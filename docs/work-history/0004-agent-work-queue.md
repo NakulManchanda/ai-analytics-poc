@@ -25,7 +25,9 @@ open GitHub issues.
 
 ## Pull request and merge
 
-Draft PR pending; do not merge without explicit authorization.
+Draft PR [#5](https://github.com/NakulManchanda/ai-analytics-poc/pull/5) is open. It seeded the
+`agent:*`, `status:*`, and minimal `area:*` labels plus umbrella issue #10 and queue issues
+#6–#9. Do not merge without explicit authorization.
 
 ## Lessons
 
