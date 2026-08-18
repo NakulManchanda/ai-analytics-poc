@@ -71,10 +71,10 @@ handoff on the issue. Do not merge or apply unless explicitly authorized.
 
 ### Manual CLI invocation
 
-Run from the assigned worktree after the coordinator has created it:
+From the repository's main checkout, enter the assigned worktree after the coordinator creates it:
 
 ```sh
-cd /Users/nakulmanchanda/dev/ai_app_poc/.worktrees/[TOPIC]
+cd .worktrees/[TOPIC]
 agy "GitHub issue #[ISSUE]: read @AGENTS.md and docs/agent-coordination.md; [TASK]."
 claude "GitHub issue #[ISSUE]: follow CLAUDE.md (@AGENTS.md) and docs/agent-coordination.md; [TASK]."
 ```
