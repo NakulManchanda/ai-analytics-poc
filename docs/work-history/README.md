@@ -6,6 +6,5 @@ and lessons. Project sequence numbers are independent of GitHub pull request num
 
 | Work | Milestone | PR | Description | Result |
 |---|---|---|---|---|
-| — | Bootstrap | — | Governance and repository skeleton | Pending initial push |
-
-The first functional entry will be `0001-m0-health.md` for Milestone 0.
+| — | Bootstrap | — | Governance and repository skeleton | Complete |
+| [0001](0001-m0-health.md) | 0 | Pending | Minimal FastAPI health endpoint | Awaiting review |
