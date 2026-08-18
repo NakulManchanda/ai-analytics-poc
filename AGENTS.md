@@ -28,6 +28,23 @@ and `.github/copilot-instructions.md`) must stay thin and refer here rather than
 - Do not rewrite or discard unrelated user work. Never commit credentials, tokens, private keys,
   `.env` values, or other secret material; use placeholders and ignored local configuration.
 
+## GitHub agent work queue
+
+- Use GitHub issues as the queue. Each issue has one owner, one branch, one project-local
+  `.worktrees/<topic>` worktree, and one draft PR; never share a write worktree.
+- Each issue states its dependencies, branch/worktree, bounded acceptance checklist, and whether
+  it explicitly authorizes implementation. Do not start blocked or future-milestone work.
+- Push an early, coherent commit and open a draft PR. Use issue comments for handoffs, decisions,
+  verification evidence, blockers, and the resulting PR URL.
+- Agent labels identify the expected tool owner; assign `NakulManchanda` when GitHub supports it,
+  because local agent CLIs are not GitHub identities. Agents never merge or apply changes unless
+  the issue explicitly authorizes that action.
+- Main orchestration uses `gpt-5.6-sol` at high reasoning. Default Codex subagents use
+  `gpt-5.6-terra` at medium; use Terra high for complex reviews, not Luna unless speed-only.
+  Use Claude Opus/high for architecture, security, or adversarial review; Gemini/Antigravity
+  Flash/high for research, schemas, docs, or test matrices; Copilot for PR review; and GitHub
+  Actions for merge gates. See `docs/agent-coordination.md` for handoff commands.
+
 ## Implementation and interoperability
 
 - Keep provider and tool boundaries explicit: model calls belong in the application, tool calls
