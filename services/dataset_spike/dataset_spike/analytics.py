@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from pathlib import Path
 import resource
 import sys
 import time
+from dataclasses import dataclass
+from pathlib import Path
 
 import duckdb
 
@@ -12,6 +12,7 @@ import duckdb
 @dataclass(frozen=True)
 class DatasetProfile:
     row_count: int
+    zone_row_count: int
     schema_columns: list[str]
     daily_zone_rows: list[dict[str, object]]
     duckdb_settings: dict[str, str]
@@ -28,7 +29,9 @@ def _sql_path(path: Path) -> str:
     return str(path).replace("'", "''")
 
 
-def profile_dataset(parquet_path: Path, zone_csv_path: Path, *, top_n: int = 10) -> DatasetProfile:
+def profile_dataset(
+    parquet_path: Path, zone_csv_path: Path, *, top_n: int = 10
+) -> DatasetProfile:
     """Run only fixed inspection queries; no caller-supplied SQL reaches DuckDB."""
     if not 1 <= top_n <= 100:
         raise ValueError("top_n must be between 1 and 100")
@@ -41,10 +44,16 @@ def profile_dataset(parquet_path: Path, zone_csv_path: Path, *, top_n: int = 10)
             f"CREATE VIEW trips AS SELECT * FROM read_parquet('{_sql_path(parquet_path)}')"
         )
         connection.execute(
-            f"CREATE VIEW taxi_zones AS SELECT * FROM read_csv_auto('{_sql_path(zone_csv_path)}', header = true)"
+            "CREATE VIEW taxi_zones AS SELECT * FROM "
+            f"read_csv_auto('{_sql_path(zone_csv_path)}', header = true)"
         )
-        schema_columns = [row[0] for row in connection.execute("DESCRIBE trips").fetchall()]
+        schema_columns = [
+            row[0] for row in connection.execute("DESCRIBE trips").fetchall()
+        ]
         row_count = connection.execute("SELECT count(*) FROM trips").fetchone()[0]
+        zone_row_count = connection.execute(
+            "SELECT count(*) FROM taxi_zones"
+        ).fetchone()[0]
         rows = connection.execute(
             """
             SELECT
@@ -64,9 +73,15 @@ def profile_dataset(parquet_path: Path, zone_csv_path: Path, *, top_n: int = 10)
         connection.close()
     return DatasetProfile(
         row_count=row_count,
+        zone_row_count=zone_row_count,
         schema_columns=schema_columns,
         daily_zone_rows=[
-            {"pickup_date": row[0], "pickup_zone": row[1], "trip_count": row[2], "total_amount": row[3]}
+            {
+                "pickup_date": row[0],
+                "pickup_zone": row[1],
+                "trip_count": row[2],
+                "total_amount": row[3],
+            }
             for row in rows
         ],
         duckdb_settings={"threads": "1", "memory_limit": "512MB"},

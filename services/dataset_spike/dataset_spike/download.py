@@ -6,7 +6,9 @@ from urllib.request import Request, urlopen
 
 
 def _is_verified(path: Path, expected_bytes: int | None, expected_sha256: str) -> bool:
-    if not path.is_file() or (expected_bytes is not None and path.stat().st_size != expected_bytes):
+    if not path.is_file() or (
+        expected_bytes is not None and path.stat().st_size != expected_bytes
+    ):
         return False
     digest = hashlib.file_digest(path.open("rb"), "sha256").hexdigest()
     return digest == expected_sha256
@@ -27,7 +29,9 @@ def ensure_cached_file(
             while block := response.read(1024 * 1024):
                 output.write(block)
         if not _is_verified(partial, expected_bytes, expected_sha256):
-            raise ValueError(f"Downloaded artifact failed size or SHA-256 verification: {url}")
+            raise ValueError(
+                f"Downloaded artifact failed size or SHA-256 verification: {url}"
+            )
         partial.replace(destination)
     finally:
         partial.unlink(missing_ok=True)
