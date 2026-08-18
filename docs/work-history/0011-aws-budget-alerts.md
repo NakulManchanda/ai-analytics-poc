@@ -34,13 +34,13 @@ resources or budget alert variables. Root `terraform.tfvars.example` diverged fr
 - `make -C infra/terraform fmt-check`: passed
 - `terraform fmt -check -recursive`: passed
 - `make -C infra/terraform validate`: passed
-- Static checks and assertions: verified variable validation, budget definitions, and non-divergent tfvars pointer
+- Static checks and assertions (`uv run --project services/app pytest services/app/tests`): 6 passed
 - `git diff --check`: clean
 - Secret scan: verified no secrets or credentials committed
 
 ## Pull request and merge
 
-Draft PR: Pending
+Draft PR: [#20](https://github.com/NakulManchanda/ai-analytics-poc/pull/20)
 Merge status: awaiting review. Do not apply and do not merge without explicit authorization.
 
 ## Lessons
