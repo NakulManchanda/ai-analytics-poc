@@ -11,4 +11,4 @@ and lessons. Project sequence numbers are independent of GitHub pull request num
 | [0002](0002-agent-instructions.md) | Governance | [#4](https://github.com/NakulManchanda/ai-analytics-poc/pull/4) | Shared agent instructions and tool adapters | Draft PR |
 | [0003](0003-m13-terraform-foundation.md) | 13 | [#3](https://github.com/NakulManchanda/ai-analytics-poc/pull/3) | Terraform foundation | Awaiting review |
 | [0004](0004-m1-empty-mcp.md) | 1 | [#2](https://github.com/NakulManchanda/ai-analytics-poc/pull/2) | Empty FastMCP service | In progress |
-| [0005](0005-aws-console-links.md) | 13 | Pending | Applied AWS console links | Pending |
+| [0005](0005-aws-console-links.md) | 13 | [#11](https://github.com/NakulManchanda/ai-analytics-poc/pull/11) | Applied AWS console links | Ready for merge |

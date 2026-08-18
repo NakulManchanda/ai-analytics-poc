@@ -28,8 +28,8 @@ account `107207236011`, Region `us-east-1`.
 
 ## Pull request and merge
 
-Ready PR pending creation. Merge status will be updated after the pull request
-is merged.
+Ready PR [#11](https://github.com/NakulManchanda/ai-analytics-poc/pull/11).
+Merge status will be updated after the pull request is merged.
 
 ## Lessons
 
