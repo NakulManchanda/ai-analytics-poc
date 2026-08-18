@@ -21,6 +21,12 @@ IMPLEMENTED — awaiting review and merge
 - FastMCP is a separate service under `services/mcp`; it contains no LLM, dataset, DuckDB, Redis, or AWS code.
 - FastMCP's documented HTTP transport is used at `/mcp` on port 8001.
 - The MCP service pins uv 0.9.26 and runs as UID 10002 in its container.
+- The application uses an app factory and a dedicated health router.
+- Service dependencies and their lockfile live under `services/app`.
+- Port 8080 is the single local and container application port.
+- The container pins uv 0.9.26 to match the local lock workflow and runs as UID 10001.
+- The requirements document is now a tracked canonical source; its former ignored-local-input
+  bootstrap treatment is retired.
 
 ## Known limitations
 

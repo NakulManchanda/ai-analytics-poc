@@ -71,6 +71,7 @@ make destroy
 - [Work-history ledger](docs/work-history/README.md)
 - [Architectural decisions](docs/decisions/README.md)
 
-The source requirements remain available locally as
-`ai_analytics_poc_requirements_aws_v5.md`, but are intentionally excluded from the bootstrap
-commit.
+The canonical source requirements are tracked in
+[`ai_analytics_poc_requirements_aws_v5.md`](ai_analytics_poc_requirements_aws_v5.md). The
+historical bootstrap phase is complete; subsequent requirement changes follow the normal branch
+and pull-request workflow.
