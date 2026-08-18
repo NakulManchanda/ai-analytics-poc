@@ -28,7 +28,8 @@ Branch `chore/agent-instructions` was created in `.worktrees/agent-instructions`
 
 ## Pull request and merge
 
-Draft PR pending; do not merge without explicit authorization.
+Draft PR [#4](https://github.com/NakulManchanda/ai-analytics-poc/pull/4) is open; do not merge
+without explicit authorization.
 
 ## Lessons
 
