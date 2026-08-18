@@ -3,6 +3,13 @@ resource "aws_vpc" "main" {
   enable_dns_hostnames = true
   enable_dns_support   = true
 
+  lifecycle {
+    precondition {
+      condition     = data.aws_caller_identity.current.account_id == local.expected_aws_account_id
+      error_message = "Refusing to create the POC foundation outside AWS account ${local.expected_aws_account_id}."
+    }
+  }
+
   tags = {
     Name = "${local.name}-vpc"
   }
@@ -88,10 +95,26 @@ resource "aws_security_group" "ecs_tasks" {
   vpc_id      = aws_vpc.main.id
 
   egress {
-    description = "HTTPS and DNS egress required by future task dependencies"
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
+    description = "HTTPS egress for AWS APIs and public dataset downloads"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    description = "DNS UDP egress for name resolution"
+    from_port   = 53
+    to_port     = 53
+    protocol    = "udp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    description = "DNS TCP egress for large DNS responses"
+    from_port   = 53
+    to_port     = 53
+    protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
 

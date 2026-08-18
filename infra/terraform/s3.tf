@@ -2,6 +2,14 @@ resource "aws_s3_bucket" "frontend" {
   bucket = "${local.bucket_prefix}-frontend"
 }
 
+resource "aws_s3_bucket_ownership_controls" "frontend" {
+  bucket = aws_s3_bucket.frontend.id
+
+  rule {
+    object_ownership = "BucketOwnerEnforced"
+  }
+}
+
 resource "aws_s3_bucket_public_access_block" "frontend" {
   bucket                  = aws_s3_bucket.frontend.id
   block_public_acls       = true
@@ -22,6 +30,14 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "frontend" {
 
 resource "aws_s3_bucket" "artifacts" {
   bucket = "${local.bucket_prefix}-artifacts"
+}
+
+resource "aws_s3_bucket_ownership_controls" "artifacts" {
+  bucket = aws_s3_bucket.artifacts.id
+
+  rule {
+    object_ownership = "BucketOwnerEnforced"
+  }
 }
 
 resource "aws_s3_bucket_public_access_block" "artifacts" {

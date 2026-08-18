@@ -1,6 +1,11 @@
 variable "aws_region" {
   description = "AWS Region in which to create the POC foundation."
   type        = string
+
+  validation {
+    condition     = can(regex("^[a-z]{2}(-[a-z]+)+-[0-9]+$", var.aws_region))
+    error_message = "aws_region must be a lowercase AWS Region identifier such as us-east-1."
+  }
 }
 
 variable "project_name" {
@@ -34,16 +39,31 @@ variable "vpc_cidr" {
 variable "availability_zones" {
   description = "Exactly two availability zones in aws_region, ordered to match the subnet CIDR lists."
   type        = list(string)
+
+  validation {
+    condition     = length(var.availability_zones) == 2 && length(toset(var.availability_zones)) == 2
+    error_message = "availability_zones must contain exactly two distinct availability zones."
+  }
 }
 
 variable "public_subnet_cidrs" {
   description = "Two public subnet CIDR blocks, one for each availability zone."
   type        = list(string)
+
+  validation {
+    condition     = length(var.public_subnet_cidrs) == 2 && alltrue([for cidr in var.public_subnet_cidrs : can(cidrnetmask(cidr))])
+    error_message = "public_subnet_cidrs must contain exactly two valid CIDR blocks ordered to match availability_zones."
+  }
 }
 
 variable "private_subnet_cidrs" {
   description = "Two private ECS-task subnet CIDR blocks, one for each availability zone."
   type        = list(string)
+
+  validation {
+    condition     = length(var.private_subnet_cidrs) == 2 && alltrue([for cidr in var.private_subnet_cidrs : can(cidrnetmask(cidr))])
+    error_message = "private_subnet_cidrs must contain exactly two valid CIDR blocks ordered to match availability_zones."
+  }
 }
 
 variable "bedrock_model_arns" {

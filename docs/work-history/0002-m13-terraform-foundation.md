@@ -22,6 +22,8 @@ The branch `feat/m13-terraform-foundation` was created in the isolated
 - A single local Terraform operator may use the verified default AWS profile;
   SSO is optional future hardening. Deployed containers still use ECS task
   roles, and no credentials belong in the repository or runtime configuration.
+- The requirements document is now tracked as the canonical project source;
+  its earlier ignored-local-input treatment ended with the bootstrap phase.
 
 ## Verification
 
@@ -29,8 +31,12 @@ The branch `feat/m13-terraform-foundation` was created in the isolated
 - `make -C infra/terraform init-backendless`: passed
 - `make -C infra/terraform fmt-check`: passed
 - `make -C infra/terraform validate`: passed
+- `make -C infra/terraform plan TFVARS=terraform.tfvars.example`: passed
+  against account `107207236011` (32 resources to add; no apply run)
+- Negative input checks: one AZ and an invalid public subnet CIDR both fail
+  Terraform variable validation before planning resources.
 - GitHub Actions `Terraform validation / Terraform static validation`: passed
-- No credentialed plan or apply was run by this branch.
+- No apply was run by this branch.
 
 ## Pull request and merge
 

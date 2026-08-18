@@ -44,3 +44,35 @@ output "iam_role_arns" {
     analytics_mcp_task = aws_iam_role.analytics_mcp_task.arn
   }
 }
+
+output "console_links" {
+  description = "Resolved AWS Console URLs for the applied foundation in the verified account and configured Region."
+  value = {
+    vpc                     = "https://${var.aws_region}.console.aws.amazon.com/vpc/home?region=${var.aws_region}#vpcs:VpcId=${aws_vpc.main.id}"
+    public_subnet_1         = "https://${var.aws_region}.console.aws.amazon.com/vpc/home?region=${var.aws_region}#subnets:subnetId=${aws_subnet.public[0].id}"
+    public_subnet_2         = "https://${var.aws_region}.console.aws.amazon.com/vpc/home?region=${var.aws_region}#subnets:subnetId=${aws_subnet.public[1].id}"
+    private_subnet_1        = "https://${var.aws_region}.console.aws.amazon.com/vpc/home?region=${var.aws_region}#subnets:subnetId=${aws_subnet.private[0].id}"
+    private_subnet_2        = "https://${var.aws_region}.console.aws.amazon.com/vpc/home?region=${var.aws_region}#subnets:subnetId=${aws_subnet.private[1].id}"
+    ecs_task_security_group = "https://${var.aws_region}.console.aws.amazon.com/ec2/home?region=${var.aws_region}#SecurityGroup:groupId=${aws_security_group.ecs_tasks.id}"
+
+    ai_app_ecr        = "https://${var.aws_region}.console.aws.amazon.com/ecr/repositories/private/${urlencode(aws_ecr_repository.ai_app.name)}?region=${var.aws_region}"
+    analytics_mcp_ecr = "https://${var.aws_region}.console.aws.amazon.com/ecr/repositories/private/${urlencode(aws_ecr_repository.analytics_mcp.name)}?region=${var.aws_region}"
+    frontend_bucket   = "https://s3.console.aws.amazon.com/s3/buckets/${urlencode(aws_s3_bucket.frontend.bucket)}?region=${var.aws_region}&tab=objects"
+    artifact_bucket   = "https://s3.console.aws.amazon.com/s3/buckets/${urlencode(aws_s3_bucket.artifacts.bucket)}?region=${var.aws_region}&tab=objects"
+
+    application_state_table = "https://${var.aws_region}.console.aws.amazon.com/dynamodbv2/home?region=${var.aws_region}#table?name=${urlencode(aws_dynamodb_table.application_state.name)}"
+    ecs_cluster             = "https://${var.aws_region}.console.aws.amazon.com/ecs/v2/clusters/${urlencode(aws_ecs_cluster.main.name)}/services?region=${var.aws_region}"
+
+    ecs_task_execution_role = "https://console.aws.amazon.com/iam/home#/roles/details/${urlencode(aws_iam_role.ecs_task_execution.name)}"
+    ai_app_task_role        = "https://console.aws.amazon.com/iam/home#/roles/details/${urlencode(aws_iam_role.ai_app_task.name)}"
+    analytics_mcp_task_role = "https://console.aws.amazon.com/iam/home#/roles/details/${urlencode(aws_iam_role.analytics_mcp_task.name)}"
+
+    ai_app_log_group        = "https://${var.aws_region}.console.aws.amazon.com/cloudwatch/home?region=${var.aws_region}#logsV2:log-groups/log-group/${urlencode(aws_cloudwatch_log_group.ai_app.name)}"
+    analytics_mcp_log_group = "https://${var.aws_region}.console.aws.amazon.com/cloudwatch/home?region=${var.aws_region}#logsV2:log-groups/log-group/${urlencode(aws_cloudwatch_log_group.analytics_mcp.name)}"
+  }
+}
+
+output "terraform_operator_account_id" {
+  description = "AWS account enforced by this single-user POC Terraform foundation."
+  value       = local.expected_aws_account_id
+}

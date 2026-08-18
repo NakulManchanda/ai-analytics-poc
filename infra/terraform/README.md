@@ -15,10 +15,10 @@ AWS-dependent command:
 aws sts get-caller-identity
 ```
 
-AWS SSO remains an optional future hardening path, but an `ai-poc` SSO profile
-is not required. Do not commit AWS configuration, credentials, session tokens,
-or an `AWS_PROFILE` setting. Never put credentials in `terraform.tfvars`, a
-container environment, GitHub Actions, or the repository.
+AWS SSO remains an optional future hardening path. Do not commit AWS
+configuration, credentials, session tokens, or an `AWS_PROFILE` setting. Never
+put credentials in `terraform.tfvars`, a container environment, GitHub Actions,
+or the repository.
 
 Deployed containers do not use the local profile. They use the separate ECS
 task roles created here.
@@ -37,3 +37,12 @@ make -C infra/terraform plan
 
 `make plan` is read-only. Review its output before any separately approved
 apply; this Makefile intentionally has no apply target.
+
+After an approved apply, retrieve exact console links with:
+
+```bash
+terraform output -json console_links
+```
+
+See [the console-links guide](../../docs/aws-console-links.md) for the
+post-apply workflow and clickable Markdown rendering command.
