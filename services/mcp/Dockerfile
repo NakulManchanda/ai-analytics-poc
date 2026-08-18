@@ -9,7 +9,8 @@ RUN pip install --no-cache-dir uv==0.9.26 \
     && useradd --create-home --uid 10002 mcpuser
 
 COPY pyproject.toml uv.lock ./
-RUN uv sync --frozen --no-dev
+RUN uv sync --frozen --no-dev \
+    && chown -R mcpuser:mcpuser /app
 
 COPY mcp_server ./mcp_server
 

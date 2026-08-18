@@ -1,4 +1,4 @@
-# Work 0002 — Milestone 1 empty MCP service
+# Work 0004 — Milestone 1 empty MCP service
 
 ## Goal
 

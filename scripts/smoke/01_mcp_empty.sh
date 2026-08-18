@@ -52,7 +52,7 @@ if ! protocol_ready; then
 fi
 
 if ! protocol_ready; then
-  echo "MCP protocol readiness timed out for ${mcp_url}; server log: ${mcp_log}" >&2
+  echo "MCP protocol readiness timed out for ${mcp_url}; showing server diagnostics before cleanup:" >&2
   if [[ -f "${mcp_log}" ]]; then
     tail -n 40 "${mcp_log}" >&2
   fi
