@@ -1,37 +1,32 @@
 # Current milestone
 
-Repository bootstrap — before Milestone 0
+Milestone 0 — FastAPI health endpoint
 
 ## Status
 
-IN PROGRESS
+IMPLEMENTED — awaiting review and merge
 
 ## Acceptance criteria
 
-- [x] Governance and skeleton files created
-- [x] Requirements document preserved locally and excluded from the bootstrap commit
-- [x] No application functionality or `/health` endpoint added
-- [ ] Local Git repository initialized on `main`
-- [ ] GitHub repository created with user-selected name and visibility
-- [ ] Bootstrap commit pushed to `main`
-- [ ] `main` branch protection configured
+- [x] `make dev` serves the FastAPI application on port 8080
+- [x] `GET /health` returns `200` and `{"status":"ok","service":"ai-app"}`
+- [x] FastAPI `TestClient` contract test passes
+- [x] Smoke script verifies the live endpoint
+- [x] Container builds and runs as a non-root user; `/health` returns the exact contract
+- [ ] Pull request reviewed and merged
 
 ## Decisions
 
-- Bootstrap contains only the 11 allowlisted files from the requirements; the requirements
-  source itself remains an explicitly ignored local execution input.
-- The root `pyproject.toml` defines shared Python/tooling policy; service dependencies begin in
-  the milestone that introduces each service.
-- Terraform example values are non-secret placeholders; actual Terraform variables arrive in
-  Milestone 13.
+- The application uses an app factory and a dedicated health router.
+- Service dependencies and their lockfile live under `services/app`.
+- Port 8080 is the single local and container application port.
+- The container pins uv 0.9.26 to match the local lock workflow and runs as UID 10001.
 
 ## Known limitations
 
-- No application is runnable yet by design.
-- Git and GitHub setup require the repository name and visibility decision.
-- AWS, GitHub, and Bedrock access checks are coordinator-owned and remain pending.
+- This milestone intentionally contains no MCP, React, Redis, AWS, or LLM integration.
 
 ## Next milestone
 
-Milestone 0 — FastAPI health endpoint. Do not start until requested and the repository
-bootstrap is committed, pushed, and protected.
+Milestone 1 — empty FastMCP service. Do not start until explicitly requested after Milestone 0
+is reviewed and merged.

@@ -3,8 +3,8 @@
 A small production-shaped AI analytics application exploring durable agent orchestration,
 MCP tool boundaries, streaming UX, bounded context, and cost-aware execution.
 
-This repository is being built incrementally. The bootstrap contains governance and planning
-files only; application functionality begins with Milestone 0 in a separate pull request.
+This repository is being built incrementally. Milestone 0 provides the first functional slice:
+a minimal FastAPI application with a health endpoint.
 
 ## Intended architecture
 
@@ -32,8 +32,20 @@ architecture choices belong in [the decision log](docs/decisions/README.md).
 
 ## Local development
 
-There is no runnable application in the bootstrap commit. Milestone 0 will add the first
-FastAPI service and its exact verification command. Useful repository commands are listed by:
+Install dependencies and run the FastAPI service on port 8080:
+
+```bash
+uv sync --project services/app --dev
+make dev
+```
+
+In another terminal, verify the exact health contract:
+
+```bash
+make smoke
+```
+
+Run the automated test suite with `make test`. Useful repository commands are listed by:
 
 ```bash
 make help
