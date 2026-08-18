@@ -25,9 +25,15 @@ def test_dataset_contract_exposes_fixed_schema_and_profile_over_mcp():
         timing_ms=1,
         rss_bytes=1024,
     )
+    loader_call_count = 0
+
+    def profile_loader() -> DatasetProfile:
+        nonlocal loader_call_count
+        loader_call_count += 1
+        return expected_profile
 
     async def exercise_protocol():
-        async with Client(build_mcp(profile_loader=lambda: expected_profile)) as client:
+        async with Client(build_mcp(profile_loader=profile_loader)) as client:
             tools = await client.list_tools()
             resources = await client.list_resources()
             schema = await client.read_resource("dataset://nyc-taxi/schema")
@@ -37,9 +43,12 @@ def test_dataset_contract_exposes_fixed_schema_and_profile_over_mcp():
     tools, resources, schema, profile = asyncio.run(exercise_protocol())
 
     assert [tool.name for tool in tools] == ["get_dataset_profile"]
-    assert [resource.uri for resource in resources] == ["dataset://nyc-taxi/schema"]
+    assert [str(resource.uri) for resource in resources] == [
+        "dataset://nyc-taxi/schema"
+    ]
     assert schema[0].text == (
         '{"columns":["tpep_pickup_datetime","PULocationID","total_amount"],'
         '"dataset":"nyc-yellow-taxi","month":"2024-01"}'
     )
     assert profile.data == asdict(expected_profile)
+    assert loader_call_count == 1

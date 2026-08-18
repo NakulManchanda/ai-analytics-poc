@@ -28,17 +28,29 @@ dataset resources or tools.
 
 ## TDD evidence
 
-The MCP contract test was added before `build_mcp` exists and is expected to fail at import time.
+The MCP contract test was added before `build_mcp` existed. It first failed because the MCP project
+did not depend on `dataset_spike`, then (after adding the direct local dependency) failed because
+`build_mcp` was absent. A second RED assertion established that initialization must load the pinned
+profile once per server lifespan rather than reopen DuckDB for both the resource and tool.
 
 ## Verification
 
-- Pending implementation.
+- `uv run --project services/mcp pytest services/mcp/tests/test_protocol.py` — 1 passed.
+- `uv run --project services/mcp black --check services/mcp/mcp_server services/mcp/tests` — passed.
+- `uv run --project services/mcp ruff check services/mcp/mcp_server services/mcp/tests` — passed.
+- `uv run --project services/mcp python -m compileall -q services/mcp/mcp_server` — passed.
+- `MCP_PORT=8011 make mcp-smoke` — schema resource and profile tool discovered from a fresh local
+  MCP process.
+- In-process live profile call — 2,964,624 trip rows and 265 zone rows returned from the pinned
+  dataset.
+- `docker build -f services/mcp/Dockerfile -t ai-analytics-mcp:m2-dataset .` — passed.
 
 ## Pull request and merge
 
-- Draft PR: pending.
+- Draft PR: https://github.com/NakulManchanda/ai-analytics-poc/pull/17
 - Merge: not authorized.
 
 ## Lessons
 
-- Pending completion.
+- Keep startup-loaded DuckDB data behind a single fixed MCP surface until the governed query-tool
+  milestone defines typed, bounded query inputs and outputs.
