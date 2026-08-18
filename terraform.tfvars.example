@@ -1,0 +1,25 @@
+# Illustrative, non-secret values. Milestone 13 will define the matching Terraform variables.
+aws_region   = "us-east-1"
+project_name = "ai-analytics-poc"
+environment  = "demo"
+
+# Use immutable image tags after the ECR deployment workflow exists.
+app_image_tag = "replace-with-image-tag"
+mcp_image_tag = "replace-with-image-tag"
+
+# Bedrock model access is supplied by the ai-app ECS task role, never static AWS keys.
+bedrock_model_id = "replace-with-enabled-bedrock-model-id"
+
+# Public-demo cost controls.
+demo_global_llm_budget_usd = 7.50
+max_estimated_cost_per_run = 0.10
+max_concurrent_runs        = 2
+
+# Optional billing alerts; leave blank until a real notification address is selected.
+budget_alert_email = ""
+
+tags = {
+  Project     = "ai-analytics-poc"
+  Environment = "demo"
+  ManagedBy   = "terraform"
+}
