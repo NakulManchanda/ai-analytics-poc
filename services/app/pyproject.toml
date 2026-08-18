@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "AI Analytics POC application service"
 requires-python = ">=3.12"
 dependencies = [
+    "boto3>=1.35,<2",
     "fastapi>=0.116,<1",
     "uvicorn[standard]>=0.35,<1",
 ]

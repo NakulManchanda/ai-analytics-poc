@@ -14,3 +14,4 @@ and lessons. Project sequence numbers are independent of GitHub pull request num
 | [0005](0005-aws-console-links.md) | 13 | [#11](https://github.com/NakulManchanda/ai-analytics-poc/pull/11) | Applied AWS console links | Merged (`19c57c8`) |
 | [0006](0006-agent-work-queue.md) | Governance | [#5](https://github.com/NakulManchanda/ai-analytics-poc/pull/5) | GitHub-centered agent coordination queue | Draft PR |
 | [0007](0007-m2-dataset-spike.md) | 2 | [#12](https://github.com/NakulManchanda/ai-analytics-poc/pull/12) | Reproducible NYC TLC DuckDB spike | Draft PR |
+| [0010](0010-m4-bedrock-app.md) | 4 | [#15](https://github.com/NakulManchanda/ai-analytics-poc/pull/15) | Application-owned Bedrock single call | Draft PR |

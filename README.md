@@ -3,8 +3,9 @@
 A small production-shaped AI analytics application exploring durable agent orchestration,
 MCP tool boundaries, streaming UX, bounded context, and cost-aware execution.
 
-This repository is being built incrementally. Milestone 2 adds a standalone, reproducible NYC TLC
-dataset and DuckDB spike; it remains separate from the FastAPI and MCP services.
+This repository is being built incrementally. Milestone 4 adds one application-owned, configured
+Amazon Bedrock call through FastAPI; it deliberately has no tools, loop, persistence, Redis, UI,
+or MCP execution.
 
 ## Intended architecture
 
@@ -53,6 +54,30 @@ Run the automated test suite with `make test`. Useful repository commands are li
 ```bash
 make help
 ```
+
+### Bedrock single-call path (Milestone 4)
+
+`POST /api/ask` accepts a non-empty `prompt` (up to 4,000 characters) and returns one answer with
+the configured model ID, input/output token usage, and Bedrock-reported latency. The app defaults
+to `LLM_PROVIDER=bedrock` and `LLM_MODEL_ID=amazon.nova-micro-v1:0`; deployed containers use the
+`ai-app` ECS task role and the AWS SDK default credential chain, never static credentials.
+
+Run the focused unit tests without making an AWS call:
+
+```bash
+uv run --project services/app pytest services/app/tests
+```
+
+The following command makes exactly one paid, bounded (128 output-token maximum) Bedrock call
+through `POST /api/ask`. It is intentionally excluded from `make smoke` and requires an explicit
+environment opt-in:
+
+```bash
+make bedrock-smoke
+```
+
+Set `LLM_MODEL_ID` only to a model permitted by the narrow `ai-app` Terraform allowlist. The
+`analytics-mcp` task role has no Bedrock invocation policy.
 
 ### Dataset spike (Milestone 2)
 

@@ -17,6 +17,8 @@ private_subnet_cidrs = [
   "10.42.32.0/20",
 ]
 
-# Add only model ARNs approved for this POC. An empty list grants no Bedrock
-# invocation permission; that is the safe default until Milestone 4 selects one.
-bedrock_model_arns = []
+# Permit only the Bedrock model configured by the Milestone 4 ai-app service.
+# analytics-mcp has no Bedrock policy regardless of this value.
+bedrock_model_arns = [
+  "arn:aws:bedrock:us-east-1::foundation-model/amazon.nova-micro-v1:0",
+]

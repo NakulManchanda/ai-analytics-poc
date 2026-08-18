@@ -67,9 +67,11 @@ variable "private_subnet_cidrs" {
 }
 
 variable "bedrock_model_arns" {
-  description = "Bedrock foundation-model ARNs that the ai-app task may invoke. Leave empty until a model is selected."
+  description = "Bedrock foundation-model ARNs that the ai-app task may invoke. Defaults to the Milestone 4 model only."
   type        = list(string)
-  default     = []
+  default = [
+    "arn:aws:bedrock:us-east-1::foundation-model/amazon.nova-micro-v1:0",
+  ]
 }
 
 variable "log_retention_in_days" {

@@ -1,35 +1,33 @@
 # Current milestone
 
-Milestone 2 — reproducible NYC TLC dataset spike with DuckDB
+Milestone 4 — first Bedrock call owned by the application
 
 ## Status
 
-IMPLEMENTED — awaiting review and merge
+IMPLEMENTED — awaiting review and merge in [PR #15](https://github.com/NakulManchanda/ai-analytics-poc/pull/15)
 
 ## Acceptance criteria
 
-- [x] Official January 2024 Yellow Taxi Parquet and zone lookup are pinned with SHA-256 metadata
-- [x] The local ignored cache is verified before reuse and invalid files are replaced atomically
-- [x] DuckDB opens the Parquet with `threads=1` and `memory_limit=512MB`
-- [x] Fixed profile verifies schema, 2,964,624 trips, 265 zones, and a bounded day/zone join
-- [x] Fixture tests and manual/cached live smoke record timing and process high-water RSS
-- [x] Ordinary CI runs fixture tests only; it does not download the public Parquet artifact
-- [x] M0 and M1 remain included in the cumulative smoke
-- [ ] Pull request reviewed and merged
+- [x] `POST /api/ask` makes one configured Amazon Bedrock Converse call from `ai-app` only.
+- [x] An explicit `LLMClient` boundary supports fake-client endpoint and Bedrock-response unit tests.
+- [x] Responses expose model ID, input/output token usage, and Bedrock latency metadata.
+- [x] The default model is `amazon.nova-micro-v1:0`; malformed and whitespace-only prompts are rejected.
+- [x] The real smoke path is opt-in and bounded to one call with a 128 output-token maximum.
+- [x] Terraform grants `bedrock:InvokeModel` for only that foundation-model ARN to `ai-app`; `analytics-mcp` has no Bedrock policy.
+- [x] No tools, loop, UI, persistence, Redis, or MCP execution were introduced.
+- [ ] Pull request reviewed and merged.
 
 ## Decisions
 
-- The spike is a standalone Python project under `services/dataset_spike`, so M2 does not alter
-  MCP exposure or introduce application, LLM, Redis, AWS, or React coupling.
-- Only the two static profile inputs are accepted; the DuckDB queries are fixed in code and `top_n`
-  is bounded to 1–100.
-- Cache files are local, ignored, and checksum-verified; the Parquet size is also pinned.
+- The application owns all model calls through `LLMClient`; the Bedrock SDK client is lazy so fake-client tests never resolve AWS credentials or incur cost.
+- M4 returns only the metadata that a later durable run and usage event will need. It does not pre-create run IDs, events, budgets, or state.
+- The M4 model is locked to the Bedrock foundation-model ARN in `us-east-1`; no Terraform apply is performed in this milestone.
 
 ## Known limitations
 
-- The M2 data layer is not yet exposed through MCP. MCP schema/profile resources and tools remain
-  later work. The manual smoke requires network access on a cold local cache.
+- The single synchronous call has only per-request (4,000 characters) and per-call (128 output tokens) bounds. Aggregate time, token, cost, and concurrency budgets belong to the later orchestration milestone.
+- The manual Bedrock smoke needs AWS credentials available through the local default provider chain and incurs the selected model's on-demand cost.
 
 ## Next milestone
 
-Next milestone: Milestone 3 — minimal React shell showing the application workflow.
+Next milestone: Milestone 5 — one-turn LLM-to-MCP tool execution.
