@@ -8,3 +8,4 @@ and lessons. Project sequence numbers are independent of GitHub pull request num
 |---|---|---|---|---|
 | — | Bootstrap | — | Governance and repository skeleton | Complete |
 | [0001](0001-m0-health.md) | 0 | Pending | Minimal FastAPI health endpoint | Awaiting review |
+| [0002](0002-m1-empty-mcp.md) | 1 | [#2](https://github.com/NakulManchanda/ai-analytics-poc/pull/2) | Empty FastMCP service | In progress |

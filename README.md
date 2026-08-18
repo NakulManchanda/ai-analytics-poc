@@ -3,8 +3,9 @@
 A small production-shaped AI analytics application exploring durable agent orchestration,
 MCP tool boundaries, streaming UX, bounded context, and cost-aware execution.
 
-This repository is being built incrementally. Milestone 0 provides the first functional slice:
-a minimal FastAPI application with a health endpoint.
+This repository is being built incrementally. Milestone 1 provides the first service boundary: a
+minimal FastAPI application with a health endpoint and an independently runnable empty FastMCP
+service.
 
 ## Intended architecture
 
@@ -38,6 +39,9 @@ Install dependencies and run the FastAPI service on port 8080:
 uv sync --project services/app --dev
 make dev
 ```
+
+Run the MCP service separately on port 8001 with `make mcp-dev`. Its focused contract check is
+`make mcp-smoke`; `make smoke` runs both the M0 health and M1 MCP checks.
 
 In another terminal, verify the exact health contract:
 
