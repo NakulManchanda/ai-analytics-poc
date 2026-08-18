@@ -29,9 +29,6 @@ frontend/dist/
 *.pem
 *.key
 
-# Local execution source; preserve locally but exclude from the bootstrap commit
-ai_analytics_poc_requirements_aws_v5.md
-
 # Terraform
 .terraform/
 *.tfstate

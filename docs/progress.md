@@ -21,6 +21,8 @@ IMPLEMENTED — awaiting review and merge
 - Service dependencies and their lockfile live under `services/app`.
 - Port 8080 is the single local and container application port.
 - The container pins uv 0.9.26 to match the local lock workflow and runs as UID 10001.
+- The requirements document is now a tracked canonical source; its former ignored-local-input
+  bootstrap treatment is retired.
 
 ## Known limitations
 
