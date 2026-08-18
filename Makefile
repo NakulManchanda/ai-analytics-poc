@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help check-bootstrap dev smoke test
+.PHONY: help check-bootstrap dev mcp-dev mcp-smoke smoke test mcp-test
 
 help: ## Show available commands
 	@awk 'BEGIN {FS = ":.*## "; print "Targets:"} /^[a-zA-Z_-]+:.*## / {printf "  %-18s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -16,8 +16,19 @@ check-bootstrap: ## Verify the tracked canonical requirements source
 dev: ## Run the AI application locally on port 8080
 	uv run --project services/app uvicorn app.main:app --host 0.0.0.0 --port 8080 --reload
 
-smoke: ## Check the health endpoint of a running local application
-	./scripts/smoke/00_health.sh
+mcp-dev: ## Run the empty MCP service locally on port 8001
+	uv run --project services/mcp fastmcp run services/mcp/mcp_server/server.py --transport http --host 0.0.0.0 --port 8001
 
-test: ## Run application tests
-	uv run --project services/app pytest
+mcp-smoke: ## Check the empty MCP protocol contract
+	./scripts/smoke/01_mcp_empty.sh
+
+smoke: ## Run all smoke checks for the current milestone
+	./scripts/smoke/00_health.sh
+	./scripts/smoke/01_mcp_empty.sh
+
+test: ## Run application and MCP tests
+	uv run --project services/app pytest services/app/tests
+	uv run --project services/mcp pytest services/mcp/tests
+
+mcp-test: ## Run MCP tests
+	uv run --project services/mcp pytest services/mcp/tests

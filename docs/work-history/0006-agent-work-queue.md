@@ -1,4 +1,4 @@
-# Work 0004 — GitHub agent work queue
+# Work 0006 — GitHub agent work queue
 
 ## Goal
 

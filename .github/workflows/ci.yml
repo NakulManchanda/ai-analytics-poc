@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  python-services:
+    name: Python services
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.9.26"
+          enable-cache: true
+          cache-dependency-glob: "services/*/uv.lock"
+
+      - name: Install application dependencies
+        run: uv sync --frozen --project services/app --dev
+
+      - name: Install MCP dependencies
+        run: uv sync --frozen --project services/mcp --dev
+
+      - name: Run service tests
+        run: make test
+
+      - name: Check formatting
+        run: |
+          uv run --project services/app black --check services/app
+          uv run --project services/mcp black --check services/mcp/mcp_server services/mcp/tests
+
+      - name: Run lint checks
+        run: |
+          uv run --project services/app ruff check services/app
+          uv run --project services/mcp ruff check services/mcp/mcp_server services/mcp/tests
+
+      - name: Compile Python sources
+        run: |
+          uv run --project services/app python -m compileall -q services/app/app
+          uv run --project services/mcp python -m compileall -q services/mcp/mcp_server
