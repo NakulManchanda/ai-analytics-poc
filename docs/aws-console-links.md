@@ -42,7 +42,7 @@ Run from the repository root after a later Terraform apply:
 
 ```bash
 AWS_PROFILE=default terraform -chdir=infra/terraform output \
-  -state=/Users/nakulmanchanda/.local/state/ai-analytics-poc/terraform.tfstate \
+  -state="${HOME}/.local/state/ai-analytics-poc/terraform.tfstate" \
   -json console_links
 ```
 

@@ -23,7 +23,7 @@ account `107207236011`, Region `us-east-1`.
 ## Verification
 
 - Initialized Terraform with the backend disabled in a temporary data directory.
-- Ran `terraform output -state=/Users/nakulmanchanda/.local/state/ai-analytics-poc/terraform.tfstate -json console_links` using `AWS_PROFILE=default`.
+- Ran `terraform output -state="${HOME}/.local/state/ai-analytics-poc/terraform.tfstate" -json console_links` using `AWS_PROFILE=default`.
 - Checked all 17 documented Markdown destinations use `https` AWS Console URLs.
 
 ## Pull request and merge
