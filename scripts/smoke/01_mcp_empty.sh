@@ -2,7 +2,7 @@
 set -euo pipefail
 
 mcp_url="${MCP_URL:-http://localhost:8001/mcp}"
-mcp_log="/tmp/ai-analytics-mcp-smoke.log"
+mcp_log="$(mktemp "${TMPDIR:-/tmp}/ai-analytics-mcp-smoke.XXXXXX")"
 server_pid=""
 
 protocol_ready() {
@@ -39,6 +39,7 @@ cleanup() {
     kill "${server_pid}" 2>/dev/null || true
     wait "${server_pid}" 2>/dev/null || true
   fi
+  rm -f -- "${mcp_log}"
 }
 trap cleanup EXIT
 
