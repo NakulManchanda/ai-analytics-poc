@@ -1,6 +1,6 @@
 # Current milestone
 
-Milestone 2 — reproducible NYC TLC dataset spike with DuckDB
+Milestone 3 — minimal React shell showing the application workflow
 
 ## Status
 
@@ -8,28 +8,29 @@ IMPLEMENTED — awaiting review and merge
 
 ## Acceptance criteria
 
-- [x] Official January 2024 Yellow Taxi Parquet and zone lookup are pinned with SHA-256 metadata
-- [x] The local ignored cache is verified before reuse and invalid files are replaced atomically
-- [x] DuckDB opens the Parquet with `threads=1` and `memory_limit=512MB`
-- [x] Fixed profile verifies schema, 2,964,624 trips, 265 zones, and a bounded day/zone join
-- [x] Fixture tests and manual/cached live smoke record timing and process high-water RSS
-- [x] Ordinary CI runs fixture tests only; it does not download the public Parquet artifact
-- [x] M0 and M1 remain included in the cumulative smoke
+- [x] React page visibly shows the title, FastAPI health, MCP discovery health, disabled prompt,
+  and placeholder timeline
+- [x] FastAPI owns MCP discovery and returns a bounded status summary at `GET /api/status`
+- [x] Docker Compose provides browser → FastAPI → FastMCP through a same-origin `/api/` proxy
+- [x] Focused React rendering test and production build pass
+- [x] Local Compose and in-app browser smoke show both services healthy
 - [ ] Pull request reviewed and merged
 
 ## Decisions
 
-- The spike is a standalone Python project under `services/dataset_spike`, so M2 does not alter
-  MCP exposure or introduce application, LLM, Redis, AWS, or React coupling.
-- Only the two static profile inputs are accepted; the DuckDB queries are fixed in code and `top_n`
-  is bounded to 1–100.
-- Cache files are local, ignored, and checksum-verified; the Parquet size is also pinned.
+- The React container serves static assets through Nginx and proxies only `/api/` to FastAPI, so
+  the browser has no direct access to the private MCP service.
+- FastAPI performs the MCP protocol discovery and returns only service status plus tool/resource
+  counts. This keeps LLM ownership and future run orchestration with the application service.
+- The prompt is disabled and the timeline is static: no LLM, chat persistence, SSE, tools UI,
+  Redis, or future orchestration interfaces are implemented in this milestone.
 
 ## Known limitations
 
-- The M2 data layer is not yet exposed through MCP. MCP schema/profile resources and tools remain
-  later work. The manual smoke requires network access on a cold local cache.
+- MCP discovery reports the intentionally empty M1 server (`0 tools`, `0 resources`). Dataset
+  exposure, actual prompt execution, durable conversations, streaming events, and context
+  visualization remain later milestones.
 
 ## Next milestone
 
-Next milestone: Milestone 3 — minimal React shell showing the application workflow.
+Next milestone: Milestone 4 — first real Bedrock call owned by the application, with no tools.

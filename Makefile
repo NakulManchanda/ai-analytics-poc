@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help check-bootstrap dev mcp-dev mcp-smoke dataset-test dataset-smoke smoke test mcp-test
+.PHONY: help check-bootstrap dev mcp-dev mcp-smoke dataset-test dataset-smoke smoke test mcp-test web-test
 
 help: ## Show available commands
 	@awk 'BEGIN {FS = ":.*## "; print "Targets:"} /^[a-zA-Z_-]+:.*## / {printf "  %-18s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -33,10 +33,15 @@ smoke: ## Run all smoke checks for the current milestone
 	./scripts/smoke/01_mcp_empty.sh
 	./scripts/smoke/02_dataset_profile.sh
 
-test: ## Run application and MCP tests
+web-test: ## Run React tests and production build
+	npm --prefix web test
+	npm --prefix web run build
+
+test: ## Run application, MCP, dataset, and React checks
 	uv run --project services/app pytest services/app/tests
 	uv run --project services/mcp pytest services/mcp/tests
 	uv run --project services/dataset_spike pytest services/dataset_spike/tests
+	$(MAKE) web-test
 
 mcp-test: ## Run MCP tests
 	uv run --project services/mcp pytest services/mcp/tests

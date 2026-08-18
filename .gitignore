@@ -21,6 +21,8 @@ build/
 # JavaScript
 node_modules/
 frontend/dist/
+web/dist/
+*.tsbuildinfo
 
 # Environment and credentials
 .env
