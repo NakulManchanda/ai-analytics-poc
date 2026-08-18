@@ -1,0 +1,17 @@
+services:
+  mcp:
+    build: ./services/mcp
+
+  app:
+    build: ./services/app
+    environment:
+      MCP_URL: http://mcp:8001/mcp
+    depends_on:
+      - mcp
+
+  web:
+    build: ./web
+    depends_on:
+      - app
+    ports:
+      - "3000:8080"
