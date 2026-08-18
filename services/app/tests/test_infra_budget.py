@@ -1,5 +1,4 @@
 from pathlib import Path
-import re
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -40,10 +39,10 @@ def test_terraform_budget_resource_defined_with_required_semantics():
     assert 'time_unit    = "MONTHLY"' in content
     assert "local.expected_aws_account_id" in content
 
-    # Notification checks: 50% actual ($5), 80% actual ($8), 100% actual ($10), 100% forecasted ($10)
-    assert 'threshold                  = 50' in content
-    assert 'threshold                  = 80' in content
-    assert 'threshold                  = 100' in content
+    # Notification checks: 50% ($5), 80% ($8), 100% ($10 actual), 100% ($10 forecast)
+    assert "threshold                  = 50" in content
+    assert "threshold                  = 80" in content
+    assert "threshold                  = 100" in content
     assert 'notification_type          = "ACTUAL"' in content
     assert 'notification_type          = "FORECASTED"' in content
     assert 'threshold_type             = "PERCENTAGE"' in content
