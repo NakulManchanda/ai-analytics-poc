@@ -1,0 +1,22 @@
+[project]
+name = "dataset-spike"
+version = "0.1.0"
+description = "Reproducible NYC TLC dataset and DuckDB spike"
+requires-python = ">=3.12"
+dependencies = [
+    "duckdb>=1.2,<2",
+]
+
+[dependency-groups]
+dev = [
+    "black>=25.1,<26",
+    "pytest>=8.4,<10",
+    "ruff>=0.12,<1",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["dataset_spike"]

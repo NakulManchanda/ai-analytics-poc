@@ -35,6 +35,9 @@ jobs:
       - name: Install MCP dependencies
         run: uv sync --frozen --project services/mcp --dev
 
+      - name: Install dataset spike dependencies
+        run: uv sync --frozen --project services/dataset_spike --dev
+
       - name: Run service tests
         run: make test
 
@@ -42,13 +45,16 @@ jobs:
         run: |
           uv run --project services/app black --check services/app
           uv run --project services/mcp black --check services/mcp/mcp_server services/mcp/tests
+          uv run --project services/dataset_spike black --check services/dataset_spike
 
       - name: Run lint checks
         run: |
           uv run --project services/app ruff check services/app
           uv run --project services/mcp ruff check services/mcp/mcp_server services/mcp/tests
+          uv run --project services/dataset_spike ruff check services/dataset_spike
 
       - name: Compile Python sources
         run: |
           uv run --project services/app python -m compileall -q services/app/app
           uv run --project services/mcp python -m compileall -q services/mcp/mcp_server
+          uv run --project services/dataset_spike python -m compileall -q services/dataset_spike/dataset_spike
