@@ -1,4 +1,4 @@
-# Work 0002 — Milestone 13 Terraform foundation
+# Work 0003 — Milestone 13 Terraform foundation
 
 ## Goal
 
