@@ -25,7 +25,8 @@ to merged pull requests.
 
 ## Pull request and merge
 
-Draft PR pending; do not merge without explicit authorization.
+Draft PR [#13](https://github.com/NakulManchanda/ai-analytics-poc/pull/13) is open; do not merge
+without explicit authorization.
 
 ## Lessons
 
