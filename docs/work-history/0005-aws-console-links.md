@@ -28,8 +28,8 @@ account `107207236011`, Region `us-east-1`.
 
 ## Pull request and merge
 
-Ready PR [#11](https://github.com/NakulManchanda/ai-analytics-poc/pull/11).
-Merge status will be updated after the pull request is merged.
+Merged PR [#11](https://github.com/NakulManchanda/ai-analytics-poc/pull/11) into `main` at
+merge commit `19c57c8`.
 
 ## Lessons
 
