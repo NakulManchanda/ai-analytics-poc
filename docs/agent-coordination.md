@@ -26,7 +26,7 @@ Ownership labels describe the intended local tool, not a GitHub identity. Assign
 | Normal Codex subtask | Codex `gpt-5.6-terra`, medium reasoning |
 | Complex code/security review | Codex `gpt-5.6-terra`, high reasoning |
 | Architecture/security/adversarial review | Claude Opus, high reasoning |
-| Research, schemas, docs, test matrices | Gemini/Antigravity Flash, high reasoning |
+| Research, schemas, docs, test matrices | Gemini/Antigravity Flash via `agy`, high reasoning |
 | Pull-request review | GitHub Copilot |
 | Merge gate | GitHub Actions |
 
@@ -42,7 +42,7 @@ Replace the bracketed values. All handoffs must begin by reading `AGENTS.md`,
 ```text
 Work on GitHub issue #[ISSUE]: [TITLE]. Read @AGENTS.md and docs/agent-coordination.md first.
 The issue authorizes [REVIEW ONLY / IMPLEMENTATION]. Use branch [BRANCH] in
-.worktrees/[TOPIC]; do not touch another worktree. Dependencies: [DEPENDENCIES].
+`.worktrees/<issue-name>`; do not touch another worktree. Dependencies: [DEPENDENCIES].
 Acceptance: [CHECKLIST]. Post decisions, exact verification, blockers, and the draft PR URL to
 the issue. Do not merge or apply anything unless this issue explicitly says so.
 ```
@@ -54,27 +54,28 @@ the issue. Do not merge or apply anything unless this issue explicitly says so.
 ```text
 GitHub issue #[ISSUE], [TITLE]. Follow CLAUDE.md (@AGENTS.md) and
 docs/agent-coordination.md. [REVIEW ONLY / IMPLEMENTATION] on [BRANCH] in
-.worktrees/[TOPIC]. Dependencies: [DEPENDENCIES]. Acceptance: [CHECKLIST]. Leave handoff and
+`.worktrees/<issue-name>`. Dependencies: [DEPENDENCIES]. Acceptance: [CHECKLIST]. Leave handoff and
 verification evidence on the issue. Do not merge or apply unless explicitly authorized.
 ```
 
-### Gemini
+### Gemini / Antigravity (`agy`)
 
-`GEMINI.md` already imports `@AGENTS.md`; use this focused prompt:
+`GEMINI.md` remains the instruction adapter and imports `@AGENTS.md`; invoke the local
+Gemini/Antigravity CLI as `agy`:
 
 ```text
 GitHub issue #[ISSUE], [TITLE]. Follow GEMINI.md (@AGENTS.md) and
 docs/agent-coordination.md. [REVIEW ONLY / IMPLEMENTATION] on [BRANCH] in
-.worktrees/[TOPIC]. Dependencies: [DEPENDENCIES]. Acceptance: [CHECKLIST]. Comment evidence and
+`.worktrees/<issue-name>`. Dependencies: [DEPENDENCIES]. Acceptance: [CHECKLIST]. Comment evidence and
 handoff on the issue. Do not merge or apply unless explicitly authorized.
 ```
 
-### Manual CLI invocation
+### Manual CLI invocation from the project root
 
-From the repository's main checkout, enter the assigned worktree after the coordinator creates it:
+After the coordinator creates the assigned worktree, run one of these from the repository root:
 
 ```sh
-cd .worktrees/[TOPIC]
+cd .worktrees/<issue-name>
 agy "GitHub issue #[ISSUE]: read @AGENTS.md and docs/agent-coordination.md; [TASK]."
 claude "GitHub issue #[ISSUE]: follow CLAUDE.md (@AGENTS.md) and docs/agent-coordination.md; [TASK]."
 ```
