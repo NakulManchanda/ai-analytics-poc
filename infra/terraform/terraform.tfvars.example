@@ -20,3 +20,10 @@ private_subnet_cidrs = [
 # Add only model ARNs approved for this POC. An empty list grants no Bedrock
 # invocation permission; that is the safe default until Milestone 4 selects one.
 bedrock_model_arns = []
+
+# Optional AWS Budget alerts (Milestone 13 / Bedrock cost controls safety net).
+# Set enable_budget_alerts = true to provision the $10 monthly budget with
+# $5 actual, $8 actual, $10 actual, and $10 forecasted email notifications.
+enable_budget_alerts     = false
+budget_alert_email       = "nakul1986@gmail.com"
+monthly_budget_limit_usd = "10.0"
