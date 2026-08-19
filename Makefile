@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help check-bootstrap dev mcp-dev mcp-smoke dataset-test dataset-smoke smoke test mcp-test infra-test web-test compose-smoke
+.PHONY: help check-bootstrap dev mcp-dev mcp-smoke dataset-test dataset-smoke smoke test mcp-test infra-test web-test compose-smoke bedrock-smoke
 
 help: ## Show available commands
 	@awk 'BEGIN {FS = ":.*## "; print "Targets:"} /^[a-zA-Z_-]+:.*## / {printf "  %-18s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -52,3 +52,6 @@ test: ## Run application, MCP, dataset spike, infra, and React checks
 
 mcp-test: ## Run MCP tests
 	uv run --project services/mcp pytest services/mcp/tests
+
+bedrock-smoke: ## Make one opt-in, bounded paid Bedrock call through POST /api/ask
+	uv run --project services/app python services/app/scripts/bedrock_smoke.py

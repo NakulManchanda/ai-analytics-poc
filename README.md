@@ -3,7 +3,12 @@
 A small production-shaped AI analytics application exploring durable agent orchestration,
 MCP tool boundaries, streaming UX, bounded context, and cost-aware execution.
 
-This repository is being built incrementally. The current merged baseline includes Milestone 0 (FastAPI health), Milestone 1 (empty FastMCP service), Milestone 2 (DuckDB dataset profile and FastMCP tools/resources), Milestone 3 (React UI status shell), and Milestone 13 Terraform foundation. This work adds optional AWS Budgets alerting configuration under Milestone 13 without mutating or applying live AWS infrastructure.
+This repository is being built incrementally. The merged baseline includes Milestone 0 (FastAPI
+health), Milestone 1 (empty FastMCP service), Milestone 2 (DuckDB dataset profile and FastMCP
+tools/resources), Milestone 3 (React UI status shell), and Milestone 13 Terraform foundation with
+optional AWS Budgets alerting configuration. Milestone 4 adds one application-owned, configured
+Amazon Bedrock call through FastAPI; it deliberately has no tools, loop, persistence, Redis, UI
+prompt execution, or MCP tool execution.
 
 ## Intended architecture
 
@@ -52,6 +57,34 @@ Run the automated test suite with `make test`. Useful repository commands are li
 ```bash
 make help
 ```
+
+### Bedrock single-call path (Milestone 4)
+
+`POST /api/ask` accepts a non-empty `prompt` (up to 4,000 characters) and returns one answer with
+an opaque `llm_call_id`, the configured model ID, input/output/total token usage, and
+Bedrock-reported latency. The app requires `LLM_PROVIDER=bedrock`, `AWS_REGION=us-east-1`, and
+`LLM_MODEL_ID=amazon.nova-micro-v1:0`; deployed containers use the `ai-app` ECS task role and the
+AWS SDK default credential chain, never static credentials.
+
+Run the focused unit tests without making an AWS call:
+
+```bash
+uv run --project services/app pytest services/app/tests
+```
+
+The following command makes exactly one paid, bounded (128 output-token maximum) Bedrock call
+through `POST /api/ask`. It is intentionally excluded from `make smoke`, requires an explicit
+environment opt-in, and fails unless the exact smoke answer plus typed call, model, usage, and
+latency metadata are returned:
+
+```bash
+RUN_BEDROCK_SMOKE=1 make bedrock-smoke
+```
+
+Terraform validates this exact region/model foundation-model ARN for the narrow `ai-app` allowlist.
+The `analytics-mcp` task role has no Bedrock invocation policy. Expected Bedrock, credentials, or
+configuration failures return a controlled response with `retryable` and `llm_call_id` metadata;
+provider details are not returned to callers.
 
 ### React shell (Milestone 3)
 

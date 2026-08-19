@@ -3,8 +3,8 @@ variable "aws_region" {
   type        = string
 
   validation {
-    condition     = can(regex("^[a-z]{2}(-[a-z]+)+-[0-9]+$", var.aws_region))
-    error_message = "aws_region must be a lowercase AWS Region identifier such as us-east-1."
+    condition     = var.aws_region == "us-east-1"
+    error_message = "Milestone 4 Bedrock deployment requires aws_region=us-east-1."
   }
 }
 
@@ -67,9 +67,16 @@ variable "private_subnet_cidrs" {
 }
 
 variable "bedrock_model_arns" {
-  description = "Bedrock foundation-model ARNs that the ai-app task may invoke. Leave empty until a model is selected."
+  description = "Bedrock foundation-model ARNs that the ai-app task may invoke. Defaults to the Milestone 4 model only."
   type        = list(string)
-  default     = []
+  default = [
+    "arn:aws:bedrock:us-east-1::foundation-model/amazon.nova-micro-v1:0",
+  ]
+
+  validation {
+    condition     = length(var.bedrock_model_arns) == 1 && var.bedrock_model_arns[0] == "arn:aws:bedrock:us-east-1::foundation-model/amazon.nova-micro-v1:0"
+    error_message = "Milestone 4 permits only the us-east-1 amazon.nova-micro-v1:0 foundation-model ARN."
+  }
 }
 
 variable "log_retention_in_days" {
