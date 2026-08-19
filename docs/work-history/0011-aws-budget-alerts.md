@@ -72,4 +72,3 @@ Merge status: awaiting review. Do not apply and do not merge without explicit au
    maintains clean service boundaries and avoids coupling infrastructure testing to application logic.
 4. Input validation for string-typed monetary variables must combine regex syntax checks with numerical
    positive checks (`tonumber(...) > 0`) to prevent zero or negative values.
-
