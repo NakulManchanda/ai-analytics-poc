@@ -89,9 +89,12 @@ exact row counts, bounded day/zone aggregation, zone join, timing, and process h
 make dataset-smoke
 ```
 
-`make smoke` now cumulatively runs M0, M1, and this M2 check. The ordinary CI job runs fixtures
-only and never downloads the 50 MB public Parquet artifact. This milestone deliberately exposes
-no MCP resources or tools and accepts no user SQL.
+The FastMCP service initializes that same pinned profile at startup and exposes
+`dataset://nyc-taxi/schema` plus `get_dataset_profile()`. Run `make mcp-smoke` to verify capability
+discovery without downloading data; the fixture-backed protocol test covers the schema and profile
+payload. `make smoke` cumulatively runs M0, M1, and the M2 dataset check. Ordinary CI runs only
+fixture tests and never downloads the 50 MB public Parquet artifact. This milestone accepts no
+user SQL.
 
 ## AWS lifecycle warning
 

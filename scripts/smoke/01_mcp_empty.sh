@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-mcp_url="${MCP_URL:-http://localhost:8001/mcp}"
+mcp_port="${MCP_PORT:-8001}"
+mcp_url="${MCP_URL:-http://localhost:${mcp_port}/mcp}"
 mcp_log="$(mktemp "${TMPDIR:-/tmp}/ai-analytics-mcp-smoke.XXXXXX")"
 server_pid=""
 
@@ -46,7 +47,7 @@ trap cleanup EXIT
 if ! protocol_ready; then
   (
     cd services/mcp
-    exec uv run --frozen fastmcp run mcp_server/server.py --transport http --host 127.0.0.1 --port 8001
+    exec uv run --frozen fastmcp run mcp_server/server.py --transport http --host 127.0.0.1 --port "${mcp_port}"
   ) >"${mcp_log}" 2>&1 &
   server_pid=$!
 fi
@@ -70,10 +71,10 @@ async def verify() -> None:
     async with Client(os.environ["MCP_URL"]) as client:
         tools = await client.list_tools()
         resources = await client.list_resources()
-    assert tools == [], tools
-    assert resources == [], resources
+    assert [tool.name for tool in tools] == ["get_dataset_profile"], tools
+    assert [str(resource.uri) for resource in resources] == ["dataset://nyc-taxi/schema"], resources
 
 
 asyncio.run(verify())
-print("MCP empty protocol check passed: tools=[], resources=[]")
+print("MCP dataset protocol check passed: schema resource and profile tool are discoverable")
 PY
