@@ -1,7 +1,13 @@
 import pytest
 from app.config import Settings
-from app.llm import BedrockLLMClient, LLMResult, create_llm_client
+from app.llm import (
+    BEDROCK_RUNTIME_CONFIG,
+    BedrockLLMClient,
+    LLMResult,
+    create_llm_client,
+)
 from app.main import create_app
+from botocore.config import Config
 from botocore.exceptions import ClientError
 from fastapi.testclient import TestClient
 
@@ -185,3 +191,31 @@ def test_create_llm_client_rejects_settings_outside_the_m4_iam_allowlist(
 ) -> None:
     with pytest.raises(ValueError):
         create_llm_client(settings)
+
+
+def test_create_llm_client_disables_bedrock_runtime_retries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+    runtime_client = object()
+
+    def fake_boto3_client(
+        service_name: str, *, region_name: str | None = None, config: Config | None = None
+    ) -> object:
+        captured["service_name"] = service_name
+        captured["region_name"] = region_name
+        captured["config"] = config
+        return runtime_client
+
+    import boto3
+
+    monkeypatch.setattr(boto3, "client", fake_boto3_client)
+
+    llm_client = create_llm_client(Settings())
+
+    assert llm_client._get_runtime_client() is runtime_client
+    assert captured == {
+        "service_name": "bedrock-runtime",
+        "region_name": "us-east-1",
+        "config": BEDROCK_RUNTIME_CONFIG,
+    }

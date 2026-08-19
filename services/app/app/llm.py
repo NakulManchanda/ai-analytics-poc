@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from typing import Any, Protocol
 
+from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError, EndpointConnectionError
 
 from app.config import Settings
@@ -12,6 +13,7 @@ RETRYABLE_BEDROCK_ERROR_CODES = {
     "ServiceUnavailableException",
     "ThrottlingException",
 }
+BEDROCK_RUNTIME_CONFIG = Config(retries={"total_max_attempts": 1})
 
 
 class LLMProviderError(Exception):
@@ -78,7 +80,9 @@ class BedrockLLMClient:
             import boto3
 
             self._runtime_client = boto3.client(
-                "bedrock-runtime", region_name=self._region_name
+                "bedrock-runtime",
+                region_name=self._region_name,
+                config=BEDROCK_RUNTIME_CONFIG,
             )
         return self._runtime_client
 
