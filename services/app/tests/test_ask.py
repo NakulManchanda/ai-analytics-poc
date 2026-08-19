@@ -200,7 +200,10 @@ def test_create_llm_client_disables_bedrock_runtime_retries(
     runtime_client = object()
 
     def fake_boto3_client(
-        service_name: str, *, region_name: str | None = None, config: Config | None = None
+        service_name: str,
+        *,
+        region_name: str | None = None,
+        config: Config | None = None,
     ) -> object:
         captured["service_name"] = service_name
         captured["region_name"] = region_name
