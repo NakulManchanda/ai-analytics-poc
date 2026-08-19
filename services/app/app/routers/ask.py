@@ -14,6 +14,12 @@ from app.mcp_client import (
     sanitize_dataset_schema,
     sanitize_query_result,
 )
+from app.orchestration import (
+    ExecutionBudgets,
+)
+from app.state import (
+    StateRepository,
+)
 
 logger = logging.getLogger(__name__)
 EXPECTED_TOOL_NAME = "query_taxi_data"
@@ -21,6 +27,7 @@ EXPECTED_TOOL_NAME = "query_taxi_data"
 
 class AskRequest(BaseModel):
     prompt: Annotated[str, Field(min_length=1, max_length=4_000)]
+    conversation_id: str | None = None
 
     @field_validator("prompt")
     @classmethod
@@ -50,6 +57,8 @@ class AskResponse(BaseModel):
     llm_calls: list[LLMCallMetadata]
     usage: UsageMetadata
     latency_ms: int
+    conversation_id: str | None = None
+    run_id: str | None = None
 
 
 def usage_metadata(result: LLMResult | ToolProposalResult) -> UsageMetadata:
@@ -88,6 +97,8 @@ def create_ask_router(
     mcp_client_factory: Callable[[], DatasetProfileMCPClient],
     llm_call_id_factory: Callable[[], str],
     tool_call_id_factory: Callable[[], str],
+    state_repository: StateRepository | None = None,
+    budgets: ExecutionBudgets | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix="/api")
 
@@ -103,7 +114,11 @@ def create_ask_router(
             },
         )
 
-    @router.post("/ask", response_model=AskResponse)
+    @router.post(
+        "/ask",
+        response_model=AskResponse,
+        response_model_exclude_none=True,
+    )
     def ask(request: AskRequest) -> AskResponse:
         proposal_call_id = llm_call_id_factory()
         tool_client = mcp_client or mcp_client_factory()
