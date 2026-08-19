@@ -23,4 +23,5 @@ and lessons. Project sequence numbers are independent of GitHub pull request num
 | [0015](0015-m6-governed-query.md) | 6 | [#33](https://github.com/NakulManchanda/ai-analytics-poc/pull/33) | Governed read-only analytical query tool | Merged (`460123c`) |
 | [0016](0016-m7-dynamodb-state-repository.md) | 7 | [#34](https://github.com/NakulManchanda/ai-analytics-poc/pull/34) | DynamoDB durable-state repository | Merged (`53e7928`) |
 | [0017](0017-m8-bounded-orchestration-loop.md) | 8 | [#35](https://github.com/NakulManchanda/ai-analytics-poc/pull/35) | Bounded orchestration loop with budgets | Merged (`d4b6746`) |
-| [0018](0018-m9-redis-streams-sse.md) | 9 | Pending | Redis Streams and SSE integration | In progress |
+| [0018](0018-m9-redis-streams-sse.md) | 9 | [#36](https://github.com/NakulManchanda/ai-analytics-poc/pull/36) | Redis Streams and SSE integration | Merged (`ac52559`) |
+| [0020](0020-m11-async-worker.md) | 11 | Pending | Async job submission & background worker | In progress |

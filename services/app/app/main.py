@@ -7,11 +7,13 @@ from uuid import uuid4
 from fastapi import FastAPI
 
 from app.config import Settings
+from app.jobs import JobProducer
 from app.llm import LLMClient, create_llm_client
 from app.mcp_client import DatasetProfileMCPClient, FastMCPDatasetProfileClient
 from app.routers.ask import create_ask_router
 from app.routers.events import create_events_router
 from app.routers.health import router as health_router
+from app.routers.jobs import create_jobs_router
 from app.routers.status import router as status_router
 from app.state import StateRepository
 
@@ -22,6 +24,7 @@ def create_app(
     mcp_client: DatasetProfileMCPClient | None = None,
     state_repository: StateRepository | None = None,
     redis_client: Any = None,
+    job_producer: JobProducer | None = None,
     llm_call_id_factory: Callable[[], str] | None = None,
     tool_call_id_factory: Callable[[], str] | None = None,
 ) -> FastAPI:
@@ -43,6 +46,13 @@ def create_app(
     application.include_router(
         create_events_router(
             state_repository=state_repository,
+            redis_client=redis_client,
+        )
+    )
+    application.include_router(
+        create_jobs_router(
+            state_repository=state_repository,
+            job_producer=job_producer,
             redis_client=redis_client,
         )
     )

@@ -8,7 +8,7 @@ import boto3
 from boto3.dynamodb.conditions import Key
 from botocore.exceptions import ClientError
 
-from app.state.models import Conversation, Message, Run, RunStep
+from app.state.models import Conversation, Job, Message, Run, RunStep
 from app.state.repository import (
     ConcurrencyError,
     DuplicateEntityError,
@@ -343,3 +343,94 @@ class DynamoDBStateRepository:
             for item in items
         ]
         return steps
+
+    def create_job(self, job: Job) -> Job:
+        item = {
+            "pk": f"JOB#{job.job_id}",
+            "sk": "METADATA",
+            "entity_type": "job",
+            "job_id": job.job_id,
+            "job_type": job.job_type,
+            "status": job.status,
+            "created_at": job.created_at,
+            "started_at": job.started_at,
+            "completed_at": job.completed_at,
+            "params": _to_decimal(job.params),
+            "result": _to_decimal(job.result) if job.result is not None else None,
+            "artifact_url": job.artifact_url,
+            "error": job.error,
+            "metadata": _to_decimal(job.metadata),
+        }
+        item = {k: v for k, v in item.items() if v is not None}
+        try:
+            self._table.put_item(
+                Item=item,
+                ConditionExpression="attribute_not_exists(pk)",
+            )
+        except ClientError as error:
+            code = error.response.get("Error", {}).get("Code")
+            if code == "ConditionalCheckFailedException":
+                raise DuplicateEntityError(
+                    f"Job {job.job_id} already exists"
+                ) from error
+            raise StateError(f"Failed to create job: {error}") from error
+        return job
+
+    def get_job(self, job_id: str) -> Job | None:
+        try:
+            response = self._table.get_item(
+                Key={"pk": f"JOB#{job_id}", "sk": "METADATA"}
+            )
+        except ClientError as error:
+            raise StateError(f"Failed to get job: {error}") from error
+
+        item = response.get("Item")
+        if not item:
+            return None
+        return Job(
+            job_id=item["job_id"],
+            job_type=item.get("job_type", "create_full_report"),
+            status=item.get("status", "PENDING"),
+            created_at=item.get("created_at", ""),
+            started_at=item.get("started_at"),
+            completed_at=item.get("completed_at"),
+            params=_from_decimal(item.get("params", {})),
+            result=_from_decimal(item.get("result")) if "result" in item else None,
+            artifact_url=item.get("artifact_url"),
+            error=item.get("error"),
+            metadata=_from_decimal(item.get("metadata", {})),
+        )
+
+    def update_job(self, job: Job) -> Job:
+        item = {
+            "pk": f"JOB#{job.job_id}",
+            "sk": "METADATA",
+            "entity_type": "job",
+            "job_id": job.job_id,
+            "job_type": job.job_type,
+            "status": job.status,
+            "created_at": job.created_at,
+            "started_at": job.started_at,
+            "completed_at": job.completed_at,
+            "params": _to_decimal(job.params),
+            "result": _to_decimal(job.result) if job.result is not None else None,
+            "artifact_url": job.artifact_url,
+            "error": job.error,
+            "metadata": _to_decimal(job.metadata),
+        }
+        item = {k: v for k, v in item.items() if v is not None}
+        try:
+            self._table.put_item(
+                Item=item,
+                ConditionExpression="attribute_exists(pk)",
+            )
+        except ClientError as error:
+            code = error.response.get("Error", {}).get("Code")
+            if code == "ConditionalCheckFailedException":
+                raise EntityNotFoundError(f"Job {job.job_id} not found") from error
+            raise ConcurrencyError(f"Failed to update job: {error}") from error
+        return job
+
+    def list_jobs(self, limit: int | None = None) -> list[Job]:
+        # For single table scan if needed
+        return []

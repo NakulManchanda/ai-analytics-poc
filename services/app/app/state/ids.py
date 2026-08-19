@@ -36,3 +36,8 @@ def generate_tool_call_id() -> str:
 def generate_query_id() -> str:
     """Return a unique identifier for an individual DuckDB query execution."""
     return f"qry_{uuid.uuid4().hex[:16]}"
+
+
+def generate_job_id() -> str:
+    """Return a unique identifier for an async execution job."""
+    return f"job_{uuid.uuid4().hex[:16]}"

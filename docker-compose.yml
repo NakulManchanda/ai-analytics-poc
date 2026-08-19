@@ -36,6 +36,19 @@ services:
       timeout: 1s
       retries: 10
 
+  worker:
+    build: ./services/app
+    command: ["uv", "run", "--no-sync", "python", "-m", "app.worker"]
+    environment:
+      MCP_URL: http://mcp:8001/mcp
+      REDIS_URL: redis://redis:6379/0
+      LLM_PROVIDER: fake
+    depends_on:
+      mcp:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
   web:
     build: ./web
     depends_on:
@@ -43,3 +56,4 @@ services:
         condition: service_healthy
     ports:
       - "${WEB_PORT:-3000}:8080"
+
