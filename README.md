@@ -3,8 +3,7 @@
 A small production-shaped AI analytics application exploring durable agent orchestration,
 MCP tool boundaries, streaming UX, bounded context, and cost-aware execution.
 
-This repository is being built incrementally. Milestone 3 adds a small React shell that visibly
-checks the FastAPI and FastMCP path without adding prompt execution, an LLM, persistence, or SSE.
+This repository is being built incrementally. The current merged baseline includes Milestone 0 (FastAPI health), Milestone 1 (empty FastMCP service), Milestone 2 (DuckDB dataset profile and FastMCP tools/resources), Milestone 3 (React UI status shell), and Milestone 13 Terraform foundation. This work adds optional AWS Budgets alerting configuration under Milestone 13 without mutating or applying live AWS infrastructure.
 
 ## Intended architecture
 
@@ -96,14 +95,37 @@ payload. `make smoke` cumulatively runs M0, M1, and the M2 dataset check. Ordina
 fixture tests and never downloads the 50 MB public Parquet artifact. This milestone accepts no
 user SQL.
 
+### Infrastructure and Budget Alerts (Milestone 13)
+
+The Terraform configuration under [`infra/terraform/`](infra/terraform/) defines the VPC, subnets,
+ECR, S3, DynamoDB, ECS cluster, IAM roles, CloudWatch log groups, and optional AWS budget alerts
+(`infra/terraform/budget.tf`).
+
+Verify Terraform syntax, formatting, and validation offline without configuring remote state:
+
+```bash
+make -C infra/terraform init-backendless
+make -C infra/terraform fmt-check
+make -C infra/terraform validate
+```
+
+To configure optional budget alerts locally in an ignored `terraform.tfvars`:
+
+```hcl
+enable_budget_alerts = true
+budget_alert_email   = "alerts@example.com"
+```
+
+All infrastructure remains unapplied offline configuration until explicitly authorized in deployment milestones.
+
 ## AWS lifecycle warning
 
 **Destroy the AWS environment when the demo week is over to prevent ongoing charges.**
-Milestone 13 will introduce a `make destroy` target with the Terraform implementation. After
-that milestone, review the plan and run:
+Milestone 13 defines the Terraform foundation under `infra/terraform/`. When infrastructure is deployed
+to AWS in future deployment milestones, review the plan and destroy resources using:
 
 ```bash
-make destroy
+terraform -chdir=infra/terraform destroy -var-file=terraform.tfvars
 ```
 
 ## How this project evolved

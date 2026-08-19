@@ -69,7 +69,18 @@ output "console_links" {
 
     ai_app_log_group        = "https://${var.aws_region}.console.aws.amazon.com/cloudwatch/home?region=${var.aws_region}#logsV2:log-groups/log-group/${urlencode(aws_cloudwatch_log_group.ai_app.name)}"
     analytics_mcp_log_group = "https://${var.aws_region}.console.aws.amazon.com/cloudwatch/home?region=${var.aws_region}#logsV2:log-groups/log-group/${urlencode(aws_cloudwatch_log_group.analytics_mcp.name)}"
+    budgets                 = "https://console.aws.amazon.com/costmanagement/home#/budgets"
   }
+}
+
+output "budget_name" {
+  description = "Name of the monthly AWS cost budget, if enabled."
+  value       = try(aws_budgets_budget.monthly_cost[0].name, null)
+}
+
+output "budget_arn" {
+  description = "ARN of the monthly AWS cost budget, if enabled."
+  value       = try(aws_budgets_budget.monthly_cost[0].arn, null)
 }
 
 output "terraform_operator_account_id" {

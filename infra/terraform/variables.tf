@@ -82,3 +82,31 @@ variable "log_retention_in_days" {
     error_message = "log_retention_in_days must be a supported short POC retention period."
   }
 }
+
+variable "enable_budget_alerts" {
+  description = "Whether to create the AWS monthly budget and spend alerts."
+  type        = bool
+  default     = false
+}
+
+variable "budget_alert_email" {
+  description = "Email address for AWS Budget alerts. Used when enable_budget_alerts is true. Provide via ignored local terraform.tfvars or TF_VAR_budget_alert_email."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.budget_alert_email == null || var.budget_alert_email == "" || can(regex("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$", var.budget_alert_email))
+    error_message = "budget_alert_email must be a valid email address when provided."
+  }
+}
+
+variable "monthly_budget_limit_usd" {
+  description = "Monthly budget limit in USD for the POC account cost alert."
+  type        = string
+  default     = "10.0"
+
+  validation {
+    condition     = can(regex("^[0-9]+(\\.[0-9]{1,2})?$", var.monthly_budget_limit_usd)) && can(tonumber(var.monthly_budget_limit_usd)) && tonumber(var.monthly_budget_limit_usd) > 0
+    error_message = "monthly_budget_limit_usd must be a positive numeric dollar amount (e.g. 10.0 or 10)."
+  }
+}
