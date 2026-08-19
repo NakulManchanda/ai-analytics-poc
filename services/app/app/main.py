@@ -7,6 +7,7 @@ from app.config import Settings
 from app.llm import LLMClient, create_llm_client
 from app.routers.ask import create_ask_router
 from app.routers.health import router as health_router
+from app.routers.status import router as status_router
 
 
 def create_app(
@@ -24,6 +25,7 @@ def create_app(
             llm_call_id_factory=llm_call_id_factory or (lambda: f"llm_{uuid4().hex}"),
         )
     )
+    application.include_router(status_router)
     return application
 
 

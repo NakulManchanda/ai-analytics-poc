@@ -3,9 +3,10 @@
 A small production-shaped AI analytics application exploring durable agent orchestration,
 MCP tool boundaries, streaming UX, bounded context, and cost-aware execution.
 
-This repository is being built incrementally. Milestone 4 adds one application-owned, configured
-Amazon Bedrock call through FastAPI; it deliberately has no tools, loop, persistence, Redis, UI,
-or MCP execution.
+This repository is being built incrementally. Milestone 3 added a small React shell for the FastAPI
+and FastMCP path. Milestone 4 adds one application-owned, configured Amazon Bedrock call through
+FastAPI; it deliberately has no tools, loop, persistence, Redis, UI prompt execution, or MCP tool
+execution.
 
 ## Intended architecture
 
@@ -81,6 +82,27 @@ Terraform validates this exact region/model foundation-model ARN for the narrow 
 The `analytics-mcp` task role has no Bedrock invocation policy. Expected Bedrock, credentials, or
 configuration failures return a controlled response with `retryable` and `llm_call_id` metadata;
 provider details are not returned to callers.
+
+### React shell (Milestone 3)
+
+Build and run the local browser path with Docker Compose:
+
+```bash
+docker compose up --build
+```
+
+Open http://localhost:3000. The page uses a same-origin `/api/status` request; Nginx proxies that
+request to FastAPI, and FastAPI uses the MCP protocol to discover the separate FastMCP service.
+It should display **Backend ready** and **MCP discovered · 1 tools · 1 resources**. The disabled
+prompt and timeline are visual placeholders only; they send no data and invoke no LLM.
+
+Run the focused browser package checks with:
+
+```bash
+cd web
+npm test
+npm run build
+```
 
 ### Dataset spike (Milestone 2)
 
