@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help check-bootstrap dev mcp-dev mcp-smoke dataset-test dataset-smoke smoke test mcp-test web-test compose-smoke bedrock-smoke
+.PHONY: help check-bootstrap dev mcp-dev mcp-smoke dataset-test dataset-smoke smoke test mcp-test infra-test web-test compose-smoke bedrock-smoke
 
 help: ## Show available commands
 	@awk 'BEGIN {FS = ":.*## "; print "Targets:"} /^[a-zA-Z_-]+:.*## / {printf "  %-18s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -33,6 +33,9 @@ smoke: ## Run all smoke checks for the current milestone
 	./scripts/smoke/01_mcp_empty.sh
 	./scripts/smoke/02_dataset_profile.sh
 
+infra-test: ## Run Terraform static block assertions
+	uv run --project services/app pytest tests/infra
+
 web-test: ## Run React tests and production build
 	npm --prefix web test
 	npm --prefix web run build
@@ -40,10 +43,11 @@ web-test: ## Run React tests and production build
 compose-smoke: ## Run the browser to FastAPI to FastMCP Compose smoke
 	./scripts/smoke/03_compose_ui.sh
 
-test: ## Run application, MCP, dataset, and React checks
+test: ## Run application, MCP, dataset spike, infra, and React checks
 	uv run --project services/app pytest services/app/tests
 	uv run --project services/mcp pytest services/mcp/tests
 	uv run --project services/dataset_spike pytest services/dataset_spike/tests
+	uv run --project services/app pytest tests/infra
 	$(MAKE) web-test
 
 mcp-test: ## Run MCP tests

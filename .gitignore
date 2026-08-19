@@ -12,8 +12,11 @@ __pycache__/
 .mypy_cache/
 .coverage
 htmlcov/
+.venv
 .venv/
 venv/
+vev
+vev/
 dist/
 build/
 *.egg-info/

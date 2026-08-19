@@ -22,3 +22,12 @@ private_subnet_cidrs = [
 bedrock_model_arns = [
   "arn:aws:bedrock:us-east-1::foundation-model/amazon.nova-micro-v1:0",
 ]
+
+# Optional AWS Budget alerts (Milestone 13 / Bedrock cost controls safety net).
+# Set enable_budget_alerts = true to provision the $10 monthly budget with
+# $5 actual, $8 actual, $10 actual, and $10 forecasted email notifications.
+# Pass a real notification address via ignored local terraform.tfvars or TF_VAR_budget_alert_email.
+# Note: AWS Budgets forecasted alerts require historical usage data and may not trigger early on new accounts.
+enable_budget_alerts     = false
+budget_alert_email       = "alert-recipient@example.com"
+monthly_budget_limit_usd = "10.0"

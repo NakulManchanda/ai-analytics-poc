@@ -6,7 +6,15 @@ Milestone 4 — first Bedrock call owned by the application
 
 IMPLEMENTED — awaiting review and merge in [PR #15](https://github.com/NakulManchanda/ai-analytics-poc/pull/15)
 
-## Acceptance criteria
+## Merged milestone baseline
+
+- **Milestone 0**: Minimal FastAPI `GET /health` endpoint (merged).
+- **Milestone 1**: Independently runnable empty FastMCP service on port 8001 (merged).
+- **Milestone 2**: NYC TLC Parquet dataset profile via DuckDB and FastMCP tools/resources (merged, PR #17).
+- **Milestone 3**: Minimal React status shell with same-origin `/api/` proxy and Compose smoke (merged, PR #19).
+- **Milestone 13 Foundation**: Terraform infrastructure foundation (merged, PR #3 / PR #11) and optional AWS Budget alerts (merged, PR #20). The budget configuration has not been applied to AWS.
+
+## Acceptance criteria (PR #15 — Bedrock single call)
 
 - [x] `POST /api/ask` makes one configured Amazon Bedrock Converse call from `ai-app` only.
 - [x] An explicit `LLMClient` boundary supports fake-client endpoint and Bedrock-response unit tests.
