@@ -22,6 +22,7 @@ from app.orchestration.budgets import (
     BudgetTracker,
     ExecutionBudgets,
 )
+from app.orchestration.reducer import ContextReducer
 from app.state import (
     Conversation,
     InMemoryStateRepository,
@@ -103,6 +104,7 @@ class OrchestrationLoop:
         state_repository: StateRepository | None = None,
         budgets: ExecutionBudgets | None = None,
         event_publisher: EventPublisher | None = None,
+        context_reducer: ContextReducer | None = None,
     ) -> None:
         self._llm_client = llm_client
         self._llm_client_factory = llm_client_factory
@@ -111,6 +113,7 @@ class OrchestrationLoop:
         self._repo = state_repository or InMemoryStateRepository()
         self._budgets = budgets or ExecutionBudgets()
         self._publisher = event_publisher
+        self._reducer = context_reducer or ContextReducer()
 
     def _get_llm_client(self) -> LLMClient:
         if self._llm_client is not None:
@@ -350,11 +353,20 @@ class OrchestrationLoop:
                 step_seq += 1
 
                 # Step E: Reduce context and Answer
+                working_ctx = self._reducer.reduce(
+                    current_prompt=prompt,
+                    stored_messages=self._repo.list_messages(conv_id),
+                    dataset_schema=schema,
+                    tool_observations=[query_result],
+                    budget_tracker=tracker,
+                    budgets=active_budgets,
+                )
                 emit(
                     "context.reduced",
                     {
                         "query_id": query_id_val,
                         "row_count": query_result.get("row_count", 0),
+                        "working_context": working_ctx.to_dict(),
                     },
                 )
 
