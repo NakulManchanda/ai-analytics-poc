@@ -2,6 +2,10 @@
 set -euo pipefail
 
 cleanup() {
+  local exit_code=$?
+  if [[ ${exit_code} -ne 0 ]]; then
+    docker compose logs --no-color >&2 || true
+  fi
   docker compose down --remove-orphans
 }
 trap cleanup EXIT
