@@ -6,9 +6,9 @@ MCP tool boundaries, streaming UX, bounded context, and cost-aware execution.
 This repository is being built incrementally. The merged baseline includes Milestone 0 (FastAPI
 health), Milestone 1 (empty FastMCP service), Milestone 2 (DuckDB dataset profile and FastMCP
 tools/resources), Milestone 3 (React UI status shell), and Milestone 13 Terraform foundation with
-optional AWS Budgets alerting configuration. Milestone 4 adds one application-owned, configured
-Amazon Bedrock call through FastAPI; it deliberately has no tools, loop, persistence, Redis, UI
-prompt execution, or MCP tool execution.
+optional AWS Budgets alerting configuration. Milestone 5 is in progress: it adds one bounded
+Bedrock → MCP dataset-profile → Bedrock sequence, with no generic loop, model-generated SQL,
+persistence, Redis, or SSE.
 
 ## Intended architecture
 
