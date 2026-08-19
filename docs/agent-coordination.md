@@ -25,8 +25,8 @@ Ownership labels describe the intended local tool, not a GitHub identity. Assign
 | Main coordinator | Codex `gpt-5.6-sol`, high reasoning |
 | Normal Codex subtask | Codex `gpt-5.6-terra`, medium reasoning |
 | Complex code/security review | Codex `gpt-5.6-terra`, high reasoning |
-| Architecture/security/adversarial review | Claude Opus, high reasoning |
-| Research, schemas, docs, test matrices | Gemini/Antigravity Flash, high reasoning |
+| Architecture/security/adversarial review | Claude Opus 4.8 via `claude`, high effort |
+| Research, schemas, docs, test matrices | Gemini/Antigravity 3.7 Flash High via `agy`, high effort |
 | Pull-request review | GitHub Copilot |
 | Merge gate | GitHub Actions |
 
@@ -42,7 +42,7 @@ Replace the bracketed values. All handoffs must begin by reading `AGENTS.md`,
 ```text
 Work on GitHub issue #[ISSUE]: [TITLE]. Read @AGENTS.md and docs/agent-coordination.md first.
 The issue authorizes [REVIEW ONLY / IMPLEMENTATION]. Use branch [BRANCH] in
-.worktrees/[TOPIC]; do not touch another worktree. Dependencies: [DEPENDENCIES].
+`.worktrees/<issue-name>`; do not touch another worktree. Dependencies: [DEPENDENCIES].
 Acceptance: [CHECKLIST]. Post decisions, exact verification, blockers, and the draft PR URL to
 the issue. Do not merge or apply anything unless this issue explicitly says so.
 ```
@@ -54,30 +54,52 @@ the issue. Do not merge or apply anything unless this issue explicitly says so.
 ```text
 GitHub issue #[ISSUE], [TITLE]. Follow CLAUDE.md (@AGENTS.md) and
 docs/agent-coordination.md. [REVIEW ONLY / IMPLEMENTATION] on [BRANCH] in
-.worktrees/[TOPIC]. Dependencies: [DEPENDENCIES]. Acceptance: [CHECKLIST]. Leave handoff and
+`.worktrees/<issue-name>`. Dependencies: [DEPENDENCIES]. Acceptance: [CHECKLIST]. Leave handoff and
 verification evidence on the issue. Do not merge or apply unless explicitly authorized.
 ```
 
-### Gemini
+### Gemini / Antigravity (`agy`)
 
-`GEMINI.md` already imports `@AGENTS.md`; use this focused prompt:
+`GEMINI.md` remains the instruction adapter and imports `@AGENTS.md`; invoke the local
+Gemini/Antigravity CLI as `agy`:
 
 ```text
 GitHub issue #[ISSUE], [TITLE]. Follow GEMINI.md (@AGENTS.md) and
 docs/agent-coordination.md. [REVIEW ONLY / IMPLEMENTATION] on [BRANCH] in
-.worktrees/[TOPIC]. Dependencies: [DEPENDENCIES]. Acceptance: [CHECKLIST]. Comment evidence and
+`.worktrees/<issue-name>`. Dependencies: [DEPENDENCIES]. Acceptance: [CHECKLIST]. Comment evidence and
 handoff on the issue. Do not merge or apply unless explicitly authorized.
 ```
 
-### Manual CLI invocation
+### External CLI invocation from the assigned worktree
 
-From the repository's main checkout, enter the assigned worktree after the coordinator creates it:
+After the coordinator creates the assigned `.worktrees/<issue-name>` worktree, `cd` into it from
+the repository root and launch the owning tool with its authorized model and mode. Run exactly one
+tool per worktree, and never share a write worktree.
 
 ```sh
-cd .worktrees/[TOPIC]
-agy "GitHub issue #[ISSUE]: read @AGENTS.md and docs/agent-coordination.md; [TASK]."
-claude "GitHub issue #[ISSUE]: follow CLAUDE.md (@AGENTS.md) and docs/agent-coordination.md; [TASK]."
+cd .worktrees/<issue-name>
+
+# Claude — Opus 4.8, high effort
+claude --dangerously-skip-permissions --effort high --model claude-opus-4-8 \
+  "GitHub issue #[ISSUE]: follow CLAUDE.md (@AGENTS.md) and docs/agent-coordination.md; [TASK]."
+
+# Gemini / Antigravity — 3.7 Flash High, accept-edits
+agy --dangerously-skip-permissions --mode=accept-edits --effort=high \
+  --model=gemini-3.7-flash-high \
+  "GitHub issue #[ISSUE]: read GEMINI.md (@AGENTS.md) and docs/agent-coordination.md; [TASK]."
 ```
 
 The task text must include the authorization level, dependencies, branch/worktree, acceptance
 checklist, and the instruction to comment evidence on the issue.
+
+#### Authorized model and mode conventions
+
+| Tool | Model | Effort | Mode flag |
+| --- | --- | --- | --- |
+| `claude` | `claude-opus-4-8` (Opus 4.8) | `--effort high` | `--dangerously-skip-permissions` |
+| `agy` | `gemini-3.7-flash-high` (Gemini 3.7 Flash High) | `--effort=high` | `--dangerously-skip-permissions --mode=accept-edits` |
+
+`--dangerously-skip-permissions` is authorized **only** inside the isolated `.worktrees/<issue-name>`
+worktree the coordinator assigned to that tool. It removes local approval prompts; it does **not**
+grant merge or apply authority. Every run still obeys the issue's explicit no-merge/no-apply
+authorization — do not merge, push to `main`, or apply infrastructure unless the issue says so.
