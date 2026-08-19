@@ -106,7 +106,7 @@ variable "monthly_budget_limit_usd" {
   default     = "10.0"
 
   validation {
-    condition     = can(regex("^[0-9]+(\\.[0-9]{1,2})?$", var.monthly_budget_limit_usd))
+    condition     = can(regex("^[0-9]+(\\.[0-9]{1,2})?$", var.monthly_budget_limit_usd)) && can(tonumber(var.monthly_budget_limit_usd)) && tonumber(var.monthly_budget_limit_usd) > 0
     error_message = "monthly_budget_limit_usd must be a positive numeric dollar amount (e.g. 10.0 or 10)."
   }
 }

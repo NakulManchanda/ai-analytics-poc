@@ -134,7 +134,8 @@ def test_terraform_budget_variables_defined():
     assert "default     = null" in email_block or "default = null" in email_block
     assert "regex(" in email_block
 
-    # Check monthly_budget_limit_usd has default "10.0" and validation regex
+    # Check monthly_budget_limit_usd has default "10.0" and validation condition
+    # requiring a positive numeric amount
     limit_block_match = re.search(
         r'variable\s+"monthly_budget_limit_usd"\s*\{([^}]+validation\s*\{[^}]+\}[^}]*)\}',
         content,
@@ -144,6 +145,58 @@ def test_terraform_budget_variables_defined():
     ), "Could not extract variable monthly_budget_limit_usd block"
     limit_block = limit_block_match.group(1)
     assert 'default     = "10.0"' in limit_block or 'default = "10.0"' in limit_block
+    assert "tonumber(" in limit_block
+    assert "> 0" in limit_block
+
+
+def test_terraform_monthly_budget_limit_validation():
+    var_file = REPO_ROOT / "infra" / "terraform" / "variables.tf"
+    assert var_file.exists()
+
+    content = var_file.read_text(encoding="utf-8")
+    limit_block_match = re.search(
+        r'variable\s+"monthly_budget_limit_usd"\s*\{([^}]+validation\s*\{[^}]+\}[^}]*)\}',
+        content,
+    )
+    assert limit_block_match is not None
+    limit_block = limit_block_match.group(1)
+
+    # Condition must safely parse number and require strictly positive value
+    assert "can(tonumber(var.monthly_budget_limit_usd))" in limit_block
+    assert "tonumber(var.monthly_budget_limit_usd) > 0" in limit_block
+
+    def evaluate_hcl_condition(val: str) -> bool:
+        # Safe evaluation semantics mirroring HCL condition:
+        # can(regex("^[0-9]+(\\.[0-9]{1,2})?$", val)) && can(tonumber(val)) && tonumber(val) > 0
+        regex_match = bool(re.match(r"^[0-9]+(\.[0-9]{1,2})?$", val))
+        if not regex_match:
+            return False
+        try:
+            num = float(val)
+            return num > 0
+        except (ValueError, TypeError):
+            return False
+
+    # Valid positive dollar inputs
+    valid_inputs = ["10.0", "10", "5.00", "0.01", "100.5", "1234.56"]
+    for val in valid_inputs:
+        assert (
+            evaluate_hcl_condition(val) is True
+        ), f"Expected {val} to be valid, but was rejected"
+
+    # Zero-valued inputs flagged by Copilot must be rejected
+    zero_inputs = ["0", "00", "0.0", "0.00", "00.00"]
+    for val in zero_inputs:
+        assert (
+            evaluate_hcl_condition(val) is False
+        ), f"Expected zero value {val} to be rejected, but was accepted"
+
+    # Negative and malformed inputs must be rejected
+    invalid_inputs = ["-1", "-0.01", "-10.0", "", "abc", "10.001", " 10.0", "$10.00"]
+    for val in invalid_inputs:
+        assert (
+            evaluate_hcl_condition(val) is False
+        ), f"Expected invalid value {val} to be rejected, but was accepted"
 
 
 def test_no_personal_email_committed():
