@@ -15,3 +15,4 @@ and lessons. Project sequence numbers are independent of GitHub pull request num
 | [0006](0006-agent-work-queue.md) | Governance | [#5](https://github.com/NakulManchanda/ai-analytics-poc/pull/5) | GitHub-centered agent coordination queue | Draft PR |
 | [0007](0007-m2-dataset-spike.md) | 2 | [#12](https://github.com/NakulManchanda/ai-analytics-poc/pull/12) | Reproducible NYC TLC DuckDB spike | Draft PR |
 | [0010](0010-m4-bedrock-app.md) | 4 | [#15](https://github.com/NakulManchanda/ai-analytics-poc/pull/15) | Application-owned Bedrock single call | Draft PR |
+| [0008](0008-m2-mcp-dataset.md) | 2 | Pending | MCP schema resource and fixed dataset profile | In progress |
