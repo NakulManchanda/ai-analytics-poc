@@ -90,7 +90,7 @@ export default function App() {
       if (!response.ok) {
         const detail = "detail" in payload ? payload.detail : undefined;
         if (detail?.code === "mcp_tool_error" && detail.retryable) {
-          throw new Error("The profile service is temporarily unavailable. Try again.");
+          throw new Error("The query service is temporarily unavailable. Try again.");
         }
         throw new Error("The analytics request could not be completed. Try again.");
       }
@@ -105,9 +105,9 @@ export default function App() {
   return (
     <main className="shell">
       <header className="masthead">
-        <p className="eyebrow">NYC TLC · milestone 5</p>
+        <p className="eyebrow">NYC TLC · milestone 6</p>
         <h1>Taxi analytics control room</h1>
-        <p className="lede">Ask one bounded question. The application profiles the governed dataset before it answers.</p>
+        <p className="lede">Ask one bounded question. The application queries the governed dataset before it answers.</p>
       </header>
 
       <section className="status-board" aria-label="Service status">
@@ -131,15 +131,15 @@ export default function App() {
             value={prompt}
             onChange={(event) => setPrompt(event.target.value)}
             disabled={isRunning}
-            placeholder="What dataset is available?"
+            placeholder="Which pickup zones have the most trips?"
             rows={4}
           />
           <button type="submit" disabled={!prompt.trim() || isRunning}>
-            {isRunning ? "Running profile…" : "Run profile"}
+            {isRunning ? "Running analysis…" : "Run analysis"}
           </button>
-          <p>This run uses one fixed dataset-profile tool and two bounded model calls.</p>
+          <p>This run uses one governed query tool and two bounded model calls.</p>
           <div aria-live="polite" className="run-result">
-            {isRunning && <p>Calling the governed profile tool…</p>}
+            {isRunning && <p>Calling the governed query tool…</p>}
             {promptError && <p className="prompt-error">{promptError}</p>}
             {answer && (
               <>
@@ -153,11 +153,11 @@ export default function App() {
         <aside className="timeline" aria-labelledby="timeline-heading">
           <div>
             <p className="card-label">Run timeline</p>
-            <h2 id="timeline-heading">One-turn profile run</h2>
+            <h2 id="timeline-heading">Governed query run</h2>
           </div>
           <ol>
-            <li>First model call requests the profile</li>
-            <li>FastMCP returns the fixed dataset profile</li>
+            <li>First model call proposes the query</li>
+            <li>FastMCP executes the governed DuckDB query</li>
             <li>Second model call returns the answer</li>
           </ol>
         </aside>

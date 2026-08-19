@@ -18,11 +18,11 @@ IN PROGRESS — [issue #24](https://github.com/NakulManchanda/ai-analytics-poc/i
 
 ## Acceptance criteria
 
-- [ ] `query_taxi_data` accepts only an allowlisted structured analysis request; callers never supply SQL.
-- [ ] DuckDB execution is SELECT-only, single-statement, allowlisted, row/byte/time bounded, and blocks filesystem/network access.
-- [ ] The app supplies the governed dataset/schema context to the first model call.
-- [ ] Three deterministic starter questions complete question → LLM → MCP → DuckDB → bounded result → answer.
-- [ ] Fake-backed acceptance/rejection tests and an explicitly opt-in real Bedrock smoke pass.
+- [x] `query_taxi_data` accepts only an allowlisted structured analysis request; callers never supply SQL.
+- [x] DuckDB execution is SELECT-only, single-statement, allowlisted, row/byte/time bounded, and blocks filesystem/network access.
+- [x] The app supplies the governed dataset/schema context to the first model call.
+- [x] Three deterministic starter questions complete question → LLM → MCP → DuckDB → bounded result → answer.
+- [x] Fake-backed acceptance/rejection tests and an explicitly opt-in real Bedrock smoke pass.
 - [ ] Draft PR, work history, documentation, CI, and Copilot review are complete.
 
 ## Decisions

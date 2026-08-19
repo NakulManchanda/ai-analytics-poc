@@ -1,3 +1,4 @@
+import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol
@@ -57,6 +58,14 @@ class LLMClient(Protocol):
         self, prompt: str, dataset_profile: Mapping[str, object]
     ) -> LLMResult: ...
 
+    def propose_taxi_query(
+        self, prompt: str, schema: Mapping[str, object]
+    ) -> ToolProposalResult: ...
+
+    def answer_with_query_result(
+        self, prompt: str, query_result: Mapping[str, object]
+    ) -> LLMResult: ...
+
 
 class LocalFakeLLMClient:
     """Deterministic local-only client used by the Compose M5 smoke path."""
@@ -81,6 +90,49 @@ class LocalFakeLLMClient:
         if isinstance(row_count, bool) or not isinstance(row_count, int):
             raise LLMProviderError(retryable=False)
         return self._result(prompt, f"The profile contains {row_count} taxi trips.")
+
+    def propose_taxi_query(
+        self, prompt: str, schema: Mapping[str, object]
+    ) -> ToolProposalResult:
+        if not isinstance(schema.get("columns"), list):
+            raise LLMProviderError(retryable=False)
+        normalized_prompt = prompt.lower()
+        if "hour" in normalized_prompt:
+            analysis = "trip_volume_by_hour"
+        elif "weekday" in normalized_prompt or "distance" in normalized_prompt:
+            analysis = "average_distance_by_weekday"
+        else:
+            analysis = "top_pickup_zones"
+        return ToolProposalResult(
+            name="query_taxi_data",
+            arguments={"analysis": analysis, "limit": 5},
+            model_id=DEFAULT_MODEL_ID,
+            input_tokens=max(1, len(prompt.split())),
+            output_tokens=4,
+            latency_ms=0,
+        )
+
+    def answer_with_query_result(
+        self, prompt: str, query_result: Mapping[str, object]
+    ) -> LLMResult:
+        columns = query_result.get("columns")
+        rows = query_result.get("rows")
+        if not isinstance(columns, list) or not isinstance(rows, list) or not rows:
+            return self._result(prompt, "The governed query returned no rows.")
+        first_row = rows[0]
+        if not isinstance(first_row, list) or len(first_row) != 2:
+            raise LLMProviderError(retryable=False)
+        if columns == ["pickup_zone", "trip_count"]:
+            text = f"{first_row[0]} has the most pickups with {first_row[1]} trips."
+        elif columns == ["pickup_hour", "trip_count"]:
+            text = (
+                f"Hour {first_row[0]} has the highest volume with {first_row[1]} trips."
+            )
+        else:
+            text = (
+                f"{first_row[0]} has an average trip distance of {first_row[1]} miles."
+            )
+        return self._result(prompt, text)
 
     def _result(self, prompt: str, text: str) -> LLMResult:
         return LLMResult(
@@ -153,8 +205,6 @@ class BedrockLLMClient:
     def answer_with_dataset_profile(
         self, prompt: str, dataset_profile: Mapping[str, object]
     ) -> LLMResult:
-        import json
-
         profile_json = json.dumps(
             dataset_profile, separators=(",", ":"), allow_nan=False
         )
@@ -167,6 +217,98 @@ class BedrockLLMClient:
                             "text": (
                                 "Answer the user's question using only this governed dataset "
                                 f"profile. Question: {prompt}\nDataset profile: {profile_json}"
+                            )
+                        }
+                    ],
+                }
+            ],
+        )
+        return self._as_llm_result(response)
+
+    def propose_taxi_query(
+        self, prompt: str, schema: Mapping[str, object]
+    ) -> ToolProposalResult:
+        schema_json = json.dumps(schema, separators=(",", ":"), allow_nan=False)
+        response = self._converse(
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "text": (
+                                "Choose the one governed analysis that answers the question. "
+                                f"Dataset schema: {schema_json}\nQuestion: {prompt}"
+                            )
+                        }
+                    ],
+                }
+            ],
+            tool_config={
+                "tools": [
+                    {
+                        "toolSpec": {
+                            "name": "query_taxi_data",
+                            "description": (
+                                "Run one fixed read-only analysis over the pinned NYC Taxi dataset."
+                            ),
+                            "inputSchema": {
+                                "json": {
+                                    "type": "object",
+                                    "properties": {
+                                        "analysis": {
+                                            "type": "string",
+                                            "enum": [
+                                                "top_pickup_zones",
+                                                "trip_volume_by_hour",
+                                                "average_distance_by_weekday",
+                                            ],
+                                        },
+                                        "limit": {
+                                            "type": "integer",
+                                            "minimum": 1,
+                                            "maximum": 20,
+                                        },
+                                    },
+                                    "required": ["analysis", "limit"],
+                                    "additionalProperties": False,
+                                }
+                            },
+                        }
+                    }
+                ],
+                "toolChoice": {"tool": {"name": "query_taxi_data"}},
+            },
+        )
+        content = response["output"]["message"]["content"]
+        tool_uses = [block["toolUse"] for block in content if "toolUse" in block]
+        if len(tool_uses) != 1:
+            name: object = ""
+            arguments: object = None
+        else:
+            name = tool_uses[0].get("name", "")
+            arguments = tool_uses[0].get("input")
+        return ToolProposalResult(
+            name=name if isinstance(name, str) else "",
+            arguments=arguments,
+            model_id=response.get("modelId", self._model_id),
+            input_tokens=response["usage"]["inputTokens"],
+            output_tokens=response["usage"]["outputTokens"],
+            latency_ms=response["metrics"]["latencyMs"],
+        )
+
+    def answer_with_query_result(
+        self, prompt: str, query_result: Mapping[str, object]
+    ) -> LLMResult:
+        result_json = json.dumps(query_result, separators=(",", ":"), allow_nan=False)
+        response = self._converse(
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "text": (
+                                "Answer the user's question using only this governed query "
+                                f"result. Question: {prompt}\nQuery result: {result_json}"
                             )
                         }
                     ],

@@ -1,5 +1,5 @@
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Annotated
 
 from fastapi import APIRouter, HTTPException
@@ -7,10 +7,16 @@ from pydantic import BaseModel, Field, field_validator
 
 from app.config import LLMConfigurationError
 from app.llm import LLMClient, LLMProviderError, LLMResult, ToolProposalResult
-from app.mcp_client import DatasetProfileMCPClient, MCPToolError
+from app.mcp_client import (
+    ALLOWED_ANALYSES,
+    DatasetProfileMCPClient,
+    MCPToolError,
+    sanitize_dataset_schema,
+    sanitize_query_result,
+)
 
 logger = logging.getLogger(__name__)
-EXPECTED_TOOL_NAME = "get_dataset_profile"
+EXPECTED_TOOL_NAME = "query_taxi_data"
 
 
 class AskRequest(BaseModel):
@@ -40,6 +46,7 @@ class LLMCallMetadata(BaseModel):
 class AskResponse(BaseModel):
     answer: str
     tool_call_id: str
+    query_id: str
     llm_calls: list[LLMCallMetadata]
     usage: UsageMetadata
     latency_ms: int
@@ -53,8 +60,25 @@ def usage_metadata(result: LLMResult | ToolProposalResult) -> UsageMetadata:
     )
 
 
-def validate_profile_proposal(proposal: ToolProposalResult) -> bool:
-    return proposal.name == EXPECTED_TOOL_NAME and proposal.arguments == {}
+def parse_query_proposal(proposal: ToolProposalResult) -> tuple[str, int] | None:
+    arguments = proposal.arguments
+    if (
+        proposal.name != EXPECTED_TOOL_NAME
+        or not isinstance(arguments, Mapping)
+        or set(arguments) != {"analysis", "limit"}
+    ):
+        return None
+    analysis = arguments.get("analysis")
+    limit = arguments.get("limit")
+    if (
+        not isinstance(analysis, str)
+        or analysis not in ALLOWED_ANALYSES
+        or isinstance(limit, bool)
+        or not isinstance(limit, int)
+        or not 1 <= limit <= 20
+    ):
+        return None
+    return analysis, limit
 
 
 def create_ask_router(
@@ -82,9 +106,19 @@ def create_ask_router(
     @router.post("/ask", response_model=AskResponse)
     def ask(request: AskRequest) -> AskResponse:
         proposal_call_id = llm_call_id_factory()
+        tool_client = mcp_client or mcp_client_factory()
+        try:
+            schema = sanitize_dataset_schema(tool_client.get_dataset_schema())
+        except MCPToolError as error:
+            raise error_response(
+                503 if error.retryable else 502,
+                "mcp_tool_error",
+                error.retryable,
+                proposal_call_id,
+            ) from error
         try:
             client = llm_client or llm_client_factory()
-            proposal = client.propose_dataset_profile(request.prompt)
+            proposal = client.propose_taxi_query(request.prompt, schema)
         except LLMConfigurationError as error:
             raise error_response(
                 503, "llm_configuration_error", False, proposal_call_id
@@ -98,14 +132,18 @@ def create_ask_router(
             ) from error
 
         logger.info(
-            "m5_sequence phase=llm_tool_proposal llm_call_id=%s", proposal_call_id
+            "m6_sequence phase=llm_query_proposal llm_call_id=%s", proposal_call_id
         )
-        if not validate_profile_proposal(proposal):
+        query_request = parse_query_proposal(proposal)
+        if query_request is None:
             raise error_response(422, "tool_validation_error", False, proposal_call_id)
+        analysis, limit = query_request
 
         tool_call_id = tool_call_id_factory()
         try:
-            profile = (mcp_client or mcp_client_factory()).get_dataset_profile()
+            query_result = sanitize_query_result(
+                tool_client.query_taxi_data(analysis=analysis, limit=limit)
+            )
         except MCPToolError as error:
             raise error_response(
                 503 if error.retryable else 502,
@@ -114,12 +152,16 @@ def create_ask_router(
                 proposal_call_id,
             ) from error
         logger.info(
-            "m5_sequence phase=mcp_dataset_profile tool_call_id=%s", tool_call_id
+            "m6_sequence phase=mcp_query tool_call_id=%s query_id=%s",
+            tool_call_id,
+            query_result["query_id"],
         )
 
         answer_call_id = llm_call_id_factory()
         try:
-            answer_result = client.answer_with_dataset_profile(request.prompt, profile)
+            answer_result = client.answer_with_query_result(
+                request.prompt, query_result
+            )
         except LLMProviderError as error:
             raise error_response(
                 503 if error.retryable else 502,
@@ -127,13 +169,14 @@ def create_ask_router(
                 error.retryable,
                 answer_call_id,
             ) from error
-        logger.info("m5_sequence phase=llm_final_answer llm_call_id=%s", answer_call_id)
+        logger.info("m6_sequence phase=llm_final_answer llm_call_id=%s", answer_call_id)
 
         proposal_usage = usage_metadata(proposal)
         answer_usage = usage_metadata(answer_result)
         return AskResponse(
             answer=answer_result.text,
             tool_call_id=tool_call_id,
+            query_id=str(query_result["query_id"]),
             llm_calls=[
                 LLMCallMetadata(
                     llm_call_id=proposal_call_id,

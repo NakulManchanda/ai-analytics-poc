@@ -92,3 +92,62 @@ def test_m5_bedrock_smoke_payload_fails_closed_for_incomplete_sequence(
 ) -> None:
     with pytest.raises(ValueError):
         validate_m5_bedrock_smoke_payload(payload)
+
+
+def test_m6_bedrock_smoke_payload_requires_two_llm_calls_and_query_id() -> None:
+    from app.m6_bedrock_smoke import validate_m6_bedrock_smoke_payload
+
+    payload = {
+        "answer": "JFK Airport has the most trips with 12000 trips.",
+        "tool_call_id": "tool_m6_smoke",
+        "query_id": "query_m6_smoke_1",
+        "llm_calls": [
+            {
+                "llm_call_id": "llm_proposal",
+                "model_id": "amazon.nova-micro-v1:0",
+                "usage": {"input_tokens": 10, "output_tokens": 2, "total_tokens": 12},
+                "latency_ms": 17,
+            },
+            {
+                "llm_call_id": "llm_answer",
+                "model_id": "amazon.nova-micro-v1:0",
+                "usage": {"input_tokens": 20, "output_tokens": 3, "total_tokens": 23},
+                "latency_ms": 19,
+            },
+        ],
+        "usage": {"input_tokens": 30, "output_tokens": 5, "total_tokens": 35},
+        "latency_ms": 36,
+    }
+
+    assert validate_m6_bedrock_smoke_payload(payload) == payload
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"answer": ""},
+        {
+            "answer": "Valid answer",
+            "tool_call_id": "",
+            "query_id": "q1",
+            "llm_calls": [],
+            "usage": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0},
+            "latency_ms": 0,
+        },
+        {
+            "answer": "Valid answer",
+            "tool_call_id": "t1",
+            "query_id": "",
+            "llm_calls": [],
+            "usage": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0},
+            "latency_ms": 0,
+        },
+    ],
+)
+def test_m6_bedrock_smoke_payload_fails_closed_for_incomplete_query_response(
+    payload: dict[str, object],
+) -> None:
+    from app.m6_bedrock_smoke import validate_m6_bedrock_smoke_payload
+
+    with pytest.raises(ValueError):
+        validate_m6_bedrock_smoke_payload(payload)

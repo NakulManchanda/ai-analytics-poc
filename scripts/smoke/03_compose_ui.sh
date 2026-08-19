@@ -28,15 +28,15 @@ PY
     ask_json="$(curl --silent --show-error --fail \
       --request POST "${web_url}/api/ask" \
       --header 'content-type: application/json' \
-      --data '{"prompt":"What dataset is available?"}')"
+      --data '{"prompt":"Which pickup zones have the most trips?"}')"
     ASK_JSON="${ask_json}" python - <<'PY'
 import json
 import os
 
 payload = json.loads(os.environ["ASK_JSON"])
-assert payload["answer"].startswith("The profile contains ")
-assert payload["answer"].endswith(" taxi trips.")
+assert "has the most pickups with" in payload["answer"]
 assert isinstance(payload["tool_call_id"], str) and payload["tool_call_id"]
+assert isinstance(payload["query_id"], str) and payload["query_id"]
 assert len(payload["llm_calls"]) == 2
 assert payload["usage"]["total_tokens"] > 0
 PY
