@@ -43,13 +43,13 @@ jobs:
 
       - name: Check formatting
         run: |
-          uv run --project services/app black --check services/app
+          uv run --project services/app black --check services/app tests
           uv run --project services/mcp black --check services/mcp/mcp_server services/mcp/tests
           uv run --project services/dataset_spike black --check services/dataset_spike
 
       - name: Run lint checks
         run: |
-          uv run --project services/app ruff check services/app
+          uv run --project services/app ruff check services/app tests
           uv run --project services/mcp ruff check services/mcp/mcp_server services/mcp/tests
           uv run --project services/dataset_spike ruff check services/dataset_spike
 

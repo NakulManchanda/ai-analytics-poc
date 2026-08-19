@@ -9,38 +9,38 @@ resource "aws_budgets_budget" "monthly_cost" {
 
   account_id = local.expected_aws_account_id
 
-  # $5 actual spend alert (50% of the $10 monthly budget cap)
+  # $5 actual spend alert
   notification {
     comparison_operator        = "GREATER_THAN"
-    threshold                  = 50
-    threshold_type             = "PERCENTAGE"
+    threshold                  = 5
+    threshold_type             = "ABSOLUTE_VALUE"
     notification_type          = "ACTUAL"
     subscriber_email_addresses = [var.budget_alert_email]
   }
 
-  # $8 actual spend alert (80% of the $10 monthly budget cap)
+  # $8 actual spend alert
   notification {
     comparison_operator        = "GREATER_THAN"
-    threshold                  = 80
-    threshold_type             = "PERCENTAGE"
+    threshold                  = 8
+    threshold_type             = "ABSOLUTE_VALUE"
     notification_type          = "ACTUAL"
     subscriber_email_addresses = [var.budget_alert_email]
   }
 
-  # $10 actual spend alert (100% of the $10 monthly budget cap)
+  # $10 actual spend alert
   notification {
     comparison_operator        = "GREATER_THAN"
-    threshold                  = 100
-    threshold_type             = "PERCENTAGE"
+    threshold                  = 10
+    threshold_type             = "ABSOLUTE_VALUE"
     notification_type          = "ACTUAL"
     subscriber_email_addresses = [var.budget_alert_email]
   }
 
-  # $10 forecasted spend alert (100% forecasted of the $10 monthly budget cap)
+  # $10 forecasted spend alert (note: forecast alerts require sufficient historical usage data)
   notification {
     comparison_operator        = "GREATER_THAN"
-    threshold                  = 100
-    threshold_type             = "PERCENTAGE"
+    threshold                  = 10
+    threshold_type             = "ABSOLUTE_VALUE"
     notification_type          = "FORECASTED"
     subscriber_email_addresses = [var.budget_alert_email]
   }

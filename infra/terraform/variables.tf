@@ -90,9 +90,9 @@ variable "enable_budget_alerts" {
 }
 
 variable "budget_alert_email" {
-  description = "Email address for AWS Budget alerts. Used when enable_budget_alerts is true."
+  description = "Email address for AWS Budget alerts. Used when enable_budget_alerts is true. Provide via ignored local terraform.tfvars or TF_VAR_budget_alert_email."
   type        = string
-  default     = "nakul1986@gmail.com"
+  default     = null
 
   validation {
     condition     = var.budget_alert_email == null || var.budget_alert_email == "" || can(regex("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$", var.budget_alert_email))
