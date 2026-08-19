@@ -58,9 +58,10 @@ make help
 ### Bedrock single-call path (Milestone 4)
 
 `POST /api/ask` accepts a non-empty `prompt` (up to 4,000 characters) and returns one answer with
-the configured model ID, input/output token usage, and Bedrock-reported latency. The app defaults
-to `LLM_PROVIDER=bedrock` and `LLM_MODEL_ID=amazon.nova-micro-v1:0`; deployed containers use the
-`ai-app` ECS task role and the AWS SDK default credential chain, never static credentials.
+an opaque `llm_call_id`, the configured model ID, input/output token usage, and Bedrock-reported
+latency. The app requires `LLM_PROVIDER=bedrock`, `AWS_REGION=us-east-1`, and
+`LLM_MODEL_ID=amazon.nova-micro-v1:0`; deployed containers use the `ai-app` ECS task role and the
+AWS SDK default credential chain, never static credentials.
 
 Run the focused unit tests without making an AWS call:
 
@@ -76,8 +77,10 @@ environment opt-in:
 make bedrock-smoke
 ```
 
-Set `LLM_MODEL_ID` only to a model permitted by the narrow `ai-app` Terraform allowlist. The
-`analytics-mcp` task role has no Bedrock invocation policy.
+Terraform validates this exact region/model foundation-model ARN for the narrow `ai-app` allowlist.
+The `analytics-mcp` task role has no Bedrock invocation policy. Expected Bedrock, credentials, or
+configuration failures return a controlled response with `retryable` and `llm_call_id` metadata;
+provider details are not returned to callers.
 
 ### Dataset spike (Milestone 2)
 

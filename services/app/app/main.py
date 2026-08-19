@@ -1,3 +1,6 @@
+from collections.abc import Callable
+from uuid import uuid4
+
 from fastapi import FastAPI
 
 from app.config import Settings
@@ -7,13 +10,18 @@ from app.routers.health import router as health_router
 
 
 def create_app(
-    settings: Settings | None = None, llm_client: LLMClient | None = None
+    settings: Settings | None = None,
+    llm_client: LLMClient | None = None,
+    llm_call_id_factory: Callable[[], str] | None = None,
 ) -> FastAPI:
+    resolved_settings = settings or Settings.from_environment()
     application = FastAPI(title="AI Analytics POC")
     application.include_router(health_router)
     application.include_router(
         create_ask_router(
-            llm_client or create_llm_client(settings or Settings.from_environment())
+            llm_client=llm_client,
+            llm_client_factory=lambda: create_llm_client(resolved_settings),
+            llm_call_id_factory=llm_call_id_factory or (lambda: f"llm_{uuid4().hex}"),
         )
     )
     return application

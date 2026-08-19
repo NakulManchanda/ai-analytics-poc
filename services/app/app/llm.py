@@ -1,7 +1,23 @@
 from dataclasses import dataclass
 from typing import Any, Protocol
 
+from botocore.exceptions import BotoCoreError, ClientError, EndpointConnectionError
+
 from app.config import Settings
+
+RETRYABLE_BEDROCK_ERROR_CODES = {
+    "InternalServerException",
+    "ModelNotReadyException",
+    "ModelTimeoutException",
+    "ServiceUnavailableException",
+    "ThrottlingException",
+}
+
+
+class LLMProviderError(Exception):
+    def __init__(self, retryable: bool) -> None:
+        super().__init__()
+        self.retryable = retryable
 
 
 @dataclass(frozen=True)
@@ -29,11 +45,22 @@ class BedrockLLMClient:
         self._runtime_client = runtime_client
 
     def ask(self, prompt: str) -> LLMResult:
-        response = self._get_runtime_client().converse(
-            modelId=self._model_id,
-            messages=[{"role": "user", "content": [{"text": prompt}]}],
-            inferenceConfig={"maxTokens": 128, "temperature": 0.0},
-        )
+        try:
+            response = self._get_runtime_client().converse(
+                modelId=self._model_id,
+                messages=[{"role": "user", "content": [{"text": prompt}]}],
+                inferenceConfig={"maxTokens": 128, "temperature": 0.0},
+            )
+        except ClientError as error:
+            error_code = error.response.get("Error", {}).get("Code", "")
+            raise LLMProviderError(
+                retryable=error_code in RETRYABLE_BEDROCK_ERROR_CODES
+            ) from error
+        except EndpointConnectionError as error:
+            raise LLMProviderError(retryable=True) from error
+        except BotoCoreError as error:
+            raise LLMProviderError(retryable=False) from error
+
         return LLMResult(
             text="".join(
                 block["text"]
@@ -57,6 +84,5 @@ class BedrockLLMClient:
 
 
 def create_llm_client(settings: Settings) -> LLMClient:
-    if settings.llm_provider != "bedrock":
-        raise ValueError(f"Unsupported LLM_PROVIDER: {settings.llm_provider}")
+    settings.validate_m4_alignment()
     return BedrockLLMClient(settings.llm_model_id, settings.aws_region)

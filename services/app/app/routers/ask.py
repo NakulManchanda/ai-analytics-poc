@@ -1,9 +1,11 @@
+from collections.abc import Callable
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, field_validator
 
-from app.llm import LLMClient, LLMResult
+from app.config import LLMConfigurationError
+from app.llm import LLMClient, LLMProviderError, LLMResult
 
 
 class AskRequest(BaseModel):
@@ -24,25 +26,52 @@ class UsageMetadata(BaseModel):
 
 class AskResponse(BaseModel):
     answer: str
+    llm_call_id: str
     model_id: str
     usage: UsageMetadata
     latency_ms: int
 
 
-def create_ask_router(llm_client: LLMClient) -> APIRouter:
+def create_ask_router(
+    llm_client: LLMClient | None,
+    llm_client_factory: Callable[[], LLMClient],
+    llm_call_id_factory: Callable[[], str],
+) -> APIRouter:
     router = APIRouter(prefix="/api")
 
-    def get_llm_client() -> LLMClient:
-        return llm_client
+    def error_response(
+        status_code: int, code: str, retryable: bool, llm_call_id: str
+    ) -> HTTPException:
+        return HTTPException(
+            status_code=status_code,
+            detail={
+                "code": code,
+                "llm_call_id": llm_call_id,
+                "retryable": retryable,
+            },
+        )
 
     @router.post("/ask", response_model=AskResponse)
-    def ask(
-        request: AskRequest,
-        client: Annotated[LLMClient, Depends(get_llm_client)],
-    ) -> AskResponse:
-        result: LLMResult = client.ask(request.prompt)
+    def ask(request: AskRequest) -> AskResponse:
+        llm_call_id = llm_call_id_factory()
+        try:
+            client = llm_client or llm_client_factory()
+            result: LLMResult = client.ask(request.prompt)
+        except LLMConfigurationError as error:
+            raise error_response(
+                503, "llm_configuration_error", False, llm_call_id
+            ) from error
+        except LLMProviderError as error:
+            raise error_response(
+                503 if error.retryable else 502,
+                "llm_provider_error",
+                error.retryable,
+                llm_call_id,
+            ) from error
+
         return AskResponse(
             answer=result.text,
+            llm_call_id=llm_call_id,
             model_id=result.model_id,
             usage=UsageMetadata(
                 input_tokens=result.input_tokens,
