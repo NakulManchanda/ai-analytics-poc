@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help check-bootstrap dev mcp-dev mcp-smoke dataset-test dataset-smoke smoke test mcp-test infra-test web-test compose-smoke bedrock-smoke
+.PHONY: help check-bootstrap dev mcp-dev mcp-smoke dataset-test dataset-smoke smoke test mcp-test infra-test web-test compose-smoke bedrock-smoke m5-bedrock-smoke
 
 help: ## Show available commands
 	@awk 'BEGIN {FS = ":.*## "; print "Targets:"} /^[a-zA-Z_-]+:.*## / {printf "  %-18s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -55,3 +55,6 @@ mcp-test: ## Run MCP tests
 
 bedrock-smoke: ## Make one opt-in, bounded paid Bedrock call through POST /api/ask
 	uv run --project services/app python services/app/scripts/bedrock_smoke.py
+
+m5-bedrock-smoke: ## Run the opt-in, bounded two-call Bedrock plus MCP profile smoke
+	./scripts/smoke/04_m5_bedrock.sh
