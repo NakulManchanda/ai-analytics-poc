@@ -72,3 +72,20 @@ class RunStep:
     completed_at: str | None = None
     duration_ms: int | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class Job:
+    """Represents a durable asynchronous execution job."""
+
+    job_id: str
+    job_type: str = "create_full_report"
+    status: str = "PENDING"
+    created_at: str = field(default_factory=utcnow_isoformat)
+    started_at: str | None = None
+    completed_at: str | None = None
+    params: dict[str, Any] = field(default_factory=dict)
+    result: dict[str, Any] | None = None
+    artifact_url: str | None = None
+    error: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)

@@ -1,24 +1,25 @@
 # Current milestone
 
-Milestone 10 — bounded-context visualization and timeline inspector
+Milestone 11 — asynchronous job submission and background worker
 
 ## Status
 
-IN PROGRESS — [issue #26](https://github.com/NakulManchanda/ai-analytics-poc/issues/26)
+IN PROGRESS — [issue #27](https://github.com/NakulManchanda/ai-analytics-poc/issues/27)
 
 ## Merged milestone baseline
 
-- **Milestones 0–9**: Merged (`ac52559`), including Redis Streams and SSE event integration.
+- **Milestones 0–10**: Merged (`128de6c`), including Redis Streams SSE and bounded-context visualization.
 - **Milestone 13 Foundation**: Terraform infrastructure foundation and budget alerts merged.
 
 ## Acceptance criteria
 
-- [x] Deterministic `ContextReducer` and `WorkingContext` implemented.
-- [x] Durable state vs working LLM context divergence exposed (`stored_message_count` vs `included_message_count`).
-- [x] Turn summarization, schema sizing, tool previews with `artifact://` URIs, and remaining budgets computed.
-- [x] `ContextInspector.tsx` and `TimelineInspector.tsx` implemented in React UI.
+- [x] `Job` domain model and DynamoDB state repository methods defined.
+- [x] `POST /api/jobs` (202 Accepted) and `GET /api/jobs/{job_id}` endpoints implemented.
+- [x] Redis Streams queue producer/consumer (`async-jobs`) implemented.
+- [x] Background worker engine implemented in `services/app/app/worker.py`.
+- [x] Docker Compose `worker` service added.
 - [x] Full test suite passing across all services (`make test`).
 
 ## Next milestone
 
-Milestone 12 (local integration hardening, #28) gates on both Milestone 10 and Milestone 11 merging.
+Milestone 12 (local integration hardening, #28) gates on Milestone 11 merging.

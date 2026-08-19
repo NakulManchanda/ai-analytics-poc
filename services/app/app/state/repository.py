@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from app.state.models import Conversation, Message, Run, RunStep
+from app.state.models import Conversation, Job, Message, Run, RunStep
 
 
 class StateError(Exception):
@@ -62,6 +62,22 @@ class StateRepository(Protocol):
         """List all steps for a run ordered by sequence."""
         ...
 
+    def create_job(self, job: Job) -> Job:
+        """Persist a new async job. Fails if job_id already exists."""
+        ...
+
+    def get_job(self, job_id: str) -> Job | None:
+        """Retrieve an async job by its unique identifier."""
+        ...
+
+    def update_job(self, job: Job) -> Job:
+        """Update an existing async job's status, result, or timestamps."""
+        ...
+
+    def list_jobs(self, limit: int | None = None) -> list[Job]:
+        """List all async jobs."""
+        ...
+
 
 class InMemoryStateRepository:
     """In-memory reference implementation of StateRepository for unit tests."""
@@ -71,6 +87,7 @@ class InMemoryStateRepository:
         self._messages: dict[str, list[Message]] = {}
         self._runs: dict[str, Run] = {}
         self._run_steps: dict[str, list[RunStep]] = {}
+        self._jobs: dict[str, Job] = {}
 
     def create_conversation(self, conversation: Conversation) -> Conversation:
         if conversation.conversation_id in self._conversations:
@@ -135,3 +152,24 @@ class InMemoryStateRepository:
         steps = list(self._run_steps.get(run_id, []))
         steps.sort(key=lambda s: s.sequence)
         return steps
+
+    def create_job(self, job: Job) -> Job:
+        if job.job_id in self._jobs:
+            raise DuplicateEntityError(f"Job {job.job_id} already exists")
+        self._jobs[job.job_id] = job
+        return job
+
+    def get_job(self, job_id: str) -> Job | None:
+        return self._jobs.get(job_id)
+
+    def update_job(self, job: Job) -> Job:
+        if job.job_id not in self._jobs:
+            raise EntityNotFoundError(f"Job {job.job_id} not found")
+        self._jobs[job.job_id] = job
+        return job
+
+    def list_jobs(self, limit: int | None = None) -> list[Job]:
+        jobs = list(self._jobs.values())
+        if limit is not None and limit > 0:
+            return jobs[:limit]
+        return jobs

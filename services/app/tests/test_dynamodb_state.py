@@ -8,10 +8,12 @@ from app.state import (
     DuplicateEntityError,
     DynamoDBStateRepository,
     EntityNotFoundError,
+    Job,
     Message,
     Run,
     RunStep,
     generate_conversation_id,
+    generate_job_id,
     generate_llm_call_id,
     generate_message_id,
     generate_query_id,
@@ -324,3 +326,75 @@ def test_dynamodb_repository_process_restart_survival() -> None:
     assert final_run is not None
     assert final_run.status == "completed"
     assert final_run.input_tokens == 200
+
+
+def test_dynamodb_job_lifecycle(
+    fake_dynamo: tuple[DynamoDBStateRepository, FakeDynamoDBTable],
+) -> None:
+    dynamo_repo, table = fake_dynamo
+    job_id = generate_job_id()
+
+    # Job does not exist yet
+    assert dynamo_repo.get_job(job_id) is None
+
+    # Create job
+    job = Job(
+        job_id=job_id,
+        job_type="create_full_report",
+        status="PENDING",
+        params={"sample": True},
+    )
+    dynamo_repo.create_job(job)
+
+    # Verify single-table key shape
+    raw_item = table.items.get((f"JOB#{job_id}", "METADATA"))
+    assert raw_item is not None
+    assert raw_item["entity_type"] == "job"
+    assert raw_item["status"] == "PENDING"
+
+    # Duplicate job error
+    with pytest.raises(DuplicateEntityError):
+        dynamo_repo.create_job(job)
+
+    # Retrieve job
+    retrieved = dynamo_repo.get_job(job_id)
+    assert retrieved is not None
+    assert retrieved.job_id == job_id
+    assert retrieved.status == "PENDING"
+    assert retrieved.params == {"sample": True}
+
+    # Update job to RUNNING and then COMPLETED
+    running_job = Job(
+        job_id=job_id,
+        job_type="create_full_report",
+        status="RUNNING",
+        created_at=job.created_at,
+        started_at="2026-08-19T00:01:00Z",
+        params=job.params,
+    )
+    dynamo_repo.update_job(running_job)
+    assert dynamo_repo.get_job(job_id).status == "RUNNING"
+
+    completed_job = Job(
+        job_id=job_id,
+        job_type="create_full_report",
+        status="COMPLETED",
+        created_at=job.created_at,
+        started_at="2026-08-19T00:01:00Z",
+        completed_at="2026-08-19T00:02:00Z",
+        params=job.params,
+        result={"report_id": "rep_123", "row_count": 100},
+        artifact_url=f"/api/jobs/{job_id}/artifact",
+    )
+    dynamo_repo.update_job(completed_job)
+
+    final_job = dynamo_repo.get_job(job_id)
+    assert final_job is not None
+    assert final_job.status == "COMPLETED"
+    assert final_job.completed_at == "2026-08-19T00:02:00Z"
+    assert final_job.result == {"report_id": "rep_123", "row_count": 100}
+    assert final_job.artifact_url == f"/api/jobs/{job_id}/artifact"
+
+    # Update nonexistent job raises EntityNotFoundError
+    with pytest.raises(EntityNotFoundError):
+        dynamo_repo.update_job(Job(job_id="job_nonexistent_999"))
