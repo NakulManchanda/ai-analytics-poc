@@ -44,13 +44,13 @@ class FastMCPDatasetProfileClient:
     def get_dataset_profile(self) -> dict[str, object]:
         try:
             return asyncio.run(self._get_dataset_profile())
-        except (ClientError, HTTPError, McpError, OSError) as error:
+        except (ClientError, HTTPError, McpError, OSError, RuntimeError) as error:
             raise MCPToolError(retryable=True) from error
 
     def get_dataset_schema(self) -> dict[str, object]:
         try:
             return asyncio.run(self._get_dataset_schema())
-        except (ClientError, HTTPError, McpError, OSError) as error:
+        except (ClientError, HTTPError, McpError, OSError, RuntimeError) as error:
             raise MCPToolError(retryable=True) from error
 
     def query_taxi_data(self, *, analysis: str, limit: int) -> dict[str, object]:
@@ -60,7 +60,7 @@ class FastMCPDatasetProfileClient:
             raise MCPToolError(retryable=False)
         try:
             return asyncio.run(self._query_taxi_data(analysis=analysis, limit=limit))
-        except (ClientError, HTTPError, McpError, OSError) as error:
+        except (ClientError, HTTPError, McpError, OSError, RuntimeError) as error:
             raise MCPToolError(retryable=True) from error
 
     async def _get_dataset_profile(self) -> dict[str, object]:
