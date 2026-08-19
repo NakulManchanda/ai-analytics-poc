@@ -5,8 +5,10 @@ import logging
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
+from typing import Any
 
 from app.config import DEFAULT_MODEL_ID, LLMConfigurationError
+from app.events import EventPublisher, RunEvent
 from app.llm import LLMClient, LLMProviderError, ToolProposalResult
 from app.mcp_client import (
     ALLOWED_ANALYSES,
@@ -100,6 +102,7 @@ class OrchestrationLoop:
         mcp_client_factory: Callable[[], DatasetProfileMCPClient] | None = None,
         state_repository: StateRepository | None = None,
         budgets: ExecutionBudgets | None = None,
+        event_publisher: EventPublisher | None = None,
     ) -> None:
         self._llm_client = llm_client
         self._llm_client_factory = llm_client_factory
@@ -107,6 +110,7 @@ class OrchestrationLoop:
         self._mcp_client_factory = mcp_client_factory
         self._repo = state_repository or InMemoryStateRepository()
         self._budgets = budgets or ExecutionBudgets()
+        self._publisher = event_publisher
 
     def _get_llm_client(self) -> LLMClient:
         if self._llm_client is not None:
@@ -131,6 +135,7 @@ class OrchestrationLoop:
         active_budgets = budgets or self._budgets
         tracker = BudgetTracker(budgets=active_budgets)
         start_mono = time.monotonic()
+        evt_sequence = 0
 
         # 1. Initialize or load Conversation
         conv_id = conversation_id or generate_conversation_id()
@@ -163,9 +168,37 @@ class OrchestrationLoop:
             message_id=user_msg_id,
             status="in_progress",
             model=DEFAULT_MODEL_ID,
-            prompt_version="m8.v1",
+            prompt_version="m9.v1",
         )
         self._repo.create_run(run)
+
+        def emit(
+            event_type: str,
+            payload: dict[str, Any] | None = None,
+            step_id: str | None = None,
+            llm_call_id: str | None = None,
+            tool_call_id: str | None = None,
+            query_id: str | None = None,
+        ) -> None:
+            nonlocal evt_sequence
+            if self._publisher is None:
+                return
+            evt_sequence += 1
+            evt = RunEvent(
+                event_type=event_type,
+                run_id=run_id,
+                conversation_id=conv_id,
+                sequence=evt_sequence,
+                payload=payload or {},
+                step_id=step_id,
+                llm_call_id=llm_call_id,
+                tool_call_id=tool_call_id,
+                query_id=query_id,
+            )
+            self._publisher.publish(evt)
+
+        # Emit initial event
+        emit("run.received", {"prompt_summary": prompt[:80], "status": "in_progress"})
 
         executed_tool_signatures: set[str] = set()
         last_tool_call_id: str | None = None
@@ -182,6 +215,7 @@ class OrchestrationLoop:
                 tracker.record_iteration()
 
                 # Step A: Load schema context
+                emit("context.loading", {"resource": "dataset://nyc-taxi/schema"})
                 try:
                     raw_schema = mcp.get_dataset_schema()
                     schema = sanitize_dataset_schema(raw_schema)
@@ -190,6 +224,7 @@ class OrchestrationLoop:
 
                 # Step B: LLM Propose Taxi Query
                 llm_call_id = generate_llm_call_id()
+                emit("llm.started", {"llm_call_id": llm_call_id, "phase": "proposal"})
                 call_start = time.monotonic()
                 try:
                     proposal = llm.propose_taxi_query(prompt, schema)
@@ -202,6 +237,19 @@ class OrchestrationLoop:
                     proposal.input_tokens,
                     proposal.output_tokens,
                     cost,
+                )
+                emit(
+                    "llm.completed",
+                    {
+                        "llm_call_id": llm_call_id,
+                        "phase": "proposal",
+                        "latency_ms": call_latency_ms,
+                        "tokens": {
+                            "input": proposal.input_tokens,
+                            "output": proposal.output_tokens,
+                        },
+                    },
+                    llm_call_id=llm_call_id,
                 )
 
                 proposal_step = RunStep(
@@ -222,7 +270,6 @@ class OrchestrationLoop:
                 # Step C: Validate proposal & Check Repeated Calls
                 query_request = parse_query_proposal(proposal)
                 if query_request is None:
-                    # Invalid tool proposal
                     invalid_step = RunStep(
                         step_id=generate_step_id(),
                         run_id=run_id,
@@ -234,9 +281,15 @@ class OrchestrationLoop:
                     )
                     self._repo.add_run_step(invalid_step)
                     steps.append(invalid_step)
+                    emit("run.failed", {"error": "Invalid tool proposal arguments"})
                     raise ValueError(f"Invalid tool proposal: {proposal.arguments}")
 
                 analysis, limit = query_request
+                emit(
+                    "tool.requested",
+                    {"tool_name": proposal.name, "analysis": analysis, "limit": limit},
+                )
+
                 tool_sig = f"{proposal.name}:{analysis}:{limit}"
                 if tool_sig in executed_tool_signatures:
                     raise BudgetExceededError(
@@ -248,6 +301,10 @@ class OrchestrationLoop:
                 # Step D: Execute MCP Tool
                 tool_call_id = generate_tool_call_id()
                 last_tool_call_id = tool_call_id
+                emit(
+                    "tool.started",
+                    {"tool_call_id": tool_call_id, "tool_name": proposal.name},
+                )
                 tool_start = time.monotonic()
                 raw_query_result = mcp.query_taxi_data(analysis=analysis, limit=limit)
                 query_result = sanitize_query_result(raw_query_result)
@@ -260,6 +317,18 @@ class OrchestrationLoop:
                     json.dumps(query_result, separators=(",", ":")).encode("utf-8")
                 )
                 tracker.record_tool_call(result_bytes=serialized_bytes)
+
+                emit(
+                    "tool.completed",
+                    {
+                        "tool_call_id": tool_call_id,
+                        "query_id": query_id_val,
+                        "row_count": query_result.get("row_count", 0),
+                        "duration_ms": tool_duration_ms,
+                    },
+                    tool_call_id=tool_call_id,
+                    query_id=query_id_val,
+                )
 
                 tool_step = RunStep(
                     step_id=generate_step_id(),
@@ -280,8 +349,20 @@ class OrchestrationLoop:
                 steps.append(tool_step)
                 step_seq += 1
 
-                # Step E: Answer with Query Result (Final LLM Step)
+                # Step E: Reduce context and Answer
+                emit(
+                    "context.reduced",
+                    {
+                        "query_id": query_id_val,
+                        "row_count": query_result.get("row_count", 0),
+                    },
+                )
+
                 answer_call_id = generate_llm_call_id()
+                emit(
+                    "llm.started",
+                    {"llm_call_id": answer_call_id, "phase": "final_answer"},
+                )
                 ans_start = time.monotonic()
                 answer_result = llm.answer_with_query_result(prompt, query_result)
                 ans_latency_ms = int((time.monotonic() - ans_start) * 1000)
@@ -293,6 +374,19 @@ class OrchestrationLoop:
                     answer_result.input_tokens,
                     answer_result.output_tokens,
                     ans_cost,
+                )
+                emit(
+                    "llm.completed",
+                    {
+                        "llm_call_id": answer_call_id,
+                        "phase": "final_answer",
+                        "latency_ms": ans_latency_ms,
+                        "tokens": {
+                            "input": answer_result.input_tokens,
+                            "output": answer_result.output_tokens,
+                        },
+                    },
+                    llm_call_id=answer_call_id,
                 )
 
                 answer_step = RunStep(
@@ -329,12 +423,22 @@ class OrchestrationLoop:
                     message_id=user_msg_id,
                     status="completed",
                     model=DEFAULT_MODEL_ID,
-                    prompt_version="m8.v1",
+                    prompt_version="m9.v1",
                     input_tokens=tracker.input_tokens,
                     output_tokens=tracker.output_tokens,
                     estimated_cost_usd=tracker.estimated_cost_usd,
                 )
                 self._repo.update_run(completed_run)
+
+                emit(
+                    "run.completed",
+                    {
+                        "status": "completed",
+                        "total_tokens": tracker.total_tokens,
+                        "estimated_cost_usd": tracker.estimated_cost_usd,
+                        "latency_ms": total_latency_ms,
+                    },
+                )
 
                 return LoopResult(
                     answer=answer_result.text,
@@ -360,7 +464,7 @@ class OrchestrationLoop:
                 message_id=user_msg_id,
                 status="budget_exceeded",
                 model=DEFAULT_MODEL_ID,
-                prompt_version="m8.v1",
+                prompt_version="m9.v1",
                 input_tokens=tracker.input_tokens,
                 output_tokens=tracker.output_tokens,
                 estimated_cost_usd=tracker.estimated_cost_usd,
@@ -368,6 +472,18 @@ class OrchestrationLoop:
                 metadata={"reason": err.reason, "details": err.details},
             )
             self._repo.update_run(exceeded_run)
+
+            emit(
+                "run.budget_exceeded",
+                {
+                    "status": "budget_exceeded",
+                    "reason": err.reason,
+                    "failure_code": "budget_exceeded",
+                    "total_tokens": tracker.total_tokens,
+                    "estimated_cost_usd": tracker.estimated_cost_usd,
+                    "latency_ms": total_latency_ms,
+                },
+            )
 
             return LoopResult(
                 answer="",
