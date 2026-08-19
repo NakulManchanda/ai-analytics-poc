@@ -34,7 +34,7 @@ def test_ask_returns_the_fake_client_answer_and_usage_metadata() -> None:
         "answer": "A short answer.",
         "llm_call_id": "llm_call_test_1",
         "model_id": "amazon.nova-micro-v1:0",
-        "usage": {"input_tokens": 4, "output_tokens": 3},
+        "usage": {"input_tokens": 4, "output_tokens": 3, "total_tokens": 7},
         "latency_ms": 17,
     }
     assert llm_client.prompts == ["Summarize this."]

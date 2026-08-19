@@ -59,8 +59,8 @@ make help
 ### Bedrock single-call path (Milestone 4)
 
 `POST /api/ask` accepts a non-empty `prompt` (up to 4,000 characters) and returns one answer with
-an opaque `llm_call_id`, the configured model ID, input/output token usage, and Bedrock-reported
-latency. The app requires `LLM_PROVIDER=bedrock`, `AWS_REGION=us-east-1`, and
+an opaque `llm_call_id`, the configured model ID, input/output/total token usage, and
+Bedrock-reported latency. The app requires `LLM_PROVIDER=bedrock`, `AWS_REGION=us-east-1`, and
 `LLM_MODEL_ID=amazon.nova-micro-v1:0`; deployed containers use the `ai-app` ECS task role and the
 AWS SDK default credential chain, never static credentials.
 
@@ -71,8 +71,9 @@ uv run --project services/app pytest services/app/tests
 ```
 
 The following command makes exactly one paid, bounded (128 output-token maximum) Bedrock call
-through `POST /api/ask`. It is intentionally excluded from `make smoke` and requires an explicit
-environment opt-in:
+through `POST /api/ask`. It is intentionally excluded from `make smoke`, requires an explicit
+environment opt-in, and fails unless the exact smoke answer plus typed call, model, usage, and
+latency metadata are returned:
 
 ```bash
 make bedrock-smoke

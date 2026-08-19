@@ -22,6 +22,7 @@ class AskRequest(BaseModel):
 class UsageMetadata(BaseModel):
     input_tokens: int
     output_tokens: int
+    total_tokens: int
 
 
 class AskResponse(BaseModel):
@@ -76,6 +77,7 @@ def create_ask_router(
             usage=UsageMetadata(
                 input_tokens=result.input_tokens,
                 output_tokens=result.output_tokens,
+                total_tokens=result.input_tokens + result.output_tokens,
             ),
             latency_ms=result.latency_ms,
         )

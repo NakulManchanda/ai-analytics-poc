@@ -10,10 +10,10 @@ IMPLEMENTED — awaiting review and merge in [PR #15](https://github.com/NakulMa
 
 - [x] `POST /api/ask` makes one configured Amazon Bedrock Converse call from `ai-app` only.
 - [x] An explicit `LLMClient` boundary supports fake-client endpoint and Bedrock-response unit tests.
-- [x] Responses expose an opaque per-call `llm_call_id`, model ID, input/output token usage, and Bedrock latency metadata.
+- [x] Responses expose an opaque per-call `llm_call_id`, model ID, input/output/total token usage, and Bedrock latency metadata.
 - [x] Expected provider and configuration failures become non-leaking retryable/non-retryable API errors.
 - [x] The app and Terraform validate the one allowed `us-east-1` `amazon.nova-micro-v1:0` model/ARN alignment; malformed and whitespace-only prompts are rejected.
-- [x] The real smoke path is opt-in and bounded to one call with a 128 output-token maximum.
+- [x] The real smoke path is opt-in, bounded to one call with a 128 output-token maximum, and fails closed unless its full response contract is met.
 - [x] Terraform grants `bedrock:InvokeModel` for only that foundation-model ARN to `ai-app`; `analytics-mcp` has no Bedrock policy.
 - [x] No tools, loop, UI, persistence, Redis, or MCP execution were introduced.
 - [ ] Pull request reviewed and merged.

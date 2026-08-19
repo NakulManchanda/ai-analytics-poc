@@ -48,6 +48,15 @@ MCP service, and a standalone dataset spike. The app had no LLM dependency or `/
   non-Nova-Micro ARN. The merged M2 MCP dataset smoke passed, as did the cumulative smoke.
 - The refreshed one-call `make bedrock-smoke` returned `BEDROCK_SMOKE_OK` with an opaque
   `llm_call_id`, 11 input tokens, 8 output tokens, and 322 ms latency.
+- Exact-head smoke hardening after merging `origin/main` at `a56b3c4`: a regression test accepts
+  only the expected answer plus typed call/model/usage/latency fields, and rejects a bad answer,
+  malformed token count, or incorrect total. The endpoint now returns `total_tokens` derived from
+  the provider's input/output counts; the opt-in script exits nonzero when that contract is not met.
+- The smoke-contract tests were written red before the validator existed and before
+  `total_tokens` was returned. The merged full suite passed app (17), MCP (1; existing FastMCP
+  deprecation warning), dataset (5), and React (2) tests plus the production browser build.
+  Backend cumulative and Compose UI smokes passed. The refreshed paid smoke returned
+  `BEDROCK_SMOKE_OK`, a generated `llm_call_id`, 11 input, 8 output, 19 total tokens, and 507 ms.
 
 ## Pull request and merge state
 
