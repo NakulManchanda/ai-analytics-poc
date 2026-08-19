@@ -3,9 +3,8 @@
 A small production-shaped AI analytics application exploring durable agent orchestration,
 MCP tool boundaries, streaming UX, bounded context, and cost-aware execution.
 
-This repository is being built incrementally. Milestone 1 provides the first service boundary: a
-minimal FastAPI application with a health endpoint and an independently runnable empty FastMCP
-service.
+This repository is being built incrementally. Milestone 2 adds a standalone, reproducible NYC TLC
+dataset and DuckDB spike; it remains separate from the FastAPI and MCP services.
 
 ## Intended architecture
 
@@ -54,6 +53,27 @@ Run the automated test suite with `make test`. Useful repository commands are li
 ```bash
 make help
 ```
+
+### Dataset spike (Milestone 2)
+
+The pinned official artifact metadata lives in
+[`config/datasets/nyc_yellow_taxi_2024_01.toml`](config/datasets/nyc_yellow_taxi_2024_01.toml).
+The Parquet and lookup CSV are cached only under ignored `data/`; each file is verified against its
+recorded SHA-256 before reuse. Run the fixture-backed tests with `make dataset-test`.
+
+To download (or reuse) the local cache and run the deterministic profile, including the schema,
+exact row counts, bounded day/zone aggregation, zone join, timing, and process high-water RSS:
+
+```bash
+make dataset-smoke
+```
+
+The FastMCP service initializes that same pinned profile at startup and exposes
+`dataset://nyc-taxi/schema` plus `get_dataset_profile()`. Run `make mcp-smoke` to verify capability
+discovery without downloading data; the fixture-backed protocol test covers the schema and profile
+payload. `make smoke` cumulatively runs M0, M1, and the M2 dataset check. Ordinary CI runs only
+fixture tests and never downloads the 50 MB public Parquet artifact. This milestone accepts no
+user SQL.
 
 ## AWS lifecycle warning
 

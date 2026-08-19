@@ -1,0 +1,15 @@
+[dataset]
+name = "nyc-yellow-taxi"
+year = 2024
+month = 1
+expected_rows = 2964624
+
+[dataset.parquet]
+url = "https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_2024-01.parquet"
+expected_bytes = 49961641
+sha256 = "c4d59da7bbc8abaeeeb1727947ee93d9891a71acb42854bd80db1571b2030510"
+
+[dataset.zone_lookup]
+url = "https://d37ci6vzurychx.cloudfront.net/misc/taxi_zone_lookup.csv"
+sha256 = "1a99e105092230f8620f301edcca7f80d3080642ff404d28ed957d3fa222c8ed"
+expected_rows = 265

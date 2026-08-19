@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help check-bootstrap dev mcp-dev mcp-smoke smoke test mcp-test
+.PHONY: help check-bootstrap dev mcp-dev mcp-smoke dataset-test dataset-smoke smoke test mcp-test
 
 help: ## Show available commands
 	@awk 'BEGIN {FS = ":.*## "; print "Targets:"} /^[a-zA-Z_-]+:.*## / {printf "  %-18s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -16,19 +16,27 @@ check-bootstrap: ## Verify the tracked canonical requirements source
 dev: ## Run the AI application locally on port 8080
 	uv run --project services/app uvicorn app.main:app --host 0.0.0.0 --port 8080 --reload
 
-mcp-dev: ## Run the empty MCP service locally on port 8001
+mcp-dev: ## Run the MCP service locally on port 8001
 	uv run --project services/mcp fastmcp run services/mcp/mcp_server/server.py --transport http --host 0.0.0.0 --port 8001
 
-mcp-smoke: ## Check the empty MCP protocol contract
+mcp-smoke: ## Check MCP dataset capability discovery
 	./scripts/smoke/01_mcp_empty.sh
+
+dataset-test: ## Run fixture-backed dataset spike tests
+	uv run --project services/dataset_spike pytest services/dataset_spike/tests
+
+dataset-smoke: ## Download/reuse pinned NYC TLC files and run the bounded DuckDB profile
+	./scripts/smoke/02_dataset_profile.sh
 
 smoke: ## Run all smoke checks for the current milestone
 	./scripts/smoke/00_health.sh
 	./scripts/smoke/01_mcp_empty.sh
+	./scripts/smoke/02_dataset_profile.sh
 
 test: ## Run application and MCP tests
 	uv run --project services/app pytest services/app/tests
 	uv run --project services/mcp pytest services/mcp/tests
+	uv run --project services/dataset_spike pytest services/dataset_spike/tests
 
 mcp-test: ## Run MCP tests
 	uv run --project services/mcp pytest services/mcp/tests

@@ -13,4 +13,6 @@ and lessons. Project sequence numbers are independent of GitHub pull request num
 | [0004](0004-m1-empty-mcp.md) | 1 | [#2](https://github.com/NakulManchanda/ai-analytics-poc/pull/2) | Empty FastMCP service | In progress |
 | [0005](0005-aws-console-links.md) | 13 | [#11](https://github.com/NakulManchanda/ai-analytics-poc/pull/11) | Applied AWS console links | Merged (`19c57c8`) |
 | [0006](0006-agent-work-queue.md) | Governance | [#5](https://github.com/NakulManchanda/ai-analytics-poc/pull/5) | GitHub-centered agent coordination queue | Draft PR |
-| [0007](0007-queue-command-and-state-refresh.md) | Governance | [#13](https://github.com/NakulManchanda/ai-analytics-poc/pull/13) | Queue command and state refresh | Draft PR |
+| [0007](0007-m2-dataset-spike.md) | 2 | [#12](https://github.com/NakulManchanda/ai-analytics-poc/pull/12) | Reproducible NYC TLC DuckDB spike | Draft PR |
+| [0008](0008-m2-mcp-dataset.md) | 2 | Pending | MCP schema resource and fixed dataset profile | In progress |
+| [0013](0013-queue-command-and-state-refresh.md) | Governance | [#13](https://github.com/NakulManchanda/ai-analytics-poc/pull/13) | Queue command and state refresh | Draft PR |
