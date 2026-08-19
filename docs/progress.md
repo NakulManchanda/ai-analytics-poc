@@ -8,7 +8,7 @@ IN PROGRESS — [issue #27](https://github.com/NakulManchanda/ai-analytics-poc/i
 
 ## Merged milestone baseline
 
-- **Milestones 0–9**: Merged (`ac52559`), including Redis Streams and SSE event integration.
+- **Milestones 0–10**: Merged (`128de6c`), including Redis Streams SSE and bounded-context visualization.
 - **Milestone 13 Foundation**: Terraform infrastructure foundation and budget alerts merged.
 
 ## Acceptance criteria
@@ -22,4 +22,4 @@ IN PROGRESS — [issue #27](https://github.com/NakulManchanda/ai-analytics-poc/i
 
 ## Next milestone
 
-Milestone 12 (local integration hardening, #28) gates on both Milestone 10 and Milestone 11 merging.
+Milestone 12 (local integration hardening, #28) gates on Milestone 11 merging.
