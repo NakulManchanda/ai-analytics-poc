@@ -1,5 +1,7 @@
 from typing import Any
 
+from app.config import DEFAULT_MODEL_ID
+
 EXPECTED_ANSWER = "BEDROCK_SMOKE_OK"
 
 
@@ -10,10 +12,12 @@ def validate_bedrock_smoke_payload(payload: object) -> dict[str, Any]:
     if payload.get("answer") != EXPECTED_ANSWER:
         raise ValueError("answer did not match the smoke contract")
 
-    for field_name in ("llm_call_id", "model_id"):
-        value = payload.get(field_name)
-        if not isinstance(value, str) or not value:
-            raise ValueError(f"{field_name} must be a non-empty string")
+    llm_call_id = payload.get("llm_call_id")
+    if not isinstance(llm_call_id, str) or not llm_call_id:
+        raise ValueError("llm_call_id must be a non-empty string")
+
+    if payload.get("model_id") != DEFAULT_MODEL_ID:
+        raise ValueError(f"model_id must equal {DEFAULT_MODEL_ID}")
 
     usage = payload.get("usage")
     if not isinstance(usage, dict):

@@ -21,6 +21,13 @@ def test_bedrock_smoke_payload_accepts_the_expected_complete_response() -> None:
         {
             "answer": "BEDROCK_SMOKE_OK",
             "llm_call_id": "llm_call_smoke",
+            "model_id": "amazon.nova-lite-v1:0",
+            "usage": {"input_tokens": 11, "output_tokens": 8, "total_tokens": 19},
+            "latency_ms": 322,
+        },
+        {
+            "answer": "BEDROCK_SMOKE_OK",
+            "llm_call_id": "llm_call_smoke",
             "model_id": "amazon.nova-micro-v1:0",
             "usage": {"input_tokens": 11, "output_tokens": 8, "total_tokens": 18},
             "latency_ms": 322,
