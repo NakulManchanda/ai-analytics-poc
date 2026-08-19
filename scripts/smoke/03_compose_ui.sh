@@ -6,10 +6,16 @@ cleanup() {
 }
 trap cleanup EXIT
 
+requested_web_port="${WEB_PORT:-${PORT:-0}}"
+export WEB_PORT="${requested_web_port}"
+export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-ai-analytics-m5-smoke-${requested_web_port}-$$}"
+
 docker compose up --build -d
+web_port="$(docker compose port web 8080 | sed -E 's/.*:([0-9]+)$/\1/')"
+web_url="http://localhost:${web_port}"
 
 for attempt in $(seq 1 60); do
-  status_json="$(curl --silent --show-error --fail http://localhost:3000/api/health 2>/dev/null || true)"
+  status_json="$(curl --silent --show-error --fail "${web_url}/api/health" 2>/dev/null || true)"
   if [[ -n "${status_json}" ]] && STATUS_JSON="${status_json}" python - <<'PY'
 import json
 import os
@@ -18,7 +24,22 @@ status = json.loads(os.environ["STATUS_JSON"])
 assert status == {"status": "ok", "service": "ai-app"}
 PY
   then
-    curl --silent --show-error --fail http://localhost:3000/ | grep -q "Taxi analytics control room"
+    curl --silent --show-error --fail "${web_url}/" | grep -q "Taxi analytics control room"
+    ask_json="$(curl --silent --show-error --fail \
+      --request POST "${web_url}/api/ask" \
+      --header 'content-type: application/json' \
+      --data '{"prompt":"What dataset is available?"}')"
+    ASK_JSON="${ask_json}" python - <<'PY'
+import json
+import os
+
+payload = json.loads(os.environ["ASK_JSON"])
+assert payload["answer"].startswith("The profile contains ")
+assert payload["answer"].endswith(" taxi trips.")
+assert isinstance(payload["tool_call_id"], str) and payload["tool_call_id"]
+assert len(payload["llm_calls"]) == 2
+assert payload["usage"]["total_tokens"] > 0
+PY
     echo "Compose UI smoke passed"
     exit 0
   fi

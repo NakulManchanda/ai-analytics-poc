@@ -4,6 +4,7 @@ from app.llm import (
     BEDROCK_RUNTIME_CONFIG,
     BedrockLLMClient,
     LLMResult,
+    ToolProposalResult,
     create_llm_client,
 )
 from app.main import create_app
@@ -14,10 +15,11 @@ from fastapi.testclient import TestClient
 
 class FakeLLMClient:
     def __init__(self) -> None:
-        self.prompts: list[str] = []
+        self.proposal_prompts: list[str] = []
+        self.answer_prompts: list[str] = []
 
     def ask(self, prompt: str) -> LLMResult:
-        self.prompts.append(prompt)
+        self.answer_prompts.append(prompt)
         return LLMResult(
             text="A short answer.",
             model_id="amazon.nova-micro-v1:0",
@@ -26,11 +28,45 @@ class FakeLLMClient:
             latency_ms=17,
         )
 
+    def propose_dataset_profile(self, prompt: str) -> ToolProposalResult:
+        self.proposal_prompts.append(prompt)
+        return ToolProposalResult(
+            name="get_dataset_profile",
+            arguments={},
+            model_id="amazon.nova-micro-v1:0",
+            input_tokens=2,
+            output_tokens=1,
+            latency_ms=3,
+        )
+
+    def answer_with_dataset_profile(
+        self, prompt: str, _dataset_profile: dict[str, object]
+    ) -> LLMResult:
+        return self.ask(prompt)
+
+
+class FakeMCPClient:
+    def get_dataset_profile(self) -> dict[str, object]:
+        return {
+            "row_count": 3,
+            "zone_row_count": 2,
+            "schema_columns": [],
+            "daily_zone_rows": [],
+            "duckdb_settings": {"threads": "1", "memory_limit": "512MB"},
+            "timing_ms": 1,
+            "rss_bytes": 1024,
+        }
+
 
 def test_ask_returns_the_fake_client_answer_and_usage_metadata() -> None:
     llm_client = FakeLLMClient()
     client = TestClient(
-        create_app(llm_client=llm_client, llm_call_id_factory=lambda: "llm_call_test_1")
+        create_app(
+            llm_client=llm_client,
+            mcp_client=FakeMCPClient(),
+            llm_call_id_factory=lambda: "llm_call_test_1",
+            tool_call_id_factory=lambda: "tool_call_test_1",
+        )
     )
 
     response = client.post("/api/ask", json={"prompt": "Summarize this."})
@@ -38,26 +74,57 @@ def test_ask_returns_the_fake_client_answer_and_usage_metadata() -> None:
     assert response.status_code == 200
     assert response.json() == {
         "answer": "A short answer.",
-        "llm_call_id": "llm_call_test_1",
-        "model_id": "amazon.nova-micro-v1:0",
-        "usage": {"input_tokens": 4, "output_tokens": 3, "total_tokens": 7},
-        "latency_ms": 17,
+        "tool_call_id": "tool_call_test_1",
+        "llm_calls": [
+            {
+                "llm_call_id": "llm_call_test_1",
+                "model_id": "amazon.nova-micro-v1:0",
+                "usage": {"input_tokens": 2, "output_tokens": 1, "total_tokens": 3},
+                "latency_ms": 3,
+            },
+            {
+                "llm_call_id": "llm_call_test_1",
+                "model_id": "amazon.nova-micro-v1:0",
+                "usage": {"input_tokens": 4, "output_tokens": 3, "total_tokens": 7},
+                "latency_ms": 17,
+            },
+        ],
+        "usage": {"input_tokens": 6, "output_tokens": 4, "total_tokens": 10},
+        "latency_ms": 20,
     }
-    assert llm_client.prompts == ["Summarize this."]
+    assert llm_client.proposal_prompts == ["Summarize this."]
+    assert llm_client.answer_prompts == ["Summarize this."]
 
 
 def test_ask_assigns_a_distinct_opaque_id_to_each_call() -> None:
     llm_client = FakeLLMClient()
-    call_ids = iter(["llm_call_test_1", "llm_call_test_2"])
+    call_ids = iter(
+        [
+            "llm_call_test_1_proposal",
+            "llm_call_test_1_answer",
+            "llm_call_test_2_proposal",
+            "llm_call_test_2_answer",
+        ]
+    )
     client = TestClient(
-        create_app(llm_client=llm_client, llm_call_id_factory=lambda: next(call_ids))
+        create_app(
+            llm_client=llm_client,
+            mcp_client=FakeMCPClient(),
+            llm_call_id_factory=lambda: next(call_ids),
+        )
     )
 
     first_response = client.post("/api/ask", json={"prompt": "First."})
     second_response = client.post("/api/ask", json={"prompt": "Second."})
 
-    assert first_response.json()["llm_call_id"] == "llm_call_test_1"
-    assert second_response.json()["llm_call_id"] == "llm_call_test_2"
+    assert [call["llm_call_id"] for call in first_response.json()["llm_calls"]] == [
+        "llm_call_test_1_proposal",
+        "llm_call_test_1_answer",
+    ]
+    assert [call["llm_call_id"] for call in second_response.json()["llm_calls"]] == [
+        "llm_call_test_2_proposal",
+        "llm_call_test_2_answer",
+    ]
 
 
 def test_ask_rejects_a_whitespace_only_prompt_without_calling_the_client() -> None:
@@ -67,7 +134,8 @@ def test_ask_rejects_a_whitespace_only_prompt_without_calling_the_client() -> No
     response = client.post("/api/ask", json={"prompt": "   "})
 
     assert response.status_code == 422
-    assert llm_client.prompts == []
+    assert llm_client.proposal_prompts == []
+    assert llm_client.answer_prompts == []
 
 
 class FakeBedrockRuntimeClient:
@@ -110,6 +178,59 @@ def test_bedrock_client_maps_converse_response_and_uses_bounded_request() -> Non
             "inferenceConfig": {"maxTokens": 128, "temperature": 0.0},
         }
     ]
+
+
+def test_bedrock_client_exposes_only_the_fixed_no_argument_profile_tool() -> None:
+    class ToolUseRuntimeClient:
+        def __init__(self) -> None:
+            self.request: dict[str, object] | None = None
+
+        def converse(self, **request: object) -> dict[str, object]:
+            self.request = request
+            return {
+                "output": {
+                    "message": {
+                        "content": [
+                            {
+                                "toolUse": {
+                                    "name": "get_dataset_profile",
+                                    "input": {},
+                                }
+                            }
+                        ]
+                    }
+                },
+                "usage": {"inputTokens": 6, "outputTokens": 1},
+                "metrics": {"latencyMs": 23},
+            }
+
+    runtime_client = ToolUseRuntimeClient()
+    proposal = BedrockLLMClient(
+        "amazon.nova-micro-v1:0", runtime_client=runtime_client
+    ).propose_dataset_profile("What dataset is available?")
+
+    assert proposal.name == "get_dataset_profile"
+    assert proposal.arguments == {}
+    assert runtime_client.request is not None
+    tool_config = runtime_client.request["toolConfig"]
+    assert tool_config == {
+        "tools": [
+            {
+                "toolSpec": {
+                    "name": "get_dataset_profile",
+                    "description": "Return the fixed profile for the pinned NYC Taxi dataset.",
+                    "inputSchema": {
+                        "json": {
+                            "type": "object",
+                            "properties": {},
+                            "additionalProperties": False,
+                        }
+                    },
+                }
+            }
+        ],
+        "toolChoice": {"tool": {"name": "get_dataset_profile"}},
+    }
 
 
 class FailingBedrockRuntimeClient:

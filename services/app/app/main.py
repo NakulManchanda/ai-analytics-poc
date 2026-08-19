@@ -5,6 +5,7 @@ from fastapi import FastAPI
 
 from app.config import Settings
 from app.llm import LLMClient, create_llm_client
+from app.mcp_client import DatasetProfileMCPClient, FastMCPDatasetProfileClient
 from app.routers.ask import create_ask_router
 from app.routers.health import router as health_router
 from app.routers.status import router as status_router
@@ -13,7 +14,9 @@ from app.routers.status import router as status_router
 def create_app(
     settings: Settings | None = None,
     llm_client: LLMClient | None = None,
+    mcp_client: DatasetProfileMCPClient | None = None,
     llm_call_id_factory: Callable[[], str] | None = None,
+    tool_call_id_factory: Callable[[], str] | None = None,
 ) -> FastAPI:
     resolved_settings = settings or Settings.from_environment()
     application = FastAPI(title="AI Analytics POC")
@@ -22,7 +25,11 @@ def create_app(
         create_ask_router(
             llm_client=llm_client,
             llm_client_factory=lambda: create_llm_client(resolved_settings),
+            mcp_client=mcp_client,
+            mcp_client_factory=FastMCPDatasetProfileClient,
             llm_call_id_factory=llm_call_id_factory or (lambda: f"llm_{uuid4().hex}"),
+            tool_call_id_factory=tool_call_id_factory
+            or (lambda: f"tool_{uuid4().hex}"),
         )
     )
     application.include_router(status_router)
