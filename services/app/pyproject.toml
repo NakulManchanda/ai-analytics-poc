@@ -7,6 +7,7 @@ dependencies = [
     "boto3>=1.35,<2",
     "fastapi>=0.116,<1",
     "fastmcp>=2,<3",
+    "redis>=5,<6",
     "uvicorn[standard]>=0.35,<1",
 ]
 
