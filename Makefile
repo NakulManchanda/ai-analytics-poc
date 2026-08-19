@@ -16,10 +16,10 @@ check-bootstrap: ## Verify the tracked canonical requirements source
 dev: ## Run the AI application locally on port 8080
 	uv run --project services/app uvicorn app.main:app --host 0.0.0.0 --port 8080 --reload
 
-mcp-dev: ## Run the empty MCP service locally on port 8001
+mcp-dev: ## Run the MCP service locally on port 8001
 	uv run --project services/mcp fastmcp run services/mcp/mcp_server/server.py --transport http --host 0.0.0.0 --port 8001
 
-mcp-smoke: ## Check the empty MCP protocol contract
+mcp-smoke: ## Check MCP dataset capability discovery
 	./scripts/smoke/01_mcp_empty.sh
 
 dataset-test: ## Run fixture-backed dataset spike tests
