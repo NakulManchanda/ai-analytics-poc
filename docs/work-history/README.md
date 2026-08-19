@@ -21,4 +21,5 @@ and lessons. Project sequence numbers are independent of GitHub pull request num
 | [0013](0013-queue-command-and-state-refresh.md) | Governance | [#13](https://github.com/NakulManchanda/ai-analytics-poc/pull/13) | Queue command and state refresh | Merged (`8cfe67e`) |
 | [0014](0014-m5-one-turn.md) | 5 | [#23](https://github.com/NakulManchanda/ai-analytics-poc/pull/23) | One-turn Bedrock → FastMCP dataset-profile execution | Merged (`c024d9a`) |
 | [0015](0015-m6-governed-query.md) | 6 | [#33](https://github.com/NakulManchanda/ai-analytics-poc/pull/33) | Governed read-only analytical query tool | Merged (`460123c`) |
-| [0016](0016-m7-dynamodb-state-repository.md) | 7 | Pending | DynamoDB durable-state repository | In progress |
+| [0016](0016-m7-dynamodb-state-repository.md) | 7 | [#34](https://github.com/NakulManchanda/ai-analytics-poc/pull/34) | DynamoDB durable-state repository | Merged (`53e7928`) |
+| [0017](0017-m8-bounded-orchestration-loop.md) | 8 | Pending | Bounded orchestration loop with budgets | In progress |
