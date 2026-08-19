@@ -32,6 +32,9 @@ resources or budget alert variables. Root `terraform.tfvars.example` diverged fr
 - Replace divergent root `terraform.tfvars.example` with a pointer to `infra/terraform/terraform.tfvars.example`.
 - Strengthen test coverage with a dedicated parser-backed test suite in `tests/infra/test_budget.py`
   placed cleanly outside the application service, validating exact 4-block count and attribute pairings.
+- Add numeric positive validation (`can(tonumber(var.monthly_budget_limit_usd)) && tonumber(var.monthly_budget_limit_usd) > 0`)
+  with safe evaluation semantics to reject zero-valued (`0`, `00`, `0.00`) or non-positive inputs, along with a focused test.
+- Integrate `origin/main` at `219608b` (Milestone 2 FastMCP dataset profile merge) cleanly into `feat/aws-budget-alerts`.
 - Keep the application-side $7.50 DynamoDB admission gate strictly out of scope.
 
 ## Verification
@@ -41,9 +44,12 @@ resources or budget alert variables. Root `terraform.tfvars.example` diverged fr
 - `terraform fmt -check -recursive`: passed
 - `make -C infra/terraform validate`: passed
 - `uv run --project services/app black --check services/app tests`: passed
+- `uv run --project services/mcp black --check services/mcp/mcp_server services/mcp/tests`: passed
+- `uv run --project services/dataset_spike black --check services/dataset_spike`: passed
 - `uv run --project services/app ruff check services/app tests`: passed
-- Static checks and assertions (`make test`): 14 passed across services and infra test suite
-- `make smoke`: passed
+- `uv run --project services/mcp ruff check services/mcp/mcp_server services/mcp/tests`: passed
+- `uv run --project services/dataset_spike ruff check services/dataset_spike`: passed
+- `make test`: all 15 tests passed across `services/app`, `services/mcp`, `services/dataset_spike`, and `tests/infra`
 - `git diff --check`: clean
 - Secret scan: verified no secrets or credentials committed; no personal email committed
 
@@ -60,3 +66,6 @@ Merge status: awaiting review. Do not apply and do not merge without explicit au
    operational documentation should highlight that forecast alerts accumulate telemetry over time.
 3. Placing Terraform static assertions in `tests/infra/` rather than inside `services/app/tests/`
    maintains clean service boundaries and avoids coupling infrastructure testing to application logic.
+4. Input validation for string-typed monetary variables must combine regex syntax checks with numerical
+   positive checks (`tonumber(...) > 0`) to prevent zero or negative values.
+
