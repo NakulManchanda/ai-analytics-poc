@@ -2,7 +2,13 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 
 from botocore.config import Config
-from botocore.exceptions import BotoCoreError, ClientError, EndpointConnectionError
+from botocore.exceptions import (
+    BotoCoreError,
+    ClientError,
+    ConnectTimeoutError,
+    EndpointConnectionError,
+    ReadTimeoutError,
+)
 
 from app.config import Settings
 
@@ -58,7 +64,11 @@ class BedrockLLMClient:
             raise LLMProviderError(
                 retryable=error_code in RETRYABLE_BEDROCK_ERROR_CODES
             ) from error
-        except EndpointConnectionError as error:
+        except (
+            ConnectTimeoutError,
+            EndpointConnectionError,
+            ReadTimeoutError,
+        ) as error:
             raise LLMProviderError(retryable=True) from error
         except BotoCoreError as error:
             raise LLMProviderError(retryable=False) from error

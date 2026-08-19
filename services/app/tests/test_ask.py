@@ -8,7 +8,7 @@ from app.llm import (
 )
 from app.main import create_app
 from botocore.config import Config
-from botocore.exceptions import ClientError
+from botocore.exceptions import ClientError, ConnectTimeoutError, ReadTimeoutError
 from fastapi.testclient import TestClient
 
 
@@ -124,6 +124,14 @@ class FailingBedrockRuntimeClient:
         )
 
 
+class TimeoutBedrockRuntimeClient:
+    def __init__(self, error: ConnectTimeoutError | ReadTimeoutError) -> None:
+        self._error = error
+
+    def converse(self, **_request: object) -> None:
+        raise self._error
+
+
 @pytest.mark.parametrize(
     ("error_code", "status_code", "retryable"),
     [
@@ -157,6 +165,38 @@ def test_ask_returns_a_controlled_provider_error_without_provider_detail(
         }
     }
     assert "internal provider detail" not in response.text
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        ConnectTimeoutError(endpoint_url="https://bedrock-runtime.example.com"),
+        ReadTimeoutError(endpoint_url="https://bedrock-runtime.example.com"),
+    ],
+)
+def test_ask_marks_bedrock_transport_timeouts_retryable(
+    error: ConnectTimeoutError | ReadTimeoutError,
+) -> None:
+    client = TestClient(
+        create_app(
+            llm_client=BedrockLLMClient(
+                "amazon.nova-micro-v1:0",
+                runtime_client=TimeoutBedrockRuntimeClient(error),
+            ),
+            llm_call_id_factory=lambda: "llm_call_transport_failure",
+        )
+    )
+
+    response = client.post("/api/ask", json={"prompt": "Summarize this."})
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "detail": {
+            "code": "llm_provider_error",
+            "llm_call_id": "llm_call_transport_failure",
+            "retryable": True,
+        }
+    }
 
 
 def test_ask_returns_a_controlled_nonretryable_configuration_error() -> None:
