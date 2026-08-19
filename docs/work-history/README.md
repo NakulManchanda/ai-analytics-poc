@@ -16,3 +16,4 @@ and lessons. Project sequence numbers are independent of GitHub pull request num
 | [0007](0007-m2-dataset-spike.md) | 2 | [#12](https://github.com/NakulManchanda/ai-analytics-poc/pull/12) | Reproducible NYC TLC DuckDB spike | Draft PR |
 | [0008](0008-m2-mcp-dataset.md) | 2 | [#17](https://github.com/NakulManchanda/ai-analytics-poc/pull/17) | MCP schema resource and fixed dataset profile | Merged (`219608b`) |
 | [0009](0009-m3-react-ui.md) | 3 | [#19](https://github.com/NakulManchanda/ai-analytics-poc/pull/19) | Minimal React health and workflow shell | Draft PR |
+| [0013](0013-queue-command-and-state-refresh.md) | Governance | [#13](https://github.com/NakulManchanda/ai-analytics-poc/pull/13) | Queue command and state refresh | Draft PR |
