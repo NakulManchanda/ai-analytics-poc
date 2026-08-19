@@ -3,7 +3,7 @@
 APP_HOST_PORT := $(or $(APP_PORT),$(PORT),8080)
 MCP_HOST_PORT := $(or $(MCP_PORT),$(PORT),8001)
 
-.PHONY: help check-bootstrap dev mcp-dev mcp-smoke dataset-test dataset-smoke smoke test mcp-test infra-test web-test compose-smoke bedrock-smoke m5-bedrock-smoke
+.PHONY: help check-bootstrap dev mcp-dev mcp-smoke dataset-test dataset-smoke smoke test mcp-test infra-test web-test compose-smoke bedrock-smoke m5-bedrock-smoke m6-bedrock-smoke
 
 help: ## Show available commands
 	@awk 'BEGIN {FS = ":.*## "; print "Targets:"} /^[a-zA-Z_-]+:.*## / {printf "  %-18s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -64,3 +64,6 @@ mcp-test: ## Run MCP tests
 
 m5-bedrock-smoke: ## Run the opt-in, bounded two-call Bedrock plus MCP profile smoke
 	MCP_PORT=$(or $(MCP_PORT),$(PORT)) ./scripts/smoke/04_m5_bedrock.sh
+
+m6-bedrock-smoke: ## Run the opt-in, bounded two-call Bedrock plus MCP query smoke
+	MCP_PORT=$(or $(MCP_PORT),$(PORT)) ./scripts/smoke/04_m6_bedrock.sh

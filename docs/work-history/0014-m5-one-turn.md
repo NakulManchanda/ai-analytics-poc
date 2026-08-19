@@ -46,7 +46,7 @@ execution path existed.
 
 Draft [PR #23](https://github.com/NakulManchanda/ai-analytics-poc/pull/23), branch
 `feat/m5-one-turn`, tracks [issue #22](https://github.com/NakulManchanda/ai-analytics-poc/issues/22).
-Exact-head CI and Copilot review remain pending.
+Merged as `c024d9a` after exact-head CI and Copilot review passed.
 
 ## Lessons
 

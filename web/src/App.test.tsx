@@ -73,7 +73,7 @@ describe("App", () => {
       return Promise.resolve({
         ok: true,
         json: async () => ({
-          answer: "The profile contains 3 taxi trips.",
+          answer: "Alpha has the most pickups with 3 trips.",
           tool_call_id: "tool_profile",
           llm_calls: [],
           usage: { input_tokens: 16, output_tokens: 9, total_tokens: 25 },
@@ -88,10 +88,10 @@ describe("App", () => {
     await act(async () => {
       await Promise.resolve();
     });
-    fireEvent.change(prompt, { target: { value: "What dataset is available?" } });
-    fireEvent.click(screen.getByRole("button", { name: "Run profile" }));
+    fireEvent.change(prompt, { target: { value: "Which pickup zones have the most trips?" } });
+    fireEvent.click(screen.getByRole("button", { name: "Run analysis" }));
 
-    expect(await screen.findByText("The profile contains 3 taxi trips.")).toBeVisible();
+    expect(await screen.findByText("Alpha has the most pickups with 3 trips.")).toBeVisible();
     expect(screen.getByText("25 tokens · 32 ms")).toBeVisible();
     expect(fetchRequest).toHaveBeenCalledWith("/api/ask", expect.objectContaining({ method: "POST" }));
   });
@@ -117,8 +117,8 @@ describe("App", () => {
     render(<App />);
     const prompt = screen.getByRole("textbox", { name: "Ask about NYC taxi activity" });
     fireEvent.change(prompt, { target: { value: "What dataset is available?" } });
-    fireEvent.click(screen.getByRole("button", { name: "Run profile" }));
+    fireEvent.click(screen.getByRole("button", { name: "Run analysis" }));
 
-    expect(await screen.findByText("The profile service is temporarily unavailable. Try again.")).toBeVisible();
+    expect(await screen.findByText("The query service is temporarily unavailable. Try again.")).toBeVisible();
   });
 });

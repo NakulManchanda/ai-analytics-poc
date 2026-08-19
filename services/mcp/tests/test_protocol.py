@@ -32,17 +32,39 @@ def test_dataset_contract_exposes_fixed_schema_and_profile_over_mcp():
         loader_call_count += 1
         return expected_profile
 
+    query_requests: list[tuple[str, int]] = []
+
+    def query_runner(*, analysis: str, limit: int) -> dict[str, object]:
+        query_requests.append((analysis, limit))
+        return {
+            "columns": ["pickup_zone", "trip_count"],
+            "rows": [["Alpha", 2]],
+            "row_count": 1,
+            "execution_duration_ms": 4,
+            "query_id": "query_protocol",
+            "truncated": False,
+        }
+
     async def exercise_protocol():
-        async with Client(build_mcp(profile_loader=profile_loader)) as client:
+        async with Client(
+            build_mcp(profile_loader=profile_loader, query_runner=query_runner)
+        ) as client:
             tools = await client.list_tools()
             resources = await client.list_resources()
             schema = await client.read_resource("dataset://nyc-taxi/schema")
             profile = await client.call_tool("get_dataset_profile")
-        return tools, resources, schema, profile
+            query = await client.call_tool(
+                "query_taxi_data",
+                {"analysis": "top_pickup_zones", "limit": 2},
+            )
+        return tools, resources, schema, profile, query
 
-    tools, resources, schema, profile = asyncio.run(exercise_protocol())
+    tools, resources, schema, profile, query = asyncio.run(exercise_protocol())
 
-    assert [tool.name for tool in tools] == ["get_dataset_profile"]
+    assert [tool.name for tool in tools] == [
+        "get_dataset_profile",
+        "query_taxi_data",
+    ]
     assert [str(resource.uri) for resource in resources] == [
         "dataset://nyc-taxi/schema"
     ]
@@ -51,4 +73,13 @@ def test_dataset_contract_exposes_fixed_schema_and_profile_over_mcp():
         '"dataset":"nyc-yellow-taxi","month":"2024-01"}'
     )
     assert profile.data == asdict(expected_profile)
+    assert query.data == {
+        "columns": ["pickup_zone", "trip_count"],
+        "rows": [["Alpha", 2]],
+        "row_count": 1,
+        "execution_duration_ms": 4,
+        "query_id": "query_protocol",
+        "truncated": False,
+    }
+    assert query_requests == [("top_pickup_zones", 2)]
     assert loader_call_count == 1

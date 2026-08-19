@@ -9,9 +9,14 @@ class FakeOneTurnLLM:
     def __init__(self, proposal: dict[str, object] | None = None) -> None:
         self.proposal_prompts: list[str] = []
         self.answer_inputs: list[tuple[str, dict[str, object]]] = []
-        self.proposal = proposal or {"name": "get_dataset_profile", "arguments": {}}
+        self.proposal = proposal or {
+            "name": "query_taxi_data",
+            "arguments": {"analysis": "top_pickup_zones", "limit": 5},
+        }
 
-    def propose_dataset_profile(self, prompt: str) -> ToolProposalResult:
+    def propose_taxi_query(
+        self, prompt: str, _schema: dict[str, object]
+    ) -> ToolProposalResult:
         self.proposal_prompts.append(prompt)
         return ToolProposalResult(
             name=str(self.proposal["name"]),
@@ -22,10 +27,10 @@ class FakeOneTurnLLM:
             latency_ms=13,
         )
 
-    def answer_with_dataset_profile(
-        self, prompt: str, dataset_profile: dict[str, object]
+    def answer_with_query_result(
+        self, prompt: str, query_result: dict[str, object]
     ) -> LLMResult:
-        self.answer_inputs.append((prompt, dataset_profile))
+        self.answer_inputs.append((prompt, query_result))
         return LLMResult(
             text="The profile contains 3 taxi trips.",
             model_id="amazon.nova-micro-v1:0",
@@ -39,16 +44,22 @@ class FakeDatasetProfileMCP:
     def __init__(self) -> None:
         self.call_count = 0
 
-    def get_dataset_profile(self) -> dict[str, object]:
+    def get_dataset_schema(self) -> dict[str, object]:
+        return {
+            "dataset": "nyc-yellow-taxi",
+            "month": "2024-01",
+            "columns": ["tpep_pickup_datetime", "PULocationID"],
+        }
+
+    def query_taxi_data(self, *, analysis: str, limit: int) -> dict[str, object]:
         self.call_count += 1
         return {
-            "row_count": 3,
-            "zone_row_count": 2,
-            "schema_columns": ["tpep_pickup_datetime", "PULocationID"],
-            "daily_zone_rows": [],
-            "duckdb_settings": {"threads": "1", "memory_limit": "512MB"},
-            "timing_ms": 1,
-            "rss_bytes": 1024,
+            "columns": ["pickup_zone", "trip_count"],
+            "rows": [["Alpha", 3]],
+            "row_count": 1,
+            "execution_duration_ms": 1,
+            "query_id": "query_m5_profile",
+            "truncated": False,
         }
 
 
@@ -73,6 +84,7 @@ def test_ask_runs_one_validated_profile_tool_sequence_and_returns_bounded_metada
     assert response.json() == {
         "answer": "The profile contains 3 taxi trips.",
         "tool_call_id": "tool_m5_profile",
+        "query_id": "query_m5_profile",
         "llm_calls": [
             {
                 "llm_call_id": "llm_m5_proposal",
@@ -96,13 +108,12 @@ def test_ask_runs_one_validated_profile_tool_sequence_and_returns_bounded_metada
         (
             "What dataset is available?",
             {
-                "row_count": 3,
-                "zone_row_count": 2,
-                "schema_columns": ["tpep_pickup_datetime", "PULocationID"],
-                "daily_zone_rows": [],
-                "duckdb_settings": {"threads": "1", "memory_limit": "512MB"},
-                "timing_ms": 1,
-                "rss_bytes": 1024,
+                "columns": ["pickup_zone", "trip_count"],
+                "rows": [["Alpha", 3]],
+                "row_count": 1,
+                "execution_duration_ms": 1,
+                "query_id": "query_m5_profile",
+                "truncated": False,
             },
         )
     ]
@@ -142,23 +153,29 @@ def test_ask_rejects_any_nonexact_profile_proposal_before_mcp(
     assert llm_client.answer_inputs == []
 
 
-def test_local_fake_llm_supports_the_same_fixed_m5_sequence_without_aws() -> None:
+def test_local_fake_llm_supports_the_same_fixed_one_turn_sequence_without_aws() -> None:
     llm_client = create_llm_client(Settings(llm_provider="fake"))
 
-    proposal = llm_client.propose_dataset_profile("What dataset is available?")
-    answer = llm_client.answer_with_dataset_profile(
-        "What dataset is available?",
+    proposal = llm_client.propose_taxi_query(
+        "Which pickup zones have the most trips?",
         {
-            "row_count": 3,
-            "zone_row_count": 2,
-            "schema_columns": [],
-            "daily_zone_rows": [],
-            "duckdb_settings": {"threads": "1", "memory_limit": "512MB"},
-            "timing_ms": 1,
-            "rss_bytes": 1024,
+            "dataset": "nyc-yellow-taxi",
+            "month": "2024-01",
+            "columns": ["tpep_pickup_datetime", "PULocationID"],
+        },
+    )
+    answer = llm_client.answer_with_query_result(
+        "Which pickup zones have the most trips?",
+        {
+            "columns": ["pickup_zone", "trip_count"],
+            "rows": [["Alpha", 3]],
+            "row_count": 1,
+            "execution_duration_ms": 1,
+            "query_id": "query_fake",
+            "truncated": False,
         },
     )
 
-    assert proposal.name == "get_dataset_profile"
-    assert proposal.arguments == {}
-    assert answer.text == "The profile contains 3 taxi trips."
+    assert proposal.name == "query_taxi_data"
+    assert proposal.arguments == {"analysis": "top_pickup_zones", "limit": 5}
+    assert answer.text == "Alpha has the most pickups with 3 trips."

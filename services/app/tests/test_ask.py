@@ -44,6 +44,24 @@ class FakeLLMClient:
     ) -> LLMResult:
         return self.ask(prompt)
 
+    def propose_taxi_query(
+        self, prompt: str, _schema: dict[str, object]
+    ) -> ToolProposalResult:
+        self.proposal_prompts.append(prompt)
+        return ToolProposalResult(
+            name="query_taxi_data",
+            arguments={"analysis": "top_pickup_zones", "limit": 5},
+            model_id="amazon.nova-micro-v1:0",
+            input_tokens=2,
+            output_tokens=1,
+            latency_ms=3,
+        )
+
+    def answer_with_query_result(
+        self, prompt: str, _query_result: dict[str, object]
+    ) -> LLMResult:
+        return self.ask(prompt)
+
 
 class FakeMCPClient:
     def get_dataset_profile(self) -> dict[str, object]:
@@ -55,6 +73,23 @@ class FakeMCPClient:
             "duckdb_settings": {"threads": "1", "memory_limit": "512MB"},
             "timing_ms": 1,
             "rss_bytes": 1024,
+        }
+
+    def get_dataset_schema(self) -> dict[str, object]:
+        return {
+            "dataset": "nyc-yellow-taxi",
+            "month": "2024-01",
+            "columns": ["tpep_pickup_datetime", "PULocationID"],
+        }
+
+    def query_taxi_data(self, *, analysis: str, limit: int) -> dict[str, object]:
+        return {
+            "columns": ["pickup_zone", "trip_count"],
+            "rows": [["Alpha", 3]],
+            "row_count": 1,
+            "execution_duration_ms": 1,
+            "query_id": "query_test_1",
+            "truncated": False,
         }
 
 
@@ -75,6 +110,7 @@ def test_ask_returns_the_fake_client_answer_and_usage_metadata() -> None:
     assert response.json() == {
         "answer": "A short answer.",
         "tool_call_id": "tool_call_test_1",
+        "query_id": "query_test_1",
         "llm_calls": [
             {
                 "llm_call_id": "llm_call_test_1",
@@ -271,6 +307,7 @@ def test_ask_returns_a_controlled_provider_error_without_provider_detail(
                     error_code, "internal provider detail"
                 ),
             ),
+            mcp_client=FakeMCPClient(),
             llm_call_id_factory=lambda: "llm_call_failure",
         )
     )
@@ -304,6 +341,7 @@ def test_ask_marks_bedrock_transport_timeouts_retryable(
                 "amazon.nova-micro-v1:0",
                 runtime_client=TimeoutBedrockRuntimeClient(error),
             ),
+            mcp_client=FakeMCPClient(),
             llm_call_id_factory=lambda: "llm_call_transport_failure",
         )
     )
@@ -324,6 +362,7 @@ def test_ask_returns_a_controlled_nonretryable_configuration_error() -> None:
     client = TestClient(
         create_app(
             settings=Settings(aws_region="us-west-2"),
+            mcp_client=FakeMCPClient(),
             llm_call_id_factory=lambda: "llm_call_config_failure",
         )
     )

@@ -73,7 +73,10 @@ async def verify() -> None:
     async with Client(os.environ["MCP_URL"]) as client:
         tools = await client.list_tools()
         resources = await client.list_resources()
-    assert [tool.name for tool in tools] == ["get_dataset_profile"], tools
+    assert [tool.name for tool in tools] == [
+        "get_dataset_profile",
+        "query_taxi_data",
+    ], tools
     assert [str(resource.uri) for resource in resources] == ["dataset://nyc-taxi/schema"], resources
 
 
