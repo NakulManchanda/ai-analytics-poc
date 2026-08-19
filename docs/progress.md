@@ -1,39 +1,43 @@
 # Current milestone
 
-Milestone 2 — reproducible NYC TLC dataset spike with DuckDB
+Milestone 13 (Optional Addition) — AWS budget alerts configuration
 
 ## Status
 
-IMPLEMENTED — awaiting review and merge
+IMPLEMENTED — awaiting review and merge (PR #20)
 
-## Acceptance criteria
+## Merged milestone baseline
 
-- [x] Official January 2024 Yellow Taxi Parquet and zone lookup are pinned with SHA-256 metadata
-- [x] The local ignored cache is verified before reuse and invalid files are replaced atomically
-- [x] DuckDB opens the Parquet with `threads=1` and `memory_limit=512MB`
-- [x] Fixed profile verifies schema, 2,964,624 trips, 265 zones, and a bounded day/zone join
-- [x] FastMCP startup reuses/downloads the pinned data and exposes `dataset://nyc-taxi/schema` and
-  `get_dataset_profile()` without accepting SQL
-- [x] Fixture tests and manual/cached live smoke record timing and process high-water RSS
-- [x] Ordinary CI runs fixture tests only; it does not download the public Parquet artifact
-- [x] M0 and M1 remain included in the cumulative smoke
-- [ ] Pull request reviewed and merged
+- **Milestone 0**: Minimal FastAPI `GET /health` endpoint (merged).
+- **Milestone 1**: Independently runnable empty FastMCP service on port 8001 (merged).
+- **Milestone 2**: NYC TLC Parquet dataset profile via DuckDB and FastMCP tools/resources (merged, PR #17).
+- **Milestone 3**: Minimal React status shell with same-origin `/api/` proxy and Compose smoke (merged, PR #19).
+- **Milestone 13 Foundation**: Terraform infrastructure foundation under `infra/terraform/` defining VPC, subnets, ECR, S3, DynamoDB, ECS, IAM, and CloudWatch log groups (merged, PR #3 / PR #11; unapplied offline configuration).
+
+## Acceptance criteria (PR #20 — Budget Alerts)
+
+- [x] Dedicated `infra/terraform/budget.tf` defines `aws_budgets_budget` for account `107207236011`
+- [x] Budget creation is optional (`enable_budget_alerts = false` default) with configurable alert email
+- [x] Four notification blocks enforce exact dollar thresholds ($5, $8, $10 actual, $10 forecasted) using `ABSOLUTE_VALUE`
+- [x] Numeric validation on `monthly_budget_limit_usd` prevents zero or non-positive budget limits
+- [x] Root `terraform.tfvars.example` points to `infra/terraform/terraform.tfvars.example`
+- [x] Static block assertions in `tests/infra/test_budget.py` validate HCL structure, notifications, and constraints
+- [x] `terraform fmt -check` and `make -C infra/terraform validate` pass backendless verification
+- [x] No AWS resources are planned or applied (infrastructure remains unapplied/offline)
+- [ ] Pull request #20 reviewed and merged
 
 ## Decisions
 
-- The MCP service depends directly on the standalone `services/dataset_spike` package and exposes
-  its fixed profile through a schema resource and no-argument tool; it does not introduce app,
-  LLM, Redis, AWS, or React coupling.
-- Only the two static profile inputs are accepted; the DuckDB queries are fixed in code and `top_n`
-  is bounded to 1–100.
-- Cache files are local, ignored, and checksum-verified; the Parquet size is also pinned.
+- Budget alerts are implemented as account-level safety nets (Layer 3) without coupling to the application-side $7.50 runtime DynamoDB admission gate (Layer 2).
+- Notification thresholds use `ABSOLUTE_VALUE` with `GREATER_THAN` to preserve the explicit $5/$8/$10 requirement contract even if monthly budget limits change.
+- Monitored account ID is constrained to `107207236011` with a lifecycle precondition.
+- Test assertions in `tests/infra/test_budget.py` execute robust static block assertions against Terraform source files; Terraform backendless `validate` serves as the authoritative semantic gate.
 
 ## Known limitations
 
-- The fixed profile contains small joined aggregation rows for M2 inspection only; the future query
-  tool will need its own allowlisted inputs, result-byte limit, query ID, and truncation contract.
-  The manual live smoke requires network access on a cold local cache.
+- Infrastructure configuration is validated offline (`init-backendless` and `validate`); no live AWS resources are planned or applied in this PR.
+- Forecasted alerts require historical account telemetry in AWS Cost Management and may not trigger immediately on newly provisioned accounts.
 
 ## Next milestone
 
-Next milestone: Milestone 3 — minimal React shell showing the application workflow.
+Next milestone: Milestone 4 — first real Bedrock call owned by the application, with no tools.

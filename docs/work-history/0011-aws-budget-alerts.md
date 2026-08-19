@@ -30,11 +30,13 @@ resources or budget alert variables. Root `terraform.tfvars.example` diverged fr
 - Note operational behavior: forecasted alerts require AWS Cost Management historical account telemetry
   and may not trigger early on new accounts; actual spend alerts trigger as usage accumulates.
 - Replace divergent root `terraform.tfvars.example` with a pointer to `infra/terraform/terraform.tfvars.example`.
-- Strengthen test coverage with a dedicated parser-backed test suite in `tests/infra/test_budget.py`
-  placed cleanly outside the application service, validating exact 4-block count and attribute pairings.
+- Strengthen test coverage with robust static block assertions in `tests/infra/test_budget.py`
+  placed cleanly outside the application service, validating exact 4-block count and attribute pairings
+  while keeping Terraform validate as the authoritative semantic gate.
 - Add numeric positive validation (`can(tonumber(var.monthly_budget_limit_usd)) && tonumber(var.monthly_budget_limit_usd) > 0`)
-  with safe evaluation semantics to reject zero-valued (`0`, `00`, `0.00`) or non-positive inputs, along with a focused test.
-- Integrate `origin/main` at `219608b` (Milestone 2 FastMCP dataset profile merge) cleanly into `feat/aws-budget-alerts`.
+  with safe evaluation semantics to reject zero-valued (`0`, `00`, `0.00`) or non-positive inputs, along with a focused static assertion test.
+- Integrate `origin/main` at `a56b3c4` (Milestone 3 React UI merge) cleanly into `feat/aws-budget-alerts`
+  without rebase or force-push, preserving M2 MCP capabilities, M3 React UI shell, and budget infra tests.
 - Keep the application-side $7.50 DynamoDB admission gate strictly out of scope.
 
 ## Verification
@@ -49,7 +51,9 @@ resources or budget alert variables. Root `terraform.tfvars.example` diverged fr
 - `uv run --project services/app ruff check services/app tests`: passed
 - `uv run --project services/mcp ruff check services/mcp/mcp_server services/mcp/tests`: passed
 - `uv run --project services/dataset_spike ruff check services/dataset_spike`: passed
-- `make test`: all 15 tests passed across `services/app`, `services/mcp`, `services/dataset_spike`, and `tests/infra`
+- `npm test --prefix web`: passed
+- `npm run build --prefix web`: passed
+- `make test`: passed across all services, infra, and web checks
 - `git diff --check`: clean
 - Secret scan: verified no secrets or credentials committed; no personal email committed
 

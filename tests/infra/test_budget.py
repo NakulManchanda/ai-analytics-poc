@@ -5,7 +5,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def extract_notification_blocks(hcl_text: str) -> list[dict[str, str]]:
-    """Extract and parse all `notification { ... }` blocks from HCL content.
+    """Extract static `notification { ... }` block attributes from HCL text.
 
     Returns a list of dictionaries with normalized attribute keys and values.
     """
@@ -165,8 +165,8 @@ def test_terraform_monthly_budget_limit_validation():
     assert "can(tonumber(var.monthly_budget_limit_usd))" in limit_block
     assert "tonumber(var.monthly_budget_limit_usd) > 0" in limit_block
 
-    def evaluate_hcl_condition(val: str) -> bool:
-        # Safe evaluation semantics mirroring HCL condition:
+    def evaluate_static_limit_condition(val: str) -> bool:
+        # Static simulation of the Terraform validation expression:
         # can(regex("^[0-9]+(\\.[0-9]{1,2})?$", val)) && can(tonumber(val)) && tonumber(val) > 0
         regex_match = bool(re.match(r"^[0-9]+(\.[0-9]{1,2})?$", val))
         if not regex_match:
@@ -181,21 +181,21 @@ def test_terraform_monthly_budget_limit_validation():
     valid_inputs = ["10.0", "10", "5.00", "0.01", "100.5", "1234.56"]
     for val in valid_inputs:
         assert (
-            evaluate_hcl_condition(val) is True
+            evaluate_static_limit_condition(val) is True
         ), f"Expected {val} to be valid, but was rejected"
 
     # Zero-valued inputs flagged by Copilot must be rejected
     zero_inputs = ["0", "00", "0.0", "0.00", "00.00"]
     for val in zero_inputs:
         assert (
-            evaluate_hcl_condition(val) is False
+            evaluate_static_limit_condition(val) is False
         ), f"Expected zero value {val} to be rejected, but was accepted"
 
     # Negative and malformed inputs must be rejected
     invalid_inputs = ["-1", "-0.01", "-10.0", "", "abc", "10.001", " 10.0", "$10.00"]
     for val in invalid_inputs:
         assert (
-            evaluate_hcl_condition(val) is False
+            evaluate_static_limit_condition(val) is False
         ), f"Expected invalid value {val} to be rejected, but was accepted"
 
 

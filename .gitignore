@@ -12,8 +12,11 @@ __pycache__/
 .mypy_cache/
 .coverage
 htmlcov/
+.venv
 .venv/
 venv/
+vev
+vev/
 dist/
 build/
 *.egg-info/
@@ -21,6 +24,8 @@ build/
 # JavaScript
 node_modules/
 frontend/dist/
+web/dist/
+*.tsbuildinfo
 
 # Environment and credentials
 .env
