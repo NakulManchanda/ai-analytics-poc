@@ -3,8 +3,8 @@
 A small production-shaped AI analytics application exploring durable agent orchestration,
 MCP tool boundaries, streaming UX, bounded context, and cost-aware execution.
 
-This repository is being built incrementally. Milestone 2 adds a standalone, reproducible NYC TLC
-dataset and DuckDB spike; it remains separate from the FastAPI and MCP services.
+This repository is being built incrementally. Milestone 3 adds a small React shell that visibly
+checks the FastAPI and FastMCP path without adding prompt execution, an LLM, persistence, or SSE.
 
 ## Intended architecture
 
@@ -52,6 +52,27 @@ Run the automated test suite with `make test`. Useful repository commands are li
 
 ```bash
 make help
+```
+
+### React shell (Milestone 3)
+
+Build and run the local browser path with Docker Compose:
+
+```bash
+docker compose up --build
+```
+
+Open http://localhost:3000. The page uses a same-origin `/api/status` request; Nginx proxies that
+request to FastAPI, and FastAPI uses the MCP protocol to discover the separate FastMCP service.
+It should display **Backend ready** and **MCP discovered · 1 tools · 1 resources**. The disabled
+prompt and timeline are visual placeholders only; they send no data and invoke no LLM.
+
+Run the focused browser package checks with:
+
+```bash
+cd web
+npm test
+npm run build
 ```
 
 ### Dataset spike (Milestone 2)
