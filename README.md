@@ -43,6 +43,10 @@ uv sync --project services/app --dev
 make dev
 ```
 
+Host-facing ports are overrideable without changing internal container ports: service-specific
+variables win over the generic fallback, so `APP_PORT=8082 PORT=9000 make dev` uses 8082,
+`PORT=8002 make mcp-dev` uses 8002, and Docker Compose uses `WEB_PORT`, then `PORT`, then 3000.
+
 Run the MCP service separately on port 8001 with `make mcp-dev`. Its focused contract check is
 `make mcp-smoke`; `make smoke` runs both the M0 health and M1 MCP checks.
 
@@ -58,13 +62,19 @@ Run the automated test suite with `make test`. Useful repository commands are li
 make help
 ```
 
-### Bedrock single-call path (Milestone 4)
+### One-turn Bedrock-to-MCP path (Milestone 5)
 
-`POST /api/ask` accepts a non-empty `prompt` (up to 4,000 characters) and returns one answer with
-an opaque `llm_call_id`, the configured model ID, input/output/total token usage, and
-Bedrock-reported latency. The app requires `LLM_PROVIDER=bedrock`, `AWS_REGION=us-east-1`, and
+`POST /api/ask` accepts a non-empty `prompt` (up to 4,000 characters) and runs exactly one fixed
+sequence: Bedrock call #1 proposes `get_dataset_profile` with no arguments, FastAPI validates that
+exact contract, the existing FastMCP service returns its bounded dataset profile, and Bedrock call
+#2 returns the final answer. The response includes an opaque `tool_call_id`, per-call IDs/model/
+usage/latency records, plus aggregate usage and latency. Unknown tools, non-empty arguments, and
+invalid MCP results fail closed before the final answer call.
+
+The app requires `LLM_PROVIDER=bedrock`, `AWS_REGION=us-east-1`, and
 `LLM_MODEL_ID=amazon.nova-micro-v1:0`; deployed containers use the `ai-app` ECS task role and the
-AWS SDK default credential chain, never static credentials.
+AWS SDK default credential chain, never static credentials. The local Docker Compose file sets a
+deterministic `LLM_PROVIDER=fake` only for its no-cost browser/API/MCP smoke path.
 
 Run the focused unit tests without making an AWS call:
 
@@ -72,13 +82,13 @@ Run the focused unit tests without making an AWS call:
 uv run --project services/app pytest services/app/tests
 ```
 
-The following command makes exactly one paid, bounded (128 output-token maximum) Bedrock call
-through `POST /api/ask`. It is intentionally excluded from `make smoke`, requires an explicit
-environment opt-in, and fails unless the exact smoke answer plus typed call, model, usage, and
-latency metadata are returned:
+The following command makes exactly two paid, bounded (128 output-token maximum per call)
+Bedrock calls plus one local FastMCP profile call. It is intentionally excluded from `make smoke`,
+requires an explicit environment opt-in, and fails unless the exact answer, two typed call records,
+tool ID, aggregate usage, and aggregate latency contract are returned:
 
 ```bash
-RUN_BEDROCK_SMOKE=1 make bedrock-smoke
+RUN_BEDROCK_SMOKE=1 make m5-bedrock-smoke
 ```
 
 Terraform validates this exact region/model foundation-model ARN for the narrow `ai-app` allowlist.
@@ -86,7 +96,7 @@ The `analytics-mcp` task role has no Bedrock invocation policy. Expected Bedrock
 configuration failures return a controlled response with `retryable` and `llm_call_id` metadata;
 provider details are not returned to callers.
 
-### React shell (Milestone 3)
+### React workflow (Milestone 5)
 
 Build and run the local browser path with Docker Compose:
 
@@ -96,8 +106,17 @@ docker compose up --build
 
 Open http://localhost:3000. The page uses a same-origin `/api/status` request; Nginx proxies that
 request to FastAPI, and FastAPI uses the MCP protocol to discover the separate FastMCP service.
-It should display **Backend ready** and **MCP discovered · 1 tools · 1 resources**. The disabled
-prompt and timeline are visual placeholders only; they send no data and invoke no LLM.
+It should display **Backend ready** and **MCP discovered · 1 tools · 1 resources**. Enter a
+question and select **Run profile** to show loading, a controlled error if a dependency fails, or a
+final answer with total token/latency metadata. The browser does not render model-authored HTML or
+visualization configuration.
+
+The Compose smoke automatically sets an isolated `COMPOSE_PROJECT_NAME`, so its cleanup cannot
+affect another local stack. When port 3000 is occupied, run it on another host port:
+
+```bash
+WEB_PORT=3001 make compose-smoke
+```
 
 Run the focused browser package checks with:
 

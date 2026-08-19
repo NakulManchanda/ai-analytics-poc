@@ -16,13 +16,13 @@ IN PROGRESS — [issue #22](https://github.com/NakulManchanda/ai-analytics-poc/i
 
 ## Acceptance criteria
 
-- [ ] First LLM call receives only the fixed `get_dataset_profile` tool contract.
-- [ ] An exact no-argument proposal is validated before any MCP execution.
-- [ ] The application calls the existing FastMCP HTTP service exactly once and bounds/sanitizes its result.
-- [ ] The second LLM call receives the bounded tool result and returns the final answer.
-- [ ] The route allows at most two LLM calls and one MCP call; it has no general loop.
-- [ ] The browser prompt shows loading, controlled errors, final answer, and bounded usage metadata.
-- [ ] Normal tests use fakes; the real Bedrock smoke remains explicitly opt-in and paid.
+- [x] First LLM call receives only the fixed `get_dataset_profile` tool contract.
+- [x] An exact no-argument proposal is validated before any MCP execution.
+- [x] The application calls the existing FastMCP HTTP service exactly once and bounds/sanitizes its result.
+- [x] The second LLM call receives the bounded tool result and returns the final answer.
+- [x] The route allows at most two LLM calls and one MCP call; it has no general loop.
+- [x] The browser prompt shows loading, controlled errors, final answer, and bounded usage metadata.
+- [x] Normal tests use fakes; the real Bedrock smoke is explicitly opt-in and passed against account `107207236011`.
 - [ ] Draft PR, work history, documentation, CI, and Copilot review are complete.
 
 ## Decisions

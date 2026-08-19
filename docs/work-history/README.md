@@ -19,4 +19,4 @@ and lessons. Project sequence numbers are independent of GitHub pull request num
 | [0010](0010-m4-bedrock-app.md) | 4 | [#15](https://github.com/NakulManchanda/ai-analytics-poc/pull/15) | Application-owned Bedrock single call | Draft PR |
 | [0011](0011-aws-budget-alerts.md) | 13 | [#20](https://github.com/NakulManchanda/ai-analytics-poc/pull/20) | Optional AWS budget alerts | Merged (`30d7039`) |
 | [0013](0013-queue-command-and-state-refresh.md) | Governance | [#13](https://github.com/NakulManchanda/ai-analytics-poc/pull/13) | Queue command and state refresh | Merged (`8cfe67e`) |
-| [0014](0014-m5-one-turn.md) | 5 | Pending | One-turn Bedrock → FastMCP dataset-profile execution | Draft PR |
+| [0014](0014-m5-one-turn.md) | 5 | [#23](https://github.com/NakulManchanda/ai-analytics-poc/pull/23) | One-turn Bedrock → FastMCP dataset-profile execution | Draft PR |

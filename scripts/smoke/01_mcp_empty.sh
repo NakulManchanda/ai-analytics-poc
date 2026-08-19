@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-mcp_port="${MCP_PORT:-8001}"
+mcp_port="${MCP_PORT:-${PORT:-8001}}"
 mcp_url="${MCP_URL:-http://localhost:${mcp_port}/mcp}"
 mcp_log="$(mktemp "${TMPDIR:-/tmp}/ai-analytics-mcp-smoke.XXXXXX")"
 server_pid=""

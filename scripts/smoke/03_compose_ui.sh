@@ -6,8 +6,10 @@ cleanup() {
 }
 trap cleanup EXIT
 
-web_port="${WEB_PORT:-3000}"
+web_port="${WEB_PORT:-${PORT:-3000}}"
 web_url="http://localhost:${web_port}"
+export WEB_PORT="${web_port}"
+export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-ai-analytics-m5-smoke-${web_port}-$$}"
 
 docker compose up --build -d
 
