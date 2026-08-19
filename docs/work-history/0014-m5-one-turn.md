@@ -33,8 +33,11 @@ execution path existed.
   React (4) tests; the React production build, Ruff, and Black checks passed. FastMCP emitted its
   existing Authlib deprecation warning only.
 - Cumulative health, FastMCP discovery, and pinned-dataset smoke passed with a locally started
-  app process. `WEB_PORT=3001 make compose-smoke` passed the browser → Nginx → app → MCP prompt
-  path while preserving an already-running preview on port 3000.
+  app process. The Compose smoke uses Docker's ephemeral host port by default and a unique project
+  name; it passed the browser → Nginx → app → MCP prompt path while preserving an already-running
+  preview on port 3000. `WEB_PORT=3001 make compose-smoke` also passed as an explicit override;
+  two concurrent default smoke runs used distinct project names and both completed without touching
+  that port-3000 preview.
 - `aws sts get-caller-identity` confirmed account `107207236011`; then
   `RUN_BEDROCK_SMOKE=1 MCP_PORT=8002 make m5-bedrock-smoke` passed with exactly two Nova Micro
   calls, one MCP tool call, 1,132 total tokens, and 706 ms aggregate Bedrock latency.
@@ -51,3 +54,6 @@ Exact-head CI and Copilot review remain pending.
   cannot name a future query tool or provide profile arguments by accident.
 - Local Compose integration needs an explicit fake provider to cover the visible browser path
   without silently spending Bedrock money; the separate opt-in smoke proves the real boundary.
+- Port selection needs different defaults for human servers and automation: human `dev` commands
+  remain predictable, while smoke scripts use isolated projects and ephemeral host ports so they
+  can run concurrently without disrupting another task.

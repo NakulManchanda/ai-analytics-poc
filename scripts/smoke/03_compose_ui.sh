@@ -6,12 +6,13 @@ cleanup() {
 }
 trap cleanup EXIT
 
-web_port="${WEB_PORT:-${PORT:-3000}}"
-web_url="http://localhost:${web_port}"
-export WEB_PORT="${web_port}"
-export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-ai-analytics-m5-smoke-${web_port}-$$}"
+requested_web_port="${WEB_PORT:-${PORT:-0}}"
+export WEB_PORT="${requested_web_port}"
+export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-ai-analytics-m5-smoke-${requested_web_port}-$$}"
 
 docker compose up --build -d
+web_port="$(docker compose port web 8080 | sed -E 's/.*:([0-9]+)$/\1/')"
+web_url="http://localhost:${web_port}"
 
 for attempt in $(seq 1 60); do
   status_json="$(curl --silent --show-error --fail "${web_url}/api/health" 2>/dev/null || true)"

@@ -6,7 +6,9 @@ if [[ "${RUN_BEDROCK_SMOKE:-}" != "1" ]]; then
   exit 1
 fi
 
-mcp_port="${MCP_PORT:-${PORT:-8001}}"
+source "$(dirname "${BASH_SOURCE[0]}")/lib/ports.sh"
+
+mcp_port="$(resolve_smoke_port MCP_PORT)"
 mcp_url="${MCP_URL:-http://localhost:${mcp_port}/mcp}"
 mcp_log="$(mktemp "${TMPDIR:-/tmp}/ai-analytics-m5-mcp.XXXXXX")"
 server_pid=""

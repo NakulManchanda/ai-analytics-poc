@@ -111,8 +111,9 @@ question and select **Run profile** to show loading, a controlled error if a dep
 final answer with total token/latency metadata. The browser does not render model-authored HTML or
 visualization configuration.
 
-The Compose smoke automatically sets an isolated `COMPOSE_PROJECT_NAME`, so its cleanup cannot
-affect another local stack. When port 3000 is occupied, run it on another host port:
+The automated Compose smoke defaults to a Docker-assigned ephemeral host port and an isolated
+`COMPOSE_PROJECT_NAME`, so parallel runs do not contend for port 3000 or clean up another local
+stack. Pin an explicit host port only when needed:
 
 ```bash
 WEB_PORT=3001 make compose-smoke
