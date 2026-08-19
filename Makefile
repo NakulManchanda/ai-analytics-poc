@@ -54,4 +54,4 @@ mcp-test: ## Run MCP tests
 	uv run --project services/mcp pytest services/mcp/tests
 
 bedrock-smoke: ## Make one opt-in, bounded paid Bedrock call through POST /api/ask
-	RUN_BEDROCK_SMOKE=1 uv run --project services/app python services/app/scripts/bedrock_smoke.py
+	uv run --project services/app python services/app/scripts/bedrock_smoke.py

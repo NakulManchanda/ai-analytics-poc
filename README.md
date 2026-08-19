@@ -78,7 +78,7 @@ environment opt-in, and fails unless the exact smoke answer plus typed call, mod
 latency metadata are returned:
 
 ```bash
-make bedrock-smoke
+RUN_BEDROCK_SMOKE=1 make bedrock-smoke
 ```
 
 Terraform validates this exact region/model foundation-model ARN for the narrow `ai-app` allowlist.
