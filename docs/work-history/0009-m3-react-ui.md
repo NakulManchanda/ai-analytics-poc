@@ -20,6 +20,8 @@ application-owned MCP discovery endpoint.
 - Use a disabled prompt and a static three-step timeline so the page communicates the intended
   workflow without prebuilding chat, LLM execution, persistence, streaming, or tools UI.
 - Pin frontend package versions and exclude Node build artifacts from Git and Docker contexts.
+- After M2 MCP integration, make Compose wait for MCP and FastAPI health, bound browser status
+  retries, and distinguish expected MCP transport/protocol failures from unexpected app defects.
 
 ## TDD evidence
 
@@ -29,11 +31,10 @@ error. The minimal endpoint and component then made both focused suites pass.
 
 ## Verification
 
-- `uv run --project services/app pytest services/app/tests/test_health.py -q` — 3 passed.
-- `npm test` in `web/` — 1 passed.
-- `npm run build` in `web/` — production Vite build passed.
-- `docker compose up --build -d`, then `curl http://localhost:3000/api/status` — returned app
-  status `ok` and MCP status `ok` with zero tools/resources.
+- `make test` — 4 FastAPI, 1 FastMCP, 5 dataset, and 2 React tests passed; React production build
+  passed.
+- `make compose-smoke` — clean Compose startup served the browser through Nginx and returned app
+  status `ok` plus MCP status `ok` with one tool/resource.
 - In-app browser smoke at `http://localhost:3000/` — visible title, backend-ready label,
   MCP-discovered label, and disabled prompt verified.
 
@@ -46,4 +47,5 @@ Merge status: awaiting review and explicit authorization. Do not merge without a
 ## Lessons
 
 The UI can demonstrate the service boundary before any AI functionality exists: relative browser
-requests terminate at FastAPI, while MCP discovery remains a server-side concern.
+requests terminate at FastAPI, while MCP discovery remains a server-side concern. Explicit service
+readiness plus bounded UI recovery prevents startup timing from becoming a manual-refresh problem.

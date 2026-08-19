@@ -64,7 +64,7 @@ docker compose up --build
 
 Open http://localhost:3000. The page uses a same-origin `/api/status` request; Nginx proxies that
 request to FastAPI, and FastAPI uses the MCP protocol to discover the separate FastMCP service.
-It should display **Backend ready** and **MCP discovered · 0 tools · 0 resources**. The disabled
+It should display **Backend ready** and **MCP discovered · 1 tools · 1 resources**. The disabled
 prompt and timeline are visual placeholders only; they send no data and invoke no LLM.
 
 Run the focused browser package checks with:

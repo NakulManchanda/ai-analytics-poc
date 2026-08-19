@@ -51,6 +51,9 @@ jobs:
       - name: Run service tests
         run: make test
 
+      - name: Run Compose UI smoke
+        run: make compose-smoke
+
       - name: Check formatting
         run: |
           uv run --project services/app black --check services/app

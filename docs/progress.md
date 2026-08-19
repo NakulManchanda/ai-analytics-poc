@@ -24,12 +24,14 @@ IMPLEMENTED — awaiting review and merge
   counts. This keeps LLM ownership and future run orchestration with the application service.
 - The prompt is disabled and the timeline is static: no LLM, chat persistence, SSE, tools UI,
   Redis, or future orchestration interfaces are implemented in this milestone.
+- Compose waits for the MCP TCP listener and FastAPI `/health` before starting the browser; the UI
+  also retries its bounded status request to recover from a transient startup failure.
 
 ## Known limitations
 
-- MCP discovery reports the intentionally empty M1 server (`0 tools`, `0 resources`). Dataset
-  exposure, actual prompt execution, durable conversations, streaming events, and context
-  visualization remain later milestones.
+- MCP discovery reports the M2 fixed profile surface (`1 tool`, `1 resource`), but does not expose
+  it as browser tool UI. Actual prompt execution, durable conversations, streaming events, and
+  context visualization remain later milestones.
 
 ## Next milestone
 

@@ -10,6 +10,9 @@ const initialStatus: Status = {
   mcp: { status: "checking" },
 };
 
+const STATUS_RETRY_DELAY_MS = 500;
+const MAX_STATUS_ATTEMPTS = 10;
+
 function appLabel(status: Status): string {
   return status.app.status === "ok" ? "Backend ready" : "Backend checking";
 }
@@ -26,30 +29,37 @@ export default function App() {
 
   useEffect(() => {
     let active = true;
+    let retryTimer: number | undefined;
 
-    fetch("/api/status")
-      .then((response) => {
+    const loadStatus = async (attempt: number) => {
+      try {
+        const response = await fetch("/api/status");
         if (!response.ok) {
           throw new Error("Status request failed");
         }
-        return response.json() as Promise<Status>;
-      })
-      .then((nextStatus) => {
+        const nextStatus = (await response.json()) as Status;
         if (active) {
           setStatus(nextStatus);
         }
-      })
-      .catch(() => {
-        if (active) {
+      } catch {
+        if (attempt + 1 < MAX_STATUS_ATTEMPTS && active) {
+          retryTimer = window.setTimeout(() => {
+            void loadStatus(attempt + 1);
+          }, STATUS_RETRY_DELAY_MS);
+        } else if (active) {
           setStatus({
             app: { status: "unavailable", service: "ai-app" },
             mcp: { status: "unavailable" },
           });
         }
-      });
+      }
+    };
+
+    void loadStatus(0);
 
     return () => {
       active = false;
+      window.clearTimeout(retryTimer);
     };
   }, []);
 
