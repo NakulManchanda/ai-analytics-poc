@@ -98,14 +98,9 @@ sequenceDiagram
     Orch-->>User: HTTP 200 { answer, run_id, latency_ms, usage }
 ```
 
-### The Turn-by-Turn Execution Steps:
-1. **Ingestion & Budget Initialization**: When the request arrives, the orchestrator initializes an immutable `ExecutionBudgets` instance ([budgets.py](https://github.com/NakulManchanda/ai-analytics-poc/blob/main/services/app/app/orchestration/budgets.py)).
-2. **Prompt Assembly**: The orchestrator injects the tool declarations discovered from the MCP server alongside the user's prompt and prior message history.
-3. **Model Turn**: The model evaluates the prompt. It decides either to:
-   - Request an analytical tool invocation (e.g., `query_taxi_data(analysis="top_pickup_zones", limit=5)`).
-   - Or generate the final user-facing text answer.
-4. **Governed Tool Execution**: If a tool is requested, the orchestrator executes the tool across the network boundary against FastMCP, enforcing isolation.
-5. **Observation & Context Reduction**: Tool output is processed by the **Context Reducer** ([reducer.py](https://github.com/NakulManchanda/ai-analytics-poc/blob/main/services/app/app/orchestration/reducer.py)) before being appended to the conversation context for the next turn.
+### Reasoning Loop Dynamics:
+- **Decision Phase**: In each turn, the model evaluates the current working context and emits either an analytical tool proposal (e.g., `query_taxi_data(analysis="top_pickup_zones", limit=5)`) or a synthesized final natural language response.
+- **Execution & Ingestion Phase**: When a tool proposal is emitted, the orchestrator executes the tool in isolation over MCP, feeds the reduced observation back to the model, and iterates until the terminal answer is reached or a budget boundary is triggered.
 
 ---
 
@@ -273,23 +268,18 @@ Conversation (conv_...) ── Continuous Multi-Turn Session (Uncapped Total Que
        └── Step #2 (step_...)
 ```
 
-### The ID Taxonomy:
-- **`conversation_id`**: Identifies the persistent multi-turn chat session between a user and the assistant (uncapped total turns, bounded by sliding window).
-- **`run_id`**: Identifies a single execution run initiated by one user prompt — **this is the authoritative boundary where the multi-turn loop budget is enforced**.
-- **`step_id`**: Monotonically identifies an individual atomic action inside a run.
-- **`llm_call_id`**: Tracks token usage, model ID, and latency for an individual model inference call.
-- **`tool_call_id` / `query_id`**: Correlates the analytical database execution with the model's tool proposal.
+### The ID Hierarchy & Scope:
 
-1. **The `run_id` is the Loop Budget Boundary**:
-   - Each time the user clicks "Run Analysis" (`POST /api/ask`), a new **`run_id`** is spawned.
-   - The **`BudgetTracker`** is attached directly to the **`run_id`**, enforcing the `ExecutionBudgets` limits (`max_iterations = 5`, `max_tool_calls = 3`, `timeout_seconds = 30.0`).
-   - The multi-turn tool calling loop happens *entirely within the scope of that single `run_id`*.
-2. **The `conversation_id` Has No Hard Loop Limit**:
-   - A user can ask 50 consecutive questions in the same conversation without hitting an iteration error.
-   - The conversation length is governed instead by the **Context Reducer's sliding window** (retaining only the last 2 turns in working context), ensuring conversation longevity never exhausts model token windows.
-3. **The `step_id` Counts Actions Inside the Run**:
-   - Every model proposal, tool invocation, or final answer is recorded as an individual `step_id` belonging to the active `run_id`.
-   - The number of steps is physically bounded by the run's `max_iterations` cap.
+- **`conversation_id` (The Multi-Turn Session)**:
+  - Spans the entire multi-turn thread between user and assistant across dozens of questions.
+  - Has **no hard loop limit**; long-term context is kept bounded via the **Context Reducer's sliding window** (retaining the last 2 turns in active working memory).
+- **`run_id` (The Loop Budget Boundary ⭐)**:
+  - Spawned afresh each time the user submits a prompt (`POST /api/ask`).
+  - **This is the authoritative boundary where the execution harness enforces multi-turn loop limits** (`max_iterations = 5`, `max_tool_calls = 3`, `timeout_seconds = 30.0`). The tool-calling loop executes entirely within the scope of this single run.
+- **`step_id` (Atomic Action inside a Run)**:
+  - Monotonically identifies an individual action within a run (Model Proposal $\rightarrow$ FastMCP Query $\rightarrow$ Final Answer). The total step count is bounded by the run's `max_iterations` cap.
+- **`llm_call_id` & `tool_call_id` / `query_id` (Telemetry Telemetry)**:
+  - Correlate individual LLM token telemetry and FastMCP database execution durations with the parent run and step.
 
 ### Durable vs. Ephemeral Storage:
 - **Durable Store (DynamoDB / PostgreSQL)**: Saves finalized messages, token tallies, run outcomes, and conversation threads. This is authoritative.
