@@ -16,7 +16,14 @@
    - Added explanatory tooltips to the **Run Timeline (SSE)** and **Working Context Panel** tabs in `web/src/App.tsx`.
    - Added clickable **Sample Question Chips** (`📍 Top Pickup Zones`, `⏰ Peak Travel Hours`, `🗺️ Borough Fare Comparison`, `💳 Payment & Tip Breakdown`) for quick testing.
    - Synchronized `activeRunId` connection timing to use the authoritative `run_id` returned by the backend.
-3. **Local & Public UAT Guides**:
+3. **Custom Domain & Route 53 Aliases (`ai.sibkaro.com` & `sibkaro.com`)**:
+   - Provisioned ACM SSL certificate across `sibkaro.com`, `ai.sibkaro.com`, and `*.sibkaro.com` with Route 53 DNS validation.
+   - Wired Route 53 `A` and `AAAA` alias records directly to the CloudFront distribution with dynamic Terraform variables (`custom_domain_name`, `custom_subdomain_name`, `enable_custom_domain`).
+4. **ECS Service Connect & Query Execution Deadline**:
+   - Built and pushed container images for `ai-app` and `analytics-mcp` to Amazon ECR.
+   - Updated `services/app/app/routers/status.py` to support `MCP_URL` / `MCP_SERVER_URL` and catch connection exceptions gracefully.
+   - Increased DuckDB query timeout from 10.0s to 30.0s in `analytics.py` and `server.py` to support multi-million row aggregation in Fargate vCPU limits.
+5. **Local & Public UAT Guides**:
    - Updated `docs/uat-guide.md` with port 3000 ingress endpoints and updated UI checklist.
    - Created `docs/public-uat-guide.md` for external stakeholders evaluating the live AWS CloudFront deployment.
 
@@ -26,15 +33,16 @@
 
 1. **Automated Tests**:
    - Backend unit and router test suite: `pytest services/app/tests` $\rightarrow$ **76/76 passed**.
+   - MCP and dataset spike tests: `pytest services/mcp/tests services/dataset_spike/tests` $\rightarrow$ **14/14 passed**.
    - Frontend Vitest suite and production build: `npm --prefix web test && npm --prefix web run build` $\rightarrow$ **10/10 passed**.
-2. **Manual & Docker Integration Smoke Verification**:
-   - Verified synchronous ask and live SSE streaming via `curl -N http://localhost:3000/api/runs/${RUN_ID}/events` $\rightarrow$ streamed all 4 events with 0 errors.
-   - Verified asynchronous job submission and polling on `http://localhost:3000/api/jobs`.
-   - Verified Terraform formatting and validation: `make -C infra/terraform fmt-check && make -C infra/terraform validate` $\rightarrow$ **0 errors**.
+2. **Cloud End-to-End Verification**:
+   - Verified live HTTPS capability discovery on `https://ai.sibkaro.com/api/status` $\rightarrow$ returns `app: ok`, `mcp: ok` (2 tools, 1 resource).
+   - Verified live governed analytics query against 2024 NYC Yellow Taxi dataset via `https://ai.sibkaro.com/api/ask` $\rightarrow$ returns synthesized Bedrock answer and event trace in 17.8s.
 
 ---
 
 ## PR and Merge State
 
 - Branch: `feat/uat-guides-and-telemetry-fix`
+- Pull Request: [PR #43](https://github.com/NakulManchanda/ai-analytics-poc/pull/43)
 - Tracking Issue: Roadmap Issue #32

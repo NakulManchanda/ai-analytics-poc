@@ -21,15 +21,21 @@ Access the live production deployment at:
 ### Scenario 1: Health & Capability Discovery (Zero-LLM Verification)
 *Objective*: Confirm that the edge CDN, Application Load Balancer, and FastMCP analytics gateway are healthy and discoverable without triggering billable model calls.
 
-1. Open **`https://db5j03ttoao1a.cloudfront.net`** in any modern web browser.
+1. Open **`https://ai.sibkaro.com`** (or **`https://sibkaro.com`**) in any modern web browser.
 2. Verify the top status board badges:
-   - [ ] **Backend Status**: Displays `Backend ready` (green indicator).
+   - [ ] **Backend Status**: Displays `Backend ready` (FastAPI `ai-app`).
    - [ ] **FastMCP Status**: Displays `MCP discovered · 2 tools · 1 resources`.
 3. *(Optional)* API verification via terminal:
    ```bash
-   curl -s https://db5j03ttoao1a.cloudfront.net/api/status | python3 -m json.tool
+   curl -s https://ai.sibkaro.com/api/status | python3 -m json.tool
    ```
-   - [ ] Returns HTTP 200 with `"status": "ok"` for both `app` and `mcp`.
+   - [ ] Returns HTTP 200 with:
+     ```json
+     {
+       "app": { "status": "ok", "service": "ai-app" },
+       "mcp": { "status": "ok", "tools": 2, "resources": 1 }
+     }
+     ```
 
 ---
 
