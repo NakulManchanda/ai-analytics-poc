@@ -25,9 +25,12 @@ async def status() -> dict[str, dict[str, str | int]]:
     mcp_url = os.environ.get("MCP_URL") or os.environ.get("MCP_SERVER_URL") or DEFAULT_MCP_URL
     try:
         discovery = await discover_mcp(mcp_url)
-    except (ClientError, HTTPError, McpError, Exception) as exc:
+    except (ClientError, HTTPError, McpError, RuntimeError, OSError) as exc:
         logger.warning("MCP discovery unavailable (%s): %s", mcp_url, exc)
         mcp_status: dict[str, str | int] = {"status": "unavailable"}
+    except Exception:
+        logger.exception("Unexpected MCP discovery failure")
+        raise
     else:
         mcp_status = {"status": "ok", **discovery}
 
