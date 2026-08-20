@@ -24,7 +24,7 @@
    - Updated `services/app/app/routers/status.py` to support `MCP_URL` / `MCP_SERVER_URL` and catch connection exceptions gracefully.
    - Increased DuckDB query timeout from 10.0s to 30.0s in `analytics.py` and `server.py` to support multi-million row aggregation in Fargate vCPU limits.
 5. **Local & Public UAT Guides**:
-   - Updated `docs/uat-guide.md` with port 3000 ingress endpoints and updated UI checklist.
+   - Updated `docs/local-uat-guide.md` with port 3000 ingress endpoints and updated UI checklist.
    - Created `docs/public-uat-guide.md` for external stakeholders evaluating the live AWS CloudFront deployment.
 
 ---

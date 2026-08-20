@@ -12,7 +12,7 @@ A production-grade, cost-governed AI Analytics platform featuring durable agent 
 - **Apex Domain**: [https://sibkaro.com](https://sibkaro.com)
 - **CloudFront Direct**: `https://d71q2u5j5gxbq.cloudfront.net` *(or `https://db5j03ttoao1a.cloudfront.net`)*
 
-> 📖 **Evaluator Runbook**: See the **[Public Cloud UAT Guide](docs/public-uat-guide.md)** for step-by-step acceptance test scenarios, capability discovery verification, and sample queries. For local development testing, see the **[Local Docker UAT Guide](docs/uat-guide.md)**.
+> 📖 **Evaluator Runbook**: See the **[Public Cloud UAT Guide](docs/public-uat-guide.md)** for step-by-step acceptance test scenarios, capability discovery verification, and sample queries. For local development testing, see the **[Local Docker UAT Guide](docs/local-uat-guide.md)**.
 
 ### 📊 Verified Live System Status
 
@@ -112,7 +112,7 @@ ai_analytics_poc/
 │   └── deploy_frontend.sh   # S3 sync + CloudFront cache invalidation
 └── docs/
     ├── public-uat-guide.md  # Public cloud UAT acceptance testing guide
-    ├── uat-guide.md         # Local docker UAT testing guide
+    ├── local-uat-guide.md   # Local docker UAT testing guide
     ├── work-history/        # Monotonic post-bootstrap ledger (0001–0025)
     ├── decisions/           # Architectural Decision Records (ADRs)
     └── progress.md          # Active milestone tracking
@@ -139,7 +139,7 @@ docker compose up --build
 - **FastAPI Backend**: [http://localhost:8080/health](http://localhost:8080/health)
 - **FastMCP Server**: [http://localhost:8001/mcp](http://localhost:8001/mcp)
 
-> 🧪 **Local Testing Runbook**: For a step-by-step local test checklist with command snippets and expected outputs, see the **[Local Docker UAT Guide](docs/uat-guide.md)**.
+> 🧪 **Local Testing Runbook**: For a step-by-step local test checklist with command snippets and expected outputs, see the **[Local Docker UAT Guide](docs/local-uat-guide.md)**.
 
 ### 2. Run All Automated Test Suites
 
@@ -244,7 +244,7 @@ Every request operates under an immutable `ExecutionBudget` with strict limits:
 ## Work History & Decisions
 
 - [Public Cloud UAT Acceptance Guide](docs/public-uat-guide.md)
-- [Local Docker UAT Guide](docs/uat-guide.md)
+- [Local Docker UAT Guide](docs/local-uat-guide.md)
 - [Implementation Plan](docs/implementation-plan.md)
 - [Monotonic Work History Ledger](docs/work-history/README.md)
 - [Architectural Decisions](docs/decisions/README.md)
