@@ -37,12 +37,14 @@
    - Frontend Vitest suite and production build: `npm --prefix web test && npm --prefix web run build` $\rightarrow$ **10/10 passed**.
 2. **Cloud End-to-End Verification**:
    - Verified live HTTPS capability discovery on `https://ai.sibkaro.com/api/status` $\rightarrow$ returns `app: ok`, `mcp: ok` (2 tools, 1 resource).
-   - Verified live governed analytics query against 2024 NYC Yellow Taxi dataset via `https://ai.sibkaro.com/api/ask` $\rightarrow$ returns synthesized Bedrock answer and event trace in 17.8s.
+   - Verified live governed analytics query against 2024 NYC Yellow Taxi dataset via `https://ai.sibkaro.com/api/ask` $\rightarrow$ returns synthesized Bedrock answer and full 5-step event trace in 4.7s.
+   - Verified custom domain alias resolution for both `ai.sibkaro.com` and `sibkaro.com` over CloudFront HTTP/2.
 
 ---
 
 ## PR and Merge State
 
 - Branch: `feat/uat-guides-and-telemetry-fix`
-- Pull Request: [PR #43](https://github.com/NakulManchanda/ai-analytics-poc/pull/43)
-- Tracking Issue: Roadmap Issue #32
+- Pull Request: [PR #43](https://github.com/NakulManchanda/ai-analytics-poc/pull/43) (Merged to `main` via commit `05a8dc3`)
+- Tracking Issue: Roadmap Issue #32 (Closed)
+- Public UAT Sign-off: Completed and verified live by operator.
