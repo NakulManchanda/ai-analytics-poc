@@ -29,6 +29,9 @@ def create_app(
     tool_call_id_factory: Callable[[], str] | None = None,
 ) -> FastAPI:
     resolved_settings = settings or Settings.from_environment()
+    from app.state import InMemoryStateRepository
+
+    shared_state_repo = state_repository or InMemoryStateRepository()
     application = FastAPI(title="AI Analytics POC")
     application.include_router(health_router)
     application.include_router(
@@ -40,18 +43,19 @@ def create_app(
             llm_call_id_factory=llm_call_id_factory or (lambda: f"llm_{uuid4().hex}"),
             tool_call_id_factory=tool_call_id_factory
             or (lambda: f"tool_{uuid4().hex}"),
-            state_repository=state_repository,
+            state_repository=shared_state_repo,
+            redis_client=redis_client,
         )
     )
     application.include_router(
         create_events_router(
-            state_repository=state_repository,
+            state_repository=shared_state_repo,
             redis_client=redis_client,
         )
     )
     application.include_router(
         create_jobs_router(
-            state_repository=state_repository,
+            state_repository=shared_state_repo,
             job_producer=job_producer,
             redis_client=redis_client,
         )

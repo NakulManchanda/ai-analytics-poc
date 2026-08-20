@@ -48,7 +48,7 @@ def create_events_router(
         except Exception:
             pass
 
-        # 1. Verify run or job exists in state repository or redis
+        # 1. Verify run or job exists in state repository or redis (if available)
         durable_run = repo.get_run(run_id) or repo.get_job(run_id)
         if durable_run is None and client is not None:
             try:
@@ -71,9 +71,22 @@ def create_events_router(
                         artifact_url=data.get("artifact_url"),
                         error=data.get("error"),
                     )
+                else:
+                    raw_run = client.get(f"run:{run_id}")
+                    if raw_run:
+                        import json
+
+                        from app.state import Run
+
+                        rdata = json.loads(raw_run)
+                        durable_run = Run(
+                            run_id=rdata["run_id"],
+                            conversation_id=rdata["conversation_id"],
+                            status=rdata["status"],
+                            metadata=rdata.get("metadata", {}),
+                        )
             except Exception:
                 pass
-
         if durable_run is None:
             raise HTTPException(status_code=404, detail="Run not found")
 
