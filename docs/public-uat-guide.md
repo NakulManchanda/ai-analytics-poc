@@ -9,7 +9,7 @@ No local setup, Docker, or Python installation is required to test the live web 
 ## Public Cloud URL
 
 Access the live production deployment at:
-👉 **`https://d11r7n27i9k489.cloudfront.net`**
+👉 **`https://db5j03ttoao1a.cloudfront.net`**
 
 ---
 
@@ -18,13 +18,13 @@ Access the live production deployment at:
 ### Scenario 1: Health & Capability Discovery (Zero-LLM Verification)
 *Objective*: Confirm that the edge CDN, Application Load Balancer, and FastMCP analytics gateway are healthy and discoverable without triggering billable model calls.
 
-1. Open **`https://d11r7n27i9k489.cloudfront.net`** in any modern web browser.
+1. Open **`https://db5j03ttoao1a.cloudfront.net`** in any modern web browser.
 2. Verify the top status board badges:
    - [ ] **Backend Status**: Displays `Backend ready` (green indicator).
    - [ ] **FastMCP Status**: Displays `MCP discovered · 2 tools · 1 resources`.
 3. *(Optional)* API verification via terminal:
    ```bash
-   curl -s https://d11r7n27i9k489.cloudfront.net/api/status | python3 -m json.tool
+   curl -s https://db5j03ttoao1a.cloudfront.net/api/status | python3 -m json.tool
    ```
    - [ ] Returns HTTP 200 with `"status": "ok"` for both `app` and `mcp`.
 
@@ -58,7 +58,7 @@ Access the live production deployment at:
 
 1. **Submit the asynchronous job**:
    ```bash
-   curl -X POST https://d11r7n27i9k489.cloudfront.net/api/jobs \
+   curl -X POST https://db5j03ttoao1a.cloudfront.net/api/jobs \
      -H "Content-Type: application/json" \
      -d '{"prompt": "Generate full monthly trip volume summary for January 2024"}' \
      | python3 -m json.tool
@@ -67,7 +67,7 @@ Access the live production deployment at:
 2. **Poll the completed report**:
    ```bash
    # Replace <JOB_ID> with the job_id returned above
-   curl -s https://d11r7n27i9k489.cloudfront.net/api/jobs/<JOB_ID> | python3 -m json.tool
+   curl -s https://db5j03ttoao1a.cloudfront.net/api/jobs/<JOB_ID> | python3 -m json.tool
    ```
    - [ ] Status transitions to `"COMPLETED"` within seconds.
    - [ ] `"result"` contains the aggregated daily zone summary across 2,964,624 taxi trips.
@@ -79,7 +79,7 @@ Access the live production deployment at:
 
 ```bash
 # 1. Ask a question and extract the run_id
-RUN_ID=$(curl -s -X POST https://d11r7n27i9k489.cloudfront.net/api/ask \
+RUN_ID=$(curl -s -X POST https://db5j03ttoao1a.cloudfront.net/api/ask \
   -H "Content-Type: application/json" \
   -d '{"prompt": "What are the peak hours for taxi rides?", "conversation_id": "conv_public_audit"}' \
   | python3 -c 'import sys, json; print(json.load(sys.stdin)["run_id"])')
@@ -87,7 +87,7 @@ RUN_ID=$(curl -s -X POST https://d11r7n27i9k489.cloudfront.net/api/ask \
 echo "Auditing Run: ${RUN_ID}"
 
 # 2. Replay the complete execution stream
-curl -N "https://d11r7n27i9k489.cloudfront.net/api/runs/${RUN_ID}/events"
+curl -N "https://db5j03ttoao1a.cloudfront.net/api/runs/${RUN_ID}/events"
 ```
 - [ ] Outputs ordered SSE stream events (`run.received` $\rightarrow$ `tool.requested` $\rightarrow$ `tool.completed` $\rightarrow$ `run.completed`).
 
