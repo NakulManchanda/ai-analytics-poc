@@ -6,10 +6,13 @@ No local setup, Docker, or Python installation is required to test the live web 
 
 ---
 
-## Public Cloud URL
+## Public Cloud URLs
 
 Access the live production deployment at:
-👉 **`https://db5j03ttoao1a.cloudfront.net`**
+👉 **`https://ai.sibkaro.com`** (or **`https://sibkaro.com`**)
+
+*Direct CloudFront HTTPS Fallback*:
+👉 **`https://d71q2u5j5gxbq.cloudfront.net`** (or **`https://db5j03ttoao1a.cloudfront.net`**)
 
 ---
 
