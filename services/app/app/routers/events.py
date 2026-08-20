@@ -42,8 +42,38 @@ def create_events_router(
         run_id: str,
         request: Request,
     ) -> StreamingResponse:
-        # 1. Verify run exists in durable state repository
-        durable_run = repo.get_run(run_id)
+        client = None
+        try:
+            client = get_redis_client()
+        except Exception:
+            pass
+
+        # 1. Verify run or job exists in state repository or redis
+        durable_run = repo.get_run(run_id) or repo.get_job(run_id)
+        if durable_run is None and client is not None:
+            try:
+                raw = client.get(f"job:{run_id}")
+                if raw:
+                    import json
+
+                    from app.state import Job
+
+                    data = json.loads(raw)
+                    durable_run = Job(
+                        job_id=data["job_id"],
+                        job_type=data["job_type"],
+                        status=data["status"],
+                        created_at=data["created_at"],
+                        started_at=data.get("started_at"),
+                        completed_at=data.get("completed_at"),
+                        params=data.get("params", {}),
+                        result=data.get("result"),
+                        artifact_url=data.get("artifact_url"),
+                        error=data.get("error"),
+                    )
+            except Exception:
+                pass
+
         if durable_run is None:
             raise HTTPException(status_code=404, detail="Run not found")
 
@@ -160,6 +190,36 @@ def create_events_router(
                                 "output_tokens": current_run.output_tokens,
                                 "estimated_cost_usd": current_run.estimated_cost_usd,
                                 "failure_code": current_run.failure_code,
+                            },
+                        )
+                        if term_evt.event_id not in emitted_event_ids:
+                            emitted_event_ids.add(term_evt.event_id)
+                            yield term_evt.to_sse()
+                        terminal_seen = True
+                        break
+
+                    current_job = repo.get_job(run_id)
+                    if current_job is not None and current_job.status in (
+                        "COMPLETED",
+                        "FAILED",
+                    ):
+                        term_type = (
+                            "job.completed"
+                            if current_job.status == "COMPLETED"
+                            else "job.failed"
+                        )
+                        term_evt = RunEvent(
+                            event_type=term_type,
+                            run_id=run_id,
+                            conversation_id=current_job.params.get(
+                                "conversation_id", run_id
+                            ),
+                            sequence=1,
+                            payload={
+                                "job_id": current_job.job_id,
+                                "status": current_job.status,
+                                "artifact_url": current_job.artifact_url,
+                                "error": current_job.error,
                             },
                         )
                         if term_evt.event_id not in emitted_event_ids:

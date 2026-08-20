@@ -67,3 +67,6 @@ m5-bedrock-smoke: ## Run the opt-in, bounded two-call Bedrock plus MCP profile s
 
 m6-bedrock-smoke: ## Run the opt-in, bounded two-call Bedrock plus MCP query smoke
 	MCP_PORT=$(or $(MCP_PORT),$(PORT)) ./scripts/smoke/04_m6_bedrock.sh
+
+integration-smoke: ## Run end-to-end multi-service integration smoke across all 5 containers
+	./scripts/smoke/12_local_integration.sh
