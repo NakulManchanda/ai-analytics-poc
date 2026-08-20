@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import os
 from pathlib import Path
@@ -106,13 +107,43 @@ def create_jobs_router(
 
         return JobResponse.from_job(job)
 
+    def _resolve_job(job_id: str) -> Job | None:
+        job = repo.get_job(job_id)
+        if job is None or job.status in ("PENDING", "RUNNING"):
+            try:
+                if hasattr(producer, "_get_client"):
+                    client = producer._get_client()
+                    raw = client.get(f"job:{job_id}")
+                    if raw:
+                        data = json.loads(raw)
+                        updated = Job(
+                            job_id=data["job_id"],
+                            job_type=data["job_type"],
+                            status=data["status"],
+                            created_at=data["created_at"],
+                            started_at=data.get("started_at"),
+                            completed_at=data.get("completed_at"),
+                            params=data.get("params", {}),
+                            result=data.get("result"),
+                            artifact_url=data.get("artifact_url"),
+                            error=data.get("error"),
+                        )
+                        if job is None:
+                            repo.create_job(updated)
+                        else:
+                            repo.update_job(updated)
+                        return updated
+            except Exception:
+                pass
+        return job
+
     @router.get(
         "/jobs/{job_id}",
         response_model=JobResponse,
         summary="Get status and details of an asynchronous job",
     )
     async def get_job_status(job_id: str) -> JobResponse:
-        job = repo.get_job(job_id)
+        job = _resolve_job(job_id)
         if job is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -125,7 +156,7 @@ def create_jobs_router(
         summary="Get generated report artifact for a completed job",
     )
     async def get_job_artifact(job_id: str) -> dict[str, Any]:
-        job = repo.get_job(job_id)
+        job = _resolve_job(job_id)
         if job is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,

@@ -23,4 +23,5 @@ Monotonically numbered log of every post-bootstrap task. Each entry records the 
 | [0017](0017-m8-bounded-orchestration-loop.md) | 8 | [#35](https://github.com/NakulManchanda/ai-analytics-poc/pull/35) | Bounded orchestration loop with budgets | Merged (`d4b6746`) |
 | [0018](0018-m9-redis-streams-sse.md) | 9 | [#36](https://github.com/NakulManchanda/ai-analytics-poc/pull/36) | Redis Streams and SSE integration | Merged (`ac52559`) |
 | [0019](0019-m10-context-visualization.md) | 10 | [#37](https://github.com/NakulManchanda/ai-analytics-poc/pull/37) | Bounded-context visualization & UI inspector | Merged (`128de6c`) |
-| [0020](0020-m11-async-worker.md) | 11 | [#38](https://github.com/NakulManchanda/ai-analytics-poc/pull/38) | Async job submission & background worker | In progress |
+| [0020](0020-m11-async-worker.md) | 11 | [#38](https://github.com/NakulManchanda/ai-analytics-poc/pull/38) | Async job submission & background worker | Merged (`5fed1b5`) |
+| [0021](0021-m12-local-integration-hardening.md) | 12 | [#39](https://github.com/NakulManchanda/ai-analytics-poc/pull/39) | Local integration hardening & multi-service smoke | In progress |

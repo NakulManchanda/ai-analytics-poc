@@ -66,6 +66,24 @@ class RedisJobProducer:
                 maxlen=self._maxlen,
                 approximate=True,
             )
+            client.set(
+                f"job:{job.job_id}",
+                json.dumps(
+                    {
+                        "job_id": job.job_id,
+                        "job_type": job.job_type,
+                        "status": job.status,
+                        "created_at": job.created_at,
+                        "started_at": job.started_at,
+                        "completed_at": job.completed_at,
+                        "params": job.params,
+                        "result": job.result,
+                        "artifact_url": job.artifact_url,
+                        "error": job.error,
+                    }
+                ),
+                ex=86400,
+            )
         except Exception as error:
             logger.warning(
                 "Failed to enqueue job %s to Redis stream %s: %s",

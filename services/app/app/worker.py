@@ -48,6 +48,32 @@ class JobWorker:
             self._mcp_client = FastMCPDatasetProfileClient()
         return self._mcp_client
 
+    def _update_job(self, job: Job) -> None:
+        self._repo.update_job(job)
+        try:
+            if hasattr(self._consumer, "_get_client"):
+                client = self._consumer._get_client()
+                client.set(
+                    f"job:{job.job_id}",
+                    json.dumps(
+                        {
+                            "job_id": job.job_id,
+                            "job_type": job.job_type,
+                            "status": job.status,
+                            "created_at": job.created_at,
+                            "started_at": job.started_at,
+                            "completed_at": job.completed_at,
+                            "params": job.params,
+                            "result": job.result,
+                            "artifact_url": job.artifact_url,
+                            "error": job.error,
+                        }
+                    ),
+                    ex=86400,
+                )
+        except Exception:
+            pass
+
     def process_one_job(self, message_id: str, data: dict[str, Any]) -> Job | None:
         job_id = data.get("job_id")
         if not job_id:
@@ -57,9 +83,18 @@ class JobWorker:
 
         job = self._repo.get_job(job_id)
         if job is None:
-            logger.warning("Job %s not found in state repository", job_id)
-            self._consumer.ack(message_id)
-            return None
+            raw_params = data.get("params", "{}")
+            params = (
+                json.loads(raw_params) if isinstance(raw_params, str) else raw_params
+            )
+            job = Job(
+                job_id=job_id,
+                job_type=data.get("job_type", "create_full_report"),
+                status=data.get("status", "PENDING"),
+                created_at=data.get("created_at", utcnow_isoformat()),
+                params=params,
+            )
+            self._repo.create_job(job)
 
         if job.status in ("COMPLETED", "FAILED"):
             logger.info("Job %s already in terminal status %s", job_id, job.status)
@@ -77,7 +112,7 @@ class JobWorker:
             params=job.params,
             metadata=job.metadata,
         )
-        self._repo.update_job(running_job)
+        self._update_job(running_job)
 
         conversation_id = job.params.get("conversation_id", job.job_id)
         if self._event_publisher:
@@ -139,7 +174,7 @@ class JobWorker:
                     artifact_url=artifact_url,
                     metadata=job.metadata,
                 )
-                self._repo.update_job(completed_job)
+                self._update_job(completed_job)
 
                 if self._event_publisher:
                     self._event_publisher.publish(
@@ -176,7 +211,7 @@ class JobWorker:
                 error=str(error),
                 metadata=job.metadata,
             )
-            self._repo.update_job(failed_job)
+            self._update_job(failed_job)
 
             if self._event_publisher:
                 self._event_publisher.publish(
