@@ -9,7 +9,7 @@ resolved AWS Console links from the applied Terraform state.
 
 `origin/main` at `1a2986e` contained only instructions for obtaining links
 after apply. The external Terraform state recorded an applied foundation in
-account `107207236011`, Region `us-east-1`.
+account `<aws-account-id>`, Region `us-east-1`.
 
 ## Decisions
 

@@ -8,7 +8,7 @@ Accepted for the single-user POC.
 
 The originally anticipated local workflow required a named AWS IAM Identity
 Center SSO profile. The developer has verified that the existing local default
-AWS CLI profile can access the intended POC account (`107207236011`). Requiring
+AWS CLI profile can access the intended POC account (`<aws-account-id>`). Requiring
 a second local profile would add setup without improving the POC's runtime IAM
 boundary.
 

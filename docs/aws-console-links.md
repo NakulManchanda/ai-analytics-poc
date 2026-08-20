@@ -1,8 +1,8 @@
 # AWS console links
 
-Terraform was applied on 2026-08-18 in AWS account `107207236011`, Region
+Terraform was applied on 2026-08-18 in AWS account `<aws-account-id>`, Region
 `us-east-1`. Confirm that the signed-in AWS Console account is
-`107207236011` before opening these links.
+`<aws-account-id>` before opening these links.
 
 ## Networking
 
@@ -21,8 +21,8 @@ Terraform was applied on 2026-08-18 in AWS account `107207236011`, Region
 
 ## Storage and state
 
-- [Frontend bucket](https://s3.console.aws.amazon.com/s3/buckets/ai-analytics-poc-demo-107207236011-us-east-1-frontend?region=us-east-1&tab=objects)
-- [Artifact bucket](https://s3.console.aws.amazon.com/s3/buckets/ai-analytics-poc-demo-107207236011-us-east-1-artifacts?region=us-east-1&tab=objects)
+- [Frontend bucket](https://s3.console.aws.amazon.com/s3/buckets/ai-analytics-poc-demo-<aws-account-id>-us-east-1-frontend?region=us-east-1&tab=objects)
+- [Artifact bucket](https://s3.console.aws.amazon.com/s3/buckets/ai-analytics-poc-demo-<aws-account-id>-us-east-1-artifacts?region=us-east-1&tab=objects)
 - [Application-state DynamoDB table](https://us-east-1.console.aws.amazon.com/dynamodbv2/home?region=us-east-1#table?name=ai-analytics-poc-demo-application-state)
 
 ## IAM roles

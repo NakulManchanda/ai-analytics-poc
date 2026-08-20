@@ -53,7 +53,7 @@ To enable the account-level spend alerts (Layer 3 billing safety net):
 
 1. Set `enable_budget_alerts = true` in local `terraform.tfvars` or pass `-var="enable_budget_alerts=true"`.
 2. Set `budget_alert_email` to your notification email in local `terraform.tfvars` or via `TF_VAR_budget_alert_email`. Do not commit real email addresses or secrets.
-3. The budget enforces account `107207236011` with a monthly cap (`monthly_budget_limit_usd`, default `"10.0"`) and provisions 4 notifications with `threshold_type = "ABSOLUTE_VALUE"`:
+3. The budget enforces account `<aws-account-id>` with a monthly cap (`monthly_budget_limit_usd`, default `"10.0"`) and provisions 4 notifications with `threshold_type = "ABSOLUTE_VALUE"`:
    - $5 actual spend (`GREATER_THAN` $5.00 actual)
    - $8 actual spend (`GREATER_THAN` $8.00 actual)
    - $10 actual spend (`GREATER_THAN` $10.00 actual)

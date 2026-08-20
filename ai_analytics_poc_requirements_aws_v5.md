@@ -3417,7 +3417,7 @@ aws sts get-caller-identity
 The expected account is:
 
 ```text
-107207236011
+<aws-account-id>
 ```
 
 AWS IAM Identity Center / AWS CLI SSO is optional future hardening, not a prerequisite or
@@ -3636,7 +3636,7 @@ The POC is done when:
 - Every meaningful implementation change was merged through a PR.
 - Every PR has a corresponding `docs/work-history/` entry.
 - `make smoke` represents the cumulative post-merge smoke-test ladder.
-- A single local Terraform operator verifies default-profile access to account `107207236011`;
+- A single local Terraform operator verifies default-profile access to account `<aws-account-id>`;
   SSO is optional future hardening, and no long-lived access keys are used.
 - End-user authentication is intentionally absent and documented as out of scope.
 - Hosted Bedrock calls stop when the application-side global demo allowance is exhausted.

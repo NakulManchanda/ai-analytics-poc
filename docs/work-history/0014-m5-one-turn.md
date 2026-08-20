@@ -38,7 +38,7 @@ execution path existed.
   preview on port 3000. `WEB_PORT=3001 make compose-smoke` also passed as an explicit override;
   two concurrent default smoke runs used distinct project names and both completed without touching
   that port-3000 preview.
-- `aws sts get-caller-identity` confirmed account `107207236011`; then
+- `aws sts get-caller-identity` confirmed account `<aws-account-id>`; then
   `RUN_BEDROCK_SMOKE=1 MCP_PORT=8002 make m5-bedrock-smoke` passed with exactly two Nova Micro
   calls, one MCP tool call, 1,132 total tokens, and 706 ms aggregate Bedrock latency.
 

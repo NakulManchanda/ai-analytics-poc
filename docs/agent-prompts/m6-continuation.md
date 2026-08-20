@@ -40,7 +40,7 @@ Current intended contract:
   exact structured tool proposal, performs exactly one query tool call, validates the envelope,
   and gives it to the second Bedrock call. No general loop, DynamoDB, Redis/SSE, worker, or user SQL.
 - Normal tests and Compose use fakes. Any real Bedrock smoke must remain explicitly opt-in and must
-  verify AWS account `107207236011` immediately before the paid call.
+  verify AWS account `<aws-account-id>` immediately before the paid call.
 
 Completed checkpoint on PR #33:
 

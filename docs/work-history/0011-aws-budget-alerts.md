@@ -2,7 +2,7 @@
 
 ## Goal
 
-Provide an optional AWS Budgets layer in Terraform for account `107207236011` with monthly
+Provide an optional AWS Budgets layer in Terraform for account `<aws-account-id>` with monthly
 cost thresholds at $5 actual, $8 actual, and $10 actual/forecasted spend alerting a configurable
 email destination, without modifying application-side runtime admission gates.
 
@@ -19,7 +19,7 @@ resources or budget alert variables. Root `terraform.tfvars.example` diverged fr
 - Keep budget creation optional via `enable_budget_alerts` (default `false`) and configurable
   email `budget_alert_email` (default `null`, example placeholder `alert-recipient@example.com`).
   Real recipient email is provided via ignored local `terraform.tfvars` or `TF_VAR_budget_alert_email`.
-- Enforce AWS account `107207236011` via `account_id` and lifecycle precondition.
+- Enforce AWS account `<aws-account-id>` via `account_id` and lifecycle precondition.
 - Map the requirements-intent thresholds ($5 actual, $8 actual, $10 actual/forecast for a $10.00
   monthly limit) using valid AWS Budgets `ABSOLUTE_VALUE` semantics to prevent dollar drift if
   `monthly_budget_limit_usd` is modified:

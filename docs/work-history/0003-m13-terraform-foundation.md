@@ -32,7 +32,7 @@ The branch `feat/m13-terraform-foundation` was created in the isolated
 - `make -C infra/terraform fmt-check`: passed
 - `make -C infra/terraform validate`: passed
 - `make -C infra/terraform plan TFVARS=terraform.tfvars.example`: passed
-  against account `107207236011` (32 resources to add; no apply run)
+  against account `<aws-account-id>` (32 resources to add; no apply run)
 - Negative input checks: one AZ and an invalid public subnet CIDR both fail
   Terraform variable validation before planning resources.
 - GitHub Actions `Terraform validation / Terraform static validation`: passed
