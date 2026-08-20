@@ -1,27 +1,24 @@
 # Current milestone
 
-Milestone 15 — S3 + CloudFront public frontend deployment
+Milestone 16 — final demo, security, cost, and documentation review
 
 ## Status
 
-IN PROGRESS — [issue #30](https://github.com/NakulManchanda/ai-analytics-poc/issues/30)
+IN PROGRESS — [issue #31](https://github.com/NakulManchanda/ai-analytics-poc/issues/31)
 
 ## Merged milestone baseline
 
-- **Milestones 0–14**: Merged (`bb4b27e`), including ECS/Fargate backend services, ALB, local multi-service integration hardening, async job worker, Redis Streams SSE, and bounded-context visualization.
+- **Milestones 0–15**: Merged (`9ad648f`), including S3 + CloudFront CDN public frontend, ECS/Fargate backend services, ALB, local multi-service integration hardening, async job worker, Redis Streams SSE, and bounded-context visualization.
 - **Milestone 13 Foundation**: Terraform infrastructure foundation and budget alerts merged.
 
 ## Acceptance criteria
 
-- [x] CloudFront distribution with Origin Access Control (OAC) for private S3 frontend bucket.
-- [x] S3 bucket policy allowing `s3:GetObject` strictly for CloudFront distribution ARN.
-- [x] Default cache behavior (`/*`) serving static React SPA with HTTPS redirection and `CachingOptimized`.
-- [x] Ordered cache behavior (`/api/*`) proxying dynamic requests to ALB with `CachingDisabled` and `AllViewerExceptHostHeader`.
-- [x] Custom error responses (403/404 -> `/index.html`) configured for SPA client-side routing.
-- [x] `scripts/deploy_frontend.sh` automated build/sync/invalidation script added.
-- [x] `scripts/smoke/15_cloudfront_e2e.sh` and `make cloudfront-smoke` added.
+- [x] Comprehensive review across Frontend UX, LLM Orchestration, FastMCP Protocol, Persistence/State, Terraform/AWS, and Test/Release.
+- [x] Zero-NAT architecture and least-privilege IAM task roles verified.
+- [x] Comprehensive root `README.md` finalized with architecture diagrams, request traces, state storage models, local Docker Compose commands, cloud deployment steps, and `make destroy` instructions.
 - [x] Full test suite passing across all services (`make test`).
+- [x] Monotonic work history ledger (`docs/work-history/0024-m16-final-demo-and-review.md`) and progress log updated.
 
-## Next milestone
+## Final milestone
 
-Milestone 16 (final demo, security review, and documentation, #31) gates on Milestone 15 merging.
+Milestone 16 is the final deliverable for the AI Analytics POC.
