@@ -12,6 +12,8 @@ A production-grade, cost-governed AI Analytics platform featuring durable agent 
 - **Apex Domain**: [https://sibkaro.com](https://sibkaro.com)
 - **CloudFront Direct**: `https://d71q2u5j5gxbq.cloudfront.net` *(or `https://db5j03ttoao1a.cloudfront.net`)*
 
+> 📖 **Evaluator Runbook**: See the **[Public Cloud UAT Guide](docs/public-uat-guide.md)** for step-by-step acceptance test scenarios, capability discovery verification, and sample queries. For local development testing, see the **[Local Docker UAT Guide](docs/uat-guide.md)**.
+
 ### 📊 Verified Live System Status
 
 The deployed platform operates in AWS `us-east-1` as a coordinated 5-component distributed system:
@@ -136,6 +138,8 @@ docker compose up --build
 - **React Web UI**: [http://localhost:3000](http://localhost:3000)
 - **FastAPI Backend**: [http://localhost:8080/health](http://localhost:8080/health)
 - **FastMCP Server**: [http://localhost:8001/mcp](http://localhost:8001/mcp)
+
+> 🧪 **Local Testing Runbook**: For a step-by-step local test checklist with command snippets and expected outputs, see the **[Local Docker UAT Guide](docs/uat-guide.md)**.
 
 ### 2. Run All Automated Test Suites
 
