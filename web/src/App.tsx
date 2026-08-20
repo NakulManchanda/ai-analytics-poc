@@ -108,19 +108,31 @@ export default function App() {
     setAnswer(null);
     setPromptError(null);
 
-    // Tentative run ID for SSE stream connection
-    const generatedRunId = `run_${Date.now().toString(36)}`;
-    setActiveRunId(generatedRunId);
-
     try {
       const response = await fetch("/api/ask", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ prompt: cleanPrompt, conversation_id: convId }),
       });
-      const payload = (await response.json()) as
+      let payload:
         | AskResponse
         | { detail?: { code?: string; retryable?: boolean } };
+      try {
+        if (typeof response.json === "function") {
+          payload = (await response.json()) as any;
+        } else if (typeof response.text === "function") {
+          const rawText = await response.text();
+          payload = JSON.parse(rawText);
+        } else {
+          throw new Error("Invalid response interface");
+        }
+      } catch {
+        throw new Error(
+          response.ok
+            ? "Invalid server response format."
+            : `Analytics service unavailable (${response.status}). Try again.`,
+        );
+      }
 
       if (!response.ok) {
         const detail = "detail" in payload ? payload.detail : undefined;
@@ -133,8 +145,9 @@ export default function App() {
       const askResp = payload as AskResponse;
       setAnswer(askResp);
 
-      const actualRunId = askResp.run_id || generatedRunId;
-      setActiveRunId(actualRunId);
+      if (askResp.run_id) {
+        setActiveRunId(askResp.run_id);
+      }
 
       // Synthesize initial working context if not yet provided by SSE
       setWorkingContext((prev) => {
@@ -319,6 +332,45 @@ export default function App() {
               )}
             </div>
 
+            {/* Sample Questions Pills */}
+            <div className="sample-questions-box">
+              <span className="sample-label">Sample Questions:</span>
+              <div className="sample-chips">
+                <button
+                  type="button"
+                  className="sample-chip"
+                  onClick={() => setPrompt("Which pickup zones have the most trips?")}
+                  title="Analyze high-density pickup zones in NYC"
+                >
+                  📍 Top Pickup Zones
+                </button>
+                <button
+                  type="button"
+                  className="sample-chip"
+                  onClick={() => setPrompt("What are the peak hours and busiest times for taxi rides in NYC?")}
+                  title="Examine trip distributions across pickup hours"
+                >
+                  ⏰ Peak Travel Hours
+                </button>
+                <button
+                  type="button"
+                  className="sample-chip"
+                  onClick={() => setPrompt("Compare average trip distance and fare amount across major pickup boroughs")}
+                  title="Borough-level distance and fare analytics"
+                >
+                  🗺️ Borough Fare Comparison
+                </button>
+                <button
+                  type="button"
+                  className="sample-chip"
+                  onClick={() => setPrompt("What is the breakdown of credit card vs cash payment types and average tips?")}
+                  title="Payment method analysis and tipping behavior"
+                >
+                  💳 Payment & Tip Breakdown
+                </button>
+              </div>
+            </div>
+
             <p className="prompt-explainer">
               This run uses one governed query tool and two bounded model calls with deterministic context reduction.
             </p>
@@ -348,6 +400,7 @@ export default function App() {
               aria-selected={activeTab === "timeline"}
               className={`tab-btn ${activeTab === "timeline" ? "active" : ""}`}
               onClick={() => setActiveTab("timeline")}
+              title="Live Server-Sent Events stream showing real-time agent execution steps, tool proposals, and telemetry"
             >
               Run Timeline (SSE)
             </button>
@@ -357,6 +410,7 @@ export default function App() {
               aria-selected={activeTab === "context"}
               className={`tab-btn ${activeTab === "context" ? "active" : ""}`}
               onClick={() => setActiveTab("context")}
+              title="Bounded working context inspector showing dataset schemas, tool execution arguments, token usage, and latency"
             >
               Working Context Panel
             </button>

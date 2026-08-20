@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, field_validator
 
 from app.config import LLMConfigurationError
+from app.events import EventPublisher, RedisEventPublisher, RunEvent
 from app.llm import LLMClient, LLMProviderError, LLMResult, ToolProposalResult
 from app.mcp_client import (
     ALLOWED_ANALYSES,
@@ -18,7 +19,11 @@ from app.orchestration import (
     ExecutionBudgets,
 )
 from app.state import (
+    Conversation,
+    Run,
+    RunStep,
     StateRepository,
+    generate_run_id,
 )
 
 logger = logging.getLogger(__name__)
@@ -99,8 +104,17 @@ def create_ask_router(
     tool_call_id_factory: Callable[[], str],
     state_repository: StateRepository | None = None,
     budgets: ExecutionBudgets | None = None,
+    event_publisher: EventPublisher | None = None,
+    redis_client: object | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix="/api")
+
+    publisher: EventPublisher | None = event_publisher
+    if publisher is None:
+        try:
+            publisher = RedisEventPublisher(redis_client=redis_client)
+        except Exception:
+            pass
 
     def error_response(
         status_code: int, code: str, retryable: bool, llm_call_id: str
@@ -120,7 +134,26 @@ def create_ask_router(
         response_model_exclude_none=True,
     )
     def ask(request: AskRequest) -> AskResponse:
+        conv_id = request.conversation_id
+        run_id = generate_run_id() if conv_id is not None else None
+        active_run_id = run_id or generate_run_id()
+        active_conv_id = conv_id or f"conv_{active_run_id[4:]}"
         proposal_call_id = llm_call_id_factory()
+
+        if publisher:
+            try:
+                publisher.publish(
+                    RunEvent(
+                        event_type="run.received",
+                        run_id=active_run_id,
+                        conversation_id=active_conv_id,
+                        sequence=1,
+                        payload={"prompt_summary": request.prompt[:120]},
+                    )
+                )
+            except Exception:
+                pass
+
         tool_client = mcp_client or mcp_client_factory()
         try:
             schema = sanitize_dataset_schema(tool_client.get_dataset_schema())
@@ -154,6 +187,25 @@ def create_ask_router(
             raise error_response(422, "tool_validation_error", False, proposal_call_id)
         analysis, limit = query_request
 
+        if publisher:
+            try:
+                publisher.publish(
+                    RunEvent(
+                        event_type="tool.requested",
+                        run_id=active_run_id,
+                        conversation_id=active_conv_id,
+                        sequence=2,
+                        llm_call_id=proposal_call_id,
+                        payload={
+                            "tool_name": "query_taxi_data",
+                            "analysis": analysis,
+                            "limit": limit,
+                        },
+                    )
+                )
+            except Exception:
+                pass
+
         tool_call_id = tool_call_id_factory()
         try:
             query_result = sanitize_query_result(
@@ -172,6 +224,28 @@ def create_ask_router(
             query_result["query_id"],
         )
 
+        rows = query_result.get("rows", [])
+        if publisher:
+            try:
+                publisher.publish(
+                    RunEvent(
+                        event_type="tool.completed",
+                        run_id=active_run_id,
+                        conversation_id=active_conv_id,
+                        sequence=3,
+                        tool_call_id=tool_call_id,
+                        query_id=str(query_result.get("query_id", "")),
+                        payload={
+                            "tool_name": "query_taxi_data",
+                            "query_id": str(query_result.get("query_id", "")),
+                            "row_count": len(rows) if isinstance(rows, list) else 0,
+                            "duration_ms": query_result.get("duration_ms", 0),
+                        },
+                    )
+                )
+            except Exception:
+                pass
+
         answer_call_id = llm_call_id_factory()
         try:
             answer_result = client.answer_with_query_result(
@@ -188,10 +262,126 @@ def create_ask_router(
 
         proposal_usage = usage_metadata(proposal)
         answer_usage = usage_metadata(answer_result)
+        total_tokens = proposal_usage.total_tokens + answer_usage.total_tokens
+        total_latency = proposal.latency_ms + answer_result.latency_ms
+
+        if publisher:
+            try:
+                publisher.publish(
+                    RunEvent(
+                        event_type="run.completed",
+                        run_id=active_run_id,
+                        conversation_id=active_conv_id,
+                        sequence=4,
+                        payload={
+                            "total_tokens": total_tokens,
+                            "estimated_cost_usd": 0.001,
+                            "latency_ms": total_latency,
+                        },
+                    )
+                )
+            except Exception:
+                pass
+
+        if state_repository:
+            try:
+                if state_repository.get_conversation(active_conv_id) is None:
+                    state_repository.create_conversation(
+                        Conversation(conversation_id=active_conv_id)
+                    )
+                state_repository.create_run(
+                    Run(
+                        run_id=active_run_id,
+                        conversation_id=active_conv_id,
+                        status="completed",
+                        input_tokens=proposal_usage.input_tokens
+                        + answer_usage.input_tokens,
+                        output_tokens=proposal_usage.output_tokens
+                        + answer_usage.output_tokens,
+                        estimated_cost_usd=0.001,
+                        metadata={
+                            "prompt": request.prompt,
+                            "answer": answer_result.text,
+                        },
+                    )
+                )
+                from uuid import uuid4
+
+                state_repository.add_run_step(
+                    RunStep(
+                        step_id=f"step_{uuid4().hex[:8]}",
+                        run_id=active_run_id,
+                        sequence=1,
+                        step_type="tool_proposal",
+                        status="completed",
+                        tool_name="query_taxi_data",
+                        llm_call_id=proposal_call_id,
+                        input_summary=request.prompt[:120],
+                        output_summary=f"Analysis: {analysis}",
+                    )
+                )
+                state_repository.add_run_step(
+                    RunStep(
+                        step_id=f"step_{uuid4().hex[:8]}",
+                        run_id=active_run_id,
+                        sequence=2,
+                        step_type="tool_execution",
+                        status="completed",
+                        tool_name="query_taxi_data",
+                        tool_call_id=tool_call_id,
+                        query_id=str(query_result.get("query_id", "")),
+                        input_summary=f"Limit {limit}",
+                        output_summary=f"{len(rows) if isinstance(rows, list) else 0} rows",
+                    )
+                )
+                state_repository.add_run_step(
+                    RunStep(
+                        step_id=f"step_{uuid4().hex[:8]}",
+                        run_id=active_run_id,
+                        sequence=3,
+                        step_type="final_answer",
+                        status="completed",
+                        llm_call_id=answer_call_id,
+                        input_summary="Synthesizing answer",
+                        output_summary=answer_result.text[:120],
+                    )
+                )
+            except Exception as e:
+                logger.warning("Failed to save run to state repository: %s", e)
+
+        if publisher and hasattr(publisher, "_get_client"):
+            try:
+                rclient = publisher._get_client()
+                import json
+
+                rclient.set(
+                    f"run:{active_run_id}",
+                    json.dumps(
+                        {
+                            "run_id": active_run_id,
+                            "conversation_id": active_conv_id,
+                            "status": "completed",
+                            "input_tokens": proposal_usage.input_tokens
+                            + answer_usage.input_tokens,
+                            "output_tokens": proposal_usage.output_tokens
+                            + answer_usage.output_tokens,
+                            "metadata": {
+                                "prompt": request.prompt,
+                                "answer": answer_result.text,
+                            },
+                        }
+                    ),
+                    ex=3600,
+                )
+            except Exception:
+                pass
+
         return AskResponse(
             answer=answer_result.text,
             tool_call_id=tool_call_id,
             query_id=str(query_result["query_id"]),
+            conversation_id=conv_id,
+            run_id=run_id,
             llm_calls=[
                 LLMCallMetadata(
                     llm_call_id=proposal_call_id,
@@ -209,9 +399,9 @@ def create_ask_router(
             usage=UsageMetadata(
                 input_tokens=proposal_usage.input_tokens + answer_usage.input_tokens,
                 output_tokens=proposal_usage.output_tokens + answer_usage.output_tokens,
-                total_tokens=proposal_usage.total_tokens + answer_usage.total_tokens,
+                total_tokens=total_tokens,
             ),
-            latency_ms=proposal.latency_ms + answer_result.latency_ms,
+            latency_ms=total_latency,
         )
 
     return router

@@ -36,6 +36,7 @@ resource "aws_cloudfront_distribution" "main" {
   is_ipv6_enabled     = true
   comment             = "${local.name} public frontend distribution"
   default_root_object = "index.html"
+  aliases             = var.enable_custom_domain ? (var.custom_domain_name != null && var.custom_domain_name != "" ? [var.custom_domain_name, var.custom_subdomain_name] : [var.custom_subdomain_name]) : []
 
   # Origin 1: S3 bucket for React static assets
   origin {
@@ -80,8 +81,8 @@ resource "aws_cloudfront_distribution" "main" {
     cached_methods         = ["GET", "HEAD", "OPTIONS"]
     compress               = false
 
-    # Managed-CachingDisabled
-    cache_policy_id = "4135ea2d-6df8-44a3-9d34-466164ec60f4"
+    # Managed-CachingDisabled (4135ea2d-6df8-44a3-9df3-4b5a84be39ad)
+    cache_policy_id = "4135ea2d-6df8-44a3-9df3-4b5a84be39ad"
 
     # Managed-AllViewerExceptHostHeader
     origin_request_policy_id = "b689b0a8-53d0-40ab-baf2-68738e2966ac"
@@ -108,8 +109,20 @@ resource "aws_cloudfront_distribution" "main" {
     }
   }
 
-  viewer_certificate {
-    cloudfront_default_certificate = true
+  dynamic "viewer_certificate" {
+    for_each = var.enable_custom_domain ? [1] : []
+    content {
+      acm_certificate_arn      = aws_acm_certificate_validation.cert[0].certificate_arn
+      ssl_support_method       = "sni-only"
+      minimum_protocol_version = "TLSv1.2_2021"
+    }
+  }
+
+  dynamic "viewer_certificate" {
+    for_each = var.enable_custom_domain ? [] : [1]
+    content {
+      cloudfront_default_certificate = true
+    }
   }
 
   tags = {

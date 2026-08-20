@@ -22,9 +22,13 @@ async def discover_mcp(mcp_url: str) -> dict[str, int]:
 
 @router.get("/api/status")
 async def status() -> dict[str, dict[str, str | int]]:
+    mcp_url = (
+        os.environ.get("MCP_URL") or os.environ.get("MCP_SERVER_URL") or DEFAULT_MCP_URL
+    )
     try:
-        discovery = await discover_mcp(os.environ.get("MCP_URL", DEFAULT_MCP_URL))
-    except (ClientError, HTTPError, McpError):
+        discovery = await discover_mcp(mcp_url)
+    except (ClientError, HTTPError, McpError, RuntimeError, OSError) as exc:
+        logger.warning("MCP discovery unavailable (%s): %s", mcp_url, exc)
         mcp_status: dict[str, str | int] = {"status": "unavailable"}
     except Exception:
         logger.exception("Unexpected MCP discovery failure")

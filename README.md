@@ -2,14 +2,41 @@
 
 A production-grade, cost-governed AI Analytics platform featuring durable agent orchestration, strict Model Context Protocol (MCP) service boundaries, real-time Server-Sent Events (SSE) streaming UX, bounded working-context inspection, and zero-NAT AWS cloud infrastructure.
 
+---
+
+## 🌐 Live Production Endpoints & Verified Architecture
+
+### Production URL Access
+
+- **Primary Custom Subdomain**: [https://ai.sibkaro.com](https://ai.sibkaro.com)
+- **Apex Domain**: [https://sibkaro.com](https://sibkaro.com)
+- **CloudFront Direct**: `https://d71q2u5j5gxbq.cloudfront.net` *(or `https://db5j03ttoao1a.cloudfront.net`)*
+
+### 📊 Verified Live System Status
+
+The deployed platform operates in AWS `us-east-1` as a coordinated 5-component distributed system:
+
+| Layer | Service / Target | Live Health / Status | Verified Capability |
+| :--- | :--- | :--- | :--- |
+| **Edge CDN** | AWS CloudFront + ACM | `HTTP/2 200 OK` | Custom SSL (`*.sibkaro.com`), SPA routing, `/api/*` cache bypass |
+| **Frontend UI** | Amazon S3 + OAC | `HTTP 200 OK` | React 18 SPA, real-time SSE Timeline, Working Context Inspector |
+| **Ingress Proxy** | Application Load Balancer | `healthy` | Public path-based routing to internal ECS Fargate tasks |
+| **Application Layer** | FastAPI `ai-app` (Fargate) | `status: ok` | Bedrock Claude 3.5 Haiku orchestration, execution budgets, DynamoDB state |
+| **Analytical Gateway** | FastMCP `analytics-mcp` | `status: ok (2 tools, 1 resource)` | Read-only DuckDB zero-copy views over 2.96M NYC taxi records via Service Connect |
+
 ```
                                       +----------------------------------------------------+
-                                      |                   Amazon CloudFront                |
-                                      |            https://<distribution>.cloudfront.net   |
+                                      |                 AWS Certificate Manager            |
+                                      |              SSL: *.sibkaro.com, sibkaro.com       |
+                                      +-------------------------+--------------------------+
+                                                                |
+                                      +-------------------------v--------------------------+
+                                      |                  Amazon CloudFront                 |
+                                      |      https://ai.sibkaro.com / https://sibkaro.com  |
                                       +-------------------------+--------------------------+
                                                                 |
                                        +------------------------+------------------------+
-                        /* (Static SPA Assets)                                 /api/* (Dynamic API & SSE)
+                        /* (Static React 18 Assets)                            /api/* (Dynamic API & SSE)
                                        |                                                 |
                        +---------------+---------------+                 +---------------+---------------+
                        |        Private S3 Bucket      |                 |   Application Load Balancer   |
@@ -18,7 +45,7 @@ A production-grade, cost-governed AI Analytics platform featuring durable agent 
                                                                                          |
                                                                          +---------------+---------------+
                                                                          |   ECS Fargate: ai-app (8080)  |
-                                                                         |   - Bedrock Nova Micro Loop   |
+                                                                         |   - Bedrock Claude 3.5 Haiku  |
                                                                          |   - Execution Budgets & State |
                                                                          +-------+---------------+-------+
                                                                                  |               |
@@ -27,9 +54,9 @@ A production-grade, cost-governed AI Analytics platform featuring durable agent 
                                       v                                                          v                       v
                       +---------------+---------------+                          +---------------+---+   +---------------+---+
                       | ECS Fargate: analytics-mcp    |                          |       Redis       |   | Amazon DynamoDB   |
-                      | - FastMCP Server              |                          |   Streams & Queue |   | Application State |
-                      | - Read-only DuckDB Engine     |                          +-------------------+   +-------------------+
-                      | - Local NYC TLC Parquet Data  |                                  ^
+                      | - FastMCP Server (8001)       |                          |   Streams & Queue |   | Application State |
+                      | - Zero-Copy DuckDB Views      |                          +-------------------+   +-------------------+
+                      | - 2.96M NYC Taxi Parquet Data |                                  ^
                       +-------------------------------+                                  | (Job Dequeue)
                                                                                  +-------+-------+
                                                                                  |  ECS Worker   |
@@ -51,7 +78,7 @@ A production-grade, cost-governed AI Analytics platform featuring durable agent 
    - Multi-step orchestration loop (up to 5 iterations) governed by hard limits on wall-clock execution time (30s), total tool invocations (3), token consumption, and tool output byte size.
    - Context reducer compresses intermediate tool observations into a bounded working context, preventing prompt bloat.
 4. **Real-Time Streaming UX & Working-Context Inspector**:
-   - Live Server-Sent Events (SSE) feed step-by-step progress, tool proposals, and execution logs to the React UI in real time.
+   - Live Server-Sent Events (SSE) feed step-by-step progress (`run.received`, `step.tool_proposal`, `step.tool_execution`, `step.final_answer`, `run.completed`) to the React UI in real time.
    - Built-in UI Inspector tabs display dataset schema, tool parameters, token usage, latency breakdowns, and raw event replays.
 5. **Zero-NAT Cost-Efficient AWS Infrastructure**:
    - ECS Fargate tasks run in public subnets with `assign_public_ip = true` to communicate with AWS Bedrock, ECR, and S3 directly over the Internet Gateway, completely eliminating costly AWS NAT Gateway overhead ($0/mo NAT cost).
@@ -67,22 +94,24 @@ ai_analytics_poc/
 │   │   ├── app/
 │   │   │   ├── orchestration/ # Agent loop, execution budgets, Bedrock client
 │   │   │   ├── storage/       # DynamoDB state repository & Redis Streams
-│   │   │   └── routers/       # /api/ask, /api/jobs, /api/runs, /api/health
+│   │   │   └── routers/       # /api/ask, /api/jobs, /api/runs, /api/status
 │   │   └── tests/
 │   ├── mcp/                 # FastMCP analytical server (DuckDB + Parquet)
 │   │   ├── mcp_server/      # Tools (query_taxi_data, get_dataset_profile)
 │   │   └── tests/
 │   └── dataset_spike/       # NYC TLC Yellow Taxi dataset profiling & spike
 ├── web/                     # React 18 + TypeScript + Vite UI
-│   ├── src/                 # QueryForm, RunTimeline, ContextInspector, App
+│   ├── src/                 # App, TimelineInspector, ContextInspector
 │   └── dist/                # Production build artifacts for S3 deployment
 ├── infra/
-│   └── terraform/           # Complete AWS infrastructure (ALB, ECS, S3, CloudFront)
+│   └── terraform/           # Complete AWS infrastructure (ALB, ECS, S3, CloudFront, Route 53)
 ├── scripts/
 │   ├── smoke/               # Milestone verification & integration smoke scripts
 │   └── deploy_frontend.sh   # S3 sync + CloudFront cache invalidation
 └── docs/
-    ├── work-history/        # Post-bootstrap monotonic ledger (0001–0024)
+    ├── public-uat-guide.md  # Public cloud UAT acceptance testing guide
+    ├── uat-guide.md         # Local docker UAT testing guide
+    ├── work-history/        # Monotonic post-bootstrap ledger (0001–0025)
     ├── decisions/           # Architectural Decision Records (ADRs)
     └── progress.md          # Active milestone tracking
 ```
@@ -165,7 +194,7 @@ make cloudfront-smoke
 
 - **No Static Credentials**: All services authenticate via AWS IAM Task Roles using the default AWS SDK credential chain.
 - **Least-Privilege Task Roles**:
-  - `ai-app` Task Role: Permissions restricted to `bedrock:InvokeModel` on `amazon.nova-micro-v1:0`, `dynamodb:*` on the state table, and `s3:GetObject` on the artifacts bucket.
+  - `ai-app` Task Role: Permissions restricted to `bedrock:InvokeModel` on `us.anthropic.claude-3-5-haiku-20241022-v1:0` and `amazon.nova-micro-v1:0`, `dynamodb:*` on the state table, and `s3:GetObject` on the artifacts bucket.
   - `analytics-mcp` Task Role: Zero AWS data permissions (operates strictly on local container storage).
 - **Private S3 Bucket**: Public access blocked completely; accessible strictly by Amazon CloudFront via SigV4 Origin Access Control (OAC).
 
@@ -181,8 +210,37 @@ terraform -chdir=infra/terraform destroy
 
 ---
 
+## Frequently Asked Questions & System Concepts
+
+### What dataset is being analyzed?
+The analytical engine is pinned to the official **NYC TLC Yellow Taxi dataset (January 2024)**, consisting of 2,964,624 trip records and 265 official NYC taxi zone definitions. FastMCP runs memory-bounded DuckDB queries against the local Parquet data directly within the analytical container using zero-copy columnar views.
+
+### Why is FastMCP separated from FastAPI?
+Separating FastAPI and FastMCP creates a hard security and architectural boundary:
+- **FastAPI (`ai-app`)** owns all LLM provider interactions, loop budgets, prompt templates, and durable state storage.
+- **FastMCP (`analytics-mcp`)** exposes strictly allowlisted, read-only analytics tools (`query_taxi_data`, `get_dataset_profile`). It **never** receives arbitrary user SQL, never makes LLM calls, and never stores persistent user data.
+
+### How does the system handle state and real-time streaming?
+- **Durable State**: **Amazon DynamoDB** stores complete conversation threads, messages, execution runs, and job metadata.
+- **Transient Streaming**: **Redis Streams** coordinate real-time Server-Sent Events (`run.received`, `step.tool_proposal`, `step.tool_execution`, `step.final_answer`, `run.completed`). If Redis is restarted, no durable conversation state is lost.
+
+### How do Execution Budgets prevent runaway costs?
+Every request operates under an immutable `ExecutionBudget` with strict limits:
+- **Maximum Iterations**: 5 model turns
+- **Maximum Tool Calls**: 3 invocations
+- **Maximum Execution Time**: 30.0 seconds
+- **Maximum Result Size**: 8,192 bytes (with automatic context reduction)
+
+### What makes the AWS infrastructure cost-efficient?
+- **Zero-NAT Architecture**: ECS Fargate containers use direct Internet Gateway routing with public IPs and strict security groups, saving ~$32+/month per NAT gateway.
+- **Serverless Compute**: Fargate containers, DynamoDB on-demand billing, and CloudFront pay-per-request ensure costs remain near zero when idle.
+
+---
+
 ## Work History & Decisions
 
+- [Public Cloud UAT Acceptance Guide](docs/public-uat-guide.md)
+- [Local Docker UAT Guide](docs/uat-guide.md)
 - [Implementation Plan](docs/implementation-plan.md)
 - [Monotonic Work History Ledger](docs/work-history/README.md)
 - [Architectural Decisions](docs/decisions/README.md)

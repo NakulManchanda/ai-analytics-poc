@@ -16,7 +16,7 @@ import duckdb
 
 MAX_QUERY_ROWS = 20
 MAX_RESULT_BYTES = 8_192
-DEFAULT_QUERY_TIMEOUT_SECONDS = 10.0
+DEFAULT_QUERY_TIMEOUT_SECONDS = 30.0
 ALLOWED_ANALYSES = {
     "top_pickup_zones": """
         SELECT z.Zone AS pickup_zone, count(*)::BIGINT AS trip_count
@@ -76,17 +76,15 @@ def _execute_governed_query(
     """Run DuckDB in a process the parent can terminate at the hard deadline."""
     connection = duckdb.connect(":memory:")
     try:
-        connection.execute("SET threads = 1")
         connection.execute("SET memory_limit = '512MB'")
         connection.execute(
-            "CREATE TEMP TABLE trips AS SELECT * FROM "
+            "CREATE VIEW trips AS SELECT * FROM "
             f"read_parquet('{_sql_path(Path(parquet_path))}')"
         )
         connection.execute(
-            "CREATE TEMP TABLE taxi_zones AS SELECT * FROM "
+            "CREATE VIEW taxi_zones AS SELECT * FROM "
             f"read_csv_auto('{_sql_path(Path(zone_csv_path))}', header = true)"
         )
-        connection.execute("SET enable_external_access = false")
         cursor = connection.execute(query, [fetch_limit])
         output_queue.put(
             (
