@@ -36,7 +36,7 @@ resource "aws_cloudfront_distribution" "main" {
   is_ipv6_enabled     = true
   comment             = "${local.name} public frontend distribution"
   default_root_object = "index.html"
-  aliases             = var.enable_custom_domain ? [var.custom_domain_name, var.custom_subdomain_name] : []
+  aliases             = var.enable_custom_domain ? [var.custom_subdomain_name] : []
 
   # Origin 1: S3 bucket for React static assets
   origin {
@@ -81,8 +81,8 @@ resource "aws_cloudfront_distribution" "main" {
     cached_methods         = ["GET", "HEAD", "OPTIONS"]
     compress               = false
 
-    # Managed-CachingDisabled
-    cache_policy_id = "4135ea2d-6df8-44a3-9d34-466164ec60f4"
+    # Managed-CachingDisabled (4135ea2d-6df8-44a3-9df3-4b5a84be39ad)
+    cache_policy_id = "4135ea2d-6df8-44a3-9df3-4b5a84be39ad"
 
     # Managed-AllViewerExceptHostHeader
     origin_request_policy_id = "b689b0a8-53d0-40ab-baf2-68738e2966ac"

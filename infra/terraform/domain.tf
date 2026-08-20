@@ -25,7 +25,7 @@ resource "aws_acm_certificate" "cert" {
 # 2. Automated Route 53 DNS validation records
 resource "aws_route53_record" "cert_validation" {
   for_each = var.enable_custom_domain ? {
-    for dvo in aws_acm_certificate.cert[0].domain_validation_options : dvo.domain_name => {
+    for dvo in tolist(aws_acm_certificate.cert[0].domain_validation_options) : dvo.domain_name => {
       name   = dvo.resource_record_name
       record = dvo.resource_record_value
       type   = dvo.resource_record_type
@@ -47,34 +47,7 @@ resource "aws_acm_certificate_validation" "cert" {
   validation_record_fqdns = [for record in aws_route53_record.cert_validation : record.fqdn]
 }
 
-# 4. Route 53 A and AAAA Alias Records for Apex Domain (sibkaro.com)
-resource "aws_route53_record" "apex_a" {
-  count   = var.enable_custom_domain ? 1 : 0
-  zone_id = data.aws_route53_zone.primary[0].zone_id
-  name    = var.custom_domain_name
-  type    = "A"
-
-  alias {
-    name                   = aws_cloudfront_distribution.main.domain_name
-    zone_id                = aws_cloudfront_distribution.main.hosted_zone_id
-    evaluate_target_health = false
-  }
-}
-
-resource "aws_route53_record" "apex_aaaa" {
-  count   = var.enable_custom_domain ? 1 : 0
-  zone_id = data.aws_route53_zone.primary[0].zone_id
-  name    = var.custom_domain_name
-  type    = "AAAA"
-
-  alias {
-    name                   = aws_cloudfront_distribution.main.domain_name
-    zone_id                = aws_cloudfront_distribution.main.hosted_zone_id
-    evaluate_target_health = false
-  }
-}
-
-# 5. Route 53 A and AAAA Alias Records for Subdomain (ai.sibkaro.com)
+# 4. Route 53 A and AAAA Alias Records for Subdomain (ai.sibkaro.com)
 resource "aws_route53_record" "subdomain_a" {
   count   = var.enable_custom_domain ? 1 : 0
   zone_id = data.aws_route53_zone.primary[0].zone_id

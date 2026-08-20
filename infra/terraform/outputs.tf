@@ -118,7 +118,6 @@ output "cloudfront_url" {
 output "custom_domain_urls" {
   description = "Custom domain HTTPS URLs mapped via Route 53 and ACM."
   value = var.enable_custom_domain ? [
-    "https://${var.custom_domain_name}",
     "https://${var.custom_subdomain_name}"
   ] : []
 }
