@@ -14,7 +14,7 @@ A production-grade, cost-governed AI Analytics platform featuring durable agent 
 - **Apex Domain**: [https://sibkaro.com](https://sibkaro.com)
 - **CloudFront Direct**: `https://d71q2u5j5gxbq.cloudfront.net` *(or `https://db5j03ttoao1a.cloudfront.net`)*
 
-> 📖 **Evaluator Runbook**: See the **[Public Cloud UAT Guide](docs/public-uat-guide.md)** for step-by-step acceptance test scenarios, capability discovery verification, and sample queries. For local development testing, see the **[Local Docker UAT Guide](docs/local-uat-guide.md)**.
+> 💡 **How It Works & Quick Walkthrough**: See the **[Public Cloud Testing Guide](docs/public-uat-guide.md)** for step-by-step test scenarios, capability discovery, and sample analytical queries. For local development, see the **[Local Docker Testing Guide](docs/local-uat-guide.md)**.
 
 ### 📊 Verified Live System Status
 
@@ -142,7 +142,7 @@ docker compose up --build
 - **FastAPI Backend**: [http://localhost:8080/health](http://localhost:8080/health)
 - **FastMCP Server**: [http://localhost:8001/mcp](http://localhost:8001/mcp)
 
-> 🧪 **Local Testing Runbook**: For a step-by-step local test checklist with command snippets and expected outputs, see the **[Local Docker UAT Guide](docs/local-uat-guide.md)**.
+> 💡 **How to Test Locally**: For a step-by-step checklist with command snippets and expected outputs, see the **[Local Docker Testing Guide](docs/local-uat-guide.md)**.
 
 ### 2. Run All Automated Test Suites
 
@@ -247,8 +247,8 @@ Every request operates under an immutable `ExecutionBudget` with strict limits:
 ## Work History & Decisions
 
 - [System Design Architecture Deep-Dive](docs/system-design-blog.md)
-- [Public Cloud UAT Acceptance Guide](docs/public-uat-guide.md)
-- [Local Docker UAT Guide](docs/local-uat-guide.md)
+- [Public Cloud Testing Guide](docs/public-uat-guide.md)
+- [Local Docker Testing Guide](docs/local-uat-guide.md)
 - [Implementation Plan](docs/implementation-plan.md)
 - [Monotonic Work History Ledger](docs/work-history/README.md)
 - [Architectural Decisions](docs/decisions/README.md)
