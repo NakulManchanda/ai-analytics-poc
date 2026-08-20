@@ -25,4 +25,5 @@ Monotonically numbered log of every post-bootstrap task. Each entry records the 
 | [0019](0019-m10-context-visualization.md) | 10 | [#37](https://github.com/NakulManchanda/ai-analytics-poc/pull/37) | Bounded-context visualization & UI inspector | Merged (`128de6c`) |
 | [0020](0020-m11-async-worker.md) | 11 | [#38](https://github.com/NakulManchanda/ai-analytics-poc/pull/38) | Async job submission & background worker | Merged (`5fed1b5`) |
 | [0021](0021-m12-local-integration-hardening.md) | 12 | [#39](https://github.com/NakulManchanda/ai-analytics-poc/pull/39) | Local integration hardening & multi-service smoke | Merged (`f21061e`) |
-| [0022](0022-m14-backend-ecs-deployment.md) | 14 | [#40](https://github.com/NakulManchanda/ai-analytics-poc/pull/40) | Backend deploy to ECS/Fargate + ALB | In progress |
+| [0022](0022-m14-backend-ecs-deployment.md) | 14 | [#40](https://github.com/NakulManchanda/ai-analytics-poc/pull/40) | Backend deploy to ECS/Fargate + ALB | Merged (`bb4b27e`) |
+| [0023](0023-m15-cloudfront-frontend.md) | 15 | [#41](https://github.com/NakulManchanda/ai-analytics-poc/pull/41) | S3 + CloudFront public frontend deployment | In progress |

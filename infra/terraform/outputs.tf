@@ -71,6 +71,7 @@ output "console_links" {
     analytics_mcp_log_group = "https://${var.aws_region}.console.aws.amazon.com/cloudwatch/home?region=${var.aws_region}#logsV2:log-groups/log-group/${urlencode(aws_cloudwatch_log_group.analytics_mcp.name)}"
     budgets                 = "https://console.aws.amazon.com/costmanagement/home#/budgets"
     alb                     = "https://${var.aws_region}.console.aws.amazon.com/ec2/home?region=${var.aws_region}#LoadBalancers:loadBalancerArn=${aws_lb.main.arn}"
+    cloudfront_distribution = "https://console.aws.amazon.com/cloudfront/v4/home#/distributions/${aws_cloudfront_distribution.main.id}"
   }
 }
 
@@ -97,6 +98,21 @@ output "analytics_mcp_service_name" {
 output "service_connect_namespace" {
   description = "Private Service Connect namespace."
   value       = aws_service_discovery_http_namespace.main.name
+}
+
+output "cloudfront_domain_name" {
+  description = "Public domain name of the CloudFront distribution."
+  value       = aws_cloudfront_distribution.main.domain_name
+}
+
+output "cloudfront_distribution_id" {
+  description = "ID of the CloudFront distribution."
+  value       = aws_cloudfront_distribution.main.id
+}
+
+output "cloudfront_url" {
+  description = "Full HTTPS URL for the public CloudFront frontend entry point."
+  value       = "https://${aws_cloudfront_distribution.main.domain_name}"
 }
 
 output "budget_name" {

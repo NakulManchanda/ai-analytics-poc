@@ -1,26 +1,27 @@
 # Current milestone
 
-Milestone 14 — backend deploy to ECS/Fargate + ALB
+Milestone 15 — S3 + CloudFront public frontend deployment
 
 ## Status
 
-IN PROGRESS — [issue #29](https://github.com/NakulManchanda/ai-analytics-poc/issues/29)
+IN PROGRESS — [issue #30](https://github.com/NakulManchanda/ai-analytics-poc/issues/30)
 
 ## Merged milestone baseline
 
-- **Milestones 0–12**: Merged (`f21061e`), including local multi-service integration hardening, async job worker, Redis Streams SSE, and bounded-context visualization.
+- **Milestones 0–14**: Merged (`bb4b27e`), including ECS/Fargate backend services, ALB, local multi-service integration hardening, async job worker, Redis Streams SSE, and bounded-context visualization.
 - **Milestone 13 Foundation**: Terraform infrastructure foundation and budget alerts merged.
 
 ## Acceptance criteria
 
-- [x] Application Load Balancer (`aws_lb.main`) and target group provisioned across public subnets.
-- [x] ECS task definitions for `ai-app` and `analytics-mcp` defined with least-privilege IAM roles and Fargate compute.
-- [x] Private Service Connect namespace (`ai-analytics-poc.local`) configured for app→MCP communication.
-- [x] Zero-NAT task networking configured with public IPs enabled for cost efficiency ($0 NAT overhead).
-- [x] Security group ingress/egress boundaries enforced (ALB→app on 8080, app→MCP on 8001).
-- [x] `scripts/smoke/14_ecs_backend_smoke.sh` and `make ecs-smoke` added.
+- [x] CloudFront distribution with Origin Access Control (OAC) for private S3 frontend bucket.
+- [x] S3 bucket policy allowing `s3:GetObject` strictly for CloudFront distribution ARN.
+- [x] Default cache behavior (`/*`) serving static React SPA with HTTPS redirection and `CachingOptimized`.
+- [x] Ordered cache behavior (`/api/*`) proxying dynamic requests to ALB with `CachingDisabled` and `AllViewerExceptHostHeader`.
+- [x] Custom error responses (403/404 -> `/index.html`) configured for SPA client-side routing.
+- [x] `scripts/deploy_frontend.sh` automated build/sync/invalidation script added.
+- [x] `scripts/smoke/15_cloudfront_e2e.sh` and `make cloudfront-smoke` added.
 - [x] Full test suite passing across all services (`make test`).
 
 ## Next milestone
 
-Milestone 15 (S3 + CloudFront frontend, #30) gates on Milestone 14 merging.
+Milestone 16 (final demo, security review, and documentation, #31) gates on Milestone 15 merging.

@@ -73,3 +73,9 @@ integration-smoke: ## Run end-to-end multi-service integration smoke across all 
 
 ecs-smoke: ## Run smoke check against deployed ECS Application Load Balancer
 	./scripts/smoke/14_ecs_backend_smoke.sh
+
+cloudfront-smoke: ## Run end-to-end smoke check against CloudFront distribution
+	./scripts/smoke/15_cloudfront_e2e.sh
+
+deploy-frontend: ## Build React app, upload to S3, and invalidate CloudFront cache
+	./scripts/deploy_frontend.sh
