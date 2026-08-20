@@ -28,4 +28,4 @@ Monotonically numbered log of every post-bootstrap task. Each entry records the 
 | [0022](0022-m14-backend-ecs-deployment.md) | 14 | [#40](https://github.com/NakulManchanda/ai-analytics-poc/pull/40) | Backend deploy to ECS/Fargate + ALB | Merged (`bb4b27e`) |
 | [0023](0023-m15-cloudfront-frontend.md) | 15 | [#41](https://github.com/NakulManchanda/ai-analytics-poc/pull/41) | S3 + CloudFront public frontend deployment | Merged (`9ad648f`) |
 | [0024](0024-m16-final-demo-and-review.md) | 16 | [#42](https://github.com/NakulManchanda/ai-analytics-poc/pull/42) | Final demo, security, and documentation review | Merged (`d65de54`) |
-| [0025](0025-uat-guides-and-telemetry-fix.md) | 16 UAT | [#43](https://github.com/NakulManchanda/ai-analytics-poc/pull/43) | Local and public UAT runbooks, SSE stream fix, and sample questions | In progress |
+| [0025](0025-uat-guides-and-telemetry-fix.md) | 16 UAT | [#43](https://github.com/NakulManchanda/ai-analytics-poc/pull/43) | Local and public UAT runbooks, SSE stream fix, and sample questions | Merged (`05a8dc3`) |
