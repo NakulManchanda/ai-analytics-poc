@@ -109,11 +109,23 @@ sequenceDiagram
 
 ---
 
-## 3. Stopping Conditions & Execution Guardrails
+## 3. The Fixed Execution Harness & Stopping Guardrails
 
-Why doesn't the agent loop indefinitely, burning money and hanging threads?
+A fundamental concept in AI system design is **The Fixed Agent Execution Harness**.
 
-In production AI systems, **an agent loop is a bounded state machine**. The loop exits immediately upon hitting any of the following stopping criteria defined in [budgets.py](https://github.com/NakulManchanda/ai-analytics-poc/blob/main/services/app/app/orchestration/budgets.py):
+An LLM is inherently non-deterministic, probabilistic, and untrusted. It cannot manage its own execution, guarantee network timeouts, or prevent infinite loops. 
+
+The **Execution Harness** ([loop.py](https://github.com/NakulManchanda/ai-analytics-poc/blob/main/services/app/app/orchestration/loop.py)) is the fixed, deterministic software chassis that safely wraps, drives, and contains the model. The model *never* executes freely — it runs strictly strapped inside this harness, which:
+1. **Drives Step Transitions**: Manages the state machine transitions between model turns and tool execution.
+2. **Intercepts Tool Requests**: Prevents the model from making direct database connections, routing all calls through the Model Context Protocol (MCP).
+3. **Applies Context Reduction**: Sanitizes and limits working context before the next turn.
+4. **Enforces Hard Guardrails**: Binds the execution to strict, immutable resource caps.
+
+### The Guardrails Built Into the Harness:
+
+Why doesn't the agent loop indefinitely, burning money and hanging server threads?
+
+Within the harness, **the agent loop is a bounded state machine**. The loop exits immediately upon hitting any of the following stopping criteria defined in [budgets.py](https://github.com/NakulManchanda/ai-analytics-poc/blob/main/services/app/app/orchestration/budgets.py):
 
 | Guardrail Dimension | POC Budget Cap | Why It Matters / System Trade-off |
 | :--- | :--- | :--- |
