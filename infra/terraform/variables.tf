@@ -131,27 +131,27 @@ variable "analytics_mcp_image_tag" {
 }
 
 variable "ai_app_cpu" {
-  description = "CPU units for the ai-app task (256 = 0.25 vCPU)."
+  description = "CPU units for the ai-app task (256 = 0.25 vCPU, 512 = 0.5 vCPU)."
   type        = number
-  default     = 256
+  default     = 512
 }
 
 variable "ai_app_memory" {
   description = "Memory in MB for the ai-app task."
   type        = number
-  default     = 512
+  default     = 1024
 }
 
 variable "analytics_mcp_cpu" {
-  description = "CPU units for the analytics-mcp task (256 = 0.25 vCPU)."
+  description = "CPU units for the analytics-mcp task (256 = 0.25 vCPU, 512 = 0.5 vCPU)."
   type        = number
-  default     = 256
+  default     = 512
 }
 
 variable "analytics_mcp_memory" {
   description = "Memory in MB for the analytics-mcp task."
   type        = number
-  default     = 512
+  default     = 1024
 }
 
 variable "ai_app_desired_count" {

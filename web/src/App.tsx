@@ -114,9 +114,19 @@ export default function App() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ prompt: cleanPrompt, conversation_id: convId }),
       });
-      const payload = (await response.json()) as
+      const text = await response.text();
+      let payload:
         | AskResponse
         | { detail?: { code?: string; retryable?: boolean } };
+      try {
+        payload = JSON.parse(text);
+      } catch {
+        throw new Error(
+          response.ok
+            ? "Invalid server response format."
+            : `Analytics service unavailable (${response.status}). Try again.`,
+        );
+      }
 
       if (!response.ok) {
         const detail = "detail" in payload ? payload.detail : undefined;
