@@ -115,6 +115,14 @@ output "cloudfront_url" {
   value       = "https://${aws_cloudfront_distribution.main.domain_name}"
 }
 
+output "custom_domain_urls" {
+  description = "Custom domain HTTPS URLs mapped via Route 53 and ACM."
+  value = var.enable_custom_domain ? [
+    "https://${var.custom_domain_name}",
+    "https://${var.custom_subdomain_name}"
+  ] : []
+}
+
 output "budget_name" {
   description = "Name of the monthly AWS cost budget, if enabled."
   value       = try(aws_budgets_budget.monthly_cost[0].name, null)

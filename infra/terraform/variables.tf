@@ -171,3 +171,21 @@ variable "bedrock_model_id" {
   type        = string
   default     = "amazon.nova-micro-v1:0"
 }
+
+variable "custom_domain_name" {
+  description = "Custom domain name for the CloudFront distribution (e.g. sibkaro.com)."
+  type        = string
+  default     = "sibkaro.com"
+}
+
+variable "custom_subdomain_name" {
+  description = "Custom subdomain name for the CloudFront distribution (e.g. ai.sibkaro.com)."
+  type        = string
+  default     = "ai.sibkaro.com"
+}
+
+variable "enable_custom_domain" {
+  description = "Whether to provision an ACM certificate and Route 53 DNS aliases for the custom domain."
+  type        = bool
+  default     = true
+}

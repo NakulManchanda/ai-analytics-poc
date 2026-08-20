@@ -8,10 +8,10 @@ No local setup, Docker, or Python installation is required to test the live web 
 
 ## Public Cloud URL
 
-Access the production deployment at your assigned CloudFront URL:
-👉 **`https://<CLOUDFRONT_DOMAIN>.cloudfront.net`**
+Access the production deployment at your live custom domain:
+👉 **`https://sibkaro.com`** or **`https://ai.sibkaro.com`**
 
-*(If you are the infrastructure operator, retrieve this URL via `terraform -chdir=infra/terraform output -raw cloudfront_url`)*
+*(Direct CloudFront URL fallback: `terraform -chdir=infra/terraform output -raw cloudfront_url`)*
 
 ---
 
@@ -20,13 +20,13 @@ Access the production deployment at your assigned CloudFront URL:
 ### Scenario 1: Health & Capability Discovery (Zero-LLM Verification)
 *Objective*: Confirm that the edge CDN, Application Load Balancer, and FastMCP analytics gateway are healthy and discoverable without triggering billable model calls.
 
-1. Open **`https://<CLOUDFRONT_DOMAIN>.cloudfront.net`** in any modern web browser.
+1. Open **`https://sibkaro.com`** (or **`https://ai.sibkaro.com`**) in any modern web browser.
 2. Verify the top status board badges:
    - [ ] **Backend Status**: Displays `Backend ready` (green indicator).
    - [ ] **FastMCP Status**: Displays `MCP discovered · 2 tools · 1 resources`.
 3. *(Optional)* API verification via terminal:
    ```bash
-   curl -s https://<CLOUDFRONT_DOMAIN>.cloudfront.net/api/status | python3 -m json.tool
+   curl -s https://ai.sibkaro.com/api/status | python3 -m json.tool
    ```
    - [ ] Returns HTTP 200 with `"status": "ok"` for both `app` and `mcp`.
 
@@ -60,7 +60,7 @@ Access the production deployment at your assigned CloudFront URL:
 
 1. **Submit the asynchronous job**:
    ```bash
-   curl -X POST https://<CLOUDFRONT_DOMAIN>.cloudfront.net/api/jobs \
+   curl -X POST https://ai.sibkaro.com/api/jobs \
      -H "Content-Type: application/json" \
      -d '{"prompt": "Generate full monthly trip volume summary for January 2024"}' \
      | python3 -m json.tool
@@ -69,7 +69,7 @@ Access the production deployment at your assigned CloudFront URL:
 2. **Poll the completed report**:
    ```bash
    # Replace <JOB_ID> with the job_id returned above
-   curl -s https://<CLOUDFRONT_DOMAIN>.cloudfront.net/api/jobs/<JOB_ID> | python3 -m json.tool
+   curl -s https://ai.sibkaro.com/api/jobs/<JOB_ID> | python3 -m json.tool
    ```
    - [ ] Status transitions to `"COMPLETED"` within seconds.
    - [ ] `"result"` contains the aggregated daily zone summary across 2,964,624 taxi trips.
@@ -81,7 +81,7 @@ Access the production deployment at your assigned CloudFront URL:
 
 ```bash
 # 1. Ask a question and extract the run_id
-RUN_ID=$(curl -s -X POST https://<CLOUDFRONT_DOMAIN>.cloudfront.net/api/ask \
+RUN_ID=$(curl -s -X POST https://ai.sibkaro.com/api/ask \
   -H "Content-Type: application/json" \
   -d '{"prompt": "What are the peak hours for taxi rides?", "conversation_id": "conv_public_audit"}' \
   | python3 -c 'import sys, json; print(json.load(sys.stdin)["run_id"])')
@@ -89,7 +89,7 @@ RUN_ID=$(curl -s -X POST https://<CLOUDFRONT_DOMAIN>.cloudfront.net/api/ask \
 echo "Auditing Run: ${RUN_ID}"
 
 # 2. Replay the complete execution stream
-curl -N "https://<CLOUDFRONT_DOMAIN>.cloudfront.net/api/runs/${RUN_ID}/events"
+curl -N "https://ai.sibkaro.com/api/runs/${RUN_ID}/events"
 ```
 - [ ] Outputs ordered SSE stream events (`run.received` $\rightarrow$ `tool.requested` $\rightarrow$ `tool.completed` $\rightarrow$ `run.completed`).
 
