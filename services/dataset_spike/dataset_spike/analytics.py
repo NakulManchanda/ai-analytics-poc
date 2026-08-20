@@ -16,7 +16,7 @@ import duckdb
 
 MAX_QUERY_ROWS = 20
 MAX_RESULT_BYTES = 8_192
-DEFAULT_QUERY_TIMEOUT_SECONDS = 10.0
+DEFAULT_QUERY_TIMEOUT_SECONDS = 30.0
 ALLOWED_ANALYSES = {
     "top_pickup_zones": """
         SELECT z.Zone AS pickup_zone, count(*)::BIGINT AS trip_count

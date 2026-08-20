@@ -42,6 +42,7 @@ def run_pinned_query(*, analysis: str, limit: int) -> dict[str, object]:
         cache_dir / ZONE_FILENAME,
         analysis=analysis,
         limit=limit,
+        timeout_seconds=30.0,
     )
 
 

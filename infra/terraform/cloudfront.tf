@@ -36,7 +36,7 @@ resource "aws_cloudfront_distribution" "main" {
   is_ipv6_enabled     = true
   comment             = "${local.name} public frontend distribution"
   default_root_object = "index.html"
-  aliases             = var.enable_custom_domain ? [var.custom_subdomain_name] : []
+  aliases             = var.enable_custom_domain ? (var.custom_domain_name != null && var.custom_domain_name != "" ? [var.custom_domain_name, var.custom_subdomain_name] : [var.custom_subdomain_name]) : []
 
   # Origin 1: S3 bucket for React static assets
   origin {

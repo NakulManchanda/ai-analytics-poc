@@ -98,6 +98,10 @@ resource "aws_ecs_task_definition" "ai_app" {
           value = "http://analytics-mcp:8001/mcp"
         },
         {
+          name  = "MCP_URL"
+          value = "http://analytics-mcp:8001/mcp"
+        },
+        {
           name  = "LLM_PROVIDER"
           value = "bedrock"
         },
