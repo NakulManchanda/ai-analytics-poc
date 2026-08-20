@@ -294,8 +294,10 @@ def create_ask_router(
                         run_id=active_run_id,
                         conversation_id=active_conv_id,
                         status="completed",
-                        input_tokens=proposal_usage.input_tokens + answer_usage.input_tokens,
-                        output_tokens=proposal_usage.output_tokens + answer_usage.output_tokens,
+                        input_tokens=proposal_usage.input_tokens
+                        + answer_usage.input_tokens,
+                        output_tokens=proposal_usage.output_tokens
+                        + answer_usage.output_tokens,
                         estimated_cost_usd=0.001,
                         metadata={
                             "prompt": request.prompt,
@@ -359,8 +361,10 @@ def create_ask_router(
                             "run_id": active_run_id,
                             "conversation_id": active_conv_id,
                             "status": "completed",
-                            "input_tokens": proposal_usage.input_tokens + answer_usage.input_tokens,
-                            "output_tokens": proposal_usage.output_tokens + answer_usage.output_tokens,
+                            "input_tokens": proposal_usage.input_tokens
+                            + answer_usage.input_tokens,
+                            "output_tokens": proposal_usage.output_tokens
+                            + answer_usage.output_tokens,
                             "metadata": {
                                 "prompt": request.prompt,
                                 "answer": answer_result.text,
