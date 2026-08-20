@@ -117,3 +117,57 @@ variable "monthly_budget_limit_usd" {
     error_message = "monthly_budget_limit_usd must be a positive numeric dollar amount (e.g. 10.0 or 10)."
   }
 }
+
+variable "ai_app_image_tag" {
+  description = "Image tag to deploy for the ai-app service."
+  type        = string
+  default     = "latest"
+}
+
+variable "analytics_mcp_image_tag" {
+  description = "Image tag to deploy for the analytics-mcp service."
+  type        = string
+  default     = "latest"
+}
+
+variable "ai_app_cpu" {
+  description = "CPU units for the ai-app task (256 = 0.25 vCPU)."
+  type        = number
+  default     = 256
+}
+
+variable "ai_app_memory" {
+  description = "Memory in MB for the ai-app task."
+  type        = number
+  default     = 512
+}
+
+variable "analytics_mcp_cpu" {
+  description = "CPU units for the analytics-mcp task (256 = 0.25 vCPU)."
+  type        = number
+  default     = 256
+}
+
+variable "analytics_mcp_memory" {
+  description = "Memory in MB for the analytics-mcp task."
+  type        = number
+  default     = 512
+}
+
+variable "ai_app_desired_count" {
+  description = "Desired number of tasks for the ai-app service."
+  type        = number
+  default     = 1
+}
+
+variable "analytics_mcp_desired_count" {
+  description = "Desired number of tasks for the analytics-mcp service."
+  type        = number
+  default     = 1
+}
+
+variable "bedrock_model_id" {
+  description = "Amazon Bedrock foundation model ID."
+  type        = string
+  default     = "amazon.nova-micro-v1:0"
+}
