@@ -2,6 +2,8 @@
 
 A production-grade, cost-governed AI Analytics platform featuring durable agent orchestration, strict Model Context Protocol (MCP) service boundaries, real-time Server-Sent Events (SSE) streaming UX, bounded working-context inspection, and zero-NAT AWS cloud infrastructure.
 
+> 📚 **System Design Deep-Dive Blog**: Read **[What Happens When a User Clicks "Run Analysis" in an AI App?](docs/system-design-blog.md)** for a comprehensive architectural breakdown of Agent Loops, FastMCP tool boundaries, Context Reducers, and SSE event streaming.
+
 ---
 
 ## 🌐 Live Production Endpoints & Verified Architecture
@@ -111,11 +113,12 @@ ai_analytics_poc/
 │   ├── smoke/               # Milestone verification & integration smoke scripts
 │   └── deploy_frontend.sh   # S3 sync + CloudFront cache invalidation
 └── docs/
-    ├── public-uat-guide.md  # Public cloud UAT acceptance testing guide
-    ├── local-uat-guide.md   # Local docker UAT testing guide
-    ├── work-history/        # Monotonic post-bootstrap ledger (0001–0025)
-    ├── decisions/           # Architectural Decision Records (ADRs)
-    └── progress.md          # Active milestone tracking
+    ├── system-design-blog.md # In-depth System Design architecture blog post
+    ├── public-uat-guide.md   # Public cloud UAT acceptance testing guide
+    ├── local-uat-guide.md    # Local docker UAT testing guide
+    ├── work-history/         # Monotonic post-bootstrap ledger (0001–0025)
+    ├── decisions/            # Architectural Decision Records (ADRs)
+    └── progress.md           # Active milestone tracking
 ```
 
 ---
@@ -243,6 +246,7 @@ Every request operates under an immutable `ExecutionBudget` with strict limits:
 
 ## Work History & Decisions
 
+- [System Design Architecture Deep-Dive](docs/system-design-blog.md)
 - [Public Cloud UAT Acceptance Guide](docs/public-uat-guide.md)
 - [Local Docker UAT Guide](docs/local-uat-guide.md)
 - [Implementation Plan](docs/implementation-plan.md)
