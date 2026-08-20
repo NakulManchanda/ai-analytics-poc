@@ -50,10 +50,11 @@ Access the live production deployment at:
    - Click **Run analysis**.
 2. **Verify the "Run Timeline (SSE)" Inspector**:
    - [ ] Badge transitions to **`● STREAMING`** and completes as **`● COMPLETED`**.
-   - [ ] Step **`run.received`**: Displays the initialized execution run.
-   - [ ] Step **`tool.requested`**: Displays the model's proposal of `query_taxi_data` with parameters.
-   - [ ] Step **`tool.completed`**: Displays DuckDB query execution with exact row counts and duration.
-   - [ ] Step **`run.completed`**: Displays token telemetry and overall latency.
+   - [ ] Step **`#1 run.received`**: Displays the initialized execution run.
+   - [ ] Step **`#2 step.tool_proposal`** (or `tool.requested`): Displays the model's proposal of `query_taxi_data` with analysis arguments.
+   - [ ] Step **`#3 step.tool_execution`** (or `tool.completed`): Displays DuckDB query execution with exact row count and latency.
+   - [ ] Step **`#4 step.final_answer`**: Displays synthesized response preparation.
+   - [ ] Step **`#5 run.completed`**: Displays total token telemetry, estimated cost, and overall run duration.
    - [ ] The synthesized answer appears in the main answer panel.
 3. **Verify the "Working Context Panel" Inspector**:
    - [ ] Switch to the **Working Context Panel** tab.
@@ -67,7 +68,7 @@ Access the live production deployment at:
 
 1. **Submit the asynchronous job**:
    ```bash
-   curl -X POST https://db5j03ttoao1a.cloudfront.net/api/jobs \
+   curl -X POST https://ai.sibkaro.com/api/jobs \
      -H "Content-Type: application/json" \
      -d '{"prompt": "Generate full monthly trip volume summary for January 2024"}' \
      | python3 -m json.tool
