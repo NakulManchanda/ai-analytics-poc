@@ -87,15 +87,29 @@ resource "aws_route_table_association" "private" {
   route_table_id = aws_route_table.private.id
 }
 
-# This group is intentionally ingress-free. Milestone 14 will add only the
-# app-specific ingress needed after the ALB and services are introduced.
 resource "aws_security_group" "ecs_tasks" {
   name        = "${local.name}-ecs-tasks"
-  description = "Foundation security group for private ECS tasks"
+  description = "Security group for ECS tasks (ai-app and analytics-mcp)"
   vpc_id      = aws_vpc.main.id
 
+  ingress {
+    description     = "Allow HTTP ingress from ALB to ai-app container"
+    from_port       = 8080
+    to_port         = 8080
+    protocol        = "tcp"
+    security_groups = [aws_security_group.alb.id]
+  }
+
+  ingress {
+    description = "Allow inter-task Service Connect communication to analytics-mcp"
+    from_port   = 8001
+    to_port     = 8001
+    protocol    = "tcp"
+    self        = true
+  }
+
   egress {
-    description = "HTTPS egress for AWS APIs and public dataset downloads"
+    description = "HTTPS egress for AWS APIs, ECR, and public dataset downloads"
     from_port   = 443
     to_port     = 443
     protocol    = "tcp"
@@ -116,6 +130,14 @@ resource "aws_security_group" "ecs_tasks" {
     to_port     = 53
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    description = "Allow inter-task Service Connect communication to analytics-mcp"
+    from_port   = 8001
+    to_port     = 8001
+    protocol    = "tcp"
+    self        = true
   }
 
   tags = {

@@ -70,3 +70,6 @@ m6-bedrock-smoke: ## Run the opt-in, bounded two-call Bedrock plus MCP query smo
 
 integration-smoke: ## Run end-to-end multi-service integration smoke across all 5 containers
 	./scripts/smoke/12_local_integration.sh
+
+ecs-smoke: ## Run smoke check against deployed ECS Application Load Balancer
+	./scripts/smoke/14_ecs_backend_smoke.sh
