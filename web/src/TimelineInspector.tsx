@@ -20,18 +20,23 @@ export const KNOWN_EVENT_TYPES = [
   "run.completed",
   "run.budget_exceeded",
   "run.failed",
+  "step.tool_proposal",
+  "step.tool_execution",
+  "step.final_answer",
   "step.llm_proposal",
   "step.tool_call",
   "step.llm_final_answer",
   "step.validation_error",
+  "job.completed",
+  "job.failed",
 ];
 
 export function getEventBadgeClass(eventType: string): string {
-  if (eventType.startsWith("llm.")) return "badge-llm";
-  if (eventType.startsWith("tool.")) return "badge-tool";
+  if (eventType.startsWith("llm.") || eventType === "step.llm_proposal" || eventType === "step.tool_proposal" || eventType === "step.final_answer" || eventType === "step.llm_final_answer") return "badge-llm";
+  if (eventType.startsWith("tool.") || eventType === "step.tool_execution" || eventType === "step.tool_call") return "badge-tool";
   if (eventType.startsWith("context.")) return "badge-context";
-  if (eventType === "run.completed") return "badge-success";
-  if (eventType === "run.budget_exceeded" || eventType === "run.failed") return "badge-danger";
+  if (eventType === "run.completed" || eventType === "job.completed") return "badge-success";
+  if (eventType === "run.budget_exceeded" || eventType === "run.failed" || eventType === "job.failed") return "badge-danger";
   return "badge-default";
 }
 
@@ -47,18 +52,27 @@ export function formatEventSummary(event: RunEvent): string {
     case "llm.completed":
       return `Model completed (${p.phase || "generation"}) · ${p.latency_ms ?? 0}ms · ${p.tokens?.input ?? 0} in / ${p.tokens?.output ?? 0} out`;
     case "tool.requested":
-      return `Tool proposal: ${p.tool_name || "query"} (${p.analysis || "default"}, limit=${p.limit ?? 5})`;
+    case "step.tool_proposal":
+    case "step.llm_proposal":
+      return `Tool proposal: ${p.tool_name || "query_taxi_data"} (${p.analysis || p.input_summary || "default"}, limit=${p.limit ?? 5})`;
     case "tool.started":
       return `Executing ${p.tool_name || "MCP tool"} in DuckDB`;
     case "tool.completed":
-      return `DuckDB query ${p.query_id || ""} completed · ${p.row_count ?? 0} rows · ${p.duration_ms ?? 0}ms`;
+    case "step.tool_execution":
+    case "step.tool_call":
+      return `DuckDB query ${p.query_id || ""} completed · ${p.row_count ?? p.output_summary ?? 0} rows · ${p.duration_ms ?? 0}ms`;
+    case "step.final_answer":
+    case "step.llm_final_answer":
+      return `Final answer synthesized · ${p.output_summary ? `"${p.output_summary.slice(0, 80)}..."` : "response ready"}`;
     case "context.reduced":
       return `Working context reduced · query ${p.query_id || ""} rows bounded to working window`;
     case "run.completed":
-      return `Run completed successfully · ${p.total_tokens ?? 0} tokens · $${Number(p.estimated_cost_usd ?? 0).toFixed(4)} · ${p.latency_ms ?? 0}ms`;
+    case "job.completed":
+      return `Run completed successfully · ${p.total_tokens ?? (Number(p.input_tokens || 0) + Number(p.output_tokens || 0))} tokens · $${Number(p.estimated_cost_usd ?? 0.001).toFixed(4)} · ${p.latency_ms ?? 0}ms`;
     case "run.budget_exceeded":
       return `Budget exceeded: ${p.reason || p.failure_code || "limit breached"}`;
     case "run.failed":
+    case "job.failed":
       return `Run failed: ${p.error || p.failure_code || "error"}`;
     default:
       if (event.event_type.startsWith("step.")) {

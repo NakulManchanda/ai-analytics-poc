@@ -114,12 +114,18 @@ export default function App() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ prompt: cleanPrompt, conversation_id: convId }),
       });
-      const text = await response.text();
       let payload:
         | AskResponse
         | { detail?: { code?: string; retryable?: boolean } };
       try {
-        payload = JSON.parse(text);
+        if (typeof response.json === "function") {
+          payload = (await response.json()) as any;
+        } else if (typeof response.text === "function") {
+          const rawText = await response.text();
+          payload = JSON.parse(rawText);
+        } else {
+          throw new Error("Invalid response interface");
+        }
       } catch {
         throw new Error(
           response.ok
