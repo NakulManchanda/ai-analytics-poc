@@ -33,7 +33,7 @@ A naive AI wrapper simply sends a user prompt directly to an LLM API endpoint an
 │  └───────────────────────┘   └───────────────────────┘   └───────────────┘  │
 │                                                                             │
 │  ┌───────────────────────────────────────────────────────────────────────┐  │
-│  │ Multi-Turn Agent Orchestration Loop ([loop.py](https://github.com/NakulManchanda/ai-analytics-poc/blob/main/services/app/app/orchestration/loop.py))                         │  │
+│  │ Multi-Turn Agent Execution Harness ([loop.py](https://github.com/NakulManchanda/ai-analytics-poc/blob/main/services/app/app/orchestration/loop.py))                      │  │
 │  └───────────────┬───────────────────────────────────────┬───────────────┘  │
 └──────────────────┼───────────────────────────────────────┼──────────────────┘
                    │                                       │
@@ -378,7 +378,7 @@ When architecting production AI systems:
 ---
 
 ### 📂 Codebase References & Implementation Index
-- **Agent Orchestrator Loop**: [services/app/app/orchestration/loop.py](https://github.com/NakulManchanda/ai-analytics-poc/blob/main/services/app/app/orchestration/loop.py)
+- **Multi-Turn Agent Execution Harness**: [services/app/app/orchestration/loop.py](https://github.com/NakulManchanda/ai-analytics-poc/blob/main/services/app/app/orchestration/loop.py)
 - **Execution Budgets & Guardrails**: [services/app/app/orchestration/budgets.py](https://github.com/NakulManchanda/ai-analytics-poc/blob/main/services/app/app/orchestration/budgets.py)
 - **Context Reducer**: [services/app/app/orchestration/reducer.py](https://github.com/NakulManchanda/ai-analytics-poc/blob/main/services/app/app/orchestration/reducer.py)
 - **FastMCP Analytical Server**: [services/mcp/mcp_server/server.py](https://github.com/NakulManchanda/ai-analytics-poc/blob/main/services/mcp/mcp_server/server.py)
