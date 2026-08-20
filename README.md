@@ -181,8 +181,59 @@ terraform -chdir=infra/terraform destroy
 
 ---
 
+## Final Verified Architecture State & Live Status
+
+### 🌐 Live Production Endpoints
+
+- **Primary Custom Subdomain**: [https://ai.sibkaro.com](https://ai.sibkaro.com)
+- **Apex Domain**: [https://sibkaro.com](https://sibkaro.com)
+- **Direct CloudFront HTTPS**: `https://d71q2u5j5gxbq.cloudfront.net` *(or `https://db5j03ttoao1a.cloudfront.net`)*
+
+### 📊 Verified Live Status
+
+The deployed platform operates as a coordinated 5-component distributed system:
+
+| Layer | Service / Target | Live Health / Status | Verified Capability |
+| :--- | :--- | :--- | :--- |
+| **Edge CDN** | AWS CloudFront + ACM | `HTTP/2 200 OK` | Custom domain SSL (`sibkaro.com`), SPA routing, `/api/*` cache bypass |
+| **Frontend UI** | Amazon S3 + OAC | `HTTP 200 OK` | React 18 SPA, real-time SSE Timeline, Working Context Inspector |
+| **Ingress Proxy** | Application Load Balancer | `healthy` | Public path-based routing to internal ECS Fargate tasks |
+| **Application Layer** | FastAPI `ai-app` (Fargate) | `status: ok` | Bedrock Claude 3.5 Haiku orchestration, execution budgets, DynamoDB state |
+| **Analytical Gateway** | FastMCP `analytics-mcp` | `status: ok (2 tools, 1 resource)` | Read-only DuckDB aggregation over 2.96M NYC taxi records via Service Connect |
+
+---
+
+## Frequently Asked Questions & System Concepts
+
+### What dataset is being analyzed?
+The analytical engine is pinned to the official **NYC TLC Yellow Taxi dataset (January 2024)**, consisting of 2,964,624 trip records and 265 official NYC taxi zone definitions. FastMCP runs memory-bounded DuckDB queries against the local Parquet data directly within the analytical container.
+
+### Why is FastMCP separated from FastAPI?
+Separating FastAPI and FastMCP creates a hard security and architectural boundary:
+- **FastAPI (`ai-app`)** owns all LLM provider interactions, loop budgets, prompt templates, and durable state storage.
+- **FastMCP (`analytics-mcp`)** exposes strictly allowlisted, read-only analytics tools (`query_taxi_data`, `get_dataset_profile`). It **never** receives arbitrary user SQL, never makes LLM calls, and never stores persistent user data.
+
+### How does the system handle state and real-time streaming?
+- **Durable State**: **Amazon DynamoDB** stores complete conversation threads, messages, execution runs, and job metadata.
+- **Transient Streaming**: **Redis Streams** coordinate real-time Server-Sent Events (`run.received`, `tool.requested`, `tool.completed`, `run.completed`). If Redis is restarted, no durable conversation state is lost.
+
+### How do Execution Budgets prevent runaway costs?
+Every request operates under an immutable `ExecutionBudget` with strict limits:
+- **Maximum Iterations**: 5 model turns
+- **Maximum Tool Calls**: 3 invocations
+- **Maximum Execution Time**: 30.0 seconds
+- **Maximum Result Size**: 8,192 bytes (with automatic context reduction)
+
+### What makes the AWS infrastructure cost-efficient?
+- **Zero-NAT Architecture**: ECS Fargate containers use direct Internet Gateway routing with public IPs and strict security groups, saving ~$32+/month per NAT gateway.
+- **Serverless Compute**: Fargate containers, DynamoDB on-demand billing, and CloudFront pay-per-request ensure costs remain near zero when idle.
+
+---
+
 ## Work History & Decisions
 
+- [Public Cloud UAT Guide](docs/public-uat-guide.md)
+- [Local UAT Guide](docs/uat-guide.md)
 - [Implementation Plan](docs/implementation-plan.md)
 - [Monotonic Work History Ledger](docs/work-history/README.md)
 - [Architectural Decisions](docs/decisions/README.md)
