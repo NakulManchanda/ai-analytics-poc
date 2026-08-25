@@ -1,118 +1,102 @@
-# User Acceptance Testing (UAT) Manual Runbook
+# Local User Acceptance Testing Guide
 
-This document contains step-by-step instructions to manually verify the complete AI Analytics POC system end-to-end.
+This guide verifies the current v1.1 local contract. It uses the deterministic
+local stack and does not make a claim about an AWS deployment or ECS restart
+recovery.
 
----
+## Start the local stack
 
-## Pre-Requisites & Environment Startup
-
-From the repository root (`/Users/nakulmanchanda/dev/ai_app_poc`):
+From the repository root:
 
 ```bash
-# 1. Activate the Python virtual environment
-source .venv/bin/activate
-
-# 2. Start the full 5-service local stack (React UI, FastAPI app, FastMCP server, Redis, Worker)
 docker compose up --build -d
 ```
 
----
+The web gateway is available at <http://localhost:3000>. The Compose path uses
+the local fake LLM, so these checks do not invoke Bedrock.
 
-## UAT Test Cases
+## One durable-conversation API flow
 
-### Test Case 1: System Health & FastMCP Capability Discovery
-*Objective*: Verify that the Gateway and MCP server are discoverable without making paid LLM calls.
-
-1. **Open your browser** to: [http://localhost:3000](http://localhost:3000)
-2. **Observe Header Badges**:
-   - [ ] Backend status displays: `Backend ready` (green badge).
-   - [ ] FastMCP status displays: `MCP discovered · 2 tools · 1 resources`.
-3. **Command-line verification**:
-   ```bash
-   curl -s http://localhost:3000/api/status | python3 -m json.tool
-   ```
-   - [ ] Expected JSON output includes `"status": "ok"` for `app` and `mcp`.
-
----
-
-### Test Case 2: Interactive AI Analytics Query & Telemetry Inspectors
-*Objective*: Verify the bounded multi-step agent loop, tool execution over MCP, and real-time SSE progress & context reduction.
-
-1. **In the Web UI ([http://localhost:3000](http://localhost:3000))**:
-   - In the query prompt input, enter or click a sample question (e.g. `Which pickup zones have the most trips?`).
-   - Click **Run analysis**.
-2. **Verify the "Run Timeline (SSE)" Tab**:
-   - [ ] Switch to **Run Timeline (SSE)** tab (or observe live during execution).
-   - [ ] Status badge displays **`● COMPLETED`** (or **`● STREAMING`** while active).
-   - [ ] Event `run.received` appears showing the run initialization.
-   - [ ] Event `tool.requested` appears showing tool proposal of `query_taxi_data` (analysis & limit).
-   - [ ] Event `tool.completed` appears showing DuckDB MCP execution with row count and query ID.
-   - [ ] Event `run.completed` appears showing total token usage and execution latency.
-   - [ ] Final synthesized answer appears in the main answer card on the left.
-3. **Verify the "Working Context Panel" Tab (Context Reducer Inspector)**:
-   - [ ] Switch to **Working Context Panel** tab.
-   - [ ] **Top Metric Cards**: Displays `Stored Messages (DynamoDB)`, `Messages in LLM Context`, and `Schema Context Size` (184 B).
-   - [ ] **Core AI Thesis Badge**: Explains bounded prompt window vs authoritative durable history.
-   - [ ] **Recent Observations & Artifacts**: Shows DuckDB query ID, preview rows, and `artifact://` URI references.
-   - [ ] **Run Execution Budgets**: Shows progress bars for Current Iteration (e.g. 1/6), Remaining Tool Calls (e.g. 7/8), Remaining Tokens, and Estimated Cost Budget.
-
----
-
-### Test Case 3: Asynchronous Job Submission & Background Worker
-*Objective*: Verify async job dispatch via Redis queue, background worker processing, and durable state storage.
-
-1. **Submit an asynchronous report job via cURL**:
-   ```bash
-   curl -X POST http://localhost:3000/api/jobs \
-     -H "Content-Type: application/json" \
-     -d '{"prompt": "Generate full monthly trip volume summary for January 2024"}' \
-     | python3 -m json.tool
-   ```
-2. **Verify immediate acceptance**:
-   - [ ] Response returns HTTP 200 with `"status": "submitted"`, `"job_id": "job-..."`, and a `"job_url"`.
-3. **Poll the job status until completed**:
-   ```bash
-   # Replace <JOB_ID> with the job_id returned above
-   curl -s http://localhost:3000/api/jobs/<JOB_ID> | python3 -m json.tool
-   ```
-   - [ ] Within ~3–5 seconds, `"status"` transitions from `"in_progress"` to `"completed"`.
-   - [ ] `"result"` contains the generated analytical report.
-
----
-
-### Test Case 4: Historical Run Event Replay
-*Objective*: Verify that event streams are reconstructible and can be replayed for auditability.
-
-1. **Query run events with replay**:
-   ```bash
-   # Run a test ask query to get a run_id
-   RUN_ID=$(curl -s -X POST http://localhost:3000/api/ask \
-     -H "Content-Type: application/json" \
-     -d '{"prompt": "What is the total trip count?", "conversation_id": "conv_replay_test"}' | python3 -c 'import sys, json; print(json.load(sys.stdin)["run_id"])')
-   
-   echo "Replaying events for Run: ${RUN_ID}"
-   
-   # Replay the SSE stream from the beginning
-   curl -N "http://localhost:3000/api/runs/${RUN_ID}/events"
-   ```
-   - [ ] Stream outputs standard SSE format `event: run.received`, `event: tool.requested`, etc. in order from step 1 to completion.
-
----
-
-### Test Case 5: Infrastructure Static Validation (AWS Zero-NAT & CloudFront)
-*Objective*: Verify that the Terraform code for ALB, ECS Fargate, S3 OAC, and CloudFront is syntactically sound and passes validation.
+The server creates the conversation ID on the first request. Reuse that ID for
+the second turn; do not invent a client-side conversation ID.
 
 ```bash
-make -C infra/terraform fmt-check
-make -C infra/terraform validate
-```
-- [ ] Output prints `Success! The configuration is valid.` with 0 errors.
+FIRST=$(curl -sS -X POST http://localhost:3000/api/ask \
+  -H 'content-type: application/json' \
+  -d '{"prompt":"Which pickup zones have the most trips?"}')
+CONVERSATION_ID=$(printf '%s' "$FIRST" | python3 -c 'import json,sys; print(json.load(sys.stdin)["conversation_id"])')
+RUN_1=$(printf '%s' "$FIRST" | python3 -c 'import json,sys; print(json.load(sys.stdin)["run_id"])')
 
----
+SECOND=$(curl -sS -X POST http://localhost:3000/api/ask \
+  -H 'content-type: application/json' \
+  -d "{\"conversation_id\":\"${CONVERSATION_ID}\",\"prompt\":\"Show me the top five.\"}")
+RUN_2=$(printf '%s' "$SECOND" | python3 -c 'import json,sys; print(json.load(sys.stdin)["run_id"])')
+
+curl -sS "http://localhost:3000/api/conversations/${CONVERSATION_ID}" | python3 -m json.tool
+curl -N "http://localhost:3000/api/runs/${RUN_2}/events"
+```
+
+Confirm all of the following:
+
+- The two responses share `conversation_id` and have distinct `run_id` values.
+- `GET /api/conversations/{conversation_id}` returns four ordered messages
+  (`user`, `assistant`, `user`, `assistant`), two runs, and nonempty run steps.
+- The event endpoint returns `Content-Type: text/event-stream` and its durable
+  replay orders `run.received`, `step.llm_proposal`, `step.tool_call`,
+  `context.reduced`, `step.llm_final_answer`, and `run.completed` with sequences
+  starting at one.
+- The `context.reduced` event contains a reconstructed `working_context`; the
+  terminal event reports actual tokens and marks TTFT unavailable with
+  `non_streaming_blocking` for this synchronous API.
+
+For a fast, deterministic equivalent of this flow without Docker, run:
+
+```bash
+uv run --project services/app pytest services/app/tests/test_v11_integration_smoke.py -q
+```
+
+It creates a fresh FastAPI app and TestClient over the same injected
+`InMemoryStateRepository`, proving API reconstruction independently of the
+first app's in-memory event publisher. It intentionally does **not** prove
+process-restart persistence: `InMemoryStateRepository` is only the local/test
+default.
+
+## Browser check
+
+1. Open <http://localhost:3000> and submit a question.
+2. Confirm the UI stores the backend-returned conversation ID, not a generated
+   client ID; submit a second question and confirm the run ID changes.
+3. Refresh while the local Compose process remains running and verify the
+   conversation snapshot and run details render from the API.
+4. Inspect the timeline and working context. Values must come from the durable
+   snapshot/replayed events. A synchronous run may show TTFT as unavailable.
+
+Do not use a local container or process restart as a durability acceptance
+test. That is the separate deployed DynamoDB checkpoint below.
+
+## Post-deployment AWS checkpoint
+
+After the v1.1 image and frontend have been deployed with the existing
+`DYNAMODB_TABLE_NAME` configuration, an operator must repeat the two-turn flow,
+restart/replace the ECS application task, reload the conversation, and inspect
+the DynamoDB-backed result. Record the deployed URL, image/task revision, and
+observed recovery separately. The v1.1 checkpoint is now recorded in work
+history 0030: `60373f3` on task definition `:5` recovered a DynamoDB-backed
+four-message/two-run conversation after task replacement. It does not make the
+environment CloudWatch-clean: missing `REDIS_URL` causes Redis
+connection-refused publish/read errors, tracked in #57; the v1.1 tag remains
+pending.
+
+## Existing isolated Compose smoke
+
+`make integration-smoke` retains the existing five-service isolated Compose
+smoke (health, `/api/ask`, jobs, replay availability, and static proxy). It is
+useful alongside the focused v1.1 API test above; it is not a substitute for
+the post-deployment DynamoDB restart checkpoint.
 
 ## Teardown
 
-When you have finished testing:
+When this local stack is no longer needed:
 
 ```bash
 docker compose down

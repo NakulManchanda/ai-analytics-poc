@@ -29,3 +29,8 @@ Monotonically numbered log of every post-bootstrap task. Each entry records the 
 | [0023](0023-m15-cloudfront-frontend.md) | 15 | [#41](https://github.com/NakulManchanda/ai-analytics-poc/pull/41) | S3 + CloudFront public frontend deployment | Merged (`9ad648f`) |
 | [0024](0024-m16-final-demo-and-review.md) | 16 | [#42](https://github.com/NakulManchanda/ai-analytics-poc/pull/42) | Final demo, security, and documentation review | Merged (`d65de54`) |
 | [0025](0025-uat-guides-and-telemetry-fix.md) | 16 UAT | [#43](https://github.com/NakulManchanda/ai-analytics-poc/pull/43) | Local and public UAT runbooks, SSE stream fix, and sample questions | Merged (`05a8dc3`) |
+| [0026](0026-v11-state-contract.md) | v1.1 | [#51](https://github.com/NakulManchanda/ai-analytics-poc/pull/51) | Application-owned durable conversation and synchronous API contract | Merged (`cff3d3b`) |
+| [0027](0027-v11-truthful-telemetry.md) | v1.1 | [#52](https://github.com/NakulManchanda/ai-analytics-poc/pull/52) | Durable working context and truthful blocking-run telemetry | Merged (`f55d331`) |
+| [0028](0028-v11-sse-stability.md) | v1.1 | [#50](https://github.com/NakulManchanda/ai-analytics-poc/pull/50) | Stable Timeline Inspector SSE lifecycle | Merged (`84c298f`) |
+| [0029](0029-v11-truthful-ui.md) | v1.1 | [#53](https://github.com/NakulManchanda/ai-analytics-poc/pull/53) | Truthful durable conversation, context, and telemetry UI | Merged (`60373f3`) |
+| [0030](0030-v11-integration.md) | v1.1 | [#56](https://github.com/NakulManchanda/ai-analytics-poc/pull/56) | Local integration contract smoke and truthful UAT boundary | Draft for #49 |

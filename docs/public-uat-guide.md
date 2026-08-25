@@ -1,111 +1,79 @@
-# Public Cloud User Acceptance Testing (UAT) Guide
+# Public Cloud UAT Guide
 
-This guide is designed for stakeholders, product managers, and external evaluators testing the live **AI Analytics POC** deployed on AWS via Amazon CloudFront.
+This is an **after-deployment** v1.1 acceptance checkpoint. It must be run only
+after an operator has deployed the v1.1 application and frontend using the
+existing AWS configuration. The v1.1 checkpoint is recorded as passed for
+`60373f3` on task definition `:5`: after task replacement, a fresh browser
+restored the DynamoDB-backed conversation, reconstructed SSE events, telemetry,
+and TTFT. This does not make the environment CloudWatch-clean: missing
+`REDIS_URL` causes Redis connection-refused publish/read errors, tracked in #57;
+the v1.1 tag remains pending.
 
-No local setup, Docker, or Python installation is required to test the live web interface.
-
----
-
-## Public Cloud URLs
-
-Access the live production deployment at:
-👉 **`https://ai.sibkaro.com`** (or **`https://sibkaro.com`**)
-
-*Direct CloudFront HTTPS Fallback*:
-👉 **`https://d71q2u5j5gxbq.cloudfront.net`** (or **`https://db5j03ttoao1a.cloudfront.net`**)
-
----
-
-## Acceptance Test Scenarios
-
-### Scenario 1: Health & Capability Discovery (Zero-LLM Verification)
-*Objective*: Confirm that the edge CDN, Application Load Balancer, and FastMCP analytics gateway are healthy and discoverable without triggering billable model calls.
-
-1. Open **`https://ai.sibkaro.com`** (or **`https://sibkaro.com`**) in any modern web browser.
-2. Verify the top status board badges:
-   - [ ] **Backend Status**: Displays `Backend ready` (FastAPI `ai-app`).
-   - [ ] **FastMCP Status**: Displays `MCP discovered · 2 tools · 1 resources`.
-3. *(Optional)* API verification via terminal:
-   ```bash
-   curl -s https://ai.sibkaro.com/api/status | python3 -m json.tool
-   ```
-   - [ ] Returns HTTP 200 with:
-     ```json
-     {
-       "app": { "status": "ok", "service": "ai-app" },
-       "mcp": { "status": "ok", "tools": 2, "resources": 1 }
-     }
-     ```
-
----
-
-### Scenario 2: Interactive AI Analytics Query & Telemetry Streaming
-*Objective*: Execute an interactive analytics query against the 2.96M NYC taxi trip dataset using the governed FastMCP DuckDB engine and observe real-time Server-Sent Events (SSE) and context reduction.
-
-1. **Submit an Analytical Query**:
-   - In the prompt input area, click one of the **Sample Question** chips (e.g., `📍 Top Pickup Zones` or `⏰ Peak Travel Hours`), or enter your own prompt:
-     ```text
-     Which pickup zones have the most trips?
-     ```
-   - Click **Run analysis**.
-2. **Verify the "Run Timeline (SSE)" Inspector**:
-   - [ ] Badge transitions to **`● STREAMING`** and completes as **`● COMPLETED`**.
-   - [ ] Step **`#1 run.received`**: Displays the initialized execution run.
-   - [ ] Step **`#2 step.tool_proposal`** (or `tool.requested`): Displays the model's proposal of `query_taxi_data` with analysis arguments.
-   - [ ] Step **`#3 step.tool_execution`** (or `tool.completed`): Displays DuckDB query execution with exact row count and latency.
-   - [ ] Step **`#4 step.final_answer`**: Displays synthesized response preparation.
-   - [ ] Step **`#5 run.completed`**: Displays total token telemetry, estimated cost, and overall run duration.
-   - [ ] The synthesized answer appears in the main answer panel.
-3. **Verify the "Working Context Panel" Inspector**:
-   - [ ] Switch to the **Working Context Panel** tab.
-   - [ ] Inspect **Schema Context Size** (184 bytes), **Messages in LLM Context**, and **Stored Messages (DynamoDB)**.
-   - [ ] Observe the **Run Execution Budgets** (visual meters for iterations, tool calls, tokens, and USD cost boundaries).
-
----
-
-### Scenario 3: Asynchronous Report Job Processing
-*Objective*: Dispatch an asynchronous report job via the `/api/jobs` endpoint and retrieve the generated daily zone analytics report.
-
-1. **Submit the asynchronous job**:
-   ```bash
-   curl -X POST https://ai.sibkaro.com/api/jobs \
-     -H "Content-Type: application/json" \
-     -d '{"prompt": "Generate full monthly trip volume summary for January 2024"}' \
-     | python3 -m json.tool
-   ```
-   - [ ] Immediate response returns HTTP 200 with `"status": "PENDING"` (or `"submitted"`) and a unique `"job_id"`.
-2. **Poll the completed report**:
-   ```bash
-   # Replace <JOB_ID> with the job_id returned above
-   curl -s https://db5j03ttoao1a.cloudfront.net/api/jobs/<JOB_ID> | python3 -m json.tool
-   ```
-   - [ ] Status transitions to `"COMPLETED"` within seconds.
-   - [ ] `"result"` contains the aggregated daily zone summary across 2,964,624 taxi trips.
-
----
-
-### Scenario 4: Historical Event Stream Audit & Replay
-*Objective*: Verify that complete run execution traces are durably recorded and can be replayed via SSE for auditability.
+Set the actual deployed public origin before testing:
 
 ```bash
-# 1. Ask a question and extract the run_id
-RUN_ID=$(curl -s -X POST https://db5j03ttoao1a.cloudfront.net/api/ask \
-  -H "Content-Type: application/json" \
-  -d '{"prompt": "What are the peak hours for taxi rides?", "conversation_id": "conv_public_audit"}' \
-  | python3 -c 'import sys, json; print(json.load(sys.stdin)["run_id"])')
-
-echo "Auditing Run: ${RUN_ID}"
-
-# 2. Replay the complete execution stream
-curl -N "https://db5j03ttoao1a.cloudfront.net/api/runs/${RUN_ID}/events"
+export APP_ORIGIN='https://<current-public-origin>'
 ```
-- [ ] Outputs ordered SSE stream events (`run.received` $\rightarrow$ `tool.requested` $\rightarrow$ `tool.completed` $\rightarrow$ `run.completed`).
 
----
+## Health and browser entry point
 
-## Security & Architecture Highlights
+Open `${APP_ORIGIN}` in a browser and verify the app is reachable. Optionally
+check the API without triggering a model request:
 
-- **Edge Security**: HTTPS enforced via AWS CloudFront CDN with TLS 1.3.
-- **SigV4 Origin Access Control (OAC)**: The S3 frontend bucket is private with zero public bucket policies.
-- **Least-Privilege Task Roles**: Backend services run in private subnets with IAM roles restricted to necessary DynamoDB, S3, and Bedrock actions.
-- **Budget Hard Limits**: Token and loop iteration ceilings prevent runaway inference loops or unexpected costs.
+```bash
+curl -fsS "${APP_ORIGIN}/api/health" | python3 -m json.tool
+```
+
+## Two-turn backend-owned conversation
+
+The first `/api/ask` request deliberately has no `conversation_id`. The backend
+returns the authoritative ID; send that returned ID for the second request.
+
+```bash
+FIRST=$(curl -fsS -X POST "${APP_ORIGIN}/api/ask" \
+  -H 'content-type: application/json' \
+  -d '{"prompt":"Which pickup zones have the most trips?"}')
+CONVERSATION_ID=$(printf '%s' "$FIRST" | python3 -c 'import json,sys; print(json.load(sys.stdin)["conversation_id"])')
+RUN_1=$(printf '%s' "$FIRST" | python3 -c 'import json,sys; print(json.load(sys.stdin)["run_id"])')
+
+SECOND=$(curl -fsS -X POST "${APP_ORIGIN}/api/ask" \
+  -H 'content-type: application/json' \
+  -d "{\"conversation_id\":\"${CONVERSATION_ID}\",\"prompt\":\"Show me the top five.\"}")
+RUN_2=$(printf '%s' "$SECOND" | python3 -c 'import json,sys; print(json.load(sys.stdin)["run_id"])')
+
+curl -fsS "${APP_ORIGIN}/api/conversations/${CONVERSATION_ID}" | python3 -m json.tool
+curl -N "${APP_ORIGIN}/api/runs/${RUN_2}/events"
+```
+
+Acceptance observations:
+
+- Both responses share one backend-owned conversation ID and use distinct run IDs.
+- The reloaded conversation has four ordered messages and two runs with steps.
+- The SSE response uses `text/event-stream`; a reconstructed completed run has
+  ordered sequences and contains `run.received`, persisted step events,
+  `context.reduced`, and a terminal event.
+- The terminal telemetry is truthful. For the current blocking `/api/ask`
+  contract, TTFT can be explicitly unavailable (`non_streaming_blocking`) rather
+  than a fabricated timing value.
+- In the browser, refresh after the two turns and verify the app reloads the
+  conversation snapshot and truthful timeline/working-context values.
+
+## Durable restart-recovery checkpoint
+
+This step is intentionally separate from normal public UAT and requires an
+operator who can replace the deployed application task without changing
+infrastructure:
+
+1. Record `${CONVERSATION_ID}` and `${RUN_2}` from the preceding flow.
+2. Confirm the deployed application has `DYNAMODB_TABLE_NAME` configured and
+   uses the existing DynamoDB table; do not use an in-memory fallback.
+3. Replace/restart the ECS application task through the approved operational
+   process, then repeat `GET /api/conversations/${CONVERSATION_ID}` and the SSE
+   replay request.
+4. Record the task/image revision, timestamp, URL, results, and any DynamoDB
+   inspection in the release evidence.
+
+Do not mark a future deployment checkpoint complete from local tests, an
+unchanged deployment, or a browser refresh alone. The recorded `60373f3`
+checkpoint passed, but its Redis/CloudWatch configuration gap remains open in
+#57 and prevents the v1.1 tag.

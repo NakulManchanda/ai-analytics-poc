@@ -1,12 +1,39 @@
 # AI Analytics POC
 
-A production-grade, cost-governed AI Analytics platform featuring durable agent orchestration, strict Model Context Protocol (MCP) service boundaries, real-time Server-Sent Events (SSE) streaming UX, bounded working-context inspection, and zero-NAT AWS cloud infrastructure.
+A cost-governed AI Analytics POC with application-owned durable conversation
+orchestration, strict Model Context Protocol (MCP) boundaries, reconstructed
+Server-Sent Events (SSE), and bounded working-context inspection.
 
 > 📚 **System Design Deep-Dive Blog**: Read **[What Happens When a User Clicks "Run Analysis" in an AI App?](docs/system-design-blog.md)** for a comprehensive architectural breakdown of Agent Loops, FastMCP tool boundaries, Context Reducers, and SSE event streaming.
 
 ---
 
-## 🌐 Live Production Endpoints & Verified Architecture
+## v1.1 local verification and deployment boundary
+
+The current v1.1 contract is verified locally with a backend-created
+conversation, two synchronous `/api/ask` turns, durable conversation reload,
+and reconstructed run events:
+
+```bash
+uv run --project services/app pytest services/app/tests/test_v11_integration_smoke.py -q
+```
+
+The smoke uses the intentional local/test default,
+`InMemoryStateRepository`, then makes a fresh FastAPI app/TestClient over that
+same injected repository. It verifies API reconstruction, not process-restart
+durability. In deployed mode, `DYNAMODB_TABLE_NAME` selects the existing
+DynamoDB state repository and must not silently fall back to in-memory state.
+
+The separately recorded AWS checkpoint passed for `60373f3` on `ai-app` task
+definition `:5`: DynamoDB contained the four-message/two-run conversation, and
+a replacement ECS task restored that conversation and six reconstructed SSE
+events in a fresh browser tab. The environment is not CloudWatch-clean yet:
+missing `REDIS_URL` produces connection-refused Redis publish/read errors;
+[#57](https://github.com/NakulManchanda/ai-analytics-poc/issues/57) tracks the
+gap, and the v1.1 tag remains pending. See the
+[local guide](docs/local-uat-guide.md) and [public guide](docs/public-uat-guide.md).
+
+## Historical deployment endpoints and architecture
 
 ### Production URL Access
 
@@ -16,7 +43,7 @@ A production-grade, cost-governed AI Analytics platform featuring durable agent 
 
 > 💡 **How It Works & Quick Walkthrough**: See the **[Public Cloud Testing Guide](docs/public-uat-guide.md)** for step-by-step test scenarios, capability discovery, and sample analytical queries. For local development, see the **[Local Docker Testing Guide](docs/local-uat-guide.md)**.
 
-### 📊 Verified Live System Status
+### 📊 Previously reported live system status
 
 The deployed platform operates in AWS `us-east-1` as a coordinated 5-component distributed system:
 
@@ -81,9 +108,9 @@ The deployed platform operates in AWS `us-east-1` as a coordinated 5-component d
 3. **Bounded Agent Loop with Strict Budgets**:
    - Multi-step orchestration loop (up to 5 iterations) governed by hard limits on wall-clock execution time (30s), total tool invocations (3), token consumption, and tool output byte size.
    - Context reducer compresses intermediate tool observations into a bounded working context, preventing prompt bloat.
-4. **Real-Time Streaming UX & Working-Context Inspector**:
-   - Live Server-Sent Events (SSE) feed step-by-step progress (`run.received`, `step.tool_proposal`, `step.tool_execution`, `step.final_answer`, `run.completed`) to the React UI in real time.
-   - Built-in UI Inspector tabs display dataset schema, tool parameters, token usage, latency breakdowns, and raw event replays.
+4. **Reconstructed SSE UX & Working-Context Inspector**:
+   - Completed runs can be reconstructed as ordered Server-Sent Events: `run.received`, persisted step events, `context.reduced`, and a truthful terminal event. `/api/ask` remains synchronous and blocking; it is not a v2 streaming endpoint.
+   - Built-in UI inspector values come from the durable snapshot/replayed events. An unavailable metric, such as TTFT for a non-streaming blocking run, is shown as unavailable rather than invented.
 5. **Zero-NAT Cost-Efficient AWS Infrastructure**:
    - ECS Fargate tasks run in public subnets with `assign_public_ip = true` to communicate with AWS Bedrock, ECR, and S3 directly over the Internet Gateway, completely eliminating costly AWS NAT Gateway overhead ($0/mo NAT cost).
 
@@ -160,6 +187,12 @@ Run the multi-service integration smoke test verifying health, synchronous `/api
 make integration-smoke
 ```
 
+For the v1.1 durable API/reload contract specifically, also run:
+
+```bash
+uv run --project services/app pytest services/app/tests/test_v11_integration_smoke.py -q
+```
+
 ---
 
 ## AWS Deployment
@@ -194,6 +227,10 @@ make ecs-smoke
 # Verify full SPA + SSE streaming through CloudFront HTTPS
 make cloudfront-smoke
 ```
+
+After a v1.1 deployment, use the public UAT guide to perform and record the
+separate DynamoDB-backed ECS restart/recovery checkpoint. Do not infer that
+checkpoint from local in-memory tests.
 
 ---
 
