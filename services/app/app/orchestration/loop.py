@@ -8,7 +8,12 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from app.config import DEFAULT_MODEL_ID, LLMConfigurationError
-from app.events import EventPublisher, RunEvent
+from app.events import (
+    EventPublisher,
+    RunEvent,
+    context_reduced_payload,
+    terminal_run_payload,
+)
 from app.llm import LLMClient, LLMProviderError, ToolProposalResult
 from app.mcp_client import (
     ALLOWED_ANALYSES,
@@ -71,6 +76,7 @@ class LoopResult:
     latency_ms: int = 0
     failure_code: str | None = None
     llm_calls: list[LLMCall] = field(default_factory=list)
+    telemetry: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -241,6 +247,18 @@ class OrchestrationLoop:
         steps: list[RunStep] = []
         llm_calls: list[LLMCall] = []
         step_seq = 1
+        proposal_latency_ms: int | None = None
+        tool_latency_ms: int | None = None
+        final_answer_latency_ms: int | None = None
+
+        def telemetry(end_to_end_latency_ms: int) -> dict[str, Any]:
+            return {
+                "end_to_end_latency_ms": end_to_end_latency_ms,
+                "proposal_llm_latency_ms": proposal_latency_ms,
+                "tool_latency_ms": tool_latency_ms,
+                "final_answer_llm_latency_ms": final_answer_latency_ms,
+                "ttft": {"available": False, "reason": "non_streaming_blocking"},
+            }
 
         try:
             proposal_call_id = self._llm_call_id_factory()
@@ -285,6 +303,7 @@ class OrchestrationLoop:
                         "llm_provider_error", err.retryable, llm_call_id, str(err)
                     ) from err
                 call_latency_ms = int((time.monotonic() - call_start) * 1000)
+                proposal_latency_ms = call_latency_ms
 
                 cost = estimate_cost(proposal.input_tokens, proposal.output_tokens)
                 tracker.record_llm_call(
@@ -344,7 +363,6 @@ class OrchestrationLoop:
                     )
                     self._repo.add_run_step(invalid_step)
                     steps.append(invalid_step)
-                    emit("run.failed", {"error": "Invalid tool proposal arguments"})
                     raise OrchestrationError(
                         "tool_validation_error",
                         False,
@@ -384,6 +402,7 @@ class OrchestrationLoop:
                         "mcp_tool_error", err.retryable, llm_call_id, str(err)
                     ) from err
                 tool_duration_ms = int((time.monotonic() - tool_start) * 1000)
+                tool_latency_ms = tool_duration_ms
 
                 query_id_val = str(query_result.get("query_id", ""))
                 last_query_id = query_id_val
@@ -428,6 +447,7 @@ class OrchestrationLoop:
                 working_ctx = self._reducer.reduce(
                     current_prompt=prompt,
                     stored_messages=self._repo.list_messages(conv_id),
+                    current_message_id=user_msg_id,
                     dataset_schema=schema,
                     tool_observations=[query_result],
                     budget_tracker=tracker,
@@ -435,12 +455,28 @@ class OrchestrationLoop:
                 )
                 emit(
                     "context.reduced",
-                    {
-                        "query_id": query_id_val,
+                    context_reduced_payload(
+                        query_id_val,
+                        query_result.get("row_count", 0),
+                        working_ctx.to_dict(),
+                    ),
+                )
+                context_step = RunStep(
+                    step_id=generate_step_id(),
+                    run_id=run_id,
+                    sequence=step_seq,
+                    step_type="context_reduced",
+                    status="completed",
+                    query_id=query_id_val,
+                    output_summary="persisted working context",
+                    metadata={
                         "row_count": query_result.get("row_count", 0),
                         "working_context": working_ctx.to_dict(),
                     },
                 )
+                self._repo.add_run_step(context_step)
+                steps.append(context_step)
+                step_seq += 1
 
                 answer_call_id = self._llm_call_id_factory()
                 emit(
@@ -459,6 +495,7 @@ class OrchestrationLoop:
                         "llm_provider_error", err.retryable, answer_call_id, str(err)
                     ) from err
                 ans_latency_ms = int((time.monotonic() - ans_start) * 1000)
+                final_answer_latency_ms = ans_latency_ms
 
                 ans_cost = estimate_cost(
                     answer_result.input_tokens, answer_result.output_tokens
@@ -519,6 +556,7 @@ class OrchestrationLoop:
 
                 # Update Run to completed
                 total_latency_ms = int((time.monotonic() - start_mono) * 1000)
+                run_telemetry = telemetry(total_latency_ms)
                 completed_run = Run(
                     run_id=run_id,
                     conversation_id=conv_id,
@@ -531,17 +569,20 @@ class OrchestrationLoop:
                     input_tokens=tracker.input_tokens,
                     output_tokens=tracker.output_tokens,
                     estimated_cost_usd=tracker.estimated_cost_usd,
+                    metadata={"telemetry": run_telemetry},
                 )
                 self._repo.update_run(completed_run)
 
                 emit(
                     "run.completed",
-                    {
-                        "status": "completed",
-                        "total_tokens": tracker.total_tokens,
-                        "estimated_cost_usd": tracker.estimated_cost_usd,
-                        "latency_ms": total_latency_ms,
-                    },
+                    terminal_run_payload(
+                        status="completed",
+                        input_tokens=tracker.input_tokens,
+                        output_tokens=tracker.output_tokens,
+                        estimated_cost_usd=tracker.estimated_cost_usd,
+                        failure_code=None,
+                        telemetry=run_telemetry,
+                    ),
                 )
 
                 return LoopResult(
@@ -558,11 +599,13 @@ class OrchestrationLoop:
                     estimated_cost_usd=tracker.estimated_cost_usd,
                     latency_ms=sum(call.latency_ms for call in llm_calls),
                     llm_calls=llm_calls,
+                    telemetry=run_telemetry,
                 )
 
         except BudgetExceededError as err:
             logger.warning("Agent loop budget exceeded: %s", err.reason)
             total_latency_ms = int((time.monotonic() - start_mono) * 1000)
+            run_telemetry = telemetry(total_latency_ms)
             exceeded_run = Run(
                 run_id=run_id,
                 conversation_id=conv_id,
@@ -576,20 +619,25 @@ class OrchestrationLoop:
                 output_tokens=tracker.output_tokens,
                 estimated_cost_usd=tracker.estimated_cost_usd,
                 failure_code="budget_exceeded",
-                metadata={"reason": err.reason, "details": err.details},
+                metadata={
+                    "reason": err.reason,
+                    "details": err.details,
+                    "telemetry": run_telemetry,
+                },
             )
             self._repo.update_run(exceeded_run)
 
             emit(
                 "run.budget_exceeded",
-                {
-                    "status": "budget_exceeded",
-                    "reason": err.reason,
-                    "failure_code": "budget_exceeded",
-                    "total_tokens": tracker.total_tokens,
-                    "estimated_cost_usd": tracker.estimated_cost_usd,
-                    "latency_ms": total_latency_ms,
-                },
+                terminal_run_payload(
+                    status="budget_exceeded",
+                    input_tokens=tracker.input_tokens,
+                    output_tokens=tracker.output_tokens,
+                    estimated_cost_usd=tracker.estimated_cost_usd,
+                    failure_code="budget_exceeded",
+                    telemetry=run_telemetry,
+                    reason=err.reason,
+                ),
             )
 
             return LoopResult(
@@ -607,4 +655,42 @@ class OrchestrationLoop:
                 latency_ms=total_latency_ms,
                 failure_code="budget_exceeded",
                 llm_calls=llm_calls,
+                telemetry=run_telemetry,
             )
+        except OrchestrationError as err:
+            total_latency_ms = int((time.monotonic() - start_mono) * 1000)
+            run_telemetry = telemetry(total_latency_ms)
+            failed_run = Run(
+                run_id=run_id,
+                conversation_id=conv_id,
+                message_id=user_msg_id,
+                status="failed",
+                model=DEFAULT_MODEL_ID,
+                prompt_version="m9.v1",
+                started_at=run.started_at,
+                completed_at=utcnow_isoformat(),
+                input_tokens=tracker.input_tokens,
+                output_tokens=tracker.output_tokens,
+                estimated_cost_usd=tracker.estimated_cost_usd,
+                failure_code=err.code,
+                metadata={
+                    "error": str(err),
+                    "retryable": err.retryable,
+                    "telemetry": run_telemetry,
+                },
+            )
+            self._repo.update_run(failed_run)
+            emit(
+                "run.failed",
+                terminal_run_payload(
+                    status="failed",
+                    input_tokens=tracker.input_tokens,
+                    output_tokens=tracker.output_tokens,
+                    estimated_cost_usd=tracker.estimated_cost_usd,
+                    failure_code=err.code,
+                    telemetry=run_telemetry,
+                    retryable=err.retryable,
+                ),
+                llm_call_id=err.llm_call_id or None,
+            )
+            raise

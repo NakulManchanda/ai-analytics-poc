@@ -119,6 +119,31 @@ def test_context_reducer_multi_turn_divergence_and_summarization() -> None:
     assert recent_ids == ["m3", "m4", "m5", "m6"]
 
 
+def test_context_reducer_uses_the_persisted_current_message_identity() -> None:
+    reducer = ContextReducer(recent_turns_window=1)
+    stored_messages = [
+        Message("m1", "conv_1", 1, "user", "repeat this request"),
+        Message("m2", "conv_1", 2, "assistant", "first answer"),
+        Message("m3", "conv_1", 3, "user", "repeat this request"),
+        Message("m4", "conv_1", 4, "assistant", "second answer"),
+        Message("m5", "conv_1", 5, "user", "repeat this request"),
+    ]
+
+    working_context = reducer.reduce(
+        current_prompt="repeat this request",
+        current_message_id="m5",
+        stored_messages=stored_messages,
+    )
+
+    assert working_context.current_user_message == "repeat this request"
+    assert working_context.stored_message_count == 5
+    assert working_context.included_message_count == 3
+    assert working_context.conversation_summary is not None
+    assert "user: repeat this request | assistant: first answer" == (
+        working_context.conversation_summary
+    )
+
+
 def test_sanitize_and_preview_tool_result_replaces_large_results() -> None:
     large_rows = [[f"Zone_{i}", i * 100, f"Detail_{i}"] for i in range(100)]
     tool_result = {

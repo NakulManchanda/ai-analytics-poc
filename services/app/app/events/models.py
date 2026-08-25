@@ -11,6 +11,49 @@ def utcnow_isoformat() -> str:
     return datetime.now(UTC).isoformat()
 
 
+def context_reduced_payload(
+    query_id: str | None,
+    row_count: int | None,
+    working_context: dict[str, Any],
+) -> dict[str, Any]:
+    """Build the durable and live public contract for a reduced context event."""
+    return {
+        "query_id": query_id,
+        "row_count": row_count,
+        "working_context": working_context,
+    }
+
+
+def terminal_run_payload(
+    *,
+    status: str,
+    input_tokens: int,
+    output_tokens: int,
+    estimated_cost_usd: float,
+    failure_code: str | None,
+    telemetry: dict[str, Any],
+    reason: str | None = None,
+    retryable: bool | None = None,
+) -> dict[str, Any]:
+    """Build the shared live/reconstructed public contract for terminal runs."""
+    payload = {
+        "status": status,
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "total_tokens": input_tokens + output_tokens,
+        "estimated_cost_usd": estimated_cost_usd,
+        "failure_code": failure_code,
+        "latency_ms": telemetry.get("end_to_end_latency_ms"),
+        "telemetry": telemetry,
+        **telemetry,
+    }
+    if reason is not None:
+        payload["reason"] = reason
+    if retryable is not None:
+        payload["retryable"] = retryable
+    return payload
+
+
 @dataclass(frozen=True)
 class RunEvent:
     """Represents a bounded, public, versioned execution event streamed to clients."""
