@@ -33,7 +33,7 @@ The unified orchestration loop emitted a transient context event and partial lat
 
 - Branch: `codex/v11-truthful-telemetry`
 - Tracking issue: #46
-- Draft pull request: pending; not merged or deployed.
+- Draft pull request: [#52](https://github.com/NakulManchanda/ai-analytics-poc/pull/52); not merged or deployed.
 
 ## Limitations
 
