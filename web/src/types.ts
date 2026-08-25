@@ -17,8 +17,52 @@ export type AskResponse = {
   llm_calls?: LLMCallMetadata[];
   usage: { input_tokens: number; output_tokens: number; total_tokens: number };
   latency_ms: number;
-  conversation_id?: string;
-  run_id?: string;
+  conversation_id: string;
+  run_id: string;
+};
+
+export type RunSnapshot = {
+  run_id: string;
+  message_id: string | null;
+  status: string;
+  started_at: string;
+  completed_at: string | null;
+  input_tokens: number;
+  output_tokens: number;
+  estimated_cost_usd: number;
+  steps: Array<{
+    step_id: string;
+    sequence: number;
+    step_type: string;
+    status: string;
+    llm_call_id: string | null;
+    tool_call_id: string | null;
+    query_id: string | null;
+  }>;
+};
+
+export type ConversationSnapshot = {
+  conversation_id: string;
+  messages: Array<{
+    message_id: string;
+    sequence: number;
+    role: "user" | "assistant";
+    content: string;
+    created_at: string;
+  }>;
+  runs: RunSnapshot[];
+};
+
+export type RunTelemetry = {
+  input_tokens?: number;
+  output_tokens?: number;
+  total_tokens?: number;
+  estimated_cost_usd?: number;
+  end_to_end_latency_ms?: number | null;
+  proposal_llm_latency_ms?: number | null;
+  tool_latency_ms?: number | null;
+  final_answer_llm_latency_ms?: number | null;
+  ttft?: { available: boolean; reason?: string };
 };
 
 export type WorkingContextData = {

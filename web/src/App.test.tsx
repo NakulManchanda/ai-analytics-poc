@@ -33,6 +33,7 @@ afterEach(() => {
   cleanup();
   vi.useRealTimers();
   vi.unstubAllGlobals();
+  window.localStorage.clear();
 });
 
 describe("App", () => {
@@ -159,7 +160,7 @@ describe("App", () => {
     expect(screen.getByText("Context Reducer Inspector")).toBeVisible();
   });
 
-  it("demonstrates multi-turn conversation archive and context divergence", async () => {
+  it("uses backend-issued IDs from the first turn and reuses the conversation on the second", async () => {
     let turnCount = 0;
     const fetchRequest = vi.fn().mockImplementation((input: string) => {
       if (input === "/api/status") {
@@ -182,6 +183,32 @@ describe("App", () => {
             usage: { input_tokens: 20, output_tokens: 10, total_tokens: 30 },
             latency_ms: 25,
             run_id: `run_turn_${turnCount}`,
+            conversation_id: "conv_backend_123",
+          }),
+        });
+      }
+      if (input === "/api/conversations/conv_backend_123") {
+        const messages = turnCount === 1
+          ? [
+              { message_id: "msg_1", sequence: 1, role: "user", content: "First query: top pickup zones", created_at: "2026-08-25T00:00:00Z" },
+              { message_id: "msg_2", sequence: 2, role: "assistant", content: "Answer for turn 1.", created_at: "2026-08-25T00:00:01Z" },
+            ]
+          : [
+              { message_id: "msg_1", sequence: 1, role: "user", content: "First query: top pickup zones", created_at: "2026-08-25T00:00:00Z" },
+              { message_id: "msg_2", sequence: 2, role: "assistant", content: "Answer for turn 1.", created_at: "2026-08-25T00:00:01Z" },
+              { message_id: "msg_3", sequence: 3, role: "user", content: "Second query: fare distribution", created_at: "2026-08-25T00:00:02Z" },
+              { message_id: "msg_4", sequence: 4, role: "assistant", content: "Answer for turn 2.", created_at: "2026-08-25T00:00:03Z" },
+            ];
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            conversation_id: "conv_backend_123",
+            messages,
+            runs: Array.from({ length: turnCount }, (_, index) => ({
+              run_id: `run_turn_${index + 1}`, message_id: `msg_${index * 2 + 1}`,
+              status: "completed", started_at: "2026-08-25T00:00:00Z", completed_at: "2026-08-25T00:00:01Z",
+              input_tokens: 20, output_tokens: 10, estimated_cost_usd: 0.001, steps: [],
+            })),
           }),
         });
       }
@@ -199,23 +226,227 @@ describe("App", () => {
     // Turn 1
     fireEvent.change(prompt, { target: { value: "First query: top pickup zones" } });
     fireEvent.click(screen.getByRole("button", { name: "Run analysis" }));
-    expect(await screen.findByText("Answer for turn 1.")).toBeVisible();
+    expect(await screen.findByText("Answer for turn 1.", { selector: ".answer" })).toBeVisible();
+    expect(screen.getByLabelText("Conversation and current run identity")).toHaveTextContent("Conversation: conv_backend_123");
+    expect(screen.getByLabelText("Conversation and current run identity")).toHaveTextContent("Current Run: run_turn_1");
+    expect(fetchRequest).toHaveBeenCalledWith(
+      "/api/ask",
+      expect.objectContaining({ body: JSON.stringify({ prompt: "First query: top pickup zones" }) }),
+    );
 
     // Turn 2
     fireEvent.change(prompt, { target: { value: "Second query: fare distribution" } });
     fireEvent.click(screen.getByRole("button", { name: "Run analysis" }));
-    expect(await screen.findByText("Answer for turn 2.")).toBeVisible();
-
-    // Verify turn 1 was archived into prior turns thread
-    expect(screen.getByText("First query: top pickup zones")).toBeVisible();
+    expect(await screen.findByText("Answer for turn 2.", { selector: ".answer" })).toBeVisible();
+    expect(screen.getByLabelText("Conversation and current run identity")).toHaveTextContent("Conversation: conv_backend_123");
+    expect(screen.getByLabelText("Conversation and current run identity")).toHaveTextContent("Current Run: run_turn_2");
+    expect(fetchRequest).toHaveBeenCalledWith(
+      "/api/ask",
+      expect.objectContaining({
+        body: JSON.stringify({
+          prompt: "Second query: fare distribution",
+          conversation_id: "conv_backend_123",
+        }),
+      }),
+    );
+    expect(await screen.findByText("First query: top pickup zones")).toBeVisible();
+    expect(screen.getAllByText("Answer for turn 1.")).toHaveLength(1);
 
     // Switch to context tab and verify working context panel
     const contextTab = screen.getByRole("tab", { name: "Working Context Panel" });
     fireEvent.click(contextTab);
 
-    expect(screen.getByText("Stored Messages (DynamoDB)")).toBeVisible();
-    expect(screen.getByText("Messages in LLM Context")).toBeVisible();
-    expect(screen.getByText(/Core AI-Systems Thesis/)).toBeVisible();
+    expect(screen.getByText("Waiting for context reduction event from SSE stream…")).toBeVisible();
+  });
+
+  it("reloads durable messages and run metadata for the backend conversation", async () => {
+    window.localStorage.setItem("ai-analytics-conversation-id", "conv_durable_456");
+    const fetchRequest = vi.fn().mockImplementation((input: string) => {
+      if (input === "/api/status") {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            app: { status: "ok", service: "ai-app" },
+            mcp: { status: "ok", tools: 1, resources: 1 },
+          }),
+        });
+      }
+      if (input === "/api/conversations/conv_durable_456") {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            conversation_id: "conv_durable_456",
+            messages: [
+              { message_id: "msg_1", sequence: 1, role: "user", content: "First durable question", created_at: "2026-08-25T00:00:00Z" },
+              { message_id: "msg_2", sequence: 2, role: "assistant", content: "First durable answer", created_at: "2026-08-25T00:00:01Z" },
+            ],
+            runs: [
+              { run_id: "run_durable_1", message_id: "msg_1", status: "completed", started_at: "2026-08-25T00:00:00Z", completed_at: "2026-08-25T00:00:01Z", input_tokens: 11, output_tokens: 7, estimated_cost_usd: 0.0003, steps: [] },
+            ],
+          }),
+        });
+      }
+      if (input === "/api/runs/run_durable_1/events") {
+        return Promise.resolve({
+          ok: true,
+          text: async () => `data: ${JSON.stringify({
+            event_id: "evt_durable_terminal", event_type: "run.completed", run_id: "run_durable_1",
+            conversation_id: "conv_durable_456", sequence: 1, timestamp: "2026-08-25T00:00:02Z",
+            payload: {
+              input_tokens: 11, output_tokens: 7, total_tokens: 18, estimated_cost_usd: 0.0003,
+              end_to_end_latency_ms: 41, proposal_llm_latency_ms: 12, tool_latency_ms: 8,
+              final_answer_llm_latency_ms: 15, ttft: { available: false, reason: "non_streaming_blocking" },
+            },
+          })}\n\n`,
+        });
+      }
+      return Promise.resolve({ ok: true, json: async () => ({}) });
+    });
+    vi.stubGlobal("fetch", fetchRequest);
+
+    render(<App />);
+
+    expect(await screen.findByText("First durable question")).toBeVisible();
+    expect(screen.getByText("First durable answer")).toBeVisible();
+    expect(screen.getByLabelText("Conversation and current run identity")).toHaveTextContent("Conversation: conv_durable_456");
+    expect(screen.getByText("run_durable_1")).toBeVisible();
+    expect(fetchRequest).toHaveBeenCalledWith("/api/conversations/conv_durable_456");
+    expect(await screen.findByText("End-to-end latency")).toBeVisible();
+    expect(screen.getByText("41 ms")).toBeVisible();
+    expect(screen.getByText("$0.0003")).toBeVisible();
+    expect(screen.getByText("Unavailable (non-streaming)")).toBeVisible();
+  });
+
+  it("does not let a stale mount hydration overwrite a submitted run", async () => {
+    window.localStorage.setItem("ai-analytics-conversation-id", "conv_old");
+    let resolveOldSnapshot: ((value: unknown) => void) | undefined;
+    const oldSnapshot = new Promise((resolve) => { resolveOldSnapshot = resolve; });
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((input: string) => {
+      if (input === "/api/status") return Promise.resolve({ ok: true, json: async () => ({ app: { status: "ok", service: "ai-app" }, mcp: { status: "ok" } }) });
+      if (input === "/api/conversations/conv_old") return oldSnapshot.then((snapshot) => ({ ok: true, json: async () => snapshot }));
+      if (input === "/api/ask") return Promise.resolve({ ok: true, json: async () => ({ answer: "Fresh answer", usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 }, latency_ms: 2, conversation_id: "conv_fresh", run_id: "run_fresh", llm_calls: [] }) });
+      if (input === "/api/conversations/conv_fresh") return Promise.resolve({ ok: true, json: async () => ({ conversation_id: "conv_fresh", messages: [], runs: [] }) });
+      return Promise.resolve({ ok: true, text: async () => "" });
+    }));
+
+    render(<App />);
+    fireEvent.change(screen.getByRole("textbox", { name: "Ask about NYC taxi activity" }), { target: { value: "Fresh question" } });
+    fireEvent.click(screen.getByRole("button", { name: "Run analysis" }));
+    expect(await screen.findByText("Fresh answer")).toBeVisible();
+
+    await act(async () => {
+      resolveOldSnapshot?.({
+        conversation_id: "conv_old",
+        messages: [{ message_id: "old_msg", sequence: 1, role: "user", content: "Old question", created_at: "2026-08-25T00:00:00Z" }],
+        runs: [{ run_id: "run_old", message_id: "old_msg", status: "completed", started_at: "2026-08-25T00:00:00Z", completed_at: null, input_tokens: 1, output_tokens: 1, estimated_cost_usd: 0.001, steps: [] }],
+      });
+    });
+
+    expect(screen.getByLabelText("Conversation and current run identity")).toHaveTextContent("conv_fresh");
+    expect(screen.getByLabelText("Conversation and current run identity")).toHaveTextContent("run_fresh");
+    expect(screen.queryByText("Old question")).not.toBeInTheDocument();
+  });
+
+  it("keeps same-run SSE telemetry when the post-ask snapshot resolves later", async () => {
+    let resolveSnapshot: ((value: unknown) => void) | undefined;
+    const delayedSnapshot = new Promise((resolve) => { resolveSnapshot = resolve; });
+    const terminalEvent = {
+      event_id: "evt_same_run", event_type: "run.completed", run_id: "run_same", conversation_id: "conv_same",
+      sequence: 1, timestamp: "2026-08-25T00:00:01Z",
+      payload: { input_tokens: 3, output_tokens: 2, total_tokens: 5, estimated_cost_usd: 0.0004, end_to_end_latency_ms: 18, ttft: { available: false } },
+    };
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((input: string) => {
+      if (input === "/api/status") return Promise.resolve({ ok: true, json: async () => ({ app: { status: "ok", service: "ai-app" }, mcp: { status: "ok" } }) });
+      if (input === "/api/ask") return Promise.resolve({ ok: true, json: async () => ({ answer: "Same run answer", usage: { input_tokens: 3, output_tokens: 2, total_tokens: 5 }, latency_ms: 18, conversation_id: "conv_same", run_id: "run_same", llm_calls: [] }) });
+      if (input === "/api/runs/run_same/events") return Promise.resolve({ ok: true, text: async () => `data: ${JSON.stringify(terminalEvent)}\n\n` });
+      if (input === "/api/conversations/conv_same") return delayedSnapshot.then((snapshot) => ({ ok: true, json: async () => snapshot }));
+      return Promise.resolve({ ok: true, text: async () => "" });
+    }));
+
+    render(<App />);
+    fireEvent.change(screen.getByRole("textbox", { name: "Ask about NYC taxi activity" }), { target: { value: "Preserve telemetry" } });
+    fireEvent.click(screen.getByRole("button", { name: "Run analysis" }));
+    expect(await screen.findByText("18 ms")).toBeVisible();
+
+    await act(async () => {
+      resolveSnapshot?.({ conversation_id: "conv_same", messages: [], runs: [] });
+    });
+
+    expect(screen.getByText("18 ms")).toBeVisible();
+    expect(screen.getByText("$0.0004")).toBeVisible();
+  });
+
+  it("clears prior run context and telemetry before inspecting another run", async () => {
+    window.localStorage.setItem("ai-analytics-conversation-id", "conv_switch");
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((input: string) => {
+      if (input === "/api/status") return Promise.resolve({ ok: true, json: async () => ({ app: { status: "ok", service: "ai-app" }, mcp: { status: "ok" } }) });
+      if (input === "/api/conversations/conv_switch") return Promise.resolve({ ok: true, json: async () => ({
+        conversation_id: "conv_switch", messages: [],
+        runs: [{ run_id: "run_first", message_id: null, status: "completed", started_at: "2026-08-25T00:00:00Z", completed_at: null, input_tokens: 1, output_tokens: 1, estimated_cost_usd: 0.001, steps: [] }],
+      }) });
+      if (input === "/api/runs/run_first/events") return Promise.resolve({ ok: true, text: async () => `data: ${JSON.stringify({ event_id: "evt_first", event_type: "run.completed", run_id: "run_first", conversation_id: "conv_switch", sequence: 1, timestamp: "2026-08-25T00:00:01Z", payload: { input_tokens: 1, output_tokens: 1, total_tokens: 2, estimated_cost_usd: 0.001, end_to_end_latency_ms: 9, ttft: { available: false } } })}\n\n` });
+      return Promise.resolve({ ok: true, text: async () => "" });
+    }));
+
+    render(<App />);
+    expect(await screen.findByText("End-to-end latency")).toBeVisible();
+    fireEvent.change(screen.getByRole("textbox", { name: "Run ID" }), { target: { value: "run_second" } });
+    fireEvent.click(screen.getByRole("button", { name: "Connect SSE" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Working Context Panel" }));
+
+    expect(screen.getByText("Waiting for context reduction event from SSE stream…")).toBeVisible();
+    expect(screen.queryByText("End-to-end latency")).not.toBeInTheDocument();
+  });
+
+  it("renders terminal SSE telemetry without inventing TTFT", async () => {
+    const terminalEvent = {
+      event_id: "evt_terminal",
+      event_type: "run.completed",
+      run_id: "run_telemetry_1",
+      conversation_id: "conv_telemetry_1",
+      sequence: 4,
+      timestamp: "2026-08-25T00:00:04Z",
+      payload: {
+        input_tokens: 21,
+        output_tokens: 8,
+        total_tokens: 29,
+        estimated_cost_usd: 0.0015,
+        end_to_end_latency_ms: 52,
+        proposal_llm_latency_ms: 12,
+        tool_latency_ms: 10,
+        final_answer_llm_latency_ms: 20,
+        ttft: { available: false, reason: "non_streaming_blocking" },
+      },
+    };
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((input: string) => {
+      if (input === "/api/status") {
+        return Promise.resolve({ ok: true, json: async () => ({ app: { status: "ok", service: "ai-app" }, mcp: { status: "ok" } }) });
+      }
+      if (input === "/api/ask") {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            answer: "Telemetry answer.", usage: { input_tokens: 21, output_tokens: 8, total_tokens: 29 }, latency_ms: 52,
+            conversation_id: "conv_telemetry_1", run_id: "run_telemetry_1", llm_calls: [],
+          }),
+        });
+      }
+      return Promise.resolve({ ok: true, text: async () => `data: ${JSON.stringify(terminalEvent)}\n\n` });
+    }));
+
+    render(<App />);
+    fireEvent.change(screen.getByRole("textbox", { name: "Ask about NYC taxi activity" }), { target: { value: "Show telemetry" } });
+    fireEvent.click(screen.getByRole("button", { name: "Run analysis" }));
+
+    expect(await screen.findByText("End-to-end latency")).toBeVisible();
+    expect(screen.getByText("52 ms")).toBeVisible();
+    expect(screen.getByText("12 ms")).toBeVisible();
+    expect(screen.getByText("10 ms")).toBeVisible();
+    expect(screen.getByText("20 ms")).toBeVisible();
+    expect(screen.getByText("21")).toBeVisible();
+    expect(screen.getByText("8")).toBeVisible();
+    expect(screen.getByText("$0.0015")).toBeVisible();
+    expect(screen.getByText("Unavailable (non-streaming)")).toBeVisible();
   });
 });
 
