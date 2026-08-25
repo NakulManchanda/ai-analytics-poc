@@ -107,7 +107,12 @@ def test_ask_returns_the_fake_client_answer_and_usage_metadata() -> None:
     response = client.post("/api/ask", json={"prompt": "Summarize this."})
 
     assert response.status_code == 200
-    assert response.json() == {
+    payload = response.json()
+    assert payload["conversation_id"].startswith("conv_")
+    assert payload["run_id"].startswith("run_")
+    del payload["conversation_id"]
+    del payload["run_id"]
+    assert payload == {
         "answer": "A short answer.",
         "tool_call_id": "tool_call_test_1",
         "query_id": "query_test_1",

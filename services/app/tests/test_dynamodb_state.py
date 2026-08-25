@@ -253,6 +253,31 @@ def test_dynamodb_repository_run_and_steps_persistence(
     assert steps[1].query_id is not None
 
 
+def test_dynamodb_repository_lists_runs_for_a_conversation_in_order(
+    fake_dynamo: tuple[DynamoDBStateRepository, FakeDynamoDBTable],
+) -> None:
+    repo, _table = fake_dynamo
+    conv_id = generate_conversation_id()
+    repo.create_conversation(Conversation(conversation_id=conv_id))
+    first_run = Run(
+        run_id=generate_run_id(),
+        conversation_id=conv_id,
+        started_at="2026-08-25T10:00:00+00:00",
+    )
+    second_run = Run(
+        run_id=generate_run_id(),
+        conversation_id=conv_id,
+        started_at="2026-08-25T10:01:00+00:00",
+    )
+    repo.create_run(first_run)
+    repo.create_run(second_run)
+
+    assert [run.run_id for run in repo.list_runs(conv_id)] == [
+        first_run.run_id,
+        second_run.run_id,
+    ]
+
+
 def test_dynamodb_repository_process_restart_survival() -> None:
     """Test state survives process restart across independent repository instances."""
     shared_table = FakeDynamoDBTable()

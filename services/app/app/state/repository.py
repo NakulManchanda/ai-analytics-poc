@@ -54,6 +54,10 @@ class StateRepository(Protocol):
         """Update an existing run's status, metrics, and completion details."""
         ...
 
+    def list_runs(self, conversation_id: str) -> list[Run]:
+        """List conversation runs ordered by their durable creation order."""
+        ...
+
     def add_run_step(self, step: RunStep) -> RunStep:
         """Persist a new run step associated with a run."""
         ...
@@ -137,6 +141,16 @@ class InMemoryStateRepository:
             raise EntityNotFoundError(f"Run {run.run_id} not found")
         self._runs[run.run_id] = run
         return run
+
+    def list_runs(self, conversation_id: str) -> list[Run]:
+        return sorted(
+            (
+                run
+                for run in self._runs.values()
+                if run.conversation_id == conversation_id
+            ),
+            key=lambda run: (run.started_at, run.run_id),
+        )
 
     def add_run_step(self, step: RunStep) -> RunStep:
         if step.run_id not in self._runs:
