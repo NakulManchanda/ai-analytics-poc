@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 from app.config import DEFAULT_MODEL_ID
-from app.llm import LocalFakeLLMClient, ToolProposalResult
+from app.llm import LLMProviderError, LocalFakeLLMClient, ToolProposalResult
 from app.orchestration import (
     ExecutionBudgets,
     OrchestrationLoop,
@@ -67,12 +67,59 @@ def test_orchestration_loop_normal_completion() -> None:
     assert run.status == "completed"
 
     steps = repo.list_run_steps(result.run_id)
-    assert len(steps) == 3
+    assert len(steps) == 4
     assert [s.step_type for s in steps] == [
         "llm_proposal",
         "tool_call",
+        "context_reduced",
         "llm_final_answer",
     ]
+    telemetry = run.metadata["telemetry"]
+    assert telemetry["end_to_end_latency_ms"] >= 0
+    assert telemetry["proposal_llm_latency_ms"] == steps[0].duration_ms
+    assert telemetry["tool_latency_ms"] == steps[1].duration_ms
+    assert telemetry["final_answer_llm_latency_ms"] == steps[3].duration_ms
+    assert telemetry["ttft"] == {
+        "available": False,
+        "reason": "non_streaming_blocking",
+    }
+    assert steps[2].metadata["working_context"]["stored_message_count"] == 1
+
+
+def test_orchestration_loop_persists_failed_run_for_non_budget_provider_error() -> None:
+    class RecordingRepository(InMemoryStateRepository):
+        updated_run = None
+
+        def update_run(self, run):  # type: ignore[no-untyped-def]
+            self.updated_run = run
+            return super().update_run(run)
+
+    repo = RecordingRepository()
+
+    class FailingLLMClient(LocalFakeLLMClient):
+        def propose_taxi_query(
+            self, prompt: str, schema: Mapping[str, object]
+        ) -> ToolProposalResult:
+            raise LLMProviderError(retryable=True)
+
+    loop = OrchestrationLoop(
+        llm_client=FailingLLMClient(),
+        mcp_client=FakeMCPClient(),  # type: ignore[arg-type]
+        state_repository=repo,
+    )
+
+    with pytest.raises(ValueError):
+        loop.run("Which pickup zones have the most trips?")
+
+    run = repo.updated_run
+    assert run is not None
+    assert run.status == "failed"
+    assert run.failure_code == "llm_provider_error"
+    assert run.completed_at is not None
+    assert run.metadata["telemetry"]["ttft"] == {
+        "available": False,
+        "reason": "non_streaming_blocking",
+    }
 
 
 def test_orchestration_loop_max_iterations_budget_exceeded() -> None:

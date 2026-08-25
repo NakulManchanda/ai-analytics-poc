@@ -92,6 +92,7 @@ class ContextReducer:
         self,
         current_prompt: str,
         stored_messages: list[Message],
+        current_message_id: str | None = None,
         dataset_schema: dict[str, Any] | None = None,
         tool_observations: list[dict[str, Any]] | None = None,
         available_tools: list[str] | None = None,
@@ -107,12 +108,19 @@ class ContextReducer:
         # Recent window: max_recent_messages = recent_turns_window * 2 (user + assistant)
         max_recent_messages = self.recent_turns_window * 2
 
-        # Filter out the current user message if it was already added to stored_messages at the end
-        historical_messages = [
-            m
-            for m in stored_messages
-            if m.content != current_prompt or m.role != "user"
-        ]
+        if current_message_id is not None:
+            current_message = next(
+                (m for m in stored_messages if m.message_id == current_message_id), None
+            )
+        elif (
+            stored_messages
+            and stored_messages[-1].role == "user"
+            and stored_messages[-1].content == current_prompt
+        ):
+            current_message = stored_messages[-1]
+        else:
+            current_message = None
+        historical_messages = [m for m in stored_messages if m is not current_message]
 
         if len(historical_messages) > max_recent_messages:
             older_messages = historical_messages[:-max_recent_messages]
@@ -196,7 +204,11 @@ class ContextReducer:
 
         return WorkingContext(
             conversation_summary=conversation_summary,
-            current_user_message=current_prompt,
+            current_user_message=(
+                current_message.content
+                if current_message is not None
+                else current_prompt
+            ),
             recent_messages=recent_formatted,
             available_tools=tools_list,
             dataset_schema=schema,

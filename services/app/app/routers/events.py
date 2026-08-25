@@ -167,8 +167,24 @@ def create_events_router(
 
                         for step in steps:
                             seq += 1
+                            if step.step_type == "context_reduced":
+                                event_type = "context.reduced"
+                                payload = {
+                                    "working_context": step.metadata.get(
+                                        "working_context", {}
+                                    )
+                                }
+                            else:
+                                event_type = f"step.{step.step_type}"
+                                payload = {
+                                    "status": step.status,
+                                    "input_summary": step.input_summary,
+                                    "output_summary": step.output_summary,
+                                    "duration_ms": step.duration_ms,
+                                    "metadata": step.metadata,
+                                }
                             step_evt = RunEvent(
-                                event_type=f"step.{step.step_type}",
+                                event_type=event_type,
                                 run_id=run_id,
                                 conversation_id=current_run.conversation_id,
                                 sequence=seq,
@@ -176,11 +192,7 @@ def create_events_router(
                                 llm_call_id=step.llm_call_id,
                                 tool_call_id=step.tool_call_id,
                                 query_id=step.query_id,
-                                payload={
-                                    "status": step.status,
-                                    "input_summary": step.input_summary,
-                                    "output_summary": step.output_summary,
-                                },
+                                payload=payload,
                             )
                             if step_evt.event_id not in emitted_event_ids:
                                 emitted_event_ids.add(step_evt.event_id)
@@ -192,6 +204,7 @@ def create_events_router(
                             if current_run.status == "completed"
                             else f"run.{current_run.status}"
                         )
+                        telemetry = current_run.metadata.get("telemetry", {})
                         term_evt = RunEvent(
                             event_type=term_type,
                             run_id=run_id,
@@ -203,6 +216,8 @@ def create_events_router(
                                 "output_tokens": current_run.output_tokens,
                                 "estimated_cost_usd": current_run.estimated_cost_usd,
                                 "failure_code": current_run.failure_code,
+                                "telemetry": telemetry,
+                                **telemetry,
                             },
                         )
                         if term_evt.event_id not in emitted_event_ids:

@@ -120,6 +120,52 @@ def test_events_endpoint_reconstructs_from_durable_state() -> None:
     assert "qry_test_456" in content
 
 
+def test_events_endpoint_reconstructs_durable_context_and_telemetry() -> None:
+    repo = InMemoryStateRepository()
+    conv_id = generate_conversation_id()
+    run_id = generate_run_id()
+    telemetry = {
+        "end_to_end_latency_ms": 41,
+        "proposal_llm_latency_ms": 11,
+        "tool_latency_ms": 7,
+        "final_answer_llm_latency_ms": 19,
+        "ttft": {"available": False, "reason": "non_streaming_blocking"},
+    }
+    working_context = {
+        "stored_message_count": 5,
+        "included_message_count": 3,
+        "conversation_summary": "user: first question",
+    }
+    repo.create_conversation(Conversation(conversation_id=conv_id))
+    repo.create_run(
+        Run(
+            run_id=run_id,
+            conversation_id=conv_id,
+            status="completed",
+            metadata={"telemetry": telemetry},
+        )
+    )
+    repo.add_run_step(
+        RunStep(
+            step_id=generate_step_id(),
+            run_id=run_id,
+            sequence=1,
+            step_type="context_reduced",
+            status="completed",
+            metadata={"working_context": working_context},
+        )
+    )
+
+    response = TestClient(create_app(state_repository=repo)).get(
+        f"/api/runs/{run_id}/events"
+    )
+
+    assert "event: context.reduced" in response.text
+    assert '"stored_message_count": 5' in response.text
+    assert '"end_to_end_latency_ms": 41' in response.text
+    assert '"non_streaming_blocking"' in response.text
+
+
 def test_orchestration_loop_emits_full_event_sequence() -> None:
     repo = InMemoryStateRepository()
     publisher = InMemoryEventPublisher()
