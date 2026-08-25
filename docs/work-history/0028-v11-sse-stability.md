@@ -14,9 +14,9 @@
 
 ## Verification
 
-1. Red test: `npm test -- TimelineInspector.test.tsx` initially failed as expected because the callback-only rerender created two EventSource instances.
-2. Focused frontend test: `npm test -- TimelineInspector.test.tsx` passed with 2 tests.
-3. Production build: `npm run build` passed (`tsc --noEmit && vite build`).
+1. Red test: `cd web && npm test -- TimelineInspector.test.tsx` initially failed as expected because the callback-only rerender created two EventSource instances.
+2. Focused frontend test: `cd web && npm test -- TimelineInspector.test.tsx` passed with 2 tests.
+3. Production build: `cd web && npm run build` passed (`tsc --noEmit && vite build`).
 
 ## Pull Request and Merge State
 
