@@ -16,6 +16,7 @@ Deliver the v1.1 durable state and synchronous API contract tracked by GitHub is
 - Add `GET /api/conversations/{conversation_id}` to reload ordered messages, runs, and run steps from the state repository.
 - Add a conversation-run index item in the existing DynamoDB table shape so reload does not require a scan, GSI, Terraform change, or new AWS resource.
 - Surface state repository failures rather than falling back to memory.
+- Construct the configured DynamoDB repository with the application setting's explicit AWS region; the selection test substitutes a local DynamoDB resource boundary and performs no AWS call.
 
 ## Decisions
 

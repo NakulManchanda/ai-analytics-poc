@@ -33,7 +33,10 @@ def create_app(
 ) -> FastAPI:
     resolved_settings = settings or Settings.from_environment()
     shared_state_repo = state_repository or (
-        DynamoDBStateRepository(table_name=resolved_settings.dynamodb_table_name)
+        DynamoDBStateRepository(
+            table_name=resolved_settings.dynamodb_table_name,
+            region_name=resolved_settings.aws_region,
+        )
         if resolved_settings.dynamodb_table_name
         else InMemoryStateRepository()
     )

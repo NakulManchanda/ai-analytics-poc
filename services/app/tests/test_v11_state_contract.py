@@ -60,11 +60,37 @@ def test_create_app_uses_memory_state_when_no_dynamodb_table_is_configured(
 
 
 def test_create_app_uses_dynamodb_state_when_table_is_configured(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeDynamoDBResource:
+        def Table(self, table_name: str) -> object:
+            captured["table_name"] = table_name
+            return object()
+
+    def fake_dynamodb_resource(
+        service_name: str,
+        *,
+        region_name: str | None = None,
+    ) -> FakeDynamoDBResource:
+        captured["service_name"] = service_name
+        captured["region_name"] = region_name
+        return FakeDynamoDBResource()
+
     monkeypatch.setenv("DYNAMODB_TABLE_NAME", "configured-application-state")
+    monkeypatch.delenv("AWS_REGION", raising=False)
+    monkeypatch.setattr(
+        "app.state.dynamodb.boto3.resource",
+        fake_dynamodb_resource,
+    )
 
     application = create_app()
 
     assert isinstance(application.state.state_repository, DynamoDBStateRepository)
+    assert captured == {
+        "service_name": "dynamodb",
+        "region_name": "us-east-1",
+        "table_name": "configured-application-state",
+    }
 
 
 def test_ask_delegates_to_the_application_orchestration_loop() -> None:

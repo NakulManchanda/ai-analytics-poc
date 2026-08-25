@@ -48,6 +48,7 @@ class DynamoDBStateRepository:
         self,
         table_name: str | None = None,
         dynamodb_resource: Any = None,
+        region_name: str | None = None,
     ) -> None:
         self._table_name = (
             table_name
@@ -55,7 +56,9 @@ class DynamoDBStateRepository:
             or os.environ.get("STATE_TABLE_NAME")
             or DEFAULT_TABLE_NAME
         )
-        self._dynamodb = dynamodb_resource or boto3.resource("dynamodb")
+        self._dynamodb = dynamodb_resource or boto3.resource(
+            "dynamodb", region_name=region_name
+        )
         self._table = self._dynamodb.Table(self._table_name)
 
     def create_conversation(self, conversation: Conversation) -> Conversation:
