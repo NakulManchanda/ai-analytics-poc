@@ -1,7 +1,14 @@
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useState } from "react";
 import { ContextInspector } from "./ContextInspector";
 import { TimelineInspector } from "./TimelineInspector";
-import { AskResponse, ChatTurn, Status, WorkingContextData } from "./types";
+import {
+  AskResponse,
+  ChatTurn,
+  ConversationSnapshot,
+  RunTelemetry,
+  Status,
+  WorkingContextData,
+} from "./types";
 
 const initialStatus: Status = {
   app: { status: "checking", service: "ai-app" },
@@ -10,6 +17,7 @@ const initialStatus: Status = {
 
 const STATUS_RETRY_DELAY_MS = 500;
 const MAX_STATUS_ATTEMPTS = 10;
+const CONVERSATION_STORAGE_KEY = "ai-analytics-conversation-id";
 
 function appLabel(status: Status): string {
   return status.app.status === "ok" ? "Backend ready" : "Backend checking";
@@ -25,7 +33,6 @@ function mcpLabel(status: Status): string {
 export default function App() {
   const [status, setStatus] = useState<Status>(initialStatus);
   const [prompt, setPrompt] = useState("");
-  const [currentPrompt, setCurrentPrompt] = useState("");
   const [answer, setAnswer] = useState<AskResponse | null>(null);
   const [promptError, setPromptError] = useState<string | null>(null);
   const [isRunning, setIsRunning] = useState(false);
@@ -35,6 +42,7 @@ export default function App() {
   const [chatTurns, setChatTurns] = useState<ChatTurn[]>([]);
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
   const [workingContext, setWorkingContext] = useState<WorkingContextData | null>(null);
+  const [runTelemetry, setRunTelemetry] = useState<RunTelemetry | null>(null);
   const [activeTab, setActiveTab] = useState<"timeline" | "context">("timeline");
 
   useEffect(() => {
@@ -73,46 +81,61 @@ export default function App() {
     };
   }, []);
 
+  const hydrateConversation = useCallback(async (id: string) => {
+    const response = await fetch(`/api/conversations/${encodeURIComponent(id)}`);
+    if (!response.ok) {
+      if (response.status === 404) window.localStorage.removeItem(CONVERSATION_STORAGE_KEY);
+      return;
+    }
+    const snapshot = (await response.json()) as ConversationSnapshot;
+    const runsByMessageId = new Map(
+      snapshot.runs.filter((run) => run.message_id).map((run) => [run.message_id as string, run]),
+    );
+    setConversationId(snapshot.conversation_id);
+    setChatTurns(
+      [...snapshot.messages]
+        .sort((a, b) => a.sequence - b.sequence)
+        .map((message) => {
+          const associatedRun = runsByMessageId.get(message.message_id);
+          return {
+            id: message.message_id,
+            role: message.role,
+            content: message.content,
+            timestamp: new Date(message.created_at).toLocaleTimeString(),
+            runId: associatedRun?.run_id,
+            tokens: associatedRun ? associatedRun.input_tokens + associatedRun.output_tokens : undefined,
+          };
+        }),
+    );
+    const latestRun = snapshot.runs.at(-1);
+    if (latestRun) setActiveRunId(latestRun.run_id);
+  }, []);
+
+  useEffect(() => {
+    const savedConversationId = window.localStorage.getItem(CONVERSATION_STORAGE_KEY);
+    if (savedConversationId) void hydrateConversation(savedConversationId);
+  }, [hydrateConversation]);
+
   const submitPrompt = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const cleanPrompt = prompt.trim();
     if (!cleanPrompt || isRunning) return;
 
-    // Archive previous turn to history if exists
-    if (currentPrompt && answer) {
-      const prevUserTurn: ChatTurn = {
-        id: `turn_user_${Date.now() - 1000}`,
-        role: "user",
-        content: currentPrompt,
-        timestamp: new Date().toLocaleTimeString(),
-      };
-      const prevAsstTurn: ChatTurn = {
-        id: `turn_asst_${Date.now() - 500}`,
-        role: "assistant",
-        content: answer.answer,
-        timestamp: new Date().toLocaleTimeString(),
-        runId: answer.run_id,
-        tokens: answer.usage.total_tokens,
-        latencyMs: answer.latency_ms,
-      };
-      setChatTurns((prev) => [...prev, prevUserTurn, prevAsstTurn]);
-    }
-
-    const convId = conversationId || `conv_${Date.now().toString(36)}`;
-    if (!conversationId) {
-      setConversationId(convId);
-    }
-
-    setCurrentPrompt(cleanPrompt);
     setIsRunning(true);
     setAnswer(null);
     setPromptError(null);
+    setWorkingContext(null);
+    setRunTelemetry(null);
 
     try {
       const response = await fetch("/api/ask", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ prompt: cleanPrompt, conversation_id: convId }),
+        body: JSON.stringify(
+          conversationId
+            ? { prompt: cleanPrompt, conversation_id: conversationId }
+            : { prompt: cleanPrompt },
+        ),
       });
       let payload:
         | AskResponse
@@ -144,74 +167,9 @@ export default function App() {
 
       const askResp = payload as AskResponse;
       setAnswer(askResp);
-
-      if (askResp.run_id) {
-        setActiveRunId(askResp.run_id);
-      }
-
-      // Synthesize initial working context if not yet provided by SSE
-      setWorkingContext((prev) => {
-        if (prev) return prev;
-        const totalStored = chatTurns.length + 2; // archived history + active user + active asst
-        const maxRecent = 4;
-        const included = Math.min(totalStored, maxRecent + 1);
-        const summary =
-          totalStored > maxRecent
-            ? `Summarized ${totalStored - maxRecent} older turns in conversation ${convId}.`
-            : null;
-
-        return {
-          conversation_summary: summary,
-          current_user_message: cleanPrompt,
-          recent_messages: [
-            ...chatTurns.slice(-maxRecent).map((t, idx) => ({
-              message_id: t.id,
-              role: t.role,
-              content: t.content,
-              sequence: idx + 1,
-            })),
-            {
-              message_id: `msg_${Date.now()}`,
-              role: "user",
-              content: cleanPrompt,
-              sequence: Math.min(totalStored, maxRecent + 1),
-            },
-          ],
-          available_tools: ["query_taxi_data"],
-          dataset_schema: {
-            dataset: "nyc-yellow-taxi",
-            columns: ["PULocationID", "DOLocationID", "trip_distance", "fare_amount"],
-          },
-          recent_tool_observations: [
-            {
-              query_id: askResp.query_id || "query_latest",
-              row_count: 1,
-              preview_rows: [["Alpha", 3]],
-              artifact_ref: `artifact://nyc-taxi/queries/${askResp.query_id || "query_latest"}`,
-              execution_duration_ms: askResp.latency_ms,
-            },
-          ],
-          assumptions: [],
-          artifacts: [`artifact://nyc-taxi/queries/${askResp.query_id || "query_latest"}`],
-          failures: [],
-          remaining_budget: {
-            current_iteration: 1,
-            max_iterations: 6,
-            remaining_iterations: 5,
-            remaining_tool_calls: 7,
-            remaining_llm_calls: 5,
-            remaining_input_tokens: 30000 - askResp.usage.input_tokens,
-            remaining_estimated_cost_usd: 0.099,
-            max_tool_calls: 8,
-            max_llm_calls: 6,
-            max_input_tokens: 30000,
-            max_estimated_cost_usd: 0.1,
-          },
-          stored_message_count: totalStored,
-          included_message_count: included,
-          schema_size_bytes: 184,
-        };
-      });
+      setConversationId(askResp.conversation_id);
+      window.localStorage.setItem(CONVERSATION_STORAGE_KEY, askResp.conversation_id);
+      setActiveRunId(askResp.run_id);
 
       setPrompt("");
     } catch (error) {
@@ -229,6 +187,10 @@ export default function App() {
 
   const handleWorkingContextUpdate = (ctx: WorkingContextData) => {
     setWorkingContext(ctx);
+  };
+
+  const handleRunTelemetryUpdate = (telemetry: RunTelemetry) => {
+    setRunTelemetry(telemetry);
   };
 
   return (
@@ -259,6 +221,12 @@ export default function App() {
       <div className="control-room-layout">
         {/* Left Column: Multi-Turn Conversation Workspace */}
         <section className="workspace-column" aria-label="Analytics workspace">
+          {conversationId && (
+            <div className="conversation-identity" aria-label="Conversation and current run identity">
+              <span>Conversation: <code>{conversationId}</code></span>
+              {activeRunId && <span>Current Run: <code>{activeRunId}</code></span>}
+            </div>
+          )}
           {/* Multi-turn Archived Chat History */}
           {chatTurns.length > 0 && (
             <div className="chat-history-container" aria-label="Conversation turns">
@@ -320,9 +288,10 @@ export default function App() {
                   className="btn-text"
                   onClick={() => {
                     setConversationId(null);
+                    window.localStorage.removeItem(CONVERSATION_STORAGE_KEY);
                     setChatTurns([]);
-                    setCurrentPrompt("");
                     setWorkingContext(null);
+                    setRunTelemetry(null);
                     setActiveRunId(null);
                     setAnswer(null);
                   }}
@@ -384,6 +353,18 @@ export default function App() {
                   <p className="usage">
                     {answer.usage.total_tokens} tokens · {answer.latency_ms} ms
                   </p>
+                  {runTelemetry && (
+                    <dl className="run-telemetry" aria-label="Authoritative run telemetry">
+                      <div><dt>End-to-end latency</dt><dd>{runTelemetry.end_to_end_latency_ms ?? "Unavailable"} ms</dd></div>
+                      <div><dt>LLM proposal latency</dt><dd>{runTelemetry.proposal_llm_latency_ms ?? "Unavailable"} ms</dd></div>
+                      <div><dt>MCP/tool latency</dt><dd>{runTelemetry.tool_latency_ms ?? "Unavailable"} ms</dd></div>
+                      <div><dt>LLM final-answer latency</dt><dd>{runTelemetry.final_answer_llm_latency_ms ?? "Unavailable"} ms</dd></div>
+                      <div><dt>Total input tokens</dt><dd>{runTelemetry.input_tokens}</dd></div>
+                      <div><dt>Total output tokens</dt><dd>{runTelemetry.output_tokens}</dd></div>
+                      <div><dt>Estimated cost</dt><dd>${runTelemetry.estimated_cost_usd.toFixed(4)}</dd></div>
+                      <div><dt>TTFT</dt><dd>{runTelemetry.ttft?.available ? "Available" : "Unavailable (non-streaming)"}</dd></div>
+                    </dl>
+                  )}
                 </div>
               )}
             </div>
@@ -421,6 +402,7 @@ export default function App() {
               <TimelineInspector
                 runId={activeRunId}
                 onWorkingContextUpdate={handleWorkingContextUpdate}
+                onRunTelemetryUpdate={handleRunTelemetryUpdate}
                 onInspectRun={handleInspectRun}
               />
             ) : (

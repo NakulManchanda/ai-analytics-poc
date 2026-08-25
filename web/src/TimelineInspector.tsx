@@ -1,10 +1,36 @@
 import React, { useEffect, useRef, useState } from "react";
-import { RunEvent, WorkingContextData } from "./types";
+import { RunEvent, RunTelemetry, WorkingContextData } from "./types";
 
 interface TimelineInspectorProps {
   runId: string | null;
   onWorkingContextUpdate?: (context: WorkingContextData) => void;
+  onRunTelemetryUpdate?: (telemetry: RunTelemetry) => void;
   onInspectRun?: (runId: string) => void;
+}
+
+function terminalTelemetry(event: RunEvent): RunTelemetry | null {
+  if (!['run.completed', 'run.budget_exceeded', 'run.failed'].includes(event.event_type)) return null;
+  const payload = event.payload;
+  const telemetry = payload.telemetry as Record<string, unknown> | undefined;
+  const value = (key: string) => payload[key] ?? telemetry?.[key];
+  const numericValue = (key: string) => {
+    const candidate = value(key);
+    return typeof candidate === 'number' ? candidate : undefined;
+  };
+  const ttft = value('ttft');
+  return {
+    input_tokens: numericValue('input_tokens') ?? 0,
+    output_tokens: numericValue('output_tokens') ?? 0,
+    total_tokens: numericValue('total_tokens') ?? 0,
+    estimated_cost_usd: numericValue('estimated_cost_usd') ?? 0,
+    end_to_end_latency_ms: numericValue('end_to_end_latency_ms'),
+    proposal_llm_latency_ms: numericValue('proposal_llm_latency_ms'),
+    tool_latency_ms: numericValue('tool_latency_ms'),
+    final_answer_llm_latency_ms: numericValue('final_answer_llm_latency_ms'),
+    ttft: typeof ttft === 'object' && ttft !== null && 'available' in ttft
+      ? ttft as RunTelemetry['ttft']
+      : undefined,
+  };
 }
 
 export const KNOWN_EVENT_TYPES = [
@@ -85,10 +111,12 @@ export function formatEventSummary(event: RunEvent): string {
 export const TimelineInspector: React.FC<TimelineInspectorProps> = ({
   runId,
   onWorkingContextUpdate,
+  onRunTelemetryUpdate,
   onInspectRun,
 }) => {
   const [events, setEvents] = useState<RunEvent[]>([]);
   const latestWorkingContextUpdate = useRef(onWorkingContextUpdate);
+  const latestRunTelemetryUpdate = useRef(onRunTelemetryUpdate);
   const [connectionStatus, setConnectionStatus] = useState<
     "idle" | "connecting" | "streaming" | "completed" | "budget_exceeded" | "failed" | "error"
   >("idle");
@@ -96,6 +124,7 @@ export const TimelineInspector: React.FC<TimelineInspectorProps> = ({
   const [customRunInput, setCustomRunInput] = useState("");
 
   latestWorkingContextUpdate.current = onWorkingContextUpdate;
+  latestRunTelemetryUpdate.current = onRunTelemetryUpdate;
 
   useEffect(() => {
     if (!runId) {
@@ -128,6 +157,10 @@ export const TimelineInspector: React.FC<TimelineInspectorProps> = ({
           // Check if payload has working_context
           if (parsed.payload?.working_context && latestWorkingContextUpdate.current) {
             latestWorkingContextUpdate.current(parsed.payload.working_context);
+          }
+          const telemetry = terminalTelemetry(parsed);
+          if (telemetry && latestRunTelemetryUpdate.current) {
+            latestRunTelemetryUpdate.current(telemetry);
           }
 
           // Check terminal events
@@ -203,6 +236,10 @@ export const TimelineInspector: React.FC<TimelineInspectorProps> = ({
                 incomingEvents.push(dataJson);
                 if (dataJson.payload?.working_context && latestWorkingContextUpdate.current) {
                   latestWorkingContextUpdate.current(dataJson.payload.working_context);
+                }
+                const telemetry = terminalTelemetry(dataJson);
+                if (telemetry && latestRunTelemetryUpdate.current) {
+                  latestRunTelemetryUpdate.current(telemetry);
                 }
               } catch {
                 // ignore

@@ -3,7 +3,7 @@ import { act } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { TimelineInspector } from "./TimelineInspector";
-import { RunEvent, WorkingContextData } from "./types";
+import { RunEvent, RunTelemetry, WorkingContextData } from "./types";
 
 class MockEventSource {
   static instances: MockEventSource[] = [];
@@ -118,5 +118,39 @@ describe("TimelineInspector SSE lifecycle", () => {
     expect(firstStream.close).toHaveBeenCalledTimes(1);
     expect(MockEventSource.instances).toHaveLength(2);
     expect(MockEventSource.instances[1].url).toBe("/api/runs/run_second/events");
+  });
+
+  it("forwards only terminal SSE telemetry to the run telemetry consumer", async () => {
+    const onRunTelemetryUpdate = vi.fn();
+    render(<TimelineInspector runId="run_same" onRunTelemetryUpdate={onRunTelemetryUpdate} />);
+
+    await act(async () => {
+      MockEventSource.instances[0].emit("run.completed", {
+        ...runCompleted,
+        payload: {
+          input_tokens: 13,
+          output_tokens: 7,
+          total_tokens: 20,
+          estimated_cost_usd: 0.0012,
+          end_to_end_latency_ms: 47,
+          proposal_llm_latency_ms: 11,
+          tool_latency_ms: 9,
+          final_answer_llm_latency_ms: 19,
+          ttft: { available: false, reason: "non_streaming_blocking" },
+        },
+      });
+    });
+
+    expect(onRunTelemetryUpdate).toHaveBeenCalledWith({
+      input_tokens: 13,
+      output_tokens: 7,
+      total_tokens: 20,
+      estimated_cost_usd: 0.0012,
+      end_to_end_latency_ms: 47,
+      proposal_llm_latency_ms: 11,
+      tool_latency_ms: 9,
+      final_answer_llm_latency_ms: 19,
+      ttft: { available: false, reason: "non_streaming_blocking" },
+    } satisfies RunTelemetry);
   });
 });
