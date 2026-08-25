@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { RunEvent, WorkingContextData } from "./types";
 
 interface TimelineInspectorProps {
@@ -88,11 +88,14 @@ export const TimelineInspector: React.FC<TimelineInspectorProps> = ({
   onInspectRun,
 }) => {
   const [events, setEvents] = useState<RunEvent[]>([]);
+  const latestWorkingContextUpdate = useRef(onWorkingContextUpdate);
   const [connectionStatus, setConnectionStatus] = useState<
     "idle" | "connecting" | "streaming" | "completed" | "budget_exceeded" | "failed" | "error"
   >("idle");
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
   const [customRunInput, setCustomRunInput] = useState("");
+
+  latestWorkingContextUpdate.current = onWorkingContextUpdate;
 
   useEffect(() => {
     if (!runId) {
@@ -123,8 +126,8 @@ export const TimelineInspector: React.FC<TimelineInspectorProps> = ({
           });
 
           // Check if payload has working_context
-          if (parsed.payload?.working_context && onWorkingContextUpdate) {
-            onWorkingContextUpdate(parsed.payload.working_context);
+          if (parsed.payload?.working_context && latestWorkingContextUpdate.current) {
+            latestWorkingContextUpdate.current(parsed.payload.working_context);
           }
 
           // Check terminal events
@@ -198,8 +201,8 @@ export const TimelineInspector: React.FC<TimelineInspectorProps> = ({
               try {
                 const dataJson = JSON.parse(line.substring(6)) as RunEvent;
                 incomingEvents.push(dataJson);
-                if (dataJson.payload?.working_context && onWorkingContextUpdate) {
-                  onWorkingContextUpdate(dataJson.payload.working_context);
+                if (dataJson.payload?.working_context && latestWorkingContextUpdate.current) {
+                  latestWorkingContextUpdate.current(dataJson.payload.working_context);
                 }
               } catch {
                 // ignore
@@ -227,7 +230,7 @@ export const TimelineInspector: React.FC<TimelineInspectorProps> = ({
         controller.abort();
       };
     }
-  }, [runId, onWorkingContextUpdate]);
+  }, [runId]);
 
   const handleInspectSubmit = (e: React.FormEvent) => {
     e.preventDefault();
