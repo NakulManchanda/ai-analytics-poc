@@ -2,8 +2,12 @@
 
 This is an **after-deployment** v1.1 acceptance checkpoint. It must be run only
 after an operator has deployed the v1.1 application and frontend using the
-existing AWS configuration. It is not evidence that this repository change has
-already been deployed or that an ECS restart-recovery test has happened.
+existing AWS configuration. The v1.1 checkpoint is recorded as passed for
+`60373f3` on task definition `:5`: after task replacement, a fresh browser
+restored the DynamoDB-backed conversation, reconstructed SSE events, telemetry,
+and TTFT. This does not make the environment CloudWatch-clean: missing
+`REDIS_URL` causes Redis connection-refused publish/read errors, tracked in #57;
+the v1.1 tag remains pending.
 
 Set the actual deployed public origin before testing:
 
@@ -69,6 +73,7 @@ infrastructure:
 4. Record the task/image revision, timestamp, URL, results, and any DynamoDB
    inspection in the release evidence.
 
-Do not mark this checkpoint complete from local tests, an unchanged deployment,
-or a browser refresh alone. This PR neither deploys AWS resources nor executes
-the checkpoint.
+Do not mark a future deployment checkpoint complete from local tests, an
+unchanged deployment, or a browser refresh alone. The recorded `60373f3`
+checkpoint passed, but its Redis/CloudWatch configuration gap remains open in
+#57 and prevents the v1.1 tag.

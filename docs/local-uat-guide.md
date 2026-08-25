@@ -74,14 +74,18 @@ default.
 Do not use a local container or process restart as a durability acceptance
 test. That is the separate deployed DynamoDB checkpoint below.
 
-## Post-deployment AWS checkpoint (not run by this local guide)
+## Post-deployment AWS checkpoint
 
 After the v1.1 image and frontend have been deployed with the existing
 `DYNAMODB_TABLE_NAME` configuration, an operator must repeat the two-turn flow,
 restart/replace the ECS application task, reload the conversation, and inspect
 the DynamoDB-backed result. Record the deployed URL, image/task revision, and
-observed recovery separately. This repository change does not perform that
-deployment or claim that recovery has occurred.
+observed recovery separately. The v1.1 checkpoint is now recorded in work
+history 0030: `60373f3` on task definition `:5` recovered a DynamoDB-backed
+four-message/two-run conversation after task replacement. It does not make the
+environment CloudWatch-clean: missing `REDIS_URL` causes Redis
+connection-refused publish/read errors, tracked in #57; the v1.1 tag remains
+pending.
 
 ## Existing isolated Compose smoke
 

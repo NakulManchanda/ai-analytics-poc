@@ -16,12 +16,18 @@ messages, two distinct runs with steps, a fresh FastAPI app/TestClient reload,
 and durable SSE reconstruction with the expected content type, sequence,
 working context, and terminal telemetry.
 
-This local check proves reconstruction over the same explicitly injected local
-repository. It does **not** prove a brand-new process preserves in-memory state,
-and it does not claim deployed ECS restart recovery. The post-merge deployment
-checkpoint is to deploy the v1.1 app/frontend with the existing
-`DYNAMODB_TABLE_NAME`, complete two turns, replace/restart the ECS application
-task, and reload/replay the recorded conversation and run.
+The local check proves reconstruction over the same explicitly injected local
+repository; by itself it does **not** prove process persistence. The separate
+deployed checkpoint has now passed: `60373f3` was deployed as `ai-app` ECR tag
+`60373f3` on task definition `:5`; DynamoDB inspection confirmed one
+four-message/two-run conversation with completed steps; and a replacement ECS
+task restored the same conversation, six reconstructed SSE events, telemetry,
+and TTFT in a fresh Chrome tab. Details are recorded in work history 0030.
+
+The release is not yet CloudWatch-clean: without `REDIS_URL`, the app defaults
+to `redis://localhost:6379/0` and logs connection-refused publish/read errors.
+Issue #57 tracks this deployment configuration gap, so the CloudWatch-clean
+criterion and v1.1 tag remain pending.
 
 The v1.1 integration review logged two non-blocking follow-ups: #54 (stale
 conversation pointers) and #55 (unavailable telemetry and partial snapshots).

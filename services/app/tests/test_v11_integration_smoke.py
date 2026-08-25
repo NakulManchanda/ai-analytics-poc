@@ -121,11 +121,41 @@ def test_v11_local_api_smoke_recovers_two_turn_conversation_and_sse_contract() -
         "step.llm_final_answer",
         "run.completed",
     ]
-    assert frames[3]["payload"]["working_context"]["stored_message_count"] == 3
-    assert frames[3]["payload"]["working_context"]["included_message_count"] == 3
-    assert frames[-1]["payload"]["status"] == "completed"
-    assert frames[-1]["payload"]["total_tokens"] > 0
-    assert frames[-1]["payload"]["telemetry"]["ttft"] == {
+    context_payload = frames[3]["payload"]
+    assert context_payload["query_id"] == "qry_v11_integration"
+    assert context_payload["row_count"] == 1
+    working_context = context_payload["working_context"]
+    assert working_context["stored_message_count"] == 3
+    assert working_context["included_message_count"] == 3
+    assert working_context["recent_tool_observations"] == [
+        {
+            "query_id": "qry_v11_integration",
+            "columns": ["pickup_zone", "trip_count"],
+            "row_count": 1,
+            "preview_rows": [["JFK Airport", 42]],
+            "artifact_ref": "artifact://nyc-taxi/queries/qry_v11_integration",
+            "execution_duration_ms": 12,
+        }
+    ]
+
+    terminal_payload = frames[-1]["payload"]
+    assert terminal_payload["status"] == "completed"
+    assert terminal_payload["input_tokens"] > 0
+    assert terminal_payload["output_tokens"] > 0
+    assert terminal_payload["total_tokens"] == (
+        terminal_payload["input_tokens"] + terminal_payload["output_tokens"]
+    )
+    assert terminal_payload["estimated_cost_usd"] > 0
+    telemetry = terminal_payload["telemetry"]
+    for metric in (
+        "end_to_end_latency_ms",
+        "proposal_llm_latency_ms",
+        "tool_latency_ms",
+        "final_answer_llm_latency_ms",
+    ):
+        assert terminal_payload[metric] == telemetry[metric]
+        assert telemetry[metric] >= 0
+    assert telemetry["ttft"] == {
         "available": False,
         "reason": "non_streaming_blocking",
     }

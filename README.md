@@ -24,10 +24,13 @@ same injected repository. It verifies API reconstruction, not process-restart
 durability. In deployed mode, `DYNAMODB_TABLE_NAME` selects the existing
 DynamoDB state repository and must not silently fall back to in-memory state.
 
-The separate, post-deployment AWS checkpoint is: deploy the v1.1 app/frontend,
-complete two turns, replace/restart the ECS application task, then reload the
-same conversation and replay its run. That checkpoint is not performed by this
-repository change and no deployed restart recovery is claimed here. See the
+The separately recorded AWS checkpoint passed for `60373f3` on `ai-app` task
+definition `:5`: DynamoDB contained the four-message/two-run conversation, and
+a replacement ECS task restored that conversation and six reconstructed SSE
+events in a fresh browser tab. The environment is not CloudWatch-clean yet:
+missing `REDIS_URL` produces connection-refused Redis publish/read errors;
+[#57](https://github.com/NakulManchanda/ai-analytics-poc/issues/57) tracks the
+gap, and the v1.1 tag remains pending. See the
 [local guide](docs/local-uat-guide.md) and [public guide](docs/public-uat-guide.md).
 
 ## Historical deployment endpoints and architecture
