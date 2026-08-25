@@ -14,6 +14,7 @@
 4. Terminal SSE events feed backend-owned phase latency, token totals, estimated cost, and explicit blocking-mode TTFT status into the answer telemetry display. TimelineInspector keeps callback references in refs, retaining the run-ID-only SSE lifecycle merged in #47.
 5. Review round 1 refreshes the durable snapshot after each successful ask, guards hydration with a monotonic request version, and clears run-scoped context/telemetry before a run switch. The snapshot attaches a run to the immediately following assistant message only when the ordered user message named by `Run.message_id` makes that relationship deterministic.
 6. TimelineInspector now forwards the source run ID with context and terminal telemetry callbacks. This sequential modification is safe because #47 is merged: it preserves that PR's run-ID-only effect dependency and ref-backed callback lifecycle, while supplying the run identity needed for App to reject stale run facts.
+7. Review round 2 removes the redundant hydration-time clearing of run-scoped context and telemetry. Submit and explicit run switching still clear those values before their run identity changes, while a same-run durable snapshot can no longer erase an already received terminal event. Starting a new conversation now also invalidates pending hydration. The optional dedicated 404-pointer and odd-count/unavailable-value tests remain follow-up work because the existing behavior is covered indirectly and they are not needed for this narrow race fix.
 
 ## Verification
 
@@ -23,6 +24,7 @@
 4. Production build: `cd web && npm run build` passed (`tsc --noEmit && vite build`).
 5. Diff checks: `git diff --check` passed; changed frontend source was searched for the removed synthesized Working Context constants before handoff.
 6. Review round 1 focused regression tests: `cd web && npm test -- App.test.tsx TimelineInspector.test.tsx` passed with 17 tests; production build passed.
+7. Review round 2 red/green regression: delayed same-run snapshot hydration initially cleared terminal SSE telemetry; `cd web && npm test -- App.test.tsx TimelineInspector.test.tsx` then passed with 18 tests. Full frontend tests and production build passed.
 
 ## Pull Request and Merge State
 

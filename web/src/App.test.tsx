@@ -347,6 +347,35 @@ describe("App", () => {
     expect(screen.queryByText("Old question")).not.toBeInTheDocument();
   });
 
+  it("keeps same-run SSE telemetry when the post-ask snapshot resolves later", async () => {
+    let resolveSnapshot: ((value: unknown) => void) | undefined;
+    const delayedSnapshot = new Promise((resolve) => { resolveSnapshot = resolve; });
+    const terminalEvent = {
+      event_id: "evt_same_run", event_type: "run.completed", run_id: "run_same", conversation_id: "conv_same",
+      sequence: 1, timestamp: "2026-08-25T00:00:01Z",
+      payload: { input_tokens: 3, output_tokens: 2, total_tokens: 5, estimated_cost_usd: 0.0004, end_to_end_latency_ms: 18, ttft: { available: false } },
+    };
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((input: string) => {
+      if (input === "/api/status") return Promise.resolve({ ok: true, json: async () => ({ app: { status: "ok", service: "ai-app" }, mcp: { status: "ok" } }) });
+      if (input === "/api/ask") return Promise.resolve({ ok: true, json: async () => ({ answer: "Same run answer", usage: { input_tokens: 3, output_tokens: 2, total_tokens: 5 }, latency_ms: 18, conversation_id: "conv_same", run_id: "run_same", llm_calls: [] }) });
+      if (input === "/api/runs/run_same/events") return Promise.resolve({ ok: true, text: async () => `data: ${JSON.stringify(terminalEvent)}\n\n` });
+      if (input === "/api/conversations/conv_same") return delayedSnapshot.then((snapshot) => ({ ok: true, json: async () => snapshot }));
+      return Promise.resolve({ ok: true, text: async () => "" });
+    }));
+
+    render(<App />);
+    fireEvent.change(screen.getByRole("textbox", { name: "Ask about NYC taxi activity" }), { target: { value: "Preserve telemetry" } });
+    fireEvent.click(screen.getByRole("button", { name: "Run analysis" }));
+    expect(await screen.findByText("18 ms")).toBeVisible();
+
+    await act(async () => {
+      resolveSnapshot?.({ conversation_id: "conv_same", messages: [], runs: [] });
+    });
+
+    expect(screen.getByText("18 ms")).toBeVisible();
+    expect(screen.getByText("$0.0004")).toBeVisible();
+  });
+
   it("clears prior run context and telemetry before inspecting another run", async () => {
     window.localStorage.setItem("ai-analytics-conversation-id", "conv_switch");
     vi.stubGlobal("fetch", vi.fn().mockImplementation((input: string) => {

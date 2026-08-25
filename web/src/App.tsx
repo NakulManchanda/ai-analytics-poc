@@ -124,8 +124,6 @@ export default function App() {
       );
       const activeRun = selectedRunId ?? snapshot.runs.at(-1)?.run_id ?? null;
       setActiveRunId(activeRun);
-      setWorkingContext(null);
-      setRunTelemetry(null);
     } catch {
       if (clearPointerOnFailure && hydrationVersion.current === version) {
         window.localStorage.removeItem(CONVERSATION_STORAGE_KEY);
@@ -314,6 +312,7 @@ export default function App() {
                   type="button"
                   className="btn-text"
                   onClick={() => {
+                    hydrationVersion.current += 1;
                     setConversationId(null);
                     window.localStorage.removeItem(CONVERSATION_STORAGE_KEY);
                     setChatTurns([]);
