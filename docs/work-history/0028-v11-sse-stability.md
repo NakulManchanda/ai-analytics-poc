@@ -22,7 +22,7 @@
 
 - Branch: `codex/v11-sse-stability`
 - Tracking issue: #47
-- Pull request: draft PR to be opened after the initial branch push.
+- Pull request: [PR #50](https://github.com/NakulManchanda/ai-analytics-poc/pull/50) (draft).
 - Merge state: not merged; deployment and infrastructure changes are out of scope.
 
 ## Lessons
