@@ -36,8 +36,8 @@ creating AWS resources, or claiming a deployment that did not occur.
   mismatches while the new smoke was being aligned with the existing API.
 - Final focused test: `uv run --project services/app pytest
   services/app/tests/test_v11_integration_smoke.py -q` — 1 passed.
-- `uv run ruff format --check tests/test_v11_integration_smoke.py` and `uv run
-  ruff check tests/test_v11_integration_smoke.py` — passed.
+- `uv run black --check tests/test_v11_integration_smoke.py` and `uv run ruff
+  check tests/test_v11_integration_smoke.py` — passed.
 - `make test` — 88 app, 1 MCP, 13 dataset-spike, 18 infrastructure/script, and
   18 web tests passed; `npm run build` and Python `compileall` passed.
 - `make integration-smoke` — existing isolated five-service Compose smoke
