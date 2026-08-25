@@ -1,4 +1,4 @@
-import { FormEvent, useCallback, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { ContextInspector } from "./ContextInspector";
 import { TimelineInspector } from "./TimelineInspector";
 import {
@@ -18,6 +18,14 @@ const initialStatus: Status = {
 const STATUS_RETRY_DELAY_MS = 500;
 const MAX_STATUS_ATTEMPTS = 10;
 const CONVERSATION_STORAGE_KEY = "ai-analytics-conversation-id";
+
+function metricValue(value: number | null | undefined, suffix = ""): string {
+  return typeof value === "number" ? `${value}${suffix}` : "Unavailable";
+}
+
+function costValue(value: number | null | undefined): string {
+  return typeof value === "number" ? `$${value.toFixed(4)}` : "Unavailable";
+}
 
 function appLabel(status: Status): string {
   return status.app.status === "ok" ? "Backend ready" : "Backend checking";
@@ -44,6 +52,7 @@ export default function App() {
   const [workingContext, setWorkingContext] = useState<WorkingContextData | null>(null);
   const [runTelemetry, setRunTelemetry] = useState<RunTelemetry | null>(null);
   const [activeTab, setActiveTab] = useState<"timeline" | "context">("timeline");
+  const hydrationVersion = useRef(0);
 
   useEffect(() => {
     let active = true;
@@ -81,22 +90,28 @@ export default function App() {
     };
   }, []);
 
-  const hydrateConversation = useCallback(async (id: string) => {
-    const response = await fetch(`/api/conversations/${encodeURIComponent(id)}`);
-    if (!response.ok) {
-      if (response.status === 404) window.localStorage.removeItem(CONVERSATION_STORAGE_KEY);
-      return;
-    }
-    const snapshot = (await response.json()) as ConversationSnapshot;
-    const runsByMessageId = new Map(
-      snapshot.runs.filter((run) => run.message_id).map((run) => [run.message_id as string, run]),
-    );
-    setConversationId(snapshot.conversation_id);
-    setChatTurns(
-      [...snapshot.messages]
-        .sort((a, b) => a.sequence - b.sequence)
-        .map((message) => {
-          const associatedRun = runsByMessageId.get(message.message_id);
+  const hydrateConversation = useCallback(async (
+    id: string,
+    selectedRunId?: string,
+    clearPointerOnFailure = false,
+  ) => {
+    const version = ++hydrationVersion.current;
+    try {
+      const response = await fetch(`/api/conversations/${encodeURIComponent(id)}`);
+      if (!response.ok) throw new Error("Conversation reload failed");
+      const snapshot = (await response.json()) as ConversationSnapshot;
+      if (hydrationVersion.current !== version) return;
+      const orderedMessages = [...snapshot.messages].sort((a, b) => a.sequence - b.sequence);
+      const runsByMessageId = new Map(
+        snapshot.runs.filter((run) => run.message_id).map((run) => [run.message_id as string, run]),
+      );
+      setConversationId(snapshot.conversation_id);
+      setChatTurns(
+        orderedMessages.map((message, index) => {
+          const priorMessage = orderedMessages[index - 1];
+          const associatedRun = message.role === "assistant" && priorMessage?.role === "user"
+            ? runsByMessageId.get(priorMessage.message_id)
+            : undefined;
           return {
             id: message.message_id,
             role: message.role,
@@ -106,14 +121,21 @@ export default function App() {
             tokens: associatedRun ? associatedRun.input_tokens + associatedRun.output_tokens : undefined,
           };
         }),
-    );
-    const latestRun = snapshot.runs.at(-1);
-    if (latestRun) setActiveRunId(latestRun.run_id);
+      );
+      const activeRun = selectedRunId ?? snapshot.runs.at(-1)?.run_id ?? null;
+      setActiveRunId(activeRun);
+      setWorkingContext(null);
+      setRunTelemetry(null);
+    } catch {
+      if (clearPointerOnFailure && hydrationVersion.current === version) {
+        window.localStorage.removeItem(CONVERSATION_STORAGE_KEY);
+      }
+    }
   }, []);
 
   useEffect(() => {
     const savedConversationId = window.localStorage.getItem(CONVERSATION_STORAGE_KEY);
-    if (savedConversationId) void hydrateConversation(savedConversationId);
+    if (savedConversationId) void hydrateConversation(savedConversationId, undefined, true);
   }, [hydrateConversation]);
 
   const submitPrompt = async (event: FormEvent<HTMLFormElement>) => {
@@ -121,6 +143,7 @@ export default function App() {
     const cleanPrompt = prompt.trim();
     if (!cleanPrompt || isRunning) return;
 
+    hydrationVersion.current += 1;
     setIsRunning(true);
     setAnswer(null);
     setPromptError(null);
@@ -170,6 +193,7 @@ export default function App() {
       setConversationId(askResp.conversation_id);
       window.localStorage.setItem(CONVERSATION_STORAGE_KEY, askResp.conversation_id);
       setActiveRunId(askResp.run_id);
+      await hydrateConversation(askResp.conversation_id, askResp.run_id);
 
       setPrompt("");
     } catch (error) {
@@ -182,15 +206,18 @@ export default function App() {
   };
 
   const handleInspectRun = (runId: string) => {
+    hydrationVersion.current += 1;
     setActiveRunId(runId);
+    setWorkingContext(null);
+    setRunTelemetry(null);
   };
 
-  const handleWorkingContextUpdate = (ctx: WorkingContextData) => {
-    setWorkingContext(ctx);
+  const handleWorkingContextUpdate = (runId: string, ctx: WorkingContextData) => {
+    if (runId === activeRunId) setWorkingContext(ctx);
   };
 
-  const handleRunTelemetryUpdate = (telemetry: RunTelemetry) => {
-    setRunTelemetry(telemetry);
+  const handleRunTelemetryUpdate = (runId: string, telemetry: RunTelemetry) => {
+    if (runId === activeRunId) setRunTelemetry(telemetry);
   };
 
   return (
@@ -232,7 +259,7 @@ export default function App() {
             <div className="chat-history-container" aria-label="Conversation turns">
               <div className="conversation-header-row">
                 <span className="card-label">Prior Turns Thread: <code>{conversationId}</code></span>
-                <span className="turns-counter">{chatTurns.length / 2} prior turns</span>
+                <span className="turns-counter">{chatTurns.filter((turn) => turn.role === "user").length} prior turns</span>
               </div>
               <div className="chat-turns-list">
                 {chatTurns.map((turn) => (
@@ -254,7 +281,7 @@ export default function App() {
                           <button
                             type="button"
                             className="inspect-link-btn"
-                            onClick={() => setActiveRunId(turn.runId || null)}
+                            onClick={() => turn.runId && handleInspectRun(turn.runId)}
                           >
                             Inspect Run
                           </button>
@@ -353,19 +380,19 @@ export default function App() {
                   <p className="usage">
                     {answer.usage.total_tokens} tokens · {answer.latency_ms} ms
                   </p>
-                  {runTelemetry && (
-                    <dl className="run-telemetry" aria-label="Authoritative run telemetry">
-                      <div><dt>End-to-end latency</dt><dd>{runTelemetry.end_to_end_latency_ms ?? "Unavailable"} ms</dd></div>
-                      <div><dt>LLM proposal latency</dt><dd>{runTelemetry.proposal_llm_latency_ms ?? "Unavailable"} ms</dd></div>
-                      <div><dt>MCP/tool latency</dt><dd>{runTelemetry.tool_latency_ms ?? "Unavailable"} ms</dd></div>
-                      <div><dt>LLM final-answer latency</dt><dd>{runTelemetry.final_answer_llm_latency_ms ?? "Unavailable"} ms</dd></div>
-                      <div><dt>Total input tokens</dt><dd>{runTelemetry.input_tokens}</dd></div>
-                      <div><dt>Total output tokens</dt><dd>{runTelemetry.output_tokens}</dd></div>
-                      <div><dt>Estimated cost</dt><dd>${runTelemetry.estimated_cost_usd.toFixed(4)}</dd></div>
-                      <div><dt>TTFT</dt><dd>{runTelemetry.ttft?.available ? "Available" : "Unavailable (non-streaming)"}</dd></div>
-                    </dl>
-                  )}
                 </div>
+              )}
+              {runTelemetry && (
+                <dl className="run-telemetry" aria-label="Authoritative run telemetry">
+                  <div><dt>End-to-end latency</dt><dd>{metricValue(runTelemetry.end_to_end_latency_ms, " ms")}</dd></div>
+                  <div><dt>LLM proposal latency</dt><dd>{metricValue(runTelemetry.proposal_llm_latency_ms, " ms")}</dd></div>
+                  <div><dt>MCP/tool latency</dt><dd>{metricValue(runTelemetry.tool_latency_ms, " ms")}</dd></div>
+                  <div><dt>LLM final-answer latency</dt><dd>{metricValue(runTelemetry.final_answer_llm_latency_ms, " ms")}</dd></div>
+                  <div><dt>Total input tokens</dt><dd>{metricValue(runTelemetry.input_tokens)}</dd></div>
+                  <div><dt>Total output tokens</dt><dd>{metricValue(runTelemetry.output_tokens)}</dd></div>
+                  <div><dt>Estimated cost</dt><dd>{costValue(runTelemetry.estimated_cost_usd)}</dd></div>
+                  <div><dt>TTFT</dt><dd>{runTelemetry.ttft?.available ? "Available" : "Unavailable (non-streaming)"}</dd></div>
+                </dl>
               )}
             </div>
           </form>

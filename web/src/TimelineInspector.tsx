@@ -3,8 +3,8 @@ import { RunEvent, RunTelemetry, WorkingContextData } from "./types";
 
 interface TimelineInspectorProps {
   runId: string | null;
-  onWorkingContextUpdate?: (context: WorkingContextData) => void;
-  onRunTelemetryUpdate?: (telemetry: RunTelemetry) => void;
+  onWorkingContextUpdate?: (runId: string, context: WorkingContextData) => void;
+  onRunTelemetryUpdate?: (runId: string, telemetry: RunTelemetry) => void;
   onInspectRun?: (runId: string) => void;
 }
 
@@ -19,10 +19,10 @@ function terminalTelemetry(event: RunEvent): RunTelemetry | null {
   };
   const ttft = value('ttft');
   return {
-    input_tokens: numericValue('input_tokens') ?? 0,
-    output_tokens: numericValue('output_tokens') ?? 0,
-    total_tokens: numericValue('total_tokens') ?? 0,
-    estimated_cost_usd: numericValue('estimated_cost_usd') ?? 0,
+    input_tokens: numericValue('input_tokens'),
+    output_tokens: numericValue('output_tokens'),
+    total_tokens: numericValue('total_tokens'),
+    estimated_cost_usd: numericValue('estimated_cost_usd'),
     end_to_end_latency_ms: numericValue('end_to_end_latency_ms'),
     proposal_llm_latency_ms: numericValue('proposal_llm_latency_ms'),
     tool_latency_ms: numericValue('tool_latency_ms'),
@@ -156,11 +156,11 @@ export const TimelineInspector: React.FC<TimelineInspectorProps> = ({
 
           // Check if payload has working_context
           if (parsed.payload?.working_context && latestWorkingContextUpdate.current) {
-            latestWorkingContextUpdate.current(parsed.payload.working_context);
+            latestWorkingContextUpdate.current(runId, parsed.payload.working_context);
           }
           const telemetry = terminalTelemetry(parsed);
           if (telemetry && latestRunTelemetryUpdate.current) {
-            latestRunTelemetryUpdate.current(telemetry);
+            latestRunTelemetryUpdate.current(runId, telemetry);
           }
 
           // Check terminal events
@@ -235,11 +235,11 @@ export const TimelineInspector: React.FC<TimelineInspectorProps> = ({
                 const dataJson = JSON.parse(line.substring(6)) as RunEvent;
                 incomingEvents.push(dataJson);
                 if (dataJson.payload?.working_context && latestWorkingContextUpdate.current) {
-                  latestWorkingContextUpdate.current(dataJson.payload.working_context);
+                  latestWorkingContextUpdate.current(runId, dataJson.payload.working_context);
                 }
                 const telemetry = terminalTelemetry(dataJson);
                 if (telemetry && latestRunTelemetryUpdate.current) {
-                  latestRunTelemetryUpdate.current(telemetry);
+                  latestRunTelemetryUpdate.current(runId, telemetry);
                 }
               } catch {
                 // ignore

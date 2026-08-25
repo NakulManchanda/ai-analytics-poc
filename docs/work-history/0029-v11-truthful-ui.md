@@ -12,6 +12,8 @@
 2. On reload, the app uses the stored backend ID solely to request `GET /api/conversations/{conversation_id}` and rebuilds ordered messages, associated run metadata, and the active run from the durable snapshot.
 3. Removed every App-level Working Context fallback, including synthetic schema, preview rows, artifacts, budgets, message counts, and generated IDs. The Context Inspector now remains empty until the live or reconstructed SSE `context.reduced` payload arrives.
 4. Terminal SSE events feed backend-owned phase latency, token totals, estimated cost, and explicit blocking-mode TTFT status into the answer telemetry display. TimelineInspector keeps callback references in refs, retaining the run-ID-only SSE lifecycle merged in #47.
+5. Review round 1 refreshes the durable snapshot after each successful ask, guards hydration with a monotonic request version, and clears run-scoped context/telemetry before a run switch. The snapshot attaches a run to the immediately following assistant message only when the ordered user message named by `Run.message_id` makes that relationship deterministic.
+6. TimelineInspector now forwards the source run ID with context and terminal telemetry callbacks. This sequential modification is safe because #47 is merged: it preserves that PR's run-ID-only effect dependency and ref-backed callback lifecycle, while supplying the run identity needed for App to reject stale run facts.
 
 ## Verification
 
@@ -20,6 +22,7 @@
 3. Full frontend test suite: `cd web && npm test` passed.
 4. Production build: `cd web && npm run build` passed (`tsc --noEmit && vite build`).
 5. Diff checks: `git diff --check` passed; changed frontend source was searched for the removed synthesized Working Context constants before handoff.
+6. Review round 1 focused regression tests: `cd web && npm test -- App.test.tsx TimelineInspector.test.tsx` passed with 17 tests; production build passed.
 
 ## Pull Request and Merge State
 

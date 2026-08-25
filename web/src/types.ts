@@ -54,10 +54,10 @@ export type ConversationSnapshot = {
 };
 
 export type RunTelemetry = {
-  input_tokens: number;
-  output_tokens: number;
-  total_tokens: number;
-  estimated_cost_usd: number;
+  input_tokens?: number;
+  output_tokens?: number;
+  total_tokens?: number;
+  estimated_cost_usd?: number;
   end_to_end_latency_ms?: number | null;
   proposal_llm_latency_ms?: number | null;
   tool_latency_ms?: number | null;

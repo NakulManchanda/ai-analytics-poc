@@ -95,7 +95,7 @@ describe("TimelineInspector SSE lifecycle", () => {
     await act(async () => {
       stream.emit("context.reduced", contextReduced);
     });
-    expect(latestContextUpdate).toHaveBeenCalledWith(reducedContext);
+    expect(latestContextUpdate).toHaveBeenCalledWith("run_same", reducedContext);
     expect(initialContextUpdate).not.toHaveBeenCalled();
 
     await act(async () => {
@@ -141,7 +141,7 @@ describe("TimelineInspector SSE lifecycle", () => {
       });
     });
 
-    expect(onRunTelemetryUpdate).toHaveBeenCalledWith({
+    expect(onRunTelemetryUpdate).toHaveBeenCalledWith("run_same", {
       input_tokens: 13,
       output_tokens: 7,
       total_tokens: 20,
