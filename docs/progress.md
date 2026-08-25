@@ -1,18 +1,33 @@
 # Project Status
- 
-All Milestones (0 through 16) and Public UAT enhancements have been successfully delivered, verified, and merged to `main`.
 
-## Merged Baseline
+## v1.1 durable state and truthful UI integration
 
-- **Milestones 0–15**: Merged (`9ad648f`), including S3 + CloudFront CDN public frontend, ECS/Fargate backend services, ALB, local multi-service integration hardening, async job worker, Redis Streams SSE, and bounded-context visualization.
-- **Milestone 16**: Final demo, security, cost, and architecture review completed and merged (`05a8dc3`).
-- **Public Cloud UAT**: Live on `https://ai.sibkaro.com` and `https://sibkaro.com`, verified end-to-end with live Bedrock LLM synthesis, zero-copy FastMCP DuckDB analytics, and 5-step real-time SSE execution telemetry.
+The four implementation tracks are merged on `main`:
 
-## Acceptance & Verification Status
+- #50 — stable SSE lifecycle (`84c298f`)
+- #51 — application-owned durable conversation orchestration (`cff3d3b`)
+- #52 — truthful durable run telemetry (`f55d331`)
+- #53 — durable conversation UI (`60373f3`)
 
-- [x] Zero-NAT architecture and least-privilege IAM task roles verified.
-- [x] Comprehensive root `README.md` finalized with architecture diagrams, live status tables, local Docker Compose commands, cloud deployment steps, and FAQ.
-- [x] Full test suite passing across all services (`make test`).
-- [x] Public UAT acceptance testing signed off by operator.
-- [x] Monotonic work history ledger (`docs/work-history/0001` through `0025`) completely updated.
+Issue #49 is the final integration and documentation checkpoint. Its focused
+local API smoke uses the default `InMemoryStateRepository` and verifies one
+backend-created conversation across two blocking `/api/ask` turns: four ordered
+messages, two distinct runs with steps, a fresh FastAPI app/TestClient reload,
+and durable SSE reconstruction with the expected content type, sequence,
+working context, and terminal telemetry.
 
+This local check proves reconstruction over the same explicitly injected local
+repository. It does **not** prove a brand-new process preserves in-memory state,
+and it does not claim deployed ECS restart recovery. The post-merge deployment
+checkpoint is to deploy the v1.1 app/frontend with the existing
+`DYNAMODB_TABLE_NAME`, complete two turns, replace/restart the ECS application
+task, and reload/replay the recorded conversation and run.
+
+The v1.1 integration review logged two non-blocking follow-ups: #54 (stale
+conversation pointers) and #55 (unavailable telemetry and partial snapshots).
+
+## Historical baseline
+
+Milestones 0–16 and prior public-UAT work remain historical baseline work. Any
+previous live-deployment statements are not v1.1 deployment evidence; use the
+current local and public UAT guides for this release's verification boundaries.
