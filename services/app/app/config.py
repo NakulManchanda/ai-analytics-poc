@@ -17,6 +17,7 @@ class Settings:
     llm_provider: str = "bedrock"
     llm_model_id: str = DEFAULT_MODEL_ID
     aws_region: str = M4_AWS_REGION
+    dynamodb_table_name: str | None = None
 
     @classmethod
     def from_environment(cls) -> "Settings":
@@ -24,6 +25,7 @@ class Settings:
             llm_provider=os.getenv("LLM_PROVIDER", "bedrock"),
             llm_model_id=os.getenv("LLM_MODEL_ID", DEFAULT_MODEL_ID),
             aws_region=os.getenv("AWS_REGION", M4_AWS_REGION),
+            dynamodb_table_name=os.getenv("DYNAMODB_TABLE_NAME"),
         )
 
     def validate_m4_alignment(self) -> None:

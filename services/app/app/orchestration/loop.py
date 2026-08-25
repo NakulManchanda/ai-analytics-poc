@@ -36,6 +36,7 @@ from app.state import (
     generate_run_id,
     generate_step_id,
     generate_tool_call_id,
+    utcnow_isoformat,
 )
 
 logger = logging.getLogger(__name__)
@@ -69,6 +70,26 @@ class LoopResult:
     estimated_cost_usd: float = 0.0
     latency_ms: int = 0
     failure_code: str | None = None
+    llm_calls: list[LLMCall] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class LLMCall:
+    llm_call_id: str
+    model_id: str
+    input_tokens: int
+    output_tokens: int
+    latency_ms: int
+
+
+class OrchestrationError(ValueError):
+    """A controlled application-boundary failure from the orchestration loop."""
+
+    def __init__(self, code: str, retryable: bool, llm_call_id: str, message: str):
+        super().__init__(message)
+        self.code = code
+        self.retryable = retryable
+        self.llm_call_id = llm_call_id
 
 
 def parse_query_proposal(proposal: ToolProposalResult) -> tuple[str, int] | None:
@@ -105,6 +126,8 @@ class OrchestrationLoop:
         budgets: ExecutionBudgets | None = None,
         event_publisher: EventPublisher | None = None,
         context_reducer: ContextReducer | None = None,
+        llm_call_id_factory: Callable[[], str] = generate_llm_call_id,
+        tool_call_id_factory: Callable[[], str] = generate_tool_call_id,
     ) -> None:
         self._llm_client = llm_client
         self._llm_client_factory = llm_client_factory
@@ -114,6 +137,8 @@ class OrchestrationLoop:
         self._budgets = budgets or ExecutionBudgets()
         self._publisher = event_publisher
         self._reducer = context_reducer or ContextReducer()
+        self._llm_call_id_factory = llm_call_id_factory
+        self._tool_call_id_factory = tool_call_id_factory
 
     def _get_llm_client(self) -> LLMClient:
         if self._llm_client is not None:
@@ -144,6 +169,13 @@ class OrchestrationLoop:
         conv_id = conversation_id or generate_conversation_id()
         conv = self._repo.get_conversation(conv_id)
         if conv is None:
+            if conversation_id is not None:
+                raise OrchestrationError(
+                    "conversation_not_found",
+                    False,
+                    "",
+                    f"Conversation {conv_id} not found",
+                )
             conv = Conversation(conversation_id=conv_id)
             self._repo.create_conversation(conv)
 
@@ -207,11 +239,22 @@ class OrchestrationLoop:
         last_tool_call_id: str | None = None
         last_query_id: str | None = None
         steps: list[RunStep] = []
+        llm_calls: list[LLMCall] = []
         step_seq = 1
 
         try:
-            llm = self._get_llm_client()
-            mcp = self._get_mcp_client()
+            proposal_call_id = self._llm_call_id_factory()
+            try:
+                llm = self._get_llm_client()
+                mcp = self._get_mcp_client()
+            except LLMConfigurationError as err:
+                raise OrchestrationError(
+                    "llm_configuration_error", False, proposal_call_id, str(err)
+                ) from err
+            except MCPToolError as err:
+                raise OrchestrationError(
+                    "mcp_tool_error", err.retryable, proposal_call_id, str(err)
+                ) from err
 
             # Main bounded orchestration loop
             while True:
@@ -223,16 +266,24 @@ class OrchestrationLoop:
                     raw_schema = mcp.get_dataset_schema()
                     schema = sanitize_dataset_schema(raw_schema)
                 except MCPToolError as err:
-                    raise err
+                    raise OrchestrationError(
+                        "mcp_tool_error", err.retryable, proposal_call_id, str(err)
+                    ) from err
 
                 # Step B: LLM Propose Taxi Query
-                llm_call_id = generate_llm_call_id()
+                llm_call_id = proposal_call_id
                 emit("llm.started", {"llm_call_id": llm_call_id, "phase": "proposal"})
                 call_start = time.monotonic()
                 try:
                     proposal = llm.propose_taxi_query(prompt, schema)
-                except (LLMProviderError, LLMConfigurationError) as err:
-                    raise err
+                except LLMConfigurationError as err:
+                    raise OrchestrationError(
+                        "llm_configuration_error", False, llm_call_id, str(err)
+                    ) from err
+                except LLMProviderError as err:
+                    raise OrchestrationError(
+                        "llm_provider_error", err.retryable, llm_call_id, str(err)
+                    ) from err
                 call_latency_ms = int((time.monotonic() - call_start) * 1000)
 
                 cost = estimate_cost(proposal.input_tokens, proposal.output_tokens)
@@ -240,6 +291,15 @@ class OrchestrationLoop:
                     proposal.input_tokens,
                     proposal.output_tokens,
                     cost,
+                )
+                llm_calls.append(
+                    LLMCall(
+                        llm_call_id=llm_call_id,
+                        model_id=proposal.model_id,
+                        input_tokens=proposal.input_tokens,
+                        output_tokens=proposal.output_tokens,
+                        latency_ms=proposal.latency_ms,
+                    )
                 )
                 emit(
                     "llm.completed",
@@ -285,7 +345,12 @@ class OrchestrationLoop:
                     self._repo.add_run_step(invalid_step)
                     steps.append(invalid_step)
                     emit("run.failed", {"error": "Invalid tool proposal arguments"})
-                    raise ValueError(f"Invalid tool proposal: {proposal.arguments}")
+                    raise OrchestrationError(
+                        "tool_validation_error",
+                        False,
+                        llm_call_id,
+                        f"Invalid tool proposal: {proposal.arguments}",
+                    )
 
                 analysis, limit = query_request
                 emit(
@@ -302,15 +367,22 @@ class OrchestrationLoop:
                 executed_tool_signatures.add(tool_sig)
 
                 # Step D: Execute MCP Tool
-                tool_call_id = generate_tool_call_id()
+                tool_call_id = self._tool_call_id_factory()
                 last_tool_call_id = tool_call_id
                 emit(
                     "tool.started",
                     {"tool_call_id": tool_call_id, "tool_name": proposal.name},
                 )
                 tool_start = time.monotonic()
-                raw_query_result = mcp.query_taxi_data(analysis=analysis, limit=limit)
-                query_result = sanitize_query_result(raw_query_result)
+                try:
+                    raw_query_result = mcp.query_taxi_data(
+                        analysis=analysis, limit=limit
+                    )
+                    query_result = sanitize_query_result(raw_query_result)
+                except MCPToolError as err:
+                    raise OrchestrationError(
+                        "mcp_tool_error", err.retryable, llm_call_id, str(err)
+                    ) from err
                 tool_duration_ms = int((time.monotonic() - tool_start) * 1000)
 
                 query_id_val = str(query_result.get("query_id", ""))
@@ -370,13 +442,22 @@ class OrchestrationLoop:
                     },
                 )
 
-                answer_call_id = generate_llm_call_id()
+                answer_call_id = self._llm_call_id_factory()
                 emit(
                     "llm.started",
                     {"llm_call_id": answer_call_id, "phase": "final_answer"},
                 )
                 ans_start = time.monotonic()
-                answer_result = llm.answer_with_query_result(prompt, query_result)
+                try:
+                    answer_result = llm.answer_with_query_result(prompt, query_result)
+                except LLMConfigurationError as err:
+                    raise OrchestrationError(
+                        "llm_configuration_error", False, answer_call_id, str(err)
+                    ) from err
+                except LLMProviderError as err:
+                    raise OrchestrationError(
+                        "llm_provider_error", err.retryable, answer_call_id, str(err)
+                    ) from err
                 ans_latency_ms = int((time.monotonic() - ans_start) * 1000)
 
                 ans_cost = estimate_cost(
@@ -386,6 +467,15 @@ class OrchestrationLoop:
                     answer_result.input_tokens,
                     answer_result.output_tokens,
                     ans_cost,
+                )
+                llm_calls.append(
+                    LLMCall(
+                        llm_call_id=answer_call_id,
+                        model_id=answer_result.model_id,
+                        input_tokens=answer_result.input_tokens,
+                        output_tokens=answer_result.output_tokens,
+                        latency_ms=answer_result.latency_ms,
+                    )
                 )
                 emit(
                     "llm.completed",
@@ -436,6 +526,8 @@ class OrchestrationLoop:
                     status="completed",
                     model=DEFAULT_MODEL_ID,
                     prompt_version="m9.v1",
+                    started_at=run.started_at,
+                    completed_at=utcnow_isoformat(),
                     input_tokens=tracker.input_tokens,
                     output_tokens=tracker.output_tokens,
                     estimated_cost_usd=tracker.estimated_cost_usd,
@@ -464,7 +556,8 @@ class OrchestrationLoop:
                     output_tokens=tracker.output_tokens,
                     total_tokens=tracker.total_tokens,
                     estimated_cost_usd=tracker.estimated_cost_usd,
-                    latency_ms=total_latency_ms,
+                    latency_ms=sum(call.latency_ms for call in llm_calls),
+                    llm_calls=llm_calls,
                 )
 
         except BudgetExceededError as err:
@@ -477,6 +570,8 @@ class OrchestrationLoop:
                 status="budget_exceeded",
                 model=DEFAULT_MODEL_ID,
                 prompt_version="m9.v1",
+                started_at=run.started_at,
+                completed_at=utcnow_isoformat(),
                 input_tokens=tracker.input_tokens,
                 output_tokens=tracker.output_tokens,
                 estimated_cost_usd=tracker.estimated_cost_usd,
@@ -511,4 +606,5 @@ class OrchestrationLoop:
                 estimated_cost_usd=tracker.estimated_cost_usd,
                 latency_ms=total_latency_ms,
                 failure_code="budget_exceeded",
+                llm_calls=llm_calls,
             )

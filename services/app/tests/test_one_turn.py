@@ -81,7 +81,12 @@ def test_ask_runs_one_validated_profile_tool_sequence_and_returns_bounded_metada
     response = client.post("/api/ask", json={"prompt": "What dataset is available?"})
 
     assert response.status_code == 200
-    assert response.json() == {
+    payload = response.json()
+    assert payload["conversation_id"].startswith("conv_")
+    assert payload["run_id"].startswith("run_")
+    del payload["conversation_id"]
+    del payload["run_id"]
+    assert payload == {
         "answer": "The profile contains 3 taxi trips.",
         "tool_call_id": "tool_m5_profile",
         "query_id": "query_m5_profile",

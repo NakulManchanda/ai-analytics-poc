@@ -4,7 +4,9 @@ from app.orchestration.budgets import (
     ExecutionBudgets,
 )
 from app.orchestration.loop import (
+    LLMCall,
     LoopResult,
+    OrchestrationError,
     OrchestrationLoop,
     estimate_cost,
     parse_query_proposal,
@@ -21,7 +23,9 @@ __all__ = [
     "BudgetTracker",
     "ContextReducer",
     "ExecutionBudgets",
+    "LLMCall",
     "LoopResult",
+    "OrchestrationError",
     "OrchestrationLoop",
     "WorkingContext",
     "estimate_cost",

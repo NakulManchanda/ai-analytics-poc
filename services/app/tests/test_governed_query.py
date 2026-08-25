@@ -89,7 +89,12 @@ def test_ask_supplies_schema_and_runs_one_validated_governed_query() -> None:
     )
 
     assert response.status_code == 200
-    assert response.json() == {
+    payload = response.json()
+    assert payload["conversation_id"].startswith("conv_")
+    assert payload["run_id"].startswith("run_")
+    del payload["conversation_id"]
+    del payload["run_id"]
+    assert payload == {
         "answer": "Alpha has the most pickups with 3 trips.",
         "tool_call_id": "tool_m6_query",
         "query_id": "query_m6_fixture",

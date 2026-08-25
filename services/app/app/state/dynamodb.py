@@ -208,6 +208,21 @@ class DynamoDBStateRepository:
                     f"Run {run.run_id} already exists"
                 ) from error
             raise StateError(f"Failed to create run: {error}") from error
+
+        conversation_index = {
+            "pk": f"CONV#{run.conversation_id}",
+            "sk": f"RUN#{run.started_at}#{run.run_id}",
+            "entity_type": "conversation_run",
+            "run_id": run.run_id,
+            "conversation_id": run.conversation_id,
+        }
+        try:
+            self._table.put_item(
+                Item=conversation_index,
+                ConditionExpression="attribute_not_exists(sk)",
+            )
+        except ClientError as error:
+            raise StateError(f"Failed to index conversation run: {error}") from error
         return run
 
     def get_run(self, run_id: str) -> Run | None:
@@ -268,6 +283,25 @@ class DynamoDBStateRepository:
                 raise EntityNotFoundError(f"Run {run.run_id} not found") from error
             raise ConcurrencyError(f"Failed to update run: {error}") from error
         return run
+
+    def list_runs(self, conversation_id: str) -> list[Run]:
+        try:
+            response = self._table.query(
+                KeyConditionExpression=(
+                    Key("pk").eq(f"CONV#{conversation_id}")
+                    & Key("sk").begins_with("RUN#")
+                ),
+                ScanIndexForward=True,
+            )
+        except ClientError as error:
+            raise StateError(f"Failed to list conversation runs: {error}") from error
+
+        runs: list[Run] = []
+        for item in response.get("Items", []):
+            run = self.get_run(item["run_id"])
+            if run is not None:
+                runs.append(run)
+        return runs
 
     def add_run_step(self, step: RunStep) -> RunStep:
         run = self.get_run(step.run_id)
