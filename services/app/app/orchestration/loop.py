@@ -8,7 +8,12 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from app.config import DEFAULT_MODEL_ID, LLMConfigurationError
-from app.events import EventPublisher, RunEvent
+from app.events import (
+    EventPublisher,
+    RunEvent,
+    context_reduced_payload,
+    terminal_run_payload,
+)
 from app.llm import LLMClient, LLMProviderError, ToolProposalResult
 from app.mcp_client import (
     ALLOWED_ANALYSES,
@@ -450,11 +455,11 @@ class OrchestrationLoop:
                 )
                 emit(
                     "context.reduced",
-                    {
-                        "query_id": query_id_val,
-                        "row_count": query_result.get("row_count", 0),
-                        "working_context": working_ctx.to_dict(),
-                    },
+                    context_reduced_payload(
+                        query_id_val,
+                        query_result.get("row_count", 0),
+                        working_ctx.to_dict(),
+                    ),
                 )
                 context_step = RunStep(
                     step_id=generate_step_id(),
@@ -464,7 +469,10 @@ class OrchestrationLoop:
                     status="completed",
                     query_id=query_id_val,
                     output_summary="persisted working context",
-                    metadata={"working_context": working_ctx.to_dict()},
+                    metadata={
+                        "row_count": query_result.get("row_count", 0),
+                        "working_context": working_ctx.to_dict(),
+                    },
                 )
                 self._repo.add_run_step(context_step)
                 steps.append(context_step)
@@ -567,14 +575,14 @@ class OrchestrationLoop:
 
                 emit(
                     "run.completed",
-                    {
-                        "status": "completed",
-                        "total_tokens": tracker.total_tokens,
-                        "estimated_cost_usd": tracker.estimated_cost_usd,
-                        "latency_ms": total_latency_ms,
-                        "telemetry": run_telemetry,
-                        **run_telemetry,
-                    },
+                    terminal_run_payload(
+                        status="completed",
+                        input_tokens=tracker.input_tokens,
+                        output_tokens=tracker.output_tokens,
+                        estimated_cost_usd=tracker.estimated_cost_usd,
+                        failure_code=None,
+                        telemetry=run_telemetry,
+                    ),
                 )
 
                 return LoopResult(
@@ -621,16 +629,15 @@ class OrchestrationLoop:
 
             emit(
                 "run.budget_exceeded",
-                {
-                    "status": "budget_exceeded",
-                    "reason": err.reason,
-                    "failure_code": "budget_exceeded",
-                    "total_tokens": tracker.total_tokens,
-                    "estimated_cost_usd": tracker.estimated_cost_usd,
-                    "latency_ms": total_latency_ms,
-                    "telemetry": run_telemetry,
-                    **run_telemetry,
-                },
+                terminal_run_payload(
+                    status="budget_exceeded",
+                    input_tokens=tracker.input_tokens,
+                    output_tokens=tracker.output_tokens,
+                    estimated_cost_usd=tracker.estimated_cost_usd,
+                    failure_code="budget_exceeded",
+                    telemetry=run_telemetry,
+                    reason=err.reason,
+                ),
             )
 
             return LoopResult(
@@ -666,19 +673,24 @@ class OrchestrationLoop:
                 output_tokens=tracker.output_tokens,
                 estimated_cost_usd=tracker.estimated_cost_usd,
                 failure_code=err.code,
-                metadata={"error": str(err), "telemetry": run_telemetry},
+                metadata={
+                    "error": str(err),
+                    "retryable": err.retryable,
+                    "telemetry": run_telemetry,
+                },
             )
             self._repo.update_run(failed_run)
             emit(
                 "run.failed",
-                {
-                    "status": "failed",
-                    "failure_code": err.code,
-                    "retryable": err.retryable,
-                    "latency_ms": total_latency_ms,
-                    "telemetry": run_telemetry,
-                    **run_telemetry,
-                },
+                terminal_run_payload(
+                    status="failed",
+                    input_tokens=tracker.input_tokens,
+                    output_tokens=tracker.output_tokens,
+                    estimated_cost_usd=tracker.estimated_cost_usd,
+                    failure_code=err.code,
+                    telemetry=run_telemetry,
+                    retryable=err.retryable,
+                ),
                 llm_call_id=err.llm_call_id or None,
             )
             raise

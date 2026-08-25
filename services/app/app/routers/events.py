@@ -9,7 +9,11 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
-from app.events.models import RunEvent
+from app.events.models import (
+    RunEvent,
+    context_reduced_payload,
+    terminal_run_payload,
+)
 from app.events.publisher import RUN_EVENTS_STREAM
 from app.state import InMemoryStateRepository, StateRepository
 
@@ -169,11 +173,11 @@ def create_events_router(
                             seq += 1
                             if step.step_type == "context_reduced":
                                 event_type = "context.reduced"
-                                payload = {
-                                    "working_context": step.metadata.get(
-                                        "working_context", {}
-                                    )
-                                }
+                                payload = context_reduced_payload(
+                                    step.query_id,
+                                    step.metadata.get("row_count"),
+                                    step.metadata.get("working_context", {}),
+                                )
                             else:
                                 event_type = f"step.{step.step_type}"
                                 payload = {
@@ -210,15 +214,16 @@ def create_events_router(
                             run_id=run_id,
                             conversation_id=current_run.conversation_id,
                             sequence=seq,
-                            payload={
-                                "status": current_run.status,
-                                "input_tokens": current_run.input_tokens,
-                                "output_tokens": current_run.output_tokens,
-                                "estimated_cost_usd": current_run.estimated_cost_usd,
-                                "failure_code": current_run.failure_code,
-                                "telemetry": telemetry,
-                                **telemetry,
-                            },
+                            payload=terminal_run_payload(
+                                status=current_run.status,
+                                input_tokens=current_run.input_tokens,
+                                output_tokens=current_run.output_tokens,
+                                estimated_cost_usd=current_run.estimated_cost_usd,
+                                failure_code=current_run.failure_code,
+                                telemetry=telemetry,
+                                reason=current_run.metadata.get("reason"),
+                                retryable=current_run.metadata.get("retryable"),
+                            ),
                         )
                         if term_evt.event_id not in emitted_event_ids:
                             emitted_event_ids.add(term_evt.event_id)
