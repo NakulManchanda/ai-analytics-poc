@@ -243,4 +243,3 @@ def test_cancellation_during_mcp_tool_execution() -> None:
     assert "tool.started" in event_types
     assert "run.cancelled" in event_types
     assert "tool.completed" not in event_types
-
