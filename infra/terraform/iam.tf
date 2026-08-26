@@ -58,9 +58,9 @@ data "aws_iam_policy_document" "ai_app_task" {
     for_each = length(var.bedrock_model_arns) == 0 ? [] : [var.bedrock_model_arns]
 
     content {
-      sid     = "InvokeConfiguredBedrockModels"
-      effect  = "Allow"
-      actions = ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"]
+      sid       = "InvokeConfiguredBedrockModels"
+      effect    = "Allow"
+      actions   = ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"]
       resources = statement.value
     }
   }
