@@ -348,12 +348,17 @@ class BedrockLLMClient:
         )
         content = response["output"]["message"]["content"]
         tool_uses = [block["toolUse"] for block in content if "toolUse" in block]
-        if len(tool_uses) != 1:
-            name: object = ""
-            arguments: object = None
-        else:
+        if len(tool_uses) == 1:
             name = tool_uses[0].get("name", "")
             arguments = tool_uses[0].get("input")
+        elif len(tool_uses) > 1 and all(
+            u.get("name") == "average_trip_metrics" for u in tool_uses
+        ):
+            name = "average_trip_metrics"
+            arguments = {}
+        else:
+            name: object = ""
+            arguments: object = None
         return ToolProposalResult(
             name=name if isinstance(name, str) else "",
             arguments=arguments,

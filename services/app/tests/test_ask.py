@@ -603,3 +603,47 @@ def test_bedrock_propose_taxi_query_schema_includes_borough_enum() -> None:
         "Bronx",
         "Staten Island",
     ]
+
+
+def test_bedrock_propose_taxi_query_resolves_multiple_borough_tools_to_all_boroughs() -> (
+    None
+):
+    class MultiToolRuntimeClient:
+        def converse(self, **request: object) -> dict[str, object]:
+            return {
+                "output": {
+                    "message": {
+                        "content": [
+                            {
+                                "toolUse": {
+                                    "name": "average_trip_metrics",
+                                    "input": {"region_name": "Manhattan"},
+                                }
+                            },
+                            {
+                                "toolUse": {
+                                    "name": "average_trip_metrics",
+                                    "input": {"region_name": "Brooklyn"},
+                                }
+                            },
+                            {
+                                "toolUse": {
+                                    "name": "average_trip_metrics",
+                                    "input": {"region_name": "Queens"},
+                                }
+                            },
+                        ]
+                    }
+                },
+                "modelId": "amazon.nova-micro-v1:0",
+                "usage": {"inputTokens": 10, "outputTokens": 15},
+                "metrics": {"latencyMs": 20},
+            }
+
+    llm_client = BedrockLLMClient(
+        "amazon.nova-micro-v1:0",
+        runtime_client=MultiToolRuntimeClient(),
+    )
+    result = llm_client.propose_taxi_query("Compare boroughs", {"dataset": "nyc-taxi"})
+    assert result.name == "average_trip_metrics"
+    assert result.arguments == {}
