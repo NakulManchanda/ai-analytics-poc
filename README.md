@@ -111,7 +111,11 @@ The deployed platform operates in AWS `us-east-1` as a coordinated 5-component d
 4. **Reconstructed SSE UX & Working-Context Inspector**:
    - Completed runs can be reconstructed as ordered Server-Sent Events: `run.received`, persisted step events, `context.reduced`, and a truthful terminal event. `/api/ask` remains synchronous and blocking; it is not a v2 streaming endpoint.
    - Built-in UI inspector values come from the durable snapshot/replayed events. An unavailable metric, such as TTFT for a non-streaming blocking run, is shown as unavailable rather than invented.
-5. **Zero-NAT Cost-Efficient AWS Infrastructure**:
+5. **Cancellable Runs & Fast Cooperative Abort (v3)**:
+   - Analysts can cancel in-flight queries via `POST /api/runs/{run_id}/cancel` or the UI Stop button.
+   - Sub-millisecond Redis fast-flag (`run:cancel:{run_id}`) coordinates loop termination across checkpoints and immediately halts Bedrock streaming delta delivery.
+   - Partial assistant responses are cleanly captured into DynamoDB with `[interrupted]` suffix and `interrupted: True` metadata.
+6. **Zero-NAT Cost-Efficient AWS Infrastructure**:
    - ECS Fargate tasks run in public subnets with `assign_public_ip = true` to communicate with AWS Bedrock, ECR, and S3 directly over the Internet Gateway, completely eliminating costly AWS NAT Gateway overhead ($0/mo NAT cost).
 
 ---
