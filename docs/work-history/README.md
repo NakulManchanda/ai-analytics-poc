@@ -37,4 +37,5 @@ Monotonically numbered log of every post-bootstrap task. Each entry records the 
 | [0031](0031-average-trip-metrics.md) | v1.1 backlog | [#60](https://github.com/NakulManchanda/ai-analytics-poc/pull/60) | Governed average trip metrics and sample-chip contrast | Merged (`a0c372e`) |
 | [0032](0032-elasticache-redis.md) | v2 infra | [#63](https://github.com/NakulManchanda/ai-analytics-poc/pull/63) | Provision ElastiCache Redis for transient delivery | Merged (`6ad927b`) |
 | [0033](0033-v2-streaming-text.md) | v2 | [#62](https://github.com/NakulManchanda/ai-analytics-poc/pull/62) | Genuine provider text streaming over live run-first SSE | Merged (`f536f54`) |
-| [0034](0034-iam-bedrock-streaming.md) | v2 infra | [#66](https://github.com/NakulManchanda/ai-analytics-poc/pull/66) | Authorize bedrock:InvokeModelWithResponseStream in IAM task policy | Draft for #65 |
+| [0034](0034-iam-bedrock-streaming.md) | v2 infra | [#66](https://github.com/NakulManchanda/ai-analytics-poc/pull/66) | Authorize bedrock:InvokeModelWithResponseStream in IAM task policy | Merged (`2935602`) |
+| [0035](0035-tool-failure-visibility.md) | v2 | [#67](https://github.com/NakulManchanda/ai-analytics-poc/pull/67) | Emit tool.failed and surface detailed tool errors in timeline | Draft for #64 |
