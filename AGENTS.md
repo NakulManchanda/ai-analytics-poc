@@ -7,7 +7,14 @@ and `.github/copilot-instructions.md`) must stay thin and refer here rather than
 
 - Build one milestone at a time. Work only on the milestone explicitly requested; do not
   pre-build future architecture. Read `docs/implementation-plan.md`, `docs/progress.md`, and
-  the local `ai_analytics_poc_requirements_aws_v5.md` before changing implementation.
+  the local `ai_analytics_poc_requirements_aws_v5.md` before changing implementation. Use
+  `ai_analytics_poc_realtime_multimodal_plan.md` as the conceptual learning sequence for realtime,
+  streaming, voice, and multimodal milestones.
+- Prioritize work by how directly it advances the active milestone's architecture and learning
+  objective. Capabilities such as text-token streaming and voice input outrank incidental polish,
+  convenience queries, and incomplete low-impact functionality. A small bug or backlog issue must
+  not delay the next conceptual step unless it blocks an acceptance criterion, security,
+  reliability, deployment, or an explicitly requested user path; park it in the issue queue instead.
 - Prefer the smallest externally meaningful vertical slice. Preserve the requirements document
   and its AWS-only, deliberately small POC boundaries; do not add Kubernetes, Kafka/Kinesis,
   RDS, EFS, OpenSearch, a vector database, a warehouse, or a second hosting platform.
@@ -21,7 +28,11 @@ and `.github/copilot-instructions.md`) must stay thin and refer here rather than
   main checkout untouched; use `.worktrees/<topic>` and a descriptive branch name.
 - Make the smallest coherent commit, push the branch early, and open a **draft** PR as soon as
   the change is reviewable. Keep the PR description current with context, decisions, tests, and
-  known limitations; finish updates on that same PR. Do not merge without explicit authorization.
+  known limitations; finish updates on that same PR. An intermediate PR may merge without separate
+  human approval after its acceptance criteria, local verification, exact-head GitHub Actions, one
+  independent review, dependency, documentation, and conflict gates pass. A full redeploy,
+  infrastructure apply, milestone release, or tag still requires an explicit user decision and
+  applicable human validation.
 - Every post-bootstrap PR gets a monotonically numbered entry under `docs/work-history/` covering
   goal, starting point, decisions, verification, PR/merge state, and lessons. Update
   `README.md` and `docs/progress.md` when the active milestone requires it.
@@ -32,6 +43,10 @@ and `.github/copilot-instructions.md`) must stay thin and refer here rather than
   smoke scripts must select an ephemeral or task-specific host port and an isolated Compose
   project by default. Keep container-internal ports fixed; pass an explicit project/port only when
   the current task owns it.
+- Prefer existing Make targets for repeatable developer, test, CI, smoke, and deployment workflows.
+  When a useful non-trivial command would otherwise be reconstructed across tasks, add a small
+  documented Make target. Keep one-off inspections direct and do not wrap or regenerate complicated
+  commands without a recurring need.
 
 ## GitHub agent work queue
 
@@ -42,13 +57,14 @@ and `.github/copilot-instructions.md`) must stay thin and refer here rather than
 - Push an early, coherent commit and open a draft PR. Use issue comments for handoffs, decisions,
   verification evidence, blockers, and the resulting PR URL.
 - Agent labels identify the expected tool owner; assign `NakulManchanda` when GitHub supports it,
-  because local agent CLIs are not GitHub identities. Agents never merge or apply changes unless
-  the issue explicitly authorizes that action.
+  because local agent CLIs are not GitHub identities. Reviewers never mutate or merge. The
+  coordinator may merge a gated intermediate PR under the policy above, but never deploy or apply
+  infrastructure without explicit authorization.
 - Main orchestration uses `gpt-5.6-sol` at high reasoning. Default Codex subagents use
   `gpt-5.6-terra` at medium; use Terra high for complex reviews, not Luna unless speed-only.
-  Use Claude Opus/high for architecture, security, or adversarial review; Gemini/Antigravity
-  Flash/high for research, schemas, docs, or test matrices; Copilot for PR review; and GitHub
-  Actions for merge gates. See `docs/agent-coordination.md` for handoff commands.
+- Requests such as “review this PR,” “validate the PR,” “is this mergeable?”, or “re-review after
+  fixes” must use `.claude/skills/project-pr-review/SKILL.md`. That skill owns the independent-review
+  model, session, CI timing, validation, and follow-up mechanics; do not duplicate them here.
 
 ## Implementation and interoperability
 

@@ -46,6 +46,7 @@ from app.state import (
 
 logger = logging.getLogger(__name__)
 EXPECTED_TOOL_NAME = "query_taxi_data"
+AVERAGE_METRICS_TOOL_NAME = "average_trip_metrics"
 
 # Standard Bedrock Claude 3.5 Sonnet rate estimates: $0.003 / 1k input, $0.015 / 1k output
 COST_PER_INPUT_TOKEN = 0.003 / 1_000.0
@@ -98,8 +99,21 @@ class OrchestrationError(ValueError):
         self.llm_call_id = llm_call_id
 
 
-def parse_query_proposal(proposal: ToolProposalResult) -> tuple[str, int] | None:
+def parse_query_proposal(
+    proposal: ToolProposalResult,
+) -> tuple[str, dict[str, object]] | None:
     arguments = proposal.arguments
+    if proposal.name == AVERAGE_METRICS_TOOL_NAME:
+        if not isinstance(arguments, Mapping) or set(arguments) - {"region_name"}:
+            return None
+        region_name = arguments.get("region_name")
+        if region_name is not None and (
+            not isinstance(region_name, str)
+            or not region_name.strip()
+            or len(region_name) > 128
+        ):
+            return None
+        return proposal.name, ({"region_name": region_name} if region_name else {})
     if (
         proposal.name != EXPECTED_TOOL_NAME
         or not isinstance(arguments, Mapping)
@@ -116,7 +130,7 @@ def parse_query_proposal(proposal: ToolProposalResult) -> tuple[str, int] | None
         or not 1 <= limit <= 20
     ):
         return None
-    return analysis, limit
+    return proposal.name, {"analysis": analysis, "limit": limit}
 
 
 class OrchestrationLoop:
@@ -370,13 +384,13 @@ class OrchestrationLoop:
                         f"Invalid tool proposal: {proposal.arguments}",
                     )
 
-                analysis, limit = query_request
+                tool_name, tool_arguments = query_request
                 emit(
                     "tool.requested",
-                    {"tool_name": proposal.name, "analysis": analysis, "limit": limit},
+                    {"tool_name": tool_name, **tool_arguments},
                 )
 
-                tool_sig = f"{proposal.name}:{analysis}:{limit}"
+                tool_sig = f"{tool_name}:{json.dumps(tool_arguments, sort_keys=True)}"
                 if tool_sig in executed_tool_signatures:
                     raise BudgetExceededError(
                         f"Repeated equivalent tool call detected: {tool_sig}",
@@ -393,9 +407,15 @@ class OrchestrationLoop:
                 )
                 tool_start = time.monotonic()
                 try:
-                    raw_query_result = mcp.query_taxi_data(
-                        analysis=analysis, limit=limit
-                    )
+                    if tool_name == AVERAGE_METRICS_TOOL_NAME:
+                        raw_query_result = mcp.average_trip_metrics(
+                            region_name=tool_arguments.get("region_name")
+                        )
+                    else:
+                        raw_query_result = mcp.query_taxi_data(
+                            analysis=str(tool_arguments["analysis"]),
+                            limit=int(tool_arguments["limit"]),
+                        )
                     query_result = sanitize_query_result(raw_query_result)
                 except MCPToolError as err:
                     raise OrchestrationError(
@@ -433,7 +453,7 @@ class OrchestrationLoop:
                     tool_name=proposal.name,
                     tool_call_id=tool_call_id,
                     query_id=query_id_val,
-                    input_summary=f"analysis={analysis}, limit={limit}",
+                    input_summary=json.dumps(tool_arguments, sort_keys=True),
                     output_summary=(
                         f"rows={query_result.get('row_count', 0)}, bytes={serialized_bytes}"
                     ),

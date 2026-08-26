@@ -11,9 +11,10 @@ handoffs; it does not relax milestone sequencing or duplicate project rules.
    whether implementation is authorized. A `status:blocked` issue is planning only.
 3. The owner posts issue comments for takeover, decisions, evidence, blockers, and the draft PR.
    Keep all implementation on the issue branch; never share a write worktree.
-4. The coordinator controls integration order. No agent merges, applies infrastructure, or starts
-   a later milestone unless the issue explicitly authorizes it. GitHub Actions and review are
-   merge gates.
+4. The coordinator controls integration order. A gated intermediate PR needs no separate human
+   merge approval. Reviewers never merge, and no agent applies infrastructure, redeploys the full
+   environment, creates a milestone tag, or starts a later milestone without explicit authority.
+   GitHub Actions and one independent review are merge gates.
 
 Ownership labels describe the intended local tool, not a GitHub identity. Assign
 `NakulManchanda` when available. See the issue queue for the exact branch and worktree names.
@@ -25,12 +26,16 @@ Ownership labels describe the intended local tool, not a GitHub identity. Assign
 | Main coordinator | Codex `gpt-5.6-sol`, high reasoning |
 | Normal Codex subtask | Codex `gpt-5.6-terra`, medium reasoning |
 | Complex code/security review | Codex `gpt-5.6-terra`, high reasoning |
-| Architecture/security/adversarial review | Claude Opus 4.8 via `claude`, high effort |
 | Research, schemas, docs, test matrices | Gemini/Antigravity 3.7 Flash High via `agy`, high effort |
-| Pull-request review | GitHub Copilot |
-| Merge gate | GitHub Actions |
+| Independent pull-request review and validation | `.claude/skills/project-pr-review/SKILL.md` |
 
 Do not select Luna unless the task is explicitly speed-only.
+
+### Review lifecycle
+
+Requests such as “review this PR,” “validate the PR,” “is this mergeable?”, “start review with CI,”
+or “re-review after fixes” trigger `.claude/skills/project-pr-review/SKILL.md`. Use it as the sole
+source for review and validation mechanics.
 
 ## Handoff templates
 
@@ -79,9 +84,8 @@ tool per worktree, and never share a write worktree.
 ```sh
 cd .worktrees/<issue-name>
 
-# Claude — Opus 4.8, high effort
-claude --dangerously-skip-permissions --effort high --model claude-opus-4-8 \
-  "GitHub issue #[ISSUE]: follow CLAUDE.md (@AGENTS.md) and docs/agent-coordination.md; [TASK]."
+# Claude review and follow-up commands are selected by the project PR-review skill.
+# Ask naturally: "Review PR #[PR] for issue #[ISSUE]. Is it mergeable?"
 
 # Gemini / Antigravity — 3.7 Flash High, accept-edits
 agy --dangerously-skip-permissions --mode=accept-edits --effort=high \
@@ -96,7 +100,6 @@ checklist, and the instruction to comment evidence on the issue.
 
 | Tool | Model | Effort | Mode flag |
 | --- | --- | --- | --- |
-| `claude` | `claude-opus-4-8` (Opus 4.8) | `--effort high` | `--dangerously-skip-permissions` |
 | `agy` | `gemini-3.7-flash-high` (Gemini 3.7 Flash High) | `--effort=high` | `--dangerously-skip-permissions --mode=accept-edits` |
 
 `--dangerously-skip-permissions` is authorized **only** inside the isolated `.worktrees/<issue-name>`

@@ -18,6 +18,19 @@ QUERY_RESULT = {
     "query_id": "query_m6_fixture",
     "truncated": False,
 }
+AVERAGE_METRICS_RESULT = {
+    "columns": [
+        "region_name",
+        "trip_count",
+        "average_trip_distance",
+        "average_fare_amount",
+    ],
+    "rows": [["Manhattan", 3, 5.33, 18.0], ["Bronx", 2, 7.0, 18.0]],
+    "row_count": 2,
+    "execution_duration_ms": 7,
+    "query_id": "query_average_metrics_fixture",
+    "truncated": False,
+}
 
 
 class FakeGovernedQueryLLM:
@@ -68,6 +81,71 @@ class FakeGovernedQueryMCP:
     def query_taxi_data(self, *, analysis: str, limit: int) -> dict[str, object]:
         self.query_requests.append((analysis, limit))
         return self.result
+
+
+class FakeAverageTripMetricsLLM(FakeGovernedQueryLLM):
+    def __init__(self) -> None:
+        super().__init__(
+            {
+                "name": "average_trip_metrics",
+                "arguments": {},
+            }
+        )
+
+    def answer_with_query_result(
+        self, prompt: str, query_result: dict[str, object]
+    ) -> LLMResult:
+        self.answer_inputs.append((prompt, query_result))
+        return LLMResult(
+            text="Manhattan averages 5.33 miles and $18.00 in fare across 3 trips.",
+            model_id="amazon.nova-micro-v1:0",
+            input_tokens=15,
+            output_tokens=8,
+            latency_ms=17,
+        )
+
+
+class FakeAverageTripMetricsMCP(FakeGovernedQueryMCP):
+    def __init__(self) -> None:
+        super().__init__()
+        self.average_requests: list[str | None] = []
+
+    def average_trip_metrics(
+        self, *, region_name: str | None = None
+    ) -> dict[str, object]:
+        self.average_requests.append(region_name)
+        return AVERAGE_METRICS_RESULT
+
+
+def test_exact_borough_comparison_prompt_runs_the_governed_average_metrics_tool() -> (
+    None
+):
+    """Catches routing the public borough comparison prompt to the old query tool."""
+    prompt = (
+        "Compare average trip distance and fare amount across major pickup boroughs"
+    )
+    llm_client = FakeAverageTripMetricsLLM()
+    mcp_client = FakeAverageTripMetricsMCP()
+    client = TestClient(
+        create_app(
+            llm_client=llm_client,
+            mcp_client=mcp_client,
+            llm_call_id_factory=iter(
+                ["llm_average_proposal", "llm_average_answer"]
+            ).__next__,
+            tool_call_id_factory=lambda: "tool_average_metrics",
+        )
+    )
+
+    response = client.post("/api/ask", json={"prompt": prompt})
+
+    assert response.status_code == 200
+    assert response.json()["answer"] == (
+        "Manhattan averages 5.33 miles and $18.00 in fare across 3 trips."
+    )
+    assert mcp_client.average_requests == [None]
+    assert mcp_client.query_requests == []
+    assert llm_client.answer_inputs == [(prompt, AVERAGE_METRICS_RESULT)]
 
 
 def test_ask_supplies_schema_and_runs_one_validated_governed_query() -> None:

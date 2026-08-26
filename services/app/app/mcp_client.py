@@ -34,6 +34,10 @@ class DatasetProfileMCPClient(Protocol):
 
     def query_taxi_data(self, *, analysis: str, limit: int) -> dict[str, object]: ...
 
+    def average_trip_metrics(
+        self, *, region_name: str | None = None
+    ) -> dict[str, object]: ...
+
 
 class FastMCPDatasetProfileClient:
     """The app's narrow, synchronous adapter for the fixed FastMCP profile tool."""
@@ -63,6 +67,20 @@ class FastMCPDatasetProfileClient:
         except (ClientError, HTTPError, McpError, OSError, RuntimeError) as error:
             raise MCPToolError(retryable=True) from error
 
+    def average_trip_metrics(
+        self, *, region_name: str | None = None
+    ) -> dict[str, object]:
+        if region_name is not None and (
+            not isinstance(region_name, str)
+            or not region_name.strip()
+            or len(region_name) > 128
+        ):
+            raise MCPToolError(retryable=False)
+        try:
+            return asyncio.run(self._average_trip_metrics(region_name=region_name))
+        except (ClientError, HTTPError, McpError, OSError, RuntimeError) as error:
+            raise MCPToolError(retryable=True) from error
+
     async def _get_dataset_profile(self) -> dict[str, object]:
         async with Client(self._mcp_url) as client:
             result = await client.call_tool("get_dataset_profile")
@@ -89,6 +107,19 @@ class FastMCPDatasetProfileClient:
                 "query_taxi_data", {"analysis": analysis, "limit": limit}
             )
         if not isinstance(result.data, dict):
+            raise MCPToolError(retryable=False)
+        return sanitize_query_result(result.data)
+
+    async def _average_trip_metrics(
+        self, *, region_name: str | None
+    ) -> dict[str, object]:
+        arguments = {} if region_name is None else {"region_name": region_name}
+        async with Client(self._mcp_url) as client:
+            result = await client.call_tool("average_trip_metrics", arguments)
+        if not isinstance(result.data, dict):
+            raise MCPToolError(retryable=False)
+        error = result.data.get("error")
+        if isinstance(error, Mapping) and error.get("retryable") is False:
             raise MCPToolError(retryable=False)
         return sanitize_query_result(result.data)
 

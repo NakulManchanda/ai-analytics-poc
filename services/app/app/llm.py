@@ -97,15 +97,23 @@ class LocalFakeLLMClient:
         if not isinstance(schema.get("columns"), list):
             raise LLMProviderError(retryable=False)
         normalized_prompt = prompt.lower()
-        if "hour" in normalized_prompt:
-            analysis = "trip_volume_by_hour"
-        elif "weekday" in normalized_prompt or "distance" in normalized_prompt:
-            analysis = "average_distance_by_weekday"
+        if "fare" in normalized_prompt and (
+            "borough" in normalized_prompt or "region" in normalized_prompt
+        ):
+            name = "average_trip_metrics"
+            arguments: dict[str, object] = {}
         else:
-            analysis = "top_pickup_zones"
+            if "hour" in normalized_prompt:
+                analysis = "trip_volume_by_hour"
+            elif "weekday" in normalized_prompt or "distance" in normalized_prompt:
+                analysis = "average_distance_by_weekday"
+            else:
+                analysis = "top_pickup_zones"
+            name = "query_taxi_data"
+            arguments = {"analysis": analysis, "limit": 5}
         return ToolProposalResult(
-            name="query_taxi_data",
-            arguments={"analysis": analysis, "limit": 5},
+            name=name,
+            arguments=arguments,
             model_id=DEFAULT_MODEL_ID,
             input_tokens=max(1, len(prompt.split())),
             output_tokens=4,
@@ -120,7 +128,31 @@ class LocalFakeLLMClient:
         if not isinstance(columns, list) or not isinstance(rows, list) or not rows:
             return self._result(prompt, "The governed query returned no rows.")
         first_row = rows[0]
-        if not isinstance(first_row, list) or len(first_row) != 2:
+        if not isinstance(first_row, list):
+            raise LLMProviderError(retryable=False)
+        if columns == [
+            "region_name",
+            "trip_count",
+            "average_trip_distance",
+            "average_fare_amount",
+        ]:
+            if (
+                len(first_row) != 4
+                or not isinstance(first_row[0], str)
+                or isinstance(first_row[1], bool)
+                or not isinstance(first_row[1], int)
+                or not isinstance(first_row[2], (int, float))
+                or isinstance(first_row[2], bool)
+                or not isinstance(first_row[3], (int, float))
+                or isinstance(first_row[3], bool)
+            ):
+                raise LLMProviderError(retryable=False)
+            text = (
+                f"{first_row[0]} averages {float(first_row[2]):.2f} miles and "
+                f"${float(first_row[3]):.2f} in fare across {first_row[1]} trips."
+            )
+            return self._result(prompt, text)
+        if len(first_row) != 2:
             raise LLMProviderError(retryable=False)
         if columns == ["pickup_zone", "trip_count"]:
             text = f"{first_row[0]} has the most pickups with {first_row[1]} trips."
@@ -274,9 +306,30 @@ class BedrockLLMClient:
                                 }
                             },
                         }
-                    }
+                    },
+                    {
+                        "toolSpec": {
+                            "name": "average_trip_metrics",
+                            "description": (
+                                "Compare average trip distance and fare amount across "
+                                "governed pickup boroughs, optionally for one borough."
+                            ),
+                            "inputSchema": {
+                                "json": {
+                                    "type": "object",
+                                    "properties": {
+                                        "region_name": {
+                                            "type": "string",
+                                            "minLength": 1,
+                                        }
+                                    },
+                                    "additionalProperties": False,
+                                }
+                            },
+                        }
+                    },
                 ],
-                "toolChoice": {"tool": {"name": "query_taxi_data"}},
+                "toolChoice": {"any": {}},
             },
         )
         content = response["output"]["message"]["content"]
