@@ -26,19 +26,16 @@ Ownership labels describe the intended local tool, not a GitHub identity. Assign
 | Main coordinator | Codex `gpt-5.6-sol`, high reasoning |
 | Normal Codex subtask | Codex `gpt-5.6-terra`, medium reasoning |
 | Complex code/security review | Codex `gpt-5.6-terra`, high reasoning |
-| Cross-service/architecture/security PR review | Claude Opus via `claude`, normal/default effort |
-| Easy localized PR review | Claude Sonnet via `claude`, normal/default effort |
 | Research, schemas, docs, test matrices | Gemini/Antigravity 3.7 Flash High via `agy`, high effort |
-| Independent pull-request review | Exactly one continuing Claude session |
-| Merge gate | GitHub Actions, started in parallel with review |
+| Independent pull-request review and validation | `.claude/skills/project-pr-review/SKILL.md` |
 
 Do not select Luna unless the task is explicitly speed-only.
 
 ### Review lifecycle
 
-Use the natural-language-triggered `.claude/skills/project-pr-review/SKILL.md` workflow. It owns
-reviewer selection, required context, single-session follow-ups, parallel CI timing, and merge
-readiness checks without loading those operational details into every task.
+Requests such as “review this PR,” “validate the PR,” “is this mergeable?”, “start review with CI,”
+or “re-review after fixes” trigger `.claude/skills/project-pr-review/SKILL.md`. Use it as the sole
+source for review and validation mechanics.
 
 ## Handoff templates
 
@@ -87,18 +84,8 @@ tool per worktree, and never share a write worktree.
 ```sh
 cd .worktrees/<issue-name>
 
-# Claude review — natural language triggers the project skill; capture the session ID
-claude --dangerously-skip-permissions --model opus --print --output-format json \
-  "Review PR #[PR] for issue #[ISSUE]. Base [BASE_SHA], head [HEAD_SHA]."
-
-# Easy localized review — the same skill selects the lighter review lane
-claude --dangerously-skip-permissions --model sonnet --print --output-format json \
-  "Review this localized PR #[PR] for issue #[ISSUE]. Base [BASE_SHA], head [HEAD_SHA]."
-
-# Follow-up — resume the original reviewer after fixes
-claude --dangerously-skip-permissions --resume "[CLAUDE_SESSION_ID]" \
-  --print --output-format json \
-  "Re-review after fixes at [NEW_HEAD_SHA]. Changes: [SUMMARY]."
+# Claude review and follow-up commands are selected by the project PR-review skill.
+# Ask naturally: "Review PR #[PR] for issue #[ISSUE]. Is it mergeable?"
 
 # Gemini / Antigravity — 3.7 Flash High, accept-edits
 agy --dangerously-skip-permissions --mode=accept-edits --effort=high \
@@ -113,7 +100,6 @@ checklist, and the instruction to comment evidence on the issue.
 
 | Tool | Model | Effort | Mode flag |
 | --- | --- | --- | --- |
-| `claude` | `opus` for complex reviews; `sonnet` for easy localized reviews | normal/default (omit `--effort`) | `--dangerously-skip-permissions` |
 | `agy` | `gemini-3.7-flash-high` (Gemini 3.7 Flash High) | `--effort=high` | `--dangerously-skip-permissions --mode=accept-edits` |
 
 `--dangerously-skip-permissions` is authorized **only** inside the isolated `.worktrees/<issue-name>`

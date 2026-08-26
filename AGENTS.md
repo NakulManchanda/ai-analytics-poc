@@ -55,10 +55,9 @@ and `.github/copilot-instructions.md`) must stay thin and refer here rather than
   infrastructure without explicit authorization.
 - Main orchestration uses `gpt-5.6-sol` at high reasoning. Default Codex subagents use
   `gpt-5.6-terra` at medium; use Terra high for complex reviews, not Luna unless speed-only.
-  Independent PR review uses exactly one Claude session: Opus at normal/default effort for complex
-  changes or Sonnet at normal/default effort for easy localized fixes. Start it in parallel with
-  CI, resume the same session after updates, and do not poll CI frequently. The reusable workflow
-  lives in `.claude/skills/project-pr-review/SKILL.md`; see `docs/agent-coordination.md` for routing.
+- Requests such as “review this PR,” “validate the PR,” “is this mergeable?”, or “re-review after
+  fixes” must use `.claude/skills/project-pr-review/SKILL.md`. That skill owns the independent-review
+  model, session, CI timing, validation, and follow-up mechanics; do not duplicate them here.
 
 ## Implementation and interoperability
 

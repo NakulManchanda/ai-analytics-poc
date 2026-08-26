@@ -1,6 +1,6 @@
 ---
 name: project-pr-review
-description: Use when asked to review a pull request, decide whether a PR is mergeable, start review with CI, or re-review a follow-up commit in ai-analytics-poc. Triggers include "review this PR", "is this mergeable", "start review with CI", "re-review after fixes", and "check review findings".
+description: Use when asked to review or validate a pull request, decide whether a PR is mergeable, start review with CI, or re-review a follow-up commit in ai-analytics-poc. Triggers include "review this PR", "validate the PR", "is this mergeable", "start review with CI", "re-review after fixes", and "check review findings".
 ---
 
 # Project Pull-Request Review
