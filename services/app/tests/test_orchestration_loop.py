@@ -322,3 +322,43 @@ def test_orchestration_loop_invalid_tool_proposal_rejected() -> None:
 
     with pytest.raises(ValueError, match="Invalid tool proposal"):
         loop.run("Which pickup zones have the most trips?")
+
+
+def test_parse_query_proposal_average_trip_metrics() -> None:
+    from app.orchestration.loop import parse_query_proposal
+
+    # Empty dict arguments
+    p1 = ToolProposalResult(
+        name="average_trip_metrics",
+        arguments={},
+        model_id=DEFAULT_MODEL_ID,
+        input_tokens=10,
+        output_tokens=10,
+        latency_ms=0,
+    )
+    assert parse_query_proposal(p1) == ("average_trip_metrics", {})
+
+    # None arguments
+    p2 = ToolProposalResult(
+        name="average_trip_metrics",
+        arguments=None,
+        model_id=DEFAULT_MODEL_ID,
+        input_tokens=10,
+        output_tokens=10,
+        latency_ms=0,
+    )
+    assert parse_query_proposal(p2) == ("average_trip_metrics", {})
+
+    # Valid region_name
+    p3 = ToolProposalResult(
+        name="average_trip_metrics",
+        arguments={"region_name": "Queens"},
+        model_id=DEFAULT_MODEL_ID,
+        input_tokens=10,
+        output_tokens=10,
+        latency_ms=0,
+    )
+    assert parse_query_proposal(p3) == (
+        "average_trip_metrics",
+        {"region_name": "Queens"},
+    )
