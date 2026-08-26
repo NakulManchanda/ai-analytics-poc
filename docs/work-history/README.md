@@ -46,4 +46,5 @@ Monotonically numbered log of every post-bootstrap task. Each entry records the 
 | [0040](0040-cancel-loop-abort.md) | v3 | [#79](https://github.com/NakulManchanda/ai-analytics-poc/pull/79) | Orchestration loop cancellation checkpoints and Bedrock streaming abort | Merged (`3c3e375`) |
 | [0041](0041-cancel-frontend-ui.md) | v3 | [#80](https://github.com/NakulManchanda/ai-analytics-poc/pull/80) | Frontend cancellation controls, SSE badging, and interrupted run UI | Merged (`10464c4`) |
 | [0042](0042-v3-integration-and-deployed-verification.md) | v3 | [#81](https://github.com/NakulManchanda/ai-analytics-poc/pull/81) | Milestone v3 integration smoke check and verification | Merged (`c7cb539`) |
-| [0043](0043-instant-tool-cancellation.md) | v3 | [#83](https://github.com/NakulManchanda/ai-analytics-poc/pull/83) | Instant async tool-call cancellation and fast abort | Draft for #82 |
+| [0043](0043-instant-tool-cancellation.md) | v3 | [#83](https://github.com/NakulManchanda/ai-analytics-poc/pull/83) | Instant async tool-call cancellation and fast abort | Merged (`dfc444e`) |
+| [0044](0044-cancel-sse-stream-close.md) | v3 | [#85](https://github.com/NakulManchanda/ai-analytics-poc/pull/85) | SSE stream close on cancel and client-side abort | Draft for #84 |

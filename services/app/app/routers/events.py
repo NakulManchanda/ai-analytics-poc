@@ -143,6 +143,7 @@ def create_events_router(
                                                 "run.completed",
                                                 "run.failed",
                                                 "run.budget_exceeded",
+                                                "run.cancelled",
                                             ):
                                                 terminal_seen = True
                                                 break
@@ -159,6 +160,7 @@ def create_events_router(
                         "completed",
                         "budget_exceeded",
                         "failed",
+                        "cancelled",
                     ):
                         # If an in-memory publisher is available, use its full event log
                         # (including transient answer.delta events not stored durably)
@@ -172,6 +174,7 @@ def create_events_router(
                                         "run.completed",
                                         "run.failed",
                                         "run.budget_exceeded",
+                                        "run.cancelled",
                                     ):
                                         terminal_seen = True
                             if terminal_seen:
