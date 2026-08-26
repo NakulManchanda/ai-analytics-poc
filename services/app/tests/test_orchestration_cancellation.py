@@ -192,3 +192,54 @@ def test_cancellation_during_answer_delta_streaming() -> None:
     events = pub.get_events_for_run(submission.run_id)
     cancelled_event = next(e for e in events if e.event_type == "run.cancelled")
     assert cancelled_event.payload["status"] == "cancelled"
+
+
+def test_cancellation_during_mcp_tool_execution() -> None:
+    import time
+
+    repo = InMemoryStateRepository()
+    pub = FakePublisher()
+    llm = MockLLM()
+
+    run_id_ref: list[str] = []
+
+    class SlowMCP(MockMCP):
+        def average_trip_metrics(
+            self, region_name: str | None = None
+        ) -> dict[str, Any]:
+            # Simulate cancellation requested while tool is executing
+            pub.set(f"run:cancel:{run_id_ref[0]}", "1")
+            # Simulate a slow query that would take 2 seconds if not aborted
+            time.sleep(2.0)
+            return {
+                "query_id": "late_query",
+                "row_count": 5,
+                "columns": ["x"],
+                "rows": [[1]],
+            }
+
+    mcp = SlowMCP()
+    loop = OrchestrationLoop(
+        llm_client=llm,
+        mcp_client=mcp,
+        state_repository=repo,
+        event_publisher=pub,
+    )
+
+    submission = loop.prepare_run("Slow tool cancel test")
+    run_id_ref.append(submission.run_id)
+
+    start_time = time.monotonic()
+    result = loop.execute(submission)
+    elapsed = time.monotonic() - start_time
+
+    assert result.status == "cancelled"
+    # Must abort quickly (<0.8s), not waiting for the 2.0s sleep in the slow tool
+    assert elapsed < 0.8
+
+    # Verify run.cancelled emitted without tool.completed
+    events = pub.get_events_for_run(submission.run_id)
+    event_types = [e.event_type for e in events]
+    assert "tool.started" in event_types
+    assert "run.cancelled" in event_types
+    assert "tool.completed" not in event_types
