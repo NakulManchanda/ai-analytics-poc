@@ -56,6 +56,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<"timeline" | "context">("timeline");
   const [streamingAnswer, setStreamingAnswer] = useState<string>("");
   const hydrationVersion = useRef(0);
+  const activeAbortController = useRef<AbortController | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -89,7 +90,7 @@ export default function App() {
 
     return () => {
       active = false;
-      window.clearTimeout(retryTimer);
+      if (retryTimer) window.clearTimeout(retryTimer);
     };
   }, []);
 
@@ -152,11 +153,15 @@ export default function App() {
     setWorkingContext(null);
     setRunTelemetry(null);
 
+    const controller = new AbortController();
+    activeAbortController.current = controller;
+
     try {
       // Run-first submission: POST /api/runs returns 202 immediately
       const runsResponse = await fetch("/api/runs", {
         method: "POST",
         headers: { "content-type": "application/json" },
+        signal: controller.signal,
         body: JSON.stringify(
           conversationId
             ? { prompt: cleanPrompt, conversation_id: conversationId }
@@ -198,7 +203,7 @@ export default function App() {
       window.localStorage.setItem(CONVERSATION_STORAGE_KEY, convId);
 
       // Stream SSE events: accumulate answer.delta and extract terminal telemetry
-      const sseResponse = await fetch(runAccepted.events_url);
+      const sseResponse = await fetch(runAccepted.events_url, { signal: controller.signal });
       let accumulatedAnswer = "";
       let finalAnswer: AskResponse | null = null;
 
@@ -263,10 +268,15 @@ export default function App() {
 
       setPrompt("");
     } catch (error) {
-      setPromptError(
-        error instanceof Error ? error.message : "The analytics request could not be completed. Try again."
-      );
+      if (error instanceof Error && error.name === "AbortError") {
+        // Cancelled by user - do not display generic error banner
+      } else {
+        setPromptError(
+          error instanceof Error ? error.message : "The analytics request could not be completed. Try again."
+        );
+      }
     } finally {
+      activeAbortController.current = null;
       setIsRunning(false);
       setIsCancelling(false);
     }
@@ -281,6 +291,13 @@ export default function App() {
       });
     } catch {
       // ignore
+    }
+    // Instantly release the UI and abort any pending fetch stream
+    setIsRunning(false);
+    setIsCancelling(false);
+    if (activeAbortController.current) {
+      activeAbortController.current.abort();
+      activeAbortController.current = null;
     }
   };
 
