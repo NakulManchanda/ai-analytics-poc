@@ -33,6 +33,11 @@ class RunAccepted(BaseModel):
     events_url: str
 
 
+class CancelRunResponse(BaseModel):
+    run_id: str
+    status: str
+
+
 def dispatch_in_thread(task: Callable[[], None]) -> None:
     threading.Thread(target=task, daemon=True).start()
 
@@ -68,5 +73,28 @@ def create_runs_router(
             run_id=submission.run_id,
             events_url=f"/api/runs/{submission.run_id}/events",
         )
+
+    @router.post(
+        "/runs/{run_id}/cancel", response_model=CancelRunResponse, status_code=202
+    )
+    def cancel_run(run_id: str) -> CancelRunResponse:
+        try:
+            run = orchestration_loop.request_cancellation(run_id)
+        except OrchestrationError as error:
+            if error.code == "run_not_found":
+                raise HTTPException(
+                    status_code=404,
+                    detail={"code": error.code, "message": str(error)},
+                ) from error
+            if error.code == "run_already_terminal":
+                raise HTTPException(
+                    status_code=409,
+                    detail={"code": error.code, "message": str(error)},
+                ) from error
+            raise HTTPException(
+                status_code=500,
+                detail={"code": error.code, "message": str(error)},
+            ) from error
+        return CancelRunResponse(run_id=run.run_id, status=run.status)
 
     return router

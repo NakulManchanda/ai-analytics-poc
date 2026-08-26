@@ -287,6 +287,77 @@ class OrchestrationLoop:
         submission = self.prepare_run(prompt, conversation_id)
         return self.execute(submission, budgets=budgets)
 
+    def request_cancellation(self, run_id: str) -> Run:
+        """Mark an active run as cancel_requested in durable state,
+        set Redis flag, and emit run.cancel_requested."""
+        run = self._repo.get_run(run_id)
+        if run is None:
+            raise OrchestrationError(
+                "run_not_found", False, "", f"Run {run_id} not found"
+            )
+        if run.status in ("completed", "failed", "budget_exceeded", "cancelled"):
+            raise OrchestrationError(
+                "run_already_terminal",
+                False,
+                "",
+                f"Run {run_id} is already terminal ({run.status})",
+            )
+
+        # Set Redis fast-cancellation flag if Redis is configured
+        if self._publisher is not None and hasattr(self._publisher, "_get_client"):
+            try:
+                client = self._publisher._get_client()
+                client.set(f"run:cancel:{run_id}", "1", ex=300)
+            except Exception as error:
+                logger.warning(
+                    "Failed to set Redis cancel flag for %s: %s", run_id, error
+                )
+
+        # Update durable run status to cancel_requested
+        updated_run = Run(
+            run_id=run.run_id,
+            conversation_id=run.conversation_id,
+            message_id=run.message_id,
+            status="cancel_requested",
+            model=run.model,
+            prompt_version=run.prompt_version,
+            started_at=run.started_at,
+            completed_at=run.completed_at,
+            input_tokens=run.input_tokens,
+            output_tokens=run.output_tokens,
+            estimated_cost_usd=run.estimated_cost_usd,
+            failure_code=run.failure_code,
+            metadata=run.metadata,
+        )
+        self._repo.update_run(updated_run)
+
+        # Emit live event
+        if self._publisher is not None:
+            self._publisher.publish(
+                RunEvent(
+                    event_type="run.cancel_requested",
+                    run_id=run.run_id,
+                    conversation_id=run.conversation_id,
+                    sequence=0,
+                    payload={"status": "cancel_requested"},
+                )
+            )
+        return updated_run
+
+    def is_cancelled(self, run_id: str) -> bool:
+        """Check if a run has been flagged for cancellation via Redis or durable state."""
+        if self._publisher is not None and hasattr(self._publisher, "_get_client"):
+            try:
+                client = self._publisher._get_client()
+                if client.get(f"run:cancel:{run_id}") == "1":
+                    return True
+            except Exception as error:
+                logger.warning(
+                    "Failed to check Redis cancel flag for %s: %s", run_id, error
+                )
+        run = self._repo.get_run(run_id)
+        return run is not None and run.status in ("cancel_requested", "cancelled")
+
     def _execute_loop(
         self,
         prompt: str,
