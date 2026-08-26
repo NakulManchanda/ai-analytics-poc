@@ -39,4 +39,5 @@ Monotonically numbered log of every post-bootstrap task. Each entry records the 
 | [0033](0033-v2-streaming-text.md) | v2 | [#62](https://github.com/NakulManchanda/ai-analytics-poc/pull/62) | Genuine provider text streaming over live run-first SSE | Merged (`f536f54`) |
 | [0034](0034-iam-bedrock-streaming.md) | v2 infra | [#66](https://github.com/NakulManchanda/ai-analytics-poc/pull/66) | Authorize bedrock:InvokeModelWithResponseStream in IAM task policy | Merged (`2935602`) |
 | [0035](0035-tool-failure-visibility.md) | v2 | [#67](https://github.com/NakulManchanda/ai-analytics-poc/pull/67) | Emit tool.failed and surface detailed tool errors in timeline | Merged (`7e9cbbb`) |
-| [0036](0036-borough-enum-schema.md) | v2 | [#69](https://github.com/NakulManchanda/ai-analytics-poc/pull/69) | Constrain average_trip_metrics borough enum and propagate validation message | Draft for #68 |
+| [0036](0036-borough-enum-schema.md) | v2 | [#69](https://github.com/NakulManchanda/ai-analytics-poc/pull/69) | Constrain average_trip_metrics borough enum and propagate validation message | Merged (`ad58f18`) |
+| [0037](0037-single-tool-proposal-prompt.md) | v2 | [#71](https://github.com/NakulManchanda/ai-analytics-poc/pull/71) | Clarify single tool proposal prompt and support empty arguments | Draft for #70 |

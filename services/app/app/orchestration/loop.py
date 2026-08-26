@@ -116,6 +116,8 @@ def parse_query_proposal(
 ) -> tuple[str, dict[str, object]] | None:
     arguments = proposal.arguments
     if proposal.name == AVERAGE_METRICS_TOOL_NAME:
+        if arguments is None:
+            arguments = {}
         if not isinstance(arguments, Mapping) or set(arguments) - {"region_name"}:
             return None
         region_name = arguments.get("region_name")

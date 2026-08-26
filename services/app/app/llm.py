@@ -268,7 +268,9 @@ class BedrockLLMClient:
                     "content": [
                         {
                             "text": (
-                                "Choose the one governed analysis that answers the question. "
+                                "Choose exactly ONE governed analysis that answers the question. "
+                                "Do not make multiple tool calls. To compare all boroughs "
+                                "across NYC, call average_trip_metrics with region_name omitted. "
                                 f"Dataset schema: {schema_json}\nQuestion: {prompt}"
                             )
                         }
