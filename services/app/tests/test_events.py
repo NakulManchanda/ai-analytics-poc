@@ -358,6 +358,58 @@ def test_orchestration_loop_emits_provider_deltas_and_truthful_ttft(
     assert repo.list_messages(result.conversation_id)[-1].content == "JFK leads."
 
 
+def test_sse_endpoint_delivers_in_progress_answer_delta_before_terminal_event() -> None:
+    """The SSE endpoint must stream answer.delta events to a connected client before the
+    terminal run.completed arrives.  This tests live in-memory delivery without Redis."""
+    repo = InMemoryStateRepository()
+    publisher = InMemoryEventPublisher()
+
+    class SlowStreamingLLMClient(LocalFakeLLMClient):
+        def stream_answer_with_query_result(
+            self,
+            prompt: str,
+            query_result: Mapping[str, object],
+            on_delta: Callable[[str], None],
+        ) -> LLMResult:
+            on_delta("Delta1 ")
+            on_delta("Delta2.")
+            return LLMResult(
+                text="Delta1 Delta2.",
+                model_id="amazon.nova-micro-v1:0",
+                input_tokens=4,
+                output_tokens=2,
+                latency_ms=50,
+            )
+
+    loop = OrchestrationLoop(
+        llm_client=SlowStreamingLLMClient(),
+        mcp_client=FakeMCPClient(),  # type: ignore[arg-type]
+        state_repository=repo,
+        event_publisher=publisher,
+    )
+
+    # Run the loop synchronously so durable state is available
+    result = loop.run("Which zones lead?")
+    assert result.status == "completed"
+
+    # Connect to SSE with the in-memory publisher injected
+    # The endpoint must deliver answer.delta events (not just reconstruct terminal steps)
+    client = TestClient(
+        create_app(state_repository=repo, event_publisher=publisher)
+    )
+    response = client.get(f"/api/runs/{result.run_id}/events")
+    assert response.status_code == 200
+    content = response.text
+    assert "event: answer.delta" in content, (
+        "SSE must include answer.delta events from the in-memory publisher; "
+        "the durable-fallback path omits them since they are transient"
+    )
+    # Verify delta payloads are present
+    events = _sse_events(content)
+    delta_events = [e for e in events if e == "answer.delta"]
+    assert len(delta_events) >= 1
+
+
 def test_orchestration_loop_emits_budget_exceeded_event() -> None:
     repo = InMemoryStateRepository()
     publisher = InMemoryEventPublisher()

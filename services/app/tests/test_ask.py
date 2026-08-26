@@ -506,3 +506,48 @@ def test_create_llm_client_disables_bedrock_runtime_retries(
         "region_name": "us-east-1",
         "config": BEDROCK_RUNTIME_CONFIG,
     }
+
+
+def test_bedrock_client_stream_raises_llm_provider_error_mid_stream_and_partial_deltas_are_emitted() -> None:
+    """A ClientError raised mid-stream (after some deltas) must raise LLMProviderError.
+    Partial deltas already passed to on_delta are caller-observable; the method does NOT
+    return partial text — it raises.  This defines the truthful partial-output contract."""
+
+    class MidStreamFailingRuntimeClient:
+        def converse_stream(self, **request: object) -> dict[str, object]:
+            def event_stream() -> object:
+                yield {
+                    "contentBlockDelta": {
+                        "contentBlockIndex": 0,
+                        "delta": {"text": "Partial "},
+                    }
+                }
+                # Raise ClientError mid-stream
+                error_response = {
+                    "Error": {"Code": "InternalServerException", "Message": "stream fault"}
+                }
+                raise ClientError(error_response, "ConverseStream")
+
+            return {"stream": event_stream()}
+
+    llm_client = BedrockLLMClient(
+        "amazon.nova-micro-v1:0",
+        runtime_client=MidStreamFailingRuntimeClient(),
+    )
+    partial_deltas: list[str] = []
+
+    from app.llm import LLMProviderError
+
+    with pytest.raises(LLMProviderError) as exc_info:
+        llm_client.stream_answer_with_query_result(
+            "Which zone leads?",
+            {"columns": ["pickup_zone"], "rows": [["Alpha"]]},
+            partial_deltas.append,
+        )
+
+    # Partial deltas emitted before the error are visible to the caller
+    assert partial_deltas == ["Partial "], (
+        "Deltas emitted before the stream error must be observable by the caller"
+    )
+    # The error must be retryable for InternalServerException
+    assert exc_info.value.retryable is True
