@@ -55,11 +55,7 @@ def create_app(
         mcp_client_factory=FastMCPDatasetProfileClient,
         state_repository=shared_state_repo,
         event_publisher=resolved_publisher,
-        **(
-            {"llm_call_id_factory": llm_call_id_factory}
-            if llm_call_id_factory is not None
-            else {}
-        ),
+        **({"llm_call_id_factory": llm_call_id_factory} if llm_call_id_factory is not None else {}),
         **(
             {"tool_call_id_factory": tool_call_id_factory}
             if tool_call_id_factory is not None

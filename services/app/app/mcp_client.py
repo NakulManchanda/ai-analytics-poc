@@ -22,9 +22,10 @@ SCHEMA_RESOURCE_URI = "dataset://nyc-taxi/schema"
 
 
 class MCPToolError(Exception):
-    def __init__(self, retryable: bool) -> None:
-        super().__init__()
+    def __init__(self, retryable: bool, message: str | None = None) -> None:
+        super().__init__(message or "MCP tool execution failed")
         self.retryable = retryable
+        self.message = message or "MCP tool execution failed"
 
 
 class DatasetProfileMCPClient(Protocol):
@@ -34,9 +35,7 @@ class DatasetProfileMCPClient(Protocol):
 
     def query_taxi_data(self, *, analysis: str, limit: int) -> dict[str, object]: ...
 
-    def average_trip_metrics(
-        self, *, region_name: str | None = None
-    ) -> dict[str, object]: ...
+    def average_trip_metrics(self, *, region_name: str | None = None) -> dict[str, object]: ...
 
 
 class FastMCPDatasetProfileClient:
@@ -49,37 +48,35 @@ class FastMCPDatasetProfileClient:
         try:
             return asyncio.run(self._get_dataset_profile())
         except (ClientError, HTTPError, McpError, OSError, RuntimeError) as error:
-            raise MCPToolError(retryable=True) from error
+            raise MCPToolError(retryable=True, message=str(error)) from error
 
     def get_dataset_schema(self) -> dict[str, object]:
         try:
             return asyncio.run(self._get_dataset_schema())
         except (ClientError, HTTPError, McpError, OSError, RuntimeError) as error:
-            raise MCPToolError(retryable=True) from error
+            raise MCPToolError(retryable=True, message=str(error)) from error
 
     def query_taxi_data(self, *, analysis: str, limit: int) -> dict[str, object]:
         if analysis not in ALLOWED_ANALYSES:
-            raise MCPToolError(retryable=False)
+            raise MCPToolError(retryable=False, message=f"Disallowed analysis '{analysis}'")
         if isinstance(limit, bool) or not 1 <= limit <= 20:
-            raise MCPToolError(retryable=False)
+            raise MCPToolError(
+                retryable=False, message=f"Limit {limit} outside allowed range [1, 20]"
+            )
         try:
             return asyncio.run(self._query_taxi_data(analysis=analysis, limit=limit))
         except (ClientError, HTTPError, McpError, OSError, RuntimeError) as error:
-            raise MCPToolError(retryable=True) from error
+            raise MCPToolError(retryable=True, message=str(error)) from error
 
-    def average_trip_metrics(
-        self, *, region_name: str | None = None
-    ) -> dict[str, object]:
+    def average_trip_metrics(self, *, region_name: str | None = None) -> dict[str, object]:
         if region_name is not None and (
-            not isinstance(region_name, str)
-            or not region_name.strip()
-            or len(region_name) > 128
+            not isinstance(region_name, str) or not region_name.strip() or len(region_name) > 128
         ):
-            raise MCPToolError(retryable=False)
+            raise MCPToolError(retryable=False, message=f"Invalid region_name '{region_name}'")
         try:
             return asyncio.run(self._average_trip_metrics(region_name=region_name))
         except (ClientError, HTTPError, McpError, OSError, RuntimeError) as error:
-            raise MCPToolError(retryable=True) from error
+            raise MCPToolError(retryable=True, message=str(error)) from error
 
     async def _get_dataset_profile(self) -> dict[str, object]:
         async with Client(self._mcp_url) as client:
@@ -110,9 +107,7 @@ class FastMCPDatasetProfileClient:
             raise MCPToolError(retryable=False)
         return sanitize_query_result(result.data)
 
-    async def _average_trip_metrics(
-        self, *, region_name: str | None
-    ) -> dict[str, object]:
+    async def _average_trip_metrics(self, *, region_name: str | None) -> dict[str, object]:
         arguments = {} if region_name is None else {"region_name": region_name}
         async with Client(self._mcp_url) as client:
             result = await client.call_tool("average_trip_metrics", arguments)
@@ -139,10 +134,7 @@ def sanitize_dataset_schema(payload: Mapping[str, Any]) -> dict[str, object]:
         or len(month) > 16
         or not isinstance(columns, list)
         or not 1 <= len(columns) <= 64
-        or any(
-            not isinstance(column, str) or not column or len(column) > 128
-            for column in columns
-        )
+        or any(not isinstance(column, str) or not column or len(column) > 128 for column in columns)
     ):
         raise MCPToolError(retryable=False)
     return {"columns": columns, "dataset": dataset, "month": month}
@@ -168,10 +160,7 @@ def sanitize_query_result(payload: Mapping[str, Any]) -> dict[str, object]:
     if (
         not isinstance(columns, list)
         or not 1 <= len(columns) <= 16
-        or any(
-            not isinstance(column, str) or not column or len(column) > 128
-            for column in columns
-        )
+        or any(not isinstance(column, str) or not column or len(column) > 128 for column in columns)
         or not isinstance(rows, list)
         or len(rows) > 20
         or isinstance(row_count, bool)
@@ -240,10 +229,7 @@ def sanitize_dataset_profile(payload: Mapping[str, Any]) -> dict[str, object]:
     if (
         not isinstance(schema_columns, list)
         or len(schema_columns) > 64
-        or any(
-            not isinstance(column, str) or len(column) > 128
-            for column in schema_columns
-        )
+        or any(not isinstance(column, str) or len(column) > 128 for column in schema_columns)
     ):
         raise MCPToolError(retryable=False)
     profile["schema_columns"] = schema_columns

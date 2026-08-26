@@ -35,9 +35,7 @@ def create_events_router(
 ) -> APIRouter:
     router = APIRouter(prefix="/api")
     repo = state_repository or InMemoryStateRepository()
-    resolved_redis_url = redis_url or os.environ.get(
-        "REDIS_URL", "redis://localhost:6379/0"
-    )
+    resolved_redis_url = redis_url or os.environ.get("REDIS_URL", "redis://localhost:6379/0")
 
     def get_redis_client() -> Any:
         if redis_client is not None:
@@ -117,9 +115,7 @@ def create_events_router(
 
             while not terminal_seen:
                 if await request.is_disconnected():
-                    logger.info(
-                        "Client disconnected from SSE stream for run %s", run_id
-                    )
+                    logger.info("Client disconnected from SSE stream for run %s", run_id)
                     break
 
                 events_found = False
@@ -147,9 +143,7 @@ def create_events_router(
                                                 terminal_seen = True
                                                 break
                     except Exception as error:
-                        logger.warning(
-                            "Redis stream read error for run %s: %s", run_id, error
-                        )
+                        logger.warning("Redis stream read error for run %s: %s", run_id, error)
                         client = None
 
                 # Fallback / Reconciliation from Durable State Repository
@@ -245,6 +239,7 @@ def create_events_router(
                                 telemetry=telemetry,
                                 reason=current_run.metadata.get("reason"),
                                 retryable=current_run.metadata.get("retryable"),
+                                error=current_run.metadata.get("error"),
                             ),
                         )
                         if term_evt.event_id not in emitted_event_ids:
@@ -259,16 +254,12 @@ def create_events_router(
                         "FAILED",
                     ):
                         term_type = (
-                            "job.completed"
-                            if current_job.status == "COMPLETED"
-                            else "job.failed"
+                            "job.completed" if current_job.status == "COMPLETED" else "job.failed"
                         )
                         term_evt = RunEvent(
                             event_type=term_type,
                             run_id=run_id,
-                            conversation_id=current_job.params.get(
-                                "conversation_id", run_id
-                            ),
+                            conversation_id=current_job.params.get("conversation_id", run_id),
                             sequence=1,
                             payload={
                                 "job_id": current_job.job_id,
@@ -290,9 +281,7 @@ def create_events_router(
                     last_heartbeat = now
 
                 if now - start_time > MAX_STREAM_WAIT_SECONDS:
-                    logger.info(
-                        "SSE stream reached max wait timeout for run %s", run_id
-                    )
+                    logger.info("SSE stream reached max wait timeout for run %s", run_id)
                     break
 
                 if not events_found:

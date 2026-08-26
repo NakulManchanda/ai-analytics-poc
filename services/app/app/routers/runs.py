@@ -46,9 +46,7 @@ def create_runs_router(
     @router.post("/runs", response_model=RunAccepted, status_code=202)
     def create_run(request: RunRequest) -> RunAccepted:
         try:
-            submission = orchestration_loop.prepare_run(
-                request.prompt, request.conversation_id
-            )
+            submission = orchestration_loop.prepare_run(request.prompt, request.conversation_id)
         except OrchestrationError as error:
             raise HTTPException(
                 status_code=404 if error.code == "conversation_not_found" else 503,

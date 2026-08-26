@@ -91,9 +91,7 @@ class LocalFakeLLMClient:
             raise LLMProviderError(retryable=False)
         return self._result(prompt, f"The profile contains {row_count} taxi trips.")
 
-    def propose_taxi_query(
-        self, prompt: str, schema: Mapping[str, object]
-    ) -> ToolProposalResult:
+    def propose_taxi_query(self, prompt: str, schema: Mapping[str, object]) -> ToolProposalResult:
         if not isinstance(schema.get("columns"), list):
             raise LLMProviderError(retryable=False)
         normalized_prompt = prompt.lower()
@@ -157,13 +155,9 @@ class LocalFakeLLMClient:
         if columns == ["pickup_zone", "trip_count"]:
             text = f"{first_row[0]} has the most pickups with {first_row[1]} trips."
         elif columns == ["pickup_hour", "trip_count"]:
-            text = (
-                f"Hour {first_row[0]} has the highest volume with {first_row[1]} trips."
-            )
+            text = f"Hour {first_row[0]} has the highest volume with {first_row[1]} trips."
         else:
-            text = (
-                f"{first_row[0]} has an average trip distance of {first_row[1]} miles."
-            )
+            text = f"{first_row[0]} has an average trip distance of {first_row[1]} miles."
         return self._result(prompt, text)
 
     def _result(self, prompt: str, text: str) -> LLMResult:
@@ -237,9 +231,7 @@ class BedrockLLMClient:
     def answer_with_dataset_profile(
         self, prompt: str, dataset_profile: Mapping[str, object]
     ) -> LLMResult:
-        profile_json = json.dumps(
-            dataset_profile, separators=(",", ":"), allow_nan=False
-        )
+        profile_json = json.dumps(dataset_profile, separators=(",", ":"), allow_nan=False)
         response = self._converse(
             messages=[
                 {
@@ -257,9 +249,7 @@ class BedrockLLMClient:
         )
         return self._as_llm_result(response)
 
-    def propose_taxi_query(
-        self, prompt: str, schema: Mapping[str, object]
-    ) -> ToolProposalResult:
+    def propose_taxi_query(self, prompt: str, schema: Mapping[str, object]) -> ToolProposalResult:
         schema_json = json.dumps(schema, separators=(",", ":"), allow_nan=False)
         response = self._converse(
             messages=[
@@ -409,9 +399,7 @@ class BedrockLLMClient:
                     metadata = event["metadata"]
         except ClientError as error:
             error_code = error.response.get("Error", {}).get("Code", "")
-            raise LLMProviderError(
-                retryable=error_code in RETRYABLE_BEDROCK_ERROR_CODES
-            ) from error
+            raise LLMProviderError(retryable=error_code in RETRYABLE_BEDROCK_ERROR_CODES) from error
         except (
             ConnectTimeoutError,
             EndpointConnectionError,
@@ -449,9 +437,7 @@ class BedrockLLMClient:
             return self._get_runtime_client().converse(**request)
         except ClientError as error:
             error_code = error.response.get("Error", {}).get("Code", "")
-            raise LLMProviderError(
-                retryable=error_code in RETRYABLE_BEDROCK_ERROR_CODES
-            ) from error
+            raise LLMProviderError(retryable=error_code in RETRYABLE_BEDROCK_ERROR_CODES) from error
         except (
             ConnectTimeoutError,
             EndpointConnectionError,

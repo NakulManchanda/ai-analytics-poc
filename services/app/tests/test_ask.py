@@ -44,9 +44,7 @@ class FakeLLMClient:
     ) -> LLMResult:
         return self.ask(prompt)
 
-    def propose_taxi_query(
-        self, prompt: str, _schema: dict[str, object]
-    ) -> ToolProposalResult:
+    def propose_taxi_query(self, prompt: str, _schema: dict[str, object]) -> ToolProposalResult:
         self.proposal_prompts.append(prompt)
         return ToolProposalResult(
             name="query_taxi_data",
@@ -57,9 +55,7 @@ class FakeLLMClient:
             latency_ms=3,
         )
 
-    def answer_with_query_result(
-        self, prompt: str, _query_result: dict[str, object]
-    ) -> LLMResult:
+    def answer_with_query_result(self, prompt: str, _query_result: dict[str, object]) -> LLMResult:
         return self.ask(prompt)
 
 
@@ -194,9 +190,7 @@ class FakeBedrockRuntimeClient:
 
 def test_bedrock_client_maps_converse_response_and_uses_bounded_request() -> None:
     runtime_client = FakeBedrockRuntimeClient()
-    llm_client = BedrockLLMClient(
-        "amazon.nova-micro-v1:0", runtime_client=runtime_client
-    )
+    llm_client = BedrockLLMClient("amazon.nova-micro-v1:0", runtime_client=runtime_client)
 
     result = llm_client.ask("Give a concise answer.")
 
@@ -260,9 +254,7 @@ def test_bedrock_client_streams_real_answer_deltas_and_returns_final_metadata() 
             }
 
     runtime_client = StreamingRuntimeClient()
-    llm_client = BedrockLLMClient(
-        "amazon.nova-micro-v1:0", runtime_client=runtime_client
-    )
+    llm_client = BedrockLLMClient("amazon.nova-micro-v1:0", runtime_client=runtime_client)
     deltas: list[str] = []
 
     result = llm_client.stream_answer_with_query_result(
@@ -387,9 +379,7 @@ def test_ask_returns_a_controlled_provider_error_without_provider_detail(
         create_app(
             llm_client=BedrockLLMClient(
                 "amazon.nova-micro-v1:0",
-                runtime_client=FailingBedrockRuntimeClient(
-                    error_code, "internal provider detail"
-                ),
+                runtime_client=FailingBedrockRuntimeClient(error_code, "internal provider detail"),
             ),
             mcp_client=FakeMCPClient(),
             llm_call_id_factory=lambda: "llm_call_failure",
@@ -550,8 +540,8 @@ def test_bedrock_client_stream_raises_llm_provider_error_mid_stream() -> None:
         )
 
     # Partial deltas emitted before the error are visible to the caller
-    assert partial_deltas == [
-        "Partial "
-    ], "Deltas emitted before the stream error must be observable by the caller"
+    assert partial_deltas == ["Partial "], (
+        "Deltas emitted before the stream error must be observable by the caller"
+    )
     # The error must be retryable for InternalServerException
     assert exc_info.value.retryable is True

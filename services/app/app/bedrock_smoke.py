@@ -29,16 +29,10 @@ def validate_bedrock_smoke_payload(payload: object) -> dict[str, Any]:
             raise ValueError(f"usage.{field_name} must be a non-negative integer")
 
     if usage["total_tokens"] != usage["input_tokens"] + usage["output_tokens"]:
-        raise ValueError(
-            "usage.total_tokens must equal input_tokens plus output_tokens"
-        )
+        raise ValueError("usage.total_tokens must equal input_tokens plus output_tokens")
 
     latency_ms = payload.get("latency_ms")
-    if (
-        isinstance(latency_ms, bool)
-        or not isinstance(latency_ms, int)
-        or latency_ms < 0
-    ):
+    if isinstance(latency_ms, bool) or not isinstance(latency_ms, int) or latency_ms < 0:
         raise ValueError("latency_ms must be a non-negative integer")
 
     return payload

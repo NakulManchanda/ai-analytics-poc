@@ -114,9 +114,7 @@ class FakeDynamoDBResource:
 def fake_dynamo() -> tuple[DynamoDBStateRepository, FakeDynamoDBTable]:
     table = FakeDynamoDBTable()
     resource = FakeDynamoDBResource(table)
-    repo = DynamoDBStateRepository(
-        table_name="test-application-state", dynamodb_resource=resource
-    )
+    repo = DynamoDBStateRepository(table_name="test-application-state", dynamodb_resource=resource)
     return repo, table
 
 

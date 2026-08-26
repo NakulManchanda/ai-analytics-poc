@@ -54,9 +54,7 @@ COST_PER_OUTPUT_TOKEN = 0.015 / 1_000.0
 
 
 def estimate_cost(input_tokens: int, output_tokens: int) -> float:
-    return (input_tokens * COST_PER_INPUT_TOKEN) + (
-        output_tokens * COST_PER_OUTPUT_TOKEN
-    )
+    return (input_tokens * COST_PER_INPUT_TOKEN) + (output_tokens * COST_PER_OUTPUT_TOKEN)
 
 
 @dataclass(frozen=True)
@@ -108,6 +106,7 @@ class OrchestrationError(ValueError):
         self.code = code
         self.retryable = retryable
         self.llm_call_id = llm_call_id
+        self.message = message
 
 
 def parse_query_proposal(
@@ -119,9 +118,7 @@ def parse_query_proposal(
             return None
         region_name = arguments.get("region_name")
         if region_name is not None and (
-            not isinstance(region_name, str)
-            or not region_name.strip()
-            or len(region_name) > 128
+            not isinstance(region_name, str) or not region_name.strip() or len(region_name) > 128
         ):
             return None
         return proposal.name, ({"region_name": region_name} if region_name else {})
@@ -301,9 +298,7 @@ class OrchestrationLoop:
 
         # Re-fetch the in-progress run record for started_at reference
         run = self._repo.get_run(run_id)
-        assert (
-            run is not None
-        ), f"Run {run_id} not found; prepare_run must be called first"
+        assert run is not None, f"Run {run_id} not found; prepare_run must be called first"
 
         def emit(
             event_type: str,
@@ -517,8 +512,35 @@ class OrchestrationLoop:
                         )
                     query_result = sanitize_query_result(raw_query_result)
                 except MCPToolError as err:
+                    fail_duration_ms = int((self._monotonic() - tool_start) * 1000)
+                    error_msg = err.message or str(err)
+                    emit(
+                        "tool.failed",
+                        {
+                            "tool_call_id": tool_call_id,
+                            "tool_name": proposal.name,
+                            "error": error_msg,
+                            "duration_ms": fail_duration_ms,
+                        },
+                        tool_call_id=tool_call_id,
+                    )
+                    failed_tool_step = RunStep(
+                        step_id=generate_step_id(),
+                        run_id=run_id,
+                        sequence=step_seq,
+                        step_type="tool_call",
+                        status="failed",
+                        tool_name=proposal.name,
+                        tool_call_id=tool_call_id,
+                        input_summary=json.dumps(tool_arguments, sort_keys=True),
+                        output_summary=f"error: {error_msg}",
+                        duration_ms=fail_duration_ms,
+                    )
+                    self._repo.add_run_step(failed_tool_step)
+                    steps.append(failed_tool_step)
+                    step_seq += 1
                     raise OrchestrationError(
-                        "mcp_tool_error", err.retryable, llm_call_id, str(err)
+                        "mcp_tool_error", err.retryable, llm_call_id, error_msg
                     ) from err
                 tool_duration_ms = int((self._monotonic() - tool_start) * 1000)
                 tool_latency_ms = tool_duration_ms
@@ -620,9 +642,7 @@ class OrchestrationLoop:
                     )
 
                 try:
-                    stream_answer = getattr(
-                        llm, "stream_answer_with_query_result", None
-                    )
+                    stream_answer = getattr(llm, "stream_answer_with_query_result", None)
                     if callable(stream_answer):
                         final_answer_stream_started = True
                         answer_result = stream_answer(
@@ -632,9 +652,7 @@ class OrchestrationLoop:
                         )
                     else:
                         final_answer_stream_started = False
-                        answer_result = llm.answer_with_query_result(
-                            prompt, query_result
-                        )
+                        answer_result = llm.answer_with_query_result(prompt, query_result)
                 except LLMConfigurationError as err:
                     raise OrchestrationError(
                         "llm_configuration_error", False, answer_call_id, str(err)
@@ -652,9 +670,7 @@ class OrchestrationLoop:
                     llm_call_id=answer_call_id,
                 )
 
-                ans_cost = estimate_cost(
-                    answer_result.input_tokens, answer_result.output_tokens
-                )
+                ans_cost = estimate_cost(answer_result.input_tokens, answer_result.output_tokens)
                 tracker.record_llm_call(
                     answer_result.input_tokens,
                     answer_result.output_tokens,
@@ -845,6 +861,7 @@ class OrchestrationLoop:
                     failure_code=err.code,
                     telemetry=run_telemetry,
                     retryable=err.retryable,
+                    error=err.message or str(err),
                 ),
                 llm_call_id=err.llm_call_id or None,
             )

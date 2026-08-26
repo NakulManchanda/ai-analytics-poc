@@ -66,9 +66,7 @@ def test_v11_local_api_smoke_recovers_two_turn_conversation_and_sse_contract() -
         event_publisher=publisher,
     )
 
-    with TestClient(
-        create_app(state_repository=repository, orchestration_loop=loop)
-    ) as client:
+    with TestClient(create_app(state_repository=repository, orchestration_loop=loop)) as client:
         first_response = client.post(
             "/api/ask", json={"prompt": "Which pickup zone has the most trips?"}
         )

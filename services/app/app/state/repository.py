@@ -36,9 +36,7 @@ class StateRepository(Protocol):
         """Persist a new message within a conversation."""
         ...
 
-    def list_messages(
-        self, conversation_id: str, limit: int | None = None
-    ) -> list[Message]:
+    def list_messages(self, conversation_id: str, limit: int | None = None) -> list[Message]:
         """List messages belonging to a conversation ordered by sequence."""
         ...
 
@@ -106,9 +104,7 @@ class InMemoryStateRepository:
 
     def add_message(self, message: Message) -> Message:
         if message.conversation_id not in self._conversations:
-            raise EntityNotFoundError(
-                f"Conversation {message.conversation_id} not found"
-            )
+            raise EntityNotFoundError(f"Conversation {message.conversation_id} not found")
         messages = self._messages.setdefault(message.conversation_id, [])
         if any(m.message_id == message.message_id for m in messages):
             raise DuplicateEntityError(f"Message {message.message_id} already exists")
@@ -116,9 +112,7 @@ class InMemoryStateRepository:
         messages.sort(key=lambda m: m.sequence)
         return message
 
-    def list_messages(
-        self, conversation_id: str, limit: int | None = None
-    ) -> list[Message]:
+    def list_messages(self, conversation_id: str, limit: int | None = None) -> list[Message]:
         messages = list(self._messages.get(conversation_id, []))
         messages.sort(key=lambda m: m.sequence)
         if limit is not None and limit > 0:
@@ -144,11 +138,7 @@ class InMemoryStateRepository:
 
     def list_runs(self, conversation_id: str) -> list[Run]:
         return sorted(
-            (
-                run
-                for run in self._runs.values()
-                if run.conversation_id == conversation_id
-            ),
+            (run for run in self._runs.values() if run.conversation_id == conversation_id),
             key=lambda run: (run.started_at, run.run_id),
         )
 
