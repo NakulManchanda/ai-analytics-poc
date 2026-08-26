@@ -7,7 +7,14 @@ and `.github/copilot-instructions.md`) must stay thin and refer here rather than
 
 - Build one milestone at a time. Work only on the milestone explicitly requested; do not
   pre-build future architecture. Read `docs/implementation-plan.md`, `docs/progress.md`, and
-  the local `ai_analytics_poc_requirements_aws_v5.md` before changing implementation.
+  the local `ai_analytics_poc_requirements_aws_v5.md` before changing implementation. Use
+  `ai_analytics_poc_realtime_multimodal_plan.md` as the conceptual learning sequence for realtime,
+  streaming, voice, and multimodal milestones.
+- Prioritize work by how directly it advances the active milestone's architecture and learning
+  objective. Capabilities such as text-token streaming and voice input outrank incidental polish,
+  convenience queries, and incomplete low-impact functionality. A small bug or backlog issue must
+  not delay the next conceptual step unless it blocks an acceptance criterion, security,
+  reliability, deployment, or an explicitly requested user path; park it in the issue queue instead.
 - Prefer the smallest externally meaningful vertical slice. Preserve the requirements document
   and its AWS-only, deliberately small POC boundaries; do not add Kubernetes, Kafka/Kinesis,
   RDS, EFS, OpenSearch, a vector database, a warehouse, or a second hosting platform.
