@@ -55,22 +55,25 @@ coordination-only and never stores conversation state.
 
 ```
 terraform fmt         # no diff — all files already well-formatted
-terraform init -backend=false  # providers installed successfully
+terraform init        # providers installed successfully
 terraform validate    # "The configuration is valid."
+terraform plan -out=tfplan  # 6 to add, 2 to change, 2 to destroy
+terraform apply tfplan      # Apply complete! Resources: 6 added, 2 changed, 2 destroyed.
 ```
 
-`terraform plan` was not run because AWS credentials are not present in this environment.
-The validate pass confirms all resource references, types, and expressions are correct.
+- Live outputs verified:
+  - `elasticache_redis_endpoint = "ai-analytics-poc-demo-redis.vqqbac.0001.use1.cache.amazonaws.com"`
+  - `elasticache_redis_url = "redis://ai-analytics-poc-demo-redis.vqqbac.0001.use1.cache.amazonaws.com:6379/0"`
+- Python and Terraform static CI passed on PR #63.
 
 ## PR / merge state
 
-Draft PR: to be opened against `main`.
-Branch: `codex/redis-elasticache`.
-**Do not merge without explicit user authorization.** Apply/deploy is a separate authorized step.
+- PR: [#63](https://github.com/NakulManchanda/ai-analytics-poc/pull/63) (`v2 infra: provision ElastiCache Redis for transient delivery (#57)`).
+- Branch: `codex/redis-elasticache`.
+- Infrastructure successfully applied with explicit user authorization. Ready to merge.
 
 ## Limitations
 
-- No `terraform plan` output (no AWS credentials in this environment).
 - Worker ECS task definition does not exist as a separate resource; `REDIS_URL` is wired into
   the ai-app task definition. If a separate worker task definition is introduced, it will need
   the same variable added at that time.
