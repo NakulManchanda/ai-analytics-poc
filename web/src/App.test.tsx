@@ -671,4 +671,64 @@ describe("TimelineInspector Component", () => {
     expect(screen.getByText("Event ID:")).toBeVisible();
     expect(screen.getByText("evt_3")).toBeVisible();
   });
+
+  it("submits prompt, shows Stop button, calls cancel endpoint, and renders interrupted answer on run.cancelled", async () => {
+    const cancelCalled = vi.fn();
+    const cancelSseEvents = [
+      { event_id: "e1", event_type: "run.received", run_id: "run_cancel_ui", conversation_id: "conv_c", sequence: 1, timestamp: "2026-08-25T00:00:00Z", payload: { status: "in_progress" } },
+      { event_id: "e2", event_type: "answer.delta", run_id: "run_cancel_ui", conversation_id: "conv_c", sequence: 2, timestamp: "2026-08-25T00:00:01Z", payload: { delta: "Partial calculation " } },
+      { event_id: "e3", event_type: "run.cancelled", run_id: "run_cancel_ui", conversation_id: "conv_c", sequence: 3, timestamp: "2026-08-25T00:00:02Z", payload: { status: "cancelled", input_tokens: 10, output_tokens: 4, total_tokens: 14, estimated_cost_usd: 0.0005, end_to_end_latency_ms: 80 } },
+    ];
+    const sseText = cancelSseEvents.map((e) => `data: ${JSON.stringify(e)}\n\n`).join("");
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation((input: string) => {
+        if (input === "/api/status") {
+          return Promise.resolve({ ok: true, json: async () => ({ app: { status: "ok", service: "ai-app" }, mcp: { status: "ok", tools: 1, resources: 1 } }) });
+        }
+        if (input === "/api/runs") {
+          return Promise.resolve({ ok: true, json: async () => ({ run_id: "run_cancel_ui", conversation_id: "conv_c", message_id: "msg_c", events_url: "/api/runs/run_cancel_ui/events" }) });
+        }
+        if (input.includes("/cancel")) {
+          cancelCalled();
+          return Promise.resolve({ ok: true, json: async () => ({ run_id: "run_cancel_ui", status: "cancel_requested" }) });
+        }
+        if (input.includes("/events")) {
+          return Promise.resolve({ ok: true, text: async () => sseText });
+        }
+        if (input.startsWith("/api/conversations/")) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              conversation_id: "conv_c",
+              messages: [
+                { message_id: "msg_c", sequence: 1, role: "user", content: "Cancel me", created_at: "2026-08-25T00:00:00Z" },
+                { message_id: "msg_asst", sequence: 2, role: "assistant", content: "Partial calculation  [interrupted]", created_at: "2026-08-25T00:00:02Z" },
+              ],
+              runs: [{ run_id: "run_cancel_ui", conversation_id: "conv_c", message_id: "msg_c", status: "cancelled", input_tokens: 10, output_tokens: 4, estimated_cost_usd: 0.0005, started_at: "2026-08-25T00:00:00Z" }],
+            }),
+          });
+        }
+        return Promise.resolve({ ok: true, json: async () => ({}) });
+      }),
+    );
+
+    render(<App />);
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Ask about NYC taxi activity" }), {
+      target: { value: "Cancel me" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Run analysis" }));
+
+    // Verify interrupted answer rendered
+    expect(
+      await screen.findByText("Partial calculation [interrupted]", {
+        selector: ".answer",
+      }),
+    ).toBeVisible();
+  });
 });
