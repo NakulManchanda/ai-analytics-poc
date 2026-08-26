@@ -48,6 +48,18 @@ logger = logging.getLogger(__name__)
 EXPECTED_TOOL_NAME = "query_taxi_data"
 AVERAGE_METRICS_TOOL_NAME = "average_trip_metrics"
 
+
+class RunCancelledError(Exception):
+    """Raised when a run execution is aborted due to a cancellation request."""
+
+    def __init__(
+        self, partial_text: str = "", reason: str = "cancelled_by_user"
+    ) -> None:
+        super().__init__(reason)
+        self.partial_text = partial_text
+        self.reason = reason
+
+
 # Standard Bedrock Claude 3.5 Sonnet rate estimates: $0.003 / 1k input, $0.015 / 1k output
 COST_PER_INPUT_TOKEN = 0.003 / 1_000.0
 COST_PER_OUTPUT_TOKEN = 0.015 / 1_000.0
@@ -447,7 +459,12 @@ class OrchestrationLoop:
                 "ttft": ttft_data,
             }
 
+        def check_cancellation(partial_text: str = "") -> None:
+            if self.is_cancelled(run_id):
+                raise RunCancelledError(partial_text=partial_text)
+
         try:
+            check_cancellation()
             proposal_call_id = self._llm_call_id_factory()
             try:
                 llm = self._get_llm_client()
@@ -466,6 +483,7 @@ class OrchestrationLoop:
                 tracker.record_iteration()
 
                 # Step A: Load schema context
+                check_cancellation()
                 emit("context.loading", {"resource": "dataset://nyc-taxi/schema"})
                 try:
                     raw_schema = mcp.get_dataset_schema()
@@ -476,6 +494,7 @@ class OrchestrationLoop:
                     ) from err
 
                 # Step B: LLM Propose Taxi Query
+                check_cancellation()
                 llm_call_id = proposal_call_id
                 emit("llm.started", {"llm_call_id": llm_call_id, "phase": "proposal"})
                 call_start = self._monotonic()
@@ -572,6 +591,7 @@ class OrchestrationLoop:
                 executed_tool_signatures.add(tool_sig)
 
                 # Step D: Execute MCP Tool
+                check_cancellation()
                 tool_call_id = self._tool_call_id_factory()
                 last_tool_call_id = tool_call_id
                 emit(
@@ -664,6 +684,7 @@ class OrchestrationLoop:
                 step_seq += 1
 
                 # Step E: Reduce context and Answer
+                check_cancellation()
                 working_ctx = self._reducer.reduce(
                     current_prompt=prompt,
                     stored_messages=self._repo.list_messages(conv_id),
@@ -700,25 +721,30 @@ class OrchestrationLoop:
 
                 answer_call_id = self._llm_call_id_factory()
                 final_answer_phase_reached = True
+                check_cancellation()
                 emit(
                     "llm.started",
                     {"llm_call_id": answer_call_id, "phase": "final_answer"},
                 )
                 ans_start = self._monotonic()
+                accumulated_answer_chunks: list[str] = []
 
                 def publish_answer_delta(
                     delta: str,
                     _start: float = ans_start,
                     _call_id: str = answer_call_id,
+                    _chunks: list[str] = accumulated_answer_chunks,
                 ) -> None:
                     nonlocal ttft_ms
                     if ttft_ms is None:
                         ttft_ms = int((self._monotonic() - _start) * 1000)
+                    _chunks.append(delta)
                     emit(
                         "answer.delta",
                         {"delta": delta},
                         llm_call_id=_call_id,
                     )
+                    check_cancellation("".join(_chunks))
 
                 try:
                     stream_answer = getattr(
@@ -857,6 +883,76 @@ class OrchestrationLoop:
                     llm_calls=llm_calls,
                     telemetry=run_telemetry,
                 )
+
+        except RunCancelledError as err:
+            logger.info("Run %s cancelled by user during execution", run_id)
+            total_latency_ms = int((self._monotonic() - start_mono) * 1000)
+            run_telemetry = telemetry(total_latency_ms)
+
+            if err.partial_text:
+                asst_msg_id = generate_message_id()
+                self._repo.add_message(
+                    Message(
+                        message_id=asst_msg_id,
+                        conversation_id=conv_id,
+                        sequence=next_seq,
+                        role="assistant",
+                        content=err.partial_text + " [interrupted]",
+                        metadata={"interrupted": True},
+                    )
+                )
+
+            cancelled_run = Run(
+                run_id=run_id,
+                conversation_id=conv_id,
+                message_id=user_msg_id,
+                status="cancelled",
+                model=DEFAULT_MODEL_ID,
+                prompt_version="m9.v1",
+                started_at=run.started_at,
+                completed_at=utcnow_isoformat(),
+                input_tokens=tracker.input_tokens,
+                output_tokens=tracker.output_tokens,
+                estimated_cost_usd=tracker.estimated_cost_usd,
+                failure_code="cancelled",
+                metadata={
+                    "reason": err.reason,
+                    "partial_text": err.partial_text,
+                    "telemetry": run_telemetry,
+                },
+            )
+            self._repo.update_run(cancelled_run)
+
+            emit(
+                "run.cancelled",
+                terminal_run_payload(
+                    status="cancelled",
+                    input_tokens=tracker.input_tokens,
+                    output_tokens=tracker.output_tokens,
+                    estimated_cost_usd=tracker.estimated_cost_usd,
+                    failure_code="cancelled",
+                    telemetry=run_telemetry,
+                    reason=err.reason,
+                ),
+            )
+
+            return LoopResult(
+                answer=err.partial_text,
+                status="cancelled",
+                run_id=run_id,
+                conversation_id=conv_id,
+                steps=steps,
+                tool_call_id=last_tool_call_id,
+                query_id=last_query_id,
+                input_tokens=tracker.input_tokens,
+                output_tokens=tracker.output_tokens,
+                total_tokens=tracker.total_tokens,
+                estimated_cost_usd=tracker.estimated_cost_usd,
+                latency_ms=total_latency_ms,
+                failure_code="cancelled",
+                llm_calls=llm_calls,
+                telemetry=run_telemetry,
+            )
 
         except BudgetExceededError as err:
             logger.warning("Agent loop budget exceeded: %s", err.reason)
