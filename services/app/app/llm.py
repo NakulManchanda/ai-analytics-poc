@@ -1,5 +1,5 @@
 import json
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -369,6 +369,68 @@ class BedrockLLMClient:
             ],
         )
         return self._as_llm_result(response)
+
+    def stream_answer_with_query_result(
+        self,
+        prompt: str,
+        query_result: Mapping[str, object],
+        on_delta: Callable[[str], None],
+    ) -> LLMResult:
+        result_json = json.dumps(query_result, separators=(",", ":"), allow_nan=False)
+        request = {
+            "modelId": self._model_id,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "text": (
+                                "Answer the user's question using only this governed query "
+                                f"result. Question: {prompt}\nQuery result: {result_json}"
+                            )
+                        }
+                    ],
+                }
+            ],
+            "inferenceConfig": {"maxTokens": 128, "temperature": 0.0},
+        }
+        chunks: list[str] = []
+        metadata: Mapping[str, Any] | None = None
+        try:
+            response = self._get_runtime_client().converse_stream(**request)
+            for event in response["stream"]:
+                content_delta = event.get("contentBlockDelta")
+                if content_delta is not None:
+                    text = content_delta.get("delta", {}).get("text")
+                    if isinstance(text, str) and text:
+                        chunks.append(text)
+                        on_delta(text)
+                if "metadata" in event:
+                    metadata = event["metadata"]
+        except ClientError as error:
+            error_code = error.response.get("Error", {}).get("Code", "")
+            raise LLMProviderError(
+                retryable=error_code in RETRYABLE_BEDROCK_ERROR_CODES
+            ) from error
+        except (
+            ConnectTimeoutError,
+            EndpointConnectionError,
+            ReadTimeoutError,
+        ) as error:
+            raise LLMProviderError(retryable=True) from error
+        except BotoCoreError as error:
+            raise LLMProviderError(retryable=False) from error
+        if metadata is None:
+            raise LLMProviderError(retryable=True)
+        usage = metadata["usage"]
+        metrics = metadata["metrics"]
+        return LLMResult(
+            text="".join(chunks),
+            model_id=self._model_id,
+            input_tokens=usage["inputTokens"],
+            output_tokens=usage["outputTokens"],
+            latency_ms=int(metrics["latencyMs"]),
+        )
 
     def _converse(
         self,

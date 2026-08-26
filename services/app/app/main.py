@@ -6,7 +6,7 @@ from typing import Any
 from fastapi import FastAPI
 
 from app.config import Settings
-from app.events import RedisEventPublisher
+from app.events import EventPublisher, RedisEventPublisher
 from app.jobs import JobProducer
 from app.llm import LLMClient, create_llm_client
 from app.mcp_client import DatasetProfileMCPClient, FastMCPDatasetProfileClient
@@ -16,6 +16,7 @@ from app.routers.conversations import create_conversations_router
 from app.routers.events import create_events_router
 from app.routers.health import router as health_router
 from app.routers.jobs import create_jobs_router
+from app.routers.runs import RunDispatcher, create_runs_router
 from app.routers.status import router as status_router
 from app.state import DynamoDBStateRepository, InMemoryStateRepository, StateRepository
 
@@ -30,6 +31,8 @@ def create_app(
     llm_call_id_factory: Callable[[], str] | None = None,
     tool_call_id_factory: Callable[[], str] | None = None,
     orchestration_loop: OrchestrationLoop | None = None,
+    run_dispatcher: RunDispatcher | None = None,
+    event_publisher: EventPublisher | None = None,
 ) -> FastAPI:
     resolved_settings = settings or Settings.from_environment()
     shared_state_repo = state_repository or (
@@ -42,13 +45,16 @@ def create_app(
     )
     application = FastAPI(title="AI Analytics POC")
     application.state.state_repository = shared_state_repo
+    resolved_publisher: EventPublisher = event_publisher or RedisEventPublisher(
+        redis_client=redis_client
+    )
     loop = orchestration_loop or OrchestrationLoop(
         llm_client=llm_client,
         llm_client_factory=lambda: create_llm_client(resolved_settings),
         mcp_client=mcp_client,
         mcp_client_factory=FastMCPDatasetProfileClient,
         state_repository=shared_state_repo,
-        event_publisher=RedisEventPublisher(redis_client=redis_client),
+        event_publisher=resolved_publisher,
         **(
             {"llm_call_id_factory": llm_call_id_factory}
             if llm_call_id_factory is not None
@@ -62,11 +68,18 @@ def create_app(
     )
     application.include_router(health_router)
     application.include_router(create_ask_router(loop))
+    application.include_router(
+        create_runs_router(
+            loop,
+            **({"run_dispatcher": run_dispatcher} if run_dispatcher else {}),
+        )
+    )
     application.include_router(create_conversations_router(shared_state_repo))
     application.include_router(
         create_events_router(
             state_repository=shared_state_repo,
             redis_client=redis_client,
+            event_publisher=resolved_publisher,
         )
     )
     application.include_router(

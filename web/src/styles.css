@@ -963,26 +963,34 @@ input:focus-visible {
   gap: 8px;
 }
 
+button.sample-chip,
 .sample-chip {
-  background: #e2e8f0;
-  border: 1px solid #94a3b8;
+  background: #f1f5f9;
+  border: 1px solid #cbd5e1;
   color: #0f172a;
   border-radius: 9999px;
-  padding: 6px 12px;
-  font-size: 0.8rem;
-  font-weight: 500;
+  padding: 6px 14px;
+  font-size: 0.82rem;
+  font-weight: 600;
   cursor: pointer;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
   transition: all 0.15s ease;
   text-align: left;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
+button.sample-chip:hover,
 .sample-chip:hover {
-  background: #cbd5e1;
-  border-color: #64748b;
+  background: #e2e8f0;
+  border-color: #94a3b8;
   color: #0f172a;
   transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08);
 }
 
+button.sample-chip:focus-visible,
 .sample-chip:focus-visible {
   outline: 3px solid #38bdf8;
   outline-offset: 2px;

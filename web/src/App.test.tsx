@@ -73,6 +73,11 @@ describe("App", () => {
   });
 
   it("submits one prompt and renders the bounded final answer and aggregate usage", async () => {
+    const sseEvents = [
+      { event_id: "e1", event_type: "answer.delta", run_id: "run_test_123", conversation_id: "conv_test", sequence: 1, timestamp: "2026-08-25T00:00:01Z", payload: { delta: "Alpha has the most pickups with 3 trips." } },
+      { event_id: "e2", event_type: "run.completed", run_id: "run_test_123", conversation_id: "conv_test", sequence: 2, timestamp: "2026-08-25T00:00:02Z", payload: { input_tokens: 16, output_tokens: 9, total_tokens: 25, estimated_cost_usd: 0.0005, end_to_end_latency_ms: 32, ttft: { available: false } } },
+    ];
+    const sseText = sseEvents.map((e) => `data: ${JSON.stringify(e)}\n\n`).join("");
     const fetchRequest = vi.fn().mockImplementation((input: string) => {
       if (input === "/api/status") {
         return Promise.resolve({
@@ -83,18 +88,14 @@ describe("App", () => {
           }),
         });
       }
-      if (input === "/api/ask") {
+      if (input === "/api/runs") {
         return Promise.resolve({
           ok: true,
-          json: async () => ({
-            answer: "Alpha has the most pickups with 3 trips.",
-            tool_call_id: "tool_profile",
-            llm_calls: [],
-            usage: { input_tokens: 16, output_tokens: 9, total_tokens: 25 },
-            latency_ms: 32,
-            run_id: "run_test_123",
-          }),
+          json: async () => ({ run_id: "run_test_123", conversation_id: "conv_test", message_id: "msg_test", events_url: "/api/runs/run_test_123/events" }),
         });
+      }
+      if (input === "/api/runs/run_test_123/events") {
+        return Promise.resolve({ ok: true, text: async () => sseText });
       }
       return Promise.resolve({
         ok: true,
@@ -114,7 +115,7 @@ describe("App", () => {
 
     expect(await screen.findByText("Alpha has the most pickups with 3 trips.")).toBeVisible();
     expect(screen.getByText("25 tokens · 32 ms")).toBeVisible();
-    expect(fetchRequest).toHaveBeenCalledWith("/api/ask", expect.objectContaining({ method: "POST" }));
+    expect(fetchRequest).toHaveBeenCalledWith("/api/runs", expect.objectContaining({ method: "POST" }));
   });
 
   it("renders a controlled prompt error without exposing provider details", async () => {
@@ -128,10 +129,13 @@ describe("App", () => {
           }),
         });
       }
-      return Promise.resolve({
-        ok: false,
-        json: async () => ({ detail: { code: "mcp_tool_error", retryable: true } }),
-      });
+      if (input === "/api/runs") {
+        return Promise.resolve({
+          ok: false,
+          json: async () => ({ detail: { code: "mcp_tool_error", retryable: true } }),
+        });
+      }
+      return Promise.resolve({ ok: true, text: async () => "", json: async () => ({}) });
     });
     vi.stubGlobal("fetch", fetchRequest);
 
@@ -172,20 +176,22 @@ describe("App", () => {
           }),
         });
       }
-      if (input === "/api/ask") {
+      if (input === "/api/runs") {
         turnCount += 1;
+        const runId = `run_turn_${turnCount}`;
         return Promise.resolve({
           ok: true,
-          json: async () => ({
-            answer: `Answer for turn ${turnCount}.`,
-            tool_call_id: `tool_${turnCount}`,
-            query_id: `query_${turnCount}`,
-            usage: { input_tokens: 20, output_tokens: 10, total_tokens: 30 },
-            latency_ms: 25,
-            run_id: `run_turn_${turnCount}`,
-            conversation_id: "conv_backend_123",
-          }),
+          json: async () => ({ run_id: runId, conversation_id: "conv_backend_123", message_id: `msg_${turnCount}`, events_url: `/api/runs/${runId}/events` }),
         });
+      }
+      if (input.startsWith("/api/runs/run_turn_") && input.endsWith("/events")) {
+        const runId = input.split("/")[3];
+        const answer = runId === "run_turn_1" ? "Answer for turn 1." : "Answer for turn 2.";
+        const events = [
+          { event_id: "e1", event_type: "answer.delta", run_id: runId, conversation_id: "conv_backend_123", sequence: 1, timestamp: "2026-08-25T00:00:01Z", payload: { delta: answer } },
+          { event_id: "e2", event_type: "run.completed", run_id: runId, conversation_id: "conv_backend_123", sequence: 2, timestamp: "2026-08-25T00:00:02Z", payload: { input_tokens: 20, output_tokens: 10, total_tokens: 30, estimated_cost_usd: 0.001, end_to_end_latency_ms: 25, ttft: { available: false } } },
+        ];
+        return Promise.resolve({ ok: true, text: async () => events.map((e) => `data: ${JSON.stringify(e)}\n\n`).join("") });
       }
       if (input === "/api/conversations/conv_backend_123") {
         const messages = turnCount === 1
@@ -230,7 +236,7 @@ describe("App", () => {
     expect(screen.getByLabelText("Conversation and current run identity")).toHaveTextContent("Conversation: conv_backend_123");
     expect(screen.getByLabelText("Conversation and current run identity")).toHaveTextContent("Current Run: run_turn_1");
     expect(fetchRequest).toHaveBeenCalledWith(
-      "/api/ask",
+      "/api/runs",
       expect.objectContaining({ body: JSON.stringify({ prompt: "First query: top pickup zones" }) }),
     );
 
@@ -241,7 +247,7 @@ describe("App", () => {
     expect(screen.getByLabelText("Conversation and current run identity")).toHaveTextContent("Conversation: conv_backend_123");
     expect(screen.getByLabelText("Conversation and current run identity")).toHaveTextContent("Current Run: run_turn_2");
     expect(fetchRequest).toHaveBeenCalledWith(
-      "/api/ask",
+      "/api/runs",
       expect.objectContaining({
         body: JSON.stringify({
           prompt: "Second query: fare distribution",
@@ -324,7 +330,8 @@ describe("App", () => {
     vi.stubGlobal("fetch", vi.fn().mockImplementation((input: string) => {
       if (input === "/api/status") return Promise.resolve({ ok: true, json: async () => ({ app: { status: "ok", service: "ai-app" }, mcp: { status: "ok" } }) });
       if (input === "/api/conversations/conv_old") return oldSnapshot.then((snapshot) => ({ ok: true, json: async () => snapshot }));
-      if (input === "/api/ask") return Promise.resolve({ ok: true, json: async () => ({ answer: "Fresh answer", usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 }, latency_ms: 2, conversation_id: "conv_fresh", run_id: "run_fresh", llm_calls: [] }) });
+      if (input === "/api/runs") return Promise.resolve({ ok: true, json: async () => ({ run_id: "run_fresh", conversation_id: "conv_fresh", message_id: "msg_f", events_url: "/api/runs/run_fresh/events" }) });
+      if (input === "/api/runs/run_fresh/events") return Promise.resolve({ ok: true, text: async () => `data: ${JSON.stringify({ event_id: "e1", event_type: "answer.delta", run_id: "run_fresh", conversation_id: "conv_fresh", sequence: 1, timestamp: "2026-08-25T00:00:00Z", payload: { delta: "Fresh answer" } })}\n\ndata: ${JSON.stringify({ event_id: "e2", event_type: "run.completed", run_id: "run_fresh", conversation_id: "conv_fresh", sequence: 2, timestamp: "2026-08-25T00:00:01Z", payload: { input_tokens: 1, output_tokens: 1, total_tokens: 2, estimated_cost_usd: 0.0001, end_to_end_latency_ms: 2, ttft: { available: false } } })}\n\n` });
       if (input === "/api/conversations/conv_fresh") return Promise.resolve({ ok: true, json: async () => ({ conversation_id: "conv_fresh", messages: [], runs: [] }) });
       return Promise.resolve({ ok: true, text: async () => "" });
     }));
@@ -357,8 +364,11 @@ describe("App", () => {
     };
     vi.stubGlobal("fetch", vi.fn().mockImplementation((input: string) => {
       if (input === "/api/status") return Promise.resolve({ ok: true, json: async () => ({ app: { status: "ok", service: "ai-app" }, mcp: { status: "ok" } }) });
-      if (input === "/api/ask") return Promise.resolve({ ok: true, json: async () => ({ answer: "Same run answer", usage: { input_tokens: 3, output_tokens: 2, total_tokens: 5 }, latency_ms: 18, conversation_id: "conv_same", run_id: "run_same", llm_calls: [] }) });
-      if (input === "/api/runs/run_same/events") return Promise.resolve({ ok: true, text: async () => `data: ${JSON.stringify(terminalEvent)}\n\n` });
+      if (input === "/api/runs") return Promise.resolve({ ok: true, json: async () => ({ run_id: "run_same", conversation_id: "conv_same", message_id: "msg_s", events_url: "/api/runs/run_same/events" }) });
+      if (input === "/api/runs/run_same/events") {
+        const deltaEvent = { event_id: "e0", event_type: "answer.delta", run_id: "run_same", conversation_id: "conv_same", sequence: 1, timestamp: "2026-08-25T00:00:00Z", payload: { delta: "Same run answer" } };
+        return Promise.resolve({ ok: true, text: async () => `data: ${JSON.stringify(deltaEvent)}\n\ndata: ${JSON.stringify(terminalEvent)}\n\n` });
+      }
       if (input === "/api/conversations/conv_same") return delayedSnapshot.then((snapshot) => ({ ok: true, json: async () => snapshot }));
       return Promise.resolve({ ok: true, text: async () => "" });
     }));
@@ -422,16 +432,14 @@ describe("App", () => {
       if (input === "/api/status") {
         return Promise.resolve({ ok: true, json: async () => ({ app: { status: "ok", service: "ai-app" }, mcp: { status: "ok" } }) });
       }
-      if (input === "/api/ask") {
-        return Promise.resolve({
-          ok: true,
-          json: async () => ({
-            answer: "Telemetry answer.", usage: { input_tokens: 21, output_tokens: 8, total_tokens: 29 }, latency_ms: 52,
-            conversation_id: "conv_telemetry_1", run_id: "run_telemetry_1", llm_calls: [],
-          }),
-        });
+      if (input === "/api/runs") {
+        return Promise.resolve({ ok: true, json: async () => ({ run_id: "run_telemetry_1", conversation_id: "conv_telemetry_1", message_id: "msg_t", events_url: "/api/runs/run_telemetry_1/events" }) });
       }
-      return Promise.resolve({ ok: true, text: async () => `data: ${JSON.stringify(terminalEvent)}\n\n` });
+      if (input === "/api/runs/run_telemetry_1/events") {
+        const deltaEvent = { event_id: "e0", event_type: "answer.delta", run_id: "run_telemetry_1", conversation_id: "conv_telemetry_1", sequence: 1, timestamp: "2026-08-25T00:00:00Z", payload: { delta: "Telemetry answer." } };
+        return Promise.resolve({ ok: true, text: async () => `data: ${JSON.stringify(deltaEvent)}\n\ndata: ${JSON.stringify(terminalEvent)}\n\n` });
+      }
+      return Promise.resolve({ ok: true, text: async () => "" });
     }));
 
     render(<App />);
@@ -447,6 +455,75 @@ describe("App", () => {
     expect(screen.getByText("8")).toBeVisible();
     expect(screen.getByText("$0.0015")).toBeVisible();
     expect(screen.getByText("Unavailable (non-streaming)")).toBeVisible();
+  });
+
+  it("progressively renders answer.delta text as SSE chunks arrive before run.completed", async () => {
+    /**
+     * The run-first path submits to /api/runs (202 Accepted), opens SSE, and
+     * progressively renders answer.delta events in the answer area before the
+     * terminal run.completed event arrives.  The streaming text must appear in
+     * the DOM before final telemetry is shown.
+     */
+    const deltaEvents = [
+      { event_id: "e1", event_type: "run.received", run_id: "run_stream", conversation_id: "conv_s", sequence: 1, timestamp: "2026-08-25T00:00:00Z", payload: { status: "in_progress" } },
+      { event_id: "e2", event_type: "answer.delta", run_id: "run_stream", conversation_id: "conv_s", sequence: 2, timestamp: "2026-08-25T00:00:01Z", payload: { delta: "JFK " } },
+      { event_id: "e3", event_type: "answer.delta", run_id: "run_stream", conversation_id: "conv_s", sequence: 3, timestamp: "2026-08-25T00:00:01Z", payload: { delta: "leads." } },
+      { event_id: "e4", event_type: "run.completed", run_id: "run_stream", conversation_id: "conv_s", sequence: 4, timestamp: "2026-08-25T00:00:02Z", payload: { input_tokens: 5, output_tokens: 2, total_tokens: 7, estimated_cost_usd: 0.0001, end_to_end_latency_ms: 120, ttft: { available: true, latency_ms: 45, source: "provider_stream" } } },
+    ];
+    const sseText = deltaEvents.map((e) => `data: ${JSON.stringify(e)}\n\n`).join("");
+
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((input: string) => {
+      if (input === "/api/status") return Promise.resolve({ ok: true, json: async () => ({ app: { status: "ok", service: "ai-app" }, mcp: { status: "ok", tools: 1, resources: 1 } }) });
+      if (input === "/api/runs") return Promise.resolve({ ok: true, json: async () => ({ run_id: "run_stream", conversation_id: "conv_s", message_id: "msg_s", events_url: "/api/runs/run_stream/events" }) });
+      if (input === "/api/runs/run_stream/events") return Promise.resolve({ ok: true, text: async () => sseText });
+      if (input === "/api/conversations/conv_s") return Promise.resolve({ ok: true, json: async () => ({ conversation_id: "conv_s", messages: [
+        { message_id: "msg_s", sequence: 1, role: "user", content: "Which zone leads?", created_at: "2026-08-25T00:00:00Z" },
+        { message_id: "msg_a", sequence: 2, role: "assistant", content: "JFK leads.", created_at: "2026-08-25T00:00:02Z" },
+      ], runs: [{ run_id: "run_stream", message_id: "msg_s", status: "completed", started_at: "2026-08-25T00:00:00Z", completed_at: "2026-08-25T00:00:02Z", input_tokens: 5, output_tokens: 2, estimated_cost_usd: 0.0001, steps: [] }] }) });
+      return Promise.resolve({ ok: true, text: async () => "" });
+    }));
+
+    render(<App />);
+    const promptBox = screen.getByRole("textbox", { name: "Ask about NYC taxi activity" });
+    await act(async () => { await Promise.resolve(); });
+    fireEvent.change(promptBox, { target: { value: "Which zone leads?" } });
+    fireEvent.click(screen.getByRole("button", { name: "Run analysis" }));
+
+    // Progressive streaming text must appear in the answer area
+    expect(await screen.findByText("JFK leads.", { selector: ".answer" })).toBeVisible();
+    // Truthful TTFT: provider_stream available should render as "Available · 45 ms (provider_stream)"
+    expect(await screen.findByText("Available · 45 ms (provider_stream)")).toBeVisible();
+  });
+
+  it("renders TTFT as Available with latency when provider_stream source is reported", async () => {
+    const terminalEvent = {
+      event_id: "e_ttft", event_type: "run.completed", run_id: "run_ttft", conversation_id: "conv_ttft",
+      sequence: 2, timestamp: "2026-08-25T00:00:02Z",
+      payload: {
+        input_tokens: 10, output_tokens: 4, total_tokens: 14, estimated_cost_usd: 0.0002,
+        end_to_end_latency_ms: 200, proposal_llm_latency_ms: 80, tool_latency_ms: 20,
+        final_answer_llm_latency_ms: 90,
+        ttft: { available: true, latency_ms: 42, source: "provider_stream" },
+      },
+    };
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((input: string) => {
+      if (input === "/api/status") return Promise.resolve({ ok: true, json: async () => ({ app: { status: "ok", service: "ai-app" }, mcp: { status: "ok" } }) });
+      if (input === "/api/runs") return Promise.resolve({ ok: true, json: async () => ({ run_id: "run_ttft", conversation_id: "conv_ttft", message_id: "msg_ttft", events_url: "/api/runs/run_ttft/events" }) });
+      if (input === "/api/runs/run_ttft/events") {
+        const deltaEvent = { event_id: "e0", event_type: "answer.delta", run_id: "run_ttft", conversation_id: "conv_ttft", sequence: 1, timestamp: "2026-08-25T00:00:01Z", payload: { delta: "TTFT answer." } };
+        return Promise.resolve({ ok: true, text: async () => `data: ${JSON.stringify(deltaEvent)}\n\ndata: ${JSON.stringify(terminalEvent)}\n\n` });
+      }
+      return Promise.resolve({ ok: true, text: async () => "" });
+    }));
+
+    render(<App />);
+    fireEvent.change(screen.getByRole("textbox", { name: "Ask about NYC taxi activity" }), { target: { value: "Show TTFT" } });
+    fireEvent.click(screen.getByRole("button", { name: "Run analysis" }));
+
+    expect(await screen.findByText("End-to-end latency")).toBeVisible();
+    // TTFT available with latency must be shown, not "Unavailable (non-streaming)"
+    expect(screen.getByText("Available · 42 ms (provider_stream)")).toBeVisible();
+    expect(screen.queryByText("Unavailable (non-streaming)")).not.toBeInTheDocument();
   });
 });
 

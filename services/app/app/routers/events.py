@@ -14,7 +14,11 @@ from app.events.models import (
     context_reduced_payload,
     terminal_run_payload,
 )
-from app.events.publisher import RUN_EVENTS_STREAM
+from app.events.publisher import (
+    RUN_EVENTS_STREAM,
+    EventPublisher,
+    InMemoryEventPublisher,
+)
 from app.state import InMemoryStateRepository, StateRepository
 
 logger = logging.getLogger(__name__)
@@ -27,6 +31,7 @@ def create_events_router(
     redis_url: str | None = None,
     state_repository: StateRepository | None = None,
     redis_client: Any = None,
+    event_publisher: EventPublisher | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix="/api")
     repo = state_repository or InMemoryStateRepository()
@@ -155,6 +160,23 @@ def create_events_router(
                         "budget_exceeded",
                         "failed",
                     ):
+                        # If an in-memory publisher is available, use its full event log
+                        # (including transient answer.delta events not stored durably)
+                        if isinstance(event_publisher, InMemoryEventPublisher):
+                            for evt in event_publisher.get_events_for_run(run_id):
+                                if evt.event_id not in emitted_event_ids:
+                                    emitted_event_ids.add(evt.event_id)
+                                    events_found = True
+                                    yield evt.to_sse()
+                                    if evt.event_type in (
+                                        "run.completed",
+                                        "run.failed",
+                                        "run.budget_exceeded",
+                                    ):
+                                        terminal_seen = True
+                            if terminal_seen:
+                                break
+
                         steps = repo.list_run_steps(run_id)
                         seq = 1
                         # Reconstruct received

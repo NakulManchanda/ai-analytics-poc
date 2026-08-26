@@ -21,6 +21,14 @@ export type AskResponse = {
   run_id: string;
 };
 
+/** Response from POST /api/runs (202 Accepted — run-first submission). */
+export type RunAccepted = {
+  run_id: string;
+  conversation_id: string;
+  message_id: string;
+  events_url: string;
+};
+
 export type RunSnapshot = {
   run_id: string;
   message_id: string | null;
@@ -62,7 +70,7 @@ export type RunTelemetry = {
   proposal_llm_latency_ms?: number | null;
   tool_latency_ms?: number | null;
   final_answer_llm_latency_ms?: number | null;
-  ttft?: { available: boolean; reason?: string };
+  ttft?: { available: boolean; latency_ms?: number; source?: string; reason?: string };
 };
 
 export type WorkingContextData = {

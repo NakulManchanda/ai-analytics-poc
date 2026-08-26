@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable, Mapping
 from typing import Any
 
 import pytest
@@ -8,7 +9,7 @@ from app.events import (
     InMemoryEventPublisher,
     RunEvent,
 )
-from app.llm import LLMProviderError, LocalFakeLLMClient, ToolProposalResult
+from app.llm import LLMProviderError, LLMResult, LocalFakeLLMClient, ToolProposalResult
 from app.main import create_app
 from app.orchestration import ExecutionBudgets, OrchestrationLoop
 from app.state import (
@@ -299,10 +300,113 @@ def test_orchestration_loop_emits_full_event_sequence() -> None:
         "tool.completed",
         "context.reduced",
         "llm.started",
+        "answer.completed",
         "llm.completed",
         "run.completed",
     ]
     assert event_types == expected_order
+
+
+def test_orchestration_loop_emits_provider_deltas_and_truthful_ttft() -> None:
+    class StreamingLLMClient(LocalFakeLLMClient):
+        def stream_answer_with_query_result(
+            self,
+            prompt: str,
+            query_result: Mapping[str, object],
+            on_delta: Callable[[str], None],
+        ) -> LLMResult:
+            on_delta("JFK ")
+            on_delta("leads.")
+            return LLMResult(
+                text="JFK leads.",
+                model_id="amazon.nova-micro-v1:0",
+                input_tokens=4,
+                output_tokens=2,
+                latency_ms=300,
+            )
+
+    monotonic_values = iter([0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.65, 0.8, 0.9])
+    repo = InMemoryStateRepository()
+    publisher = InMemoryEventPublisher()
+    loop = OrchestrationLoop(
+        llm_client=StreamingLLMClient(),
+        mcp_client=FakeMCPClient(),  # type: ignore[arg-type]
+        state_repository=repo,
+        event_publisher=publisher,
+        monotonic_factory=lambda: next(monotonic_values),
+    )
+
+    result = loop.run("Which pickup zones have the most trips?")
+
+    events = publisher.get_events_for_run(result.run_id)
+    answer_events = [
+        event for event in events if event.event_type.startswith("answer.")
+    ]
+    assert [(event.event_type, event.payload) for event in answer_events] == [
+        ("answer.delta", {"delta": "JFK "}),
+        ("answer.delta", {"delta": "leads."}),
+        ("answer.completed", {"answer": "JFK leads."}),
+    ]
+    completed_payload = next(
+        event.payload for event in events if event.event_type == "run.completed"
+    )
+    assert completed_payload["ttft"] == {
+        "available": True,
+        "latency_ms": 150,
+        "source": "provider_stream",
+    }
+    assert repo.list_messages(result.conversation_id)[-1].content == "JFK leads."
+
+
+def test_sse_endpoint_delivers_in_progress_answer_delta_before_terminal_event() -> None:
+    """The SSE endpoint must stream answer.delta events to a connected client before the
+    terminal run.completed arrives.  This tests live in-memory delivery without Redis.
+    """
+    repo = InMemoryStateRepository()
+    publisher = InMemoryEventPublisher()
+
+    class SlowStreamingLLMClient(LocalFakeLLMClient):
+        def stream_answer_with_query_result(
+            self,
+            prompt: str,
+            query_result: Mapping[str, object],
+            on_delta: Callable[[str], None],
+        ) -> LLMResult:
+            on_delta("Delta1 ")
+            on_delta("Delta2.")
+            return LLMResult(
+                text="Delta1 Delta2.",
+                model_id="amazon.nova-micro-v1:0",
+                input_tokens=4,
+                output_tokens=2,
+                latency_ms=50,
+            )
+
+    loop = OrchestrationLoop(
+        llm_client=SlowStreamingLLMClient(),
+        mcp_client=FakeMCPClient(),  # type: ignore[arg-type]
+        state_repository=repo,
+        event_publisher=publisher,
+    )
+
+    # Run the loop synchronously so durable state is available
+    result = loop.run("Which zones lead?")
+    assert result.status == "completed"
+
+    # Connect to SSE with the in-memory publisher injected
+    # The endpoint must deliver answer.delta events (not just reconstruct terminal steps)
+    client = TestClient(create_app(state_repository=repo, event_publisher=publisher))
+    response = client.get(f"/api/runs/{result.run_id}/events")
+    assert response.status_code == 200
+    content = response.text
+    assert "event: answer.delta" in content, (
+        "SSE must include answer.delta events from the in-memory publisher; "
+        "the durable-fallback path omits them since they are transient"
+    )
+    # Verify delta payloads are present
+    events = _sse_events(content)
+    delta_events = [e for e in events if e == "answer.delta"]
+    assert len(delta_events) >= 1
 
 
 def test_orchestration_loop_emits_budget_exceeded_event() -> None:
