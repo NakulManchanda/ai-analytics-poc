@@ -43,4 +43,5 @@ Monotonically numbered log of every post-bootstrap task. Each entry records the 
 | [0037](0037-single-tool-proposal-prompt.md) | v2 | [#71](https://github.com/NakulManchanda/ai-analytics-poc/pull/71) | Clarify single tool proposal prompt and support empty arguments | Merged (`64604c1`) |
 | [0038](0038-multi-tool-collapse.md) | v2 | [#73](https://github.com/NakulManchanda/ai-analytics-poc/pull/73) | Resolve multi-borough tool uses to all-borough average_trip_metrics call | Merged (`a5fc606`) |
 | [0039](0039-cancel-api-state.md) | v3 | [#78](https://github.com/NakulManchanda/ai-analytics-poc/pull/78) | Run state model expansion and POST /api/runs/{run_id}/cancel endpoint | Merged (`3dbcfa7`) |
-| [0040](0040-cancel-loop-abort.md) | v3 | [#79](https://github.com/NakulManchanda/ai-analytics-poc/pull/79) | Orchestration loop cancellation checkpoints and Bedrock streaming abort | Draft for #75 |
+| [0040](0040-cancel-loop-abort.md) | v3 | [#79](https://github.com/NakulManchanda/ai-analytics-poc/pull/79) | Orchestration loop cancellation checkpoints and Bedrock streaming abort | Merged (`3c3e375`) |
+| [0041](0041-cancel-frontend-ui.md) | v3 | [#80](https://github.com/NakulManchanda/ai-analytics-poc/pull/80) | Frontend cancellation controls, SSE badging, and interrupted run UI | Draft for #76 |

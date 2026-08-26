@@ -190,4 +190,52 @@ describe("TimelineInspector SSE lifecycle", () => {
     expect(screen.getByText("run.failed")).toBeVisible();
     expect(screen.getByText(/Run failed: \[mcp_tool_error\] Unknown tool: average_trip_metrics/)).toBeVisible();
   });
+
+  it("renders run.cancel_requested and run.cancelled events with warning badges", async () => {
+    const telemetryUpdate = vi.fn();
+    render(<TimelineInspector runId="run_same" onRunTelemetryUpdate={telemetryUpdate} />);
+
+    const stream = MockEventSource.instances[0];
+    await act(async () => {
+      stream.emit("run.cancel_requested", {
+        event_id: "evt_cancel_req",
+        event_type: "run.cancel_requested",
+        run_id: "run_same",
+        conversation_id: "conversation_1",
+        sequence: 2,
+        timestamp: "2026-08-25T00:00:01Z",
+        payload: { status: "cancel_requested" },
+      });
+      stream.emit("run.cancelled", {
+        event_id: "evt_cancelled",
+        event_type: "run.cancelled",
+        run_id: "run_same",
+        conversation_id: "conversation_1",
+        sequence: 3,
+        timestamp: "2026-08-25T00:00:02Z",
+        payload: {
+          status: "cancelled",
+          input_tokens: 15,
+          output_tokens: 5,
+          total_tokens: 20,
+          estimated_cost_usd: 0.001,
+          latency_ms: 50,
+          failure_code: "cancelled",
+        },
+      });
+    });
+
+    expect(screen.getByText("run.cancel_requested")).toBeVisible();
+    expect(screen.getByText("Cancellation requested by user")).toBeVisible();
+    expect(screen.getByText("run.cancelled")).toBeVisible();
+    expect(screen.getByText(/Run cancelled · 20 tokens consumed · 50ms/)).toBeVisible();
+    expect(telemetryUpdate).toHaveBeenCalledWith(
+      "run_same",
+      expect.objectContaining({
+        input_tokens: 15,
+        output_tokens: 5,
+        total_tokens: 20,
+      }),
+    );
+  });
 });

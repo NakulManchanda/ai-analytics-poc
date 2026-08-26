@@ -9,7 +9,7 @@ interface TimelineInspectorProps {
 }
 
 function terminalTelemetry(event: RunEvent): RunTelemetry | null {
-  if (!['run.completed', 'run.budget_exceeded', 'run.failed'].includes(event.event_type)) return null;
+  if (!['run.completed', 'run.budget_exceeded', 'run.failed', 'run.cancelled'].includes(event.event_type)) return null;
   const payload = event.payload;
   const telemetry = payload.telemetry as Record<string, unknown> | undefined;
   const value = (key: string) => payload[key] ?? telemetry?.[key];
@@ -36,6 +36,8 @@ function terminalTelemetry(event: RunEvent): RunTelemetry | null {
 export const KNOWN_EVENT_TYPES = [
   "message",
   "run.received",
+  "run.cancel_requested",
+  "run.cancelled",
   "context.loading",
   "llm.started",
   "llm.completed",
@@ -59,6 +61,7 @@ export const KNOWN_EVENT_TYPES = [
 ];
 
 export function getEventBadgeClass(eventType: string): string {
+  if (eventType === "run.cancel_requested" || eventType === "run.cancelled") return "badge-warning";
   if (eventType === "tool.failed" || eventType === "run.budget_exceeded" || eventType === "run.failed" || eventType === "job.failed") return "badge-danger";
   if (eventType.startsWith("llm.") || eventType === "step.llm_proposal" || eventType === "step.tool_proposal" || eventType === "step.final_answer" || eventType === "step.llm_final_answer") return "badge-llm";
   if (eventType.startsWith("tool.") || eventType === "step.tool_execution" || eventType === "step.tool_call") return "badge-tool";
@@ -72,6 +75,10 @@ export function formatEventSummary(event: RunEvent): string {
   switch (event.event_type) {
     case "run.received":
       return p.prompt_summary ? `Prompt: "${p.prompt_summary}"` : "Execution run initialized";
+    case "run.cancel_requested":
+      return "Cancellation requested by user";
+    case "run.cancelled":
+      return `Run cancelled · ${p.total_tokens ?? (Number(p.input_tokens || 0) + Number(p.output_tokens || 0))} tokens consumed · ${p.latency_ms ?? 0}ms`;
     case "context.loading":
       return `Loading schema: ${p.resource || "dataset schema"}`;
     case "llm.started":
@@ -121,7 +128,7 @@ export const TimelineInspector: React.FC<TimelineInspectorProps> = ({
   const latestWorkingContextUpdate = useRef(onWorkingContextUpdate);
   const latestRunTelemetryUpdate = useRef(onRunTelemetryUpdate);
   const [connectionStatus, setConnectionStatus] = useState<
-    "idle" | "connecting" | "streaming" | "completed" | "budget_exceeded" | "failed" | "error"
+    "idle" | "connecting" | "streaming" | "completed" | "budget_exceeded" | "failed" | "cancelled" | "cancelling" | "error"
   >("idle");
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
   const [customRunInput, setCustomRunInput] = useState("");
@@ -176,6 +183,11 @@ export const TimelineInspector: React.FC<TimelineInspectorProps> = ({
           } else if (parsed.event_type === "run.failed") {
             setConnectionStatus("failed");
             eventSource.close();
+          } else if (parsed.event_type === "run.cancelled") {
+            setConnectionStatus("cancelled");
+            eventSource.close();
+          } else if (parsed.event_type === "run.cancel_requested") {
+            setConnectionStatus("cancelling");
           }
         } catch {
           // ignore keep-alives or non-json comments
@@ -191,7 +203,7 @@ export const TimelineInspector: React.FC<TimelineInspectorProps> = ({
         // If we already have terminal events, stay completed
         setEvents((currentEvents) => {
           const hasTerminal = currentEvents.some((e) =>
-            ["run.completed", "run.budget_exceeded", "run.failed"].includes(e.event_type)
+            ["run.completed", "run.budget_exceeded", "run.failed", "run.cancelled"].includes(e.event_type)
           );
           if (!hasTerminal) {
             setConnectionStatus("error");
@@ -256,6 +268,8 @@ export const TimelineInspector: React.FC<TimelineInspectorProps> = ({
             if (lastEvt.event_type === "run.completed") setConnectionStatus("completed");
             else if (lastEvt.event_type === "run.budget_exceeded") setConnectionStatus("budget_exceeded");
             else if (lastEvt.event_type === "run.failed") setConnectionStatus("failed");
+            else if (lastEvt.event_type === "run.cancelled") setConnectionStatus("cancelled");
+            else if (lastEvt.event_type === "run.cancel_requested") setConnectionStatus("cancelling");
             else setConnectionStatus("streaming");
           }
         } catch {

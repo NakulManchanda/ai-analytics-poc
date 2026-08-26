@@ -45,6 +45,7 @@ export default function App() {
   const [answer, setAnswer] = useState<AskResponse | null>(null);
   const [promptError, setPromptError] = useState<string | null>(null);
   const [isRunning, setIsRunning] = useState(false);
+  const [isCancelling, setIsCancelling] = useState(false);
 
   // Multi-turn and SSE Inspection State
   const [conversationId, setConversationId] = useState<string | null>(null);
@@ -219,7 +220,8 @@ export default function App() {
             } else if (
               event.event_type === "run.completed" ||
               event.event_type === "run.failed" ||
-              event.event_type === "run.budget_exceeded"
+              event.event_type === "run.budget_exceeded" ||
+              event.event_type === "run.cancelled"
             ) {
               const p = event.payload;
               setRunTelemetry({
@@ -235,7 +237,7 @@ export default function App() {
               });
               if (accumulatedAnswer) {
                 finalAnswer = {
-                  answer: accumulatedAnswer,
+                  answer: event.event_type === "run.cancelled" ? `${accumulatedAnswer} [interrupted]` : accumulatedAnswer,
                   usage: {
                     input_tokens: (p.input_tokens as number) ?? 0,
                     output_tokens: (p.output_tokens as number) ?? 0,
@@ -266,6 +268,19 @@ export default function App() {
       );
     } finally {
       setIsRunning(false);
+      setIsCancelling(false);
+    }
+  };
+
+  const handleCancelRun = async () => {
+    if (!activeRunId || isCancelling) return;
+    setIsCancelling(true);
+    try {
+      await fetch(`/api/runs/${encodeURIComponent(activeRunId)}/cancel`, {
+        method: "POST",
+      });
+    } catch {
+      // ignore
     }
   };
 
@@ -373,7 +388,18 @@ export default function App() {
               <button type="submit" disabled={!prompt.trim() || isRunning}>
                 {isRunning ? "Running analysis…" : "Run analysis"}
               </button>
-              {conversationId && (
+              {isRunning && (
+                <button
+                  type="button"
+                  className="btn-cancel"
+                  onClick={handleCancelRun}
+                  disabled={isCancelling}
+                  aria-label="Cancel active run"
+                >
+                  {isCancelling ? "Cancelling…" : "⏹ Stop"}
+                </button>
+              )}
+              {conversationId && !isRunning && (
                 <button
                   type="button"
                   className="btn-text"

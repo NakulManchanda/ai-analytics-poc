@@ -284,6 +284,19 @@ input:focus-visible {
   padding: 8px 12px;
 }
 
+.btn-cancel {
+  background: #dc2626;
+  border-color: #dc2626;
+  color: #fff;
+  font-size: 0.85rem;
+  padding: 12px 18px;
+}
+
+.btn-cancel:hover:not(:disabled) {
+  background: #b91c1c;
+  border-color: #b91c1c;
+}
+
 .btn-text {
   background: transparent;
   border: none;
