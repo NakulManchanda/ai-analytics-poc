@@ -11,9 +11,10 @@ handoffs; it does not relax milestone sequencing or duplicate project rules.
    whether implementation is authorized. A `status:blocked` issue is planning only.
 3. The owner posts issue comments for takeover, decisions, evidence, blockers, and the draft PR.
    Keep all implementation on the issue branch; never share a write worktree.
-4. The coordinator controls integration order. No agent merges, applies infrastructure, or starts
-   a later milestone unless the issue explicitly authorizes it. GitHub Actions and review are
-   merge gates.
+4. The coordinator controls integration order. A gated intermediate PR needs no separate human
+   merge approval. Reviewers never merge, and no agent applies infrastructure, redeploys the full
+   environment, creates a milestone tag, or starts a later milestone without explicit authority.
+   GitHub Actions and one independent review are merge gates.
 
 Ownership labels describe the intended local tool, not a GitHub identity. Assign
 `NakulManchanda` when available. See the issue queue for the exact branch and worktree names.
@@ -35,18 +36,9 @@ Do not select Luna unless the task is explicitly speed-only.
 
 ### Review lifecycle
 
-- Push a reviewable commit, then start one Claude review in parallel with GitHub Actions. Do not
-  run Claude and Gemini as duplicate PR reviewers unless the user explicitly requests both.
-- Use Opus at normal/default effort for cross-service, architecture, security, or adversarial
-  changes. Use Sonnet at normal/default effort for easy, localized fixes. Do not select high effort
-  by default because it consumes the review budget too quickly.
-- Give the initial reviewer enough context to judge the change independently: `AGENTS.md`, the
-  linked issue and acceptance criteria, explicit scope exclusions, base and head SHAs, the PR URL,
-  and the exact verification already run. Keep the review read-only.
-- Record the Claude session ID. After addressing findings, resume that same session with the new
-  head SHA, a concise summary of the fixes, and the prior findings to recheck. Do not start a fresh
-  session for each follow-up review.
-- Prefer one long CI wait or infrequent status snapshots. Do not repeatedly poll GitHub Actions.
+Use the natural-language-triggered `.claude/skills/project-pr-review/SKILL.md` workflow. It owns
+reviewer selection, required context, single-session follow-ups, parallel CI timing, and merge
+readiness checks without loading those operational details into every task.
 
 ## Handoff templates
 
@@ -95,21 +87,18 @@ tool per worktree, and never share a write worktree.
 ```sh
 cd .worktrees/<issue-name>
 
-# Claude review — Opus at normal/default effort; capture the returned session ID
+# Claude review — natural language triggers the project skill; capture the session ID
 claude --dangerously-skip-permissions --model opus --print --output-format json \
-  "Read-only review of PR #[PR]. Read CLAUDE.md (@AGENTS.md) and docs/agent-coordination.md. \
-Issue #[ISSUE]; acceptance: [CHECKLIST]; exclusions: [OUT-OF-SCOPE]; base [BASE_SHA], \
-head [HEAD_SHA]; verification: [COMMANDS AND RESULTS]. Do not edit, commit, push, merge, or deploy."
+  "Review PR #[PR] for issue #[ISSUE]. Base [BASE_SHA], head [HEAD_SHA]."
 
-# Easy localized review — use Sonnet with the same context shape
+# Easy localized review — the same skill selects the lighter review lane
 claude --dangerously-skip-permissions --model sonnet --print --output-format json \
-  "Read-only review of PR #[PR]. [CONTEXT AS ABOVE]."
+  "Review this localized PR #[PR] for issue #[ISSUE]. Base [BASE_SHA], head [HEAD_SHA]."
 
 # Follow-up — resume the original reviewer after fixes
 claude --dangerously-skip-permissions --resume "[CLAUDE_SESSION_ID]" \
   --print --output-format json \
-  "Re-review new head [NEW_HEAD_SHA]. Fixes since the prior review: [SUMMARY]. \
-Recheck every prior finding and inspect the incremental diff for regressions. Remain read-only."
+  "Re-review after fixes at [NEW_HEAD_SHA]. Changes: [SUMMARY]."
 
 # Gemini / Antigravity — 3.7 Flash High, accept-edits
 agy --dangerously-skip-permissions --mode=accept-edits --effort=high \

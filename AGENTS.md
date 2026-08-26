@@ -21,7 +21,11 @@ and `.github/copilot-instructions.md`) must stay thin and refer here rather than
   main checkout untouched; use `.worktrees/<topic>` and a descriptive branch name.
 - Make the smallest coherent commit, push the branch early, and open a **draft** PR as soon as
   the change is reviewable. Keep the PR description current with context, decisions, tests, and
-  known limitations; finish updates on that same PR. Do not merge without explicit authorization.
+  known limitations; finish updates on that same PR. An intermediate PR may merge without separate
+  human approval after its acceptance criteria, local verification, exact-head GitHub Actions, one
+  independent review, dependency, documentation, and conflict gates pass. A full redeploy,
+  infrastructure apply, milestone release, or tag still requires an explicit user decision and
+  applicable human validation.
 - Every post-bootstrap PR gets a monotonically numbered entry under `docs/work-history/` covering
   goal, starting point, decisions, verification, PR/merge state, and lessons. Update
   `README.md` and `docs/progress.md` when the active milestone requires it.
@@ -32,6 +36,10 @@ and `.github/copilot-instructions.md`) must stay thin and refer here rather than
   smoke scripts must select an ephemeral or task-specific host port and an isolated Compose
   project by default. Keep container-internal ports fixed; pass an explicit project/port only when
   the current task owns it.
+- Prefer existing Make targets for repeatable developer, test, CI, smoke, and deployment workflows.
+  When a useful non-trivial command would otherwise be reconstructed across tasks, add a small
+  documented Make target. Keep one-off inspections direct and do not wrap or regenerate complicated
+  commands without a recurring need.
 
 ## GitHub agent work queue
 
@@ -42,18 +50,15 @@ and `.github/copilot-instructions.md`) must stay thin and refer here rather than
 - Push an early, coherent commit and open a draft PR. Use issue comments for handoffs, decisions,
   verification evidence, blockers, and the resulting PR URL.
 - Agent labels identify the expected tool owner; assign `NakulManchanda` when GitHub supports it,
-  because local agent CLIs are not GitHub identities. Agents never merge or apply changes unless
-  the issue explicitly authorizes that action.
+  because local agent CLIs are not GitHub identities. Reviewers never mutate or merge. The
+  coordinator may merge a gated intermediate PR under the policy above, but never deploy or apply
+  infrastructure without explicit authorization.
 - Main orchestration uses `gpt-5.6-sol` at high reasoning. Default Codex subagents use
   `gpt-5.6-terra` at medium; use Terra high for complex reviews, not Luna unless speed-only.
-  Use exactly one Claude session for independent PR code review: Opus at normal/default effort
-  for cross-service, architecture, security, or adversarial work, and Sonnet at normal/default
-  effort for easy localized changes. Start that review in parallel with GitHub Actions after the
-  reviewable commit is pushed. Give the initial reviewer the issue, acceptance criteria, scope
-  constraints, base/head SHAs, and verification context; after updates, resume the same session ID
-  with the new head SHA instead of starting another reviewer. Do not poll CI frequently. Use
-  Gemini/Antigravity Flash/high for research, schemas, docs, or test matrices, not as an additional
-  PR reviewer unless explicitly requested. See `docs/agent-coordination.md` for handoff commands.
+  Independent PR review uses exactly one Claude session: Opus at normal/default effort for complex
+  changes or Sonnet at normal/default effort for easy localized fixes. Start it in parallel with
+  CI, resume the same session after updates, and do not poll CI frequently. The reusable workflow
+  lives in `.claude/skills/project-pr-review/SKILL.md`; see `docs/agent-coordination.md` for routing.
 
 ## Implementation and interoperability
 
