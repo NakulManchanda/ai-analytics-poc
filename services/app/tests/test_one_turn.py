@@ -184,3 +184,43 @@ def test_local_fake_llm_supports_the_same_fixed_one_turn_sequence_without_aws() 
     assert proposal.name == "query_taxi_data"
     assert proposal.arguments == {"analysis": "top_pickup_zones", "limit": 5}
     assert answer.text == "Alpha has the most pickups with 3 trips."
+
+
+def test_local_fake_llm_answers_the_public_borough_comparison_prompt() -> None:
+    """Catches the local smoke path rejecting the four-column governed metrics result."""
+    llm_client = create_llm_client(Settings(llm_provider="fake"))
+    prompt = (
+        "Compare average trip distance and fare amount across major pickup boroughs"
+    )
+
+    proposal = llm_client.propose_taxi_query(
+        prompt,
+        {
+            "dataset": "nyc-yellow-taxi",
+            "month": "2024-01",
+            "columns": ["tpep_pickup_datetime", "PULocationID"],
+        },
+    )
+    answer = llm_client.answer_with_query_result(
+        prompt,
+        {
+            "columns": [
+                "region_name",
+                "trip_count",
+                "average_trip_distance",
+                "average_fare_amount",
+            ],
+            "rows": [["Manhattan", 3, 5.33, 18.0]],
+            "row_count": 1,
+            "execution_duration_ms": 1,
+            "query_id": "query_average_metrics",
+            "truncated": False,
+        },
+    )
+
+    assert proposal.name == "average_trip_metrics"
+    assert proposal.arguments == {}
+    assert (
+        answer.text
+        == "Manhattan averages 5.33 miles and $18.00 in fare across 3 trips."
+    )

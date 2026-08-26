@@ -964,9 +964,9 @@ input:focus-visible {
 }
 
 .sample-chip {
-  background: var(--color-surface-muted, #f1f5f9);
-  border: 1px solid var(--color-border, #cbd5e1);
-  color: var(--color-text, #0f172a);
+  background: #e2e8f0;
+  border: 1px solid #94a3b8;
+  color: #0f172a;
   border-radius: 9999px;
   padding: 6px 12px;
   font-size: 0.8rem;
@@ -977,9 +977,15 @@ input:focus-visible {
 }
 
 .sample-chip:hover {
-  background: #e2e8f0;
-  border-color: #94a3b8;
+  background: #cbd5e1;
+  border-color: #64748b;
+  color: #0f172a;
   transform: translateY(-1px);
+}
+
+.sample-chip:focus-visible {
+  outline: 3px solid #38bdf8;
+  outline-offset: 2px;
 }
 
 @media (prefers-reduced-motion: reduce) {

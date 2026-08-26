@@ -7,7 +7,12 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Literal
 
-from dataset_spike.analytics import DatasetProfile, query_dataset
+from dataset_spike.analytics import (
+    DatasetProfile,
+    RegionValidationError,
+    query_average_trip_metrics,
+    query_dataset,
+)
 from dataset_spike.spike import run_dataset_spike
 from fastmcp import FastMCP
 
@@ -46,10 +51,27 @@ def run_pinned_query(*, analysis: str, limit: int) -> dict[str, object]:
     )
 
 
+def run_pinned_average_trip_metrics(
+    *, region_name: str | None = None
+) -> dict[str, object]:
+    """Run the fixed regional average-metrics query over pinned local inputs."""
+    project_root = Path(__file__).resolve().parents[3]
+    cache_dir = project_root / DATASET_CACHE_DIR
+    return query_average_trip_metrics(
+        cache_dir / PARQUET_FILENAME,
+        cache_dir / ZONE_FILENAME,
+        region_name=region_name,
+        timeout_seconds=30.0,
+    )
+
+
 def build_mcp(
     *,
     profile_loader: Callable[[], DatasetProfile] = load_pinned_profile,
     query_runner: Callable[..., dict[str, object]] = run_pinned_query,
+    average_metrics_runner: Callable[..., dict[str, object]] = (
+        run_pinned_average_trip_metrics
+    ),
 ) -> FastMCP:
     """Build the bounded MCP surface without accepting SQL or dataset paths."""
     profile_cache: dict[str, DatasetProfile] = {}
@@ -90,6 +112,20 @@ def build_mcp(
         if isinstance(limit, bool) or not 1 <= limit <= 20:
             raise ValueError("limit must be between 1 and 20")
         return query_runner(analysis=analysis, limit=limit)
+
+    @server.tool()
+    def average_trip_metrics(region_name: str | None = None) -> dict[str, object]:
+        """Compare average distance and fare for governed pickup boroughs only."""
+        try:
+            return average_metrics_runner(region_name=region_name)
+        except RegionValidationError as error:
+            return {
+                "error": {
+                    "code": "invalid_region_name",
+                    "message": str(error),
+                    "retryable": False,
+                }
+            }
 
     return server
 

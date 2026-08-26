@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import json
 import multiprocessing
 import queue
@@ -44,6 +45,58 @@ ALLOWED_ANALYSES = {
         LIMIT ?
     """,
 }
+AVERAGE_TRIP_METRICS_QUERY = """
+    SELECT z.Borough AS region_name,
+           count(*)::BIGINT AS trip_count,
+           round(avg(t.trip_distance), 2) AS average_trip_distance,
+           round(avg(t.fare_amount), 2) AS average_fare_amount
+    FROM trips AS t
+    JOIN taxi_zones AS z ON t.PULocationID = z.LocationID
+    WHERE z.Borough NOT IN ('Unknown', 'N/A', 'EWR')
+      AND t.trip_distance >= 0
+      AND t.fare_amount >= 0
+    GROUP BY 1
+    ORDER BY trip_count DESC, region_name ASC
+    LIMIT ?
+"""
+AVERAGE_TRIP_METRICS_FOR_REGION_QUERY = """
+    SELECT z.Borough AS region_name,
+           count(*)::BIGINT AS trip_count,
+           round(avg(t.trip_distance), 2) AS average_trip_distance,
+           round(avg(t.fare_amount), 2) AS average_fare_amount
+    FROM trips AS t
+    JOIN taxi_zones AS z ON t.PULocationID = z.LocationID
+    WHERE z.Borough NOT IN ('Unknown', 'N/A', 'EWR')
+      AND t.trip_distance >= 0
+      AND t.fare_amount >= 0
+      AND z.Borough = ?
+    GROUP BY 1
+    ORDER BY trip_count DESC, region_name ASC
+    LIMIT ?
+"""
+NON_BOROUGH_REGIONS = frozenset({"unknown", "n/a", "ewr"})
+
+
+class RegionValidationError(ValueError):
+    """Raised when a requested region is not a governed pickup borough."""
+
+
+def _resolve_region_name(zone_csv_path: Path, region_name: object) -> str:
+    if not isinstance(region_name, str) or not region_name.strip():
+        raise RegionValidationError("region_name must be a recognized pickup borough")
+    with zone_csv_path.open(newline="", encoding="utf-8") as zone_file:
+        boroughs = {
+            row["Borough"].strip().casefold(): row["Borough"].strip()
+            for row in csv.DictReader(zone_file)
+            if row.get("Borough")
+            and row["Borough"].strip().casefold() not in NON_BOROUGH_REGIONS
+        }
+    try:
+        return boroughs[region_name.strip().casefold()]
+    except KeyError as error:
+        raise RegionValidationError(
+            "region_name must be a recognized pickup borough"
+        ) from error
 
 
 @dataclass(frozen=True)
@@ -70,7 +123,7 @@ def _execute_governed_query(
     parquet_path: str,
     zone_csv_path: str,
     query: str,
-    fetch_limit: int,
+    query_parameters: list[object],
     output_queue: Any,
 ) -> None:
     """Run DuckDB in a process the parent can terminate at the hard deadline."""
@@ -85,7 +138,7 @@ def _execute_governed_query(
             "CREATE VIEW taxi_zones AS SELECT * FROM "
             f"read_csv_auto('{_sql_path(Path(zone_csv_path))}', header = true)"
         )
-        cursor = connection.execute(query, [fetch_limit])
+        cursor = connection.execute(query, query_parameters)
         output_queue.put(
             (
                 "ok",
@@ -99,21 +152,18 @@ def _execute_governed_query(
         connection.close()
 
 
-def query_dataset(
+def _run_governed_query(
     parquet_path: Path,
     zone_csv_path: Path,
     *,
-    analysis: str,
-    limit: int = 5,
+    query: str,
+    query_parameters: list[object],
+    result_limit: int,
     max_result_bytes: int = MAX_RESULT_BYTES,
     timeout_seconds: float = DEFAULT_QUERY_TIMEOUT_SECONDS,
     query_id_factory: Callable[[], str] | None = None,
 ) -> dict[str, object]:
-    """Execute one internally defined read-only analysis over pinned local inputs."""
-    if analysis not in ALLOWED_ANALYSES:
-        raise ValueError("analysis is not allowlisted")
-    if isinstance(limit, bool) or not 1 <= limit <= MAX_QUERY_ROWS:
-        raise ValueError(f"limit must be between 1 and {MAX_QUERY_ROWS}")
+    """Execute a fixed read-only query over pinned local inputs."""
     if isinstance(max_result_bytes, bool) or max_result_bytes < 128:
         raise ValueError("max_result_bytes must be at least 128")
     if isinstance(timeout_seconds, bool) or timeout_seconds <= 0:
@@ -127,8 +177,8 @@ def query_dataset(
         args=(
             str(parquet_path),
             str(zone_csv_path),
-            ALLOWED_ANALYSES[analysis],
-            limit + 1,
+            query,
+            query_parameters,
             output_queue,
         ),
         daemon=True,
@@ -155,8 +205,8 @@ def query_dataset(
         raise RuntimeError("governed query execution failed")
     _, columns, fetched_rows = outcome
 
-    truncated = len(fetched_rows) > limit
-    rows = [list(row) for row in fetched_rows[:limit]]
+    truncated = len(fetched_rows) > result_limit
+    rows = [list(row) for row in fetched_rows[:result_limit]]
     result: dict[str, object] = {
         "columns": columns,
         "rows": rows,
@@ -172,6 +222,64 @@ def query_dataset(
         result["row_count"] = len(rows)
         result["truncated"] = True
     return result
+
+
+def query_dataset(
+    parquet_path: Path,
+    zone_csv_path: Path,
+    *,
+    analysis: str,
+    limit: int = 5,
+    max_result_bytes: int = MAX_RESULT_BYTES,
+    timeout_seconds: float = DEFAULT_QUERY_TIMEOUT_SECONDS,
+    query_id_factory: Callable[[], str] | None = None,
+) -> dict[str, object]:
+    """Execute one internally defined read-only analysis over pinned local inputs."""
+    if analysis not in ALLOWED_ANALYSES:
+        raise ValueError("analysis is not allowlisted")
+    if isinstance(limit, bool) or not 1 <= limit <= MAX_QUERY_ROWS:
+        raise ValueError(f"limit must be between 1 and {MAX_QUERY_ROWS}")
+    return _run_governed_query(
+        parquet_path,
+        zone_csv_path,
+        query=ALLOWED_ANALYSES[analysis],
+        query_parameters=[limit + 1],
+        result_limit=limit,
+        max_result_bytes=max_result_bytes,
+        timeout_seconds=timeout_seconds,
+        query_id_factory=query_id_factory,
+    )
+
+
+def query_average_trip_metrics(
+    parquet_path: Path,
+    zone_csv_path: Path,
+    *,
+    region_name: str | None = None,
+    max_result_bytes: int = MAX_RESULT_BYTES,
+    timeout_seconds: float = DEFAULT_QUERY_TIMEOUT_SECONDS,
+    query_id_factory: Callable[[], str] | None = None,
+) -> dict[str, object]:
+    """Compare fixed average trip metrics across governed pickup regions."""
+    canonical_region = (
+        None
+        if region_name is None
+        else _resolve_region_name(zone_csv_path, region_name)
+    )
+    return _run_governed_query(
+        parquet_path,
+        zone_csv_path,
+        query=(
+            AVERAGE_TRIP_METRICS_QUERY
+            if canonical_region is None
+            else AVERAGE_TRIP_METRICS_FOR_REGION_QUERY
+        ),
+        query_parameters=([6] if canonical_region is None else [canonical_region, 2]),
+        result_limit=5 if canonical_region is None else 1,
+        max_result_bytes=max_result_bytes,
+        timeout_seconds=timeout_seconds,
+        query_id_factory=query_id_factory,
+    )
 
 
 def profile_dataset(

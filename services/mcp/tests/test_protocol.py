@@ -1,7 +1,7 @@
 import asyncio
 from dataclasses import asdict
 
-from dataset_spike.analytics import DatasetProfile
+from dataset_spike.analytics import DatasetProfile, RegionValidationError
 
 
 def test_dataset_contract_exposes_fixed_schema_and_profile_over_mcp():
@@ -45,9 +45,35 @@ def test_dataset_contract_exposes_fixed_schema_and_profile_over_mcp():
             "truncated": False,
         }
 
+    average_requests: list[str | None] = []
+
+    def average_metrics_runner(*, region_name: str | None = None) -> dict[str, object]:
+        average_requests.append(region_name)
+        if region_name == "Atlantis":
+            raise RegionValidationError(
+                "region_name must be a recognized pickup borough"
+            )
+        return {
+            "columns": [
+                "region_name",
+                "trip_count",
+                "average_trip_distance",
+                "average_fare_amount",
+            ],
+            "rows": [[region_name or "Manhattan", 3, 5.33, 18.0]],
+            "row_count": 1,
+            "execution_duration_ms": 4,
+            "query_id": "query_average_protocol",
+            "truncated": False,
+        }
+
     async def exercise_protocol():
         async with Client(
-            build_mcp(profile_loader=profile_loader, query_runner=query_runner)
+            build_mcp(
+                profile_loader=profile_loader,
+                query_runner=query_runner,
+                average_metrics_runner=average_metrics_runner,
+            )
         ) as client:
             tools = await client.list_tools()
             resources = await client.list_resources()
@@ -57,14 +83,46 @@ def test_dataset_contract_exposes_fixed_schema_and_profile_over_mcp():
                 "query_taxi_data",
                 {"analysis": "top_pickup_zones", "limit": 2},
             )
-        return tools, resources, schema, profile, query
+            averages = await client.call_tool("average_trip_metrics")
+            filtered_averages = await client.call_tool(
+                "average_trip_metrics", {"region_name": "Bronx"}
+            )
+            invalid_region = await client.call_tool(
+                "average_trip_metrics", {"region_name": "Atlantis"}
+            )
+        return (
+            tools,
+            resources,
+            schema,
+            profile,
+            query,
+            averages,
+            filtered_averages,
+            invalid_region,
+        )
 
-    tools, resources, schema, profile, query = asyncio.run(exercise_protocol())
+    (
+        tools,
+        resources,
+        schema,
+        profile,
+        query,
+        averages,
+        filtered_averages,
+        invalid_region,
+    ) = asyncio.run(exercise_protocol())
 
     assert [tool.name for tool in tools] == [
         "get_dataset_profile",
         "query_taxi_data",
+        "average_trip_metrics",
     ]
+    average_tool = next(tool for tool in tools if tool.name == "average_trip_metrics")
+    assert average_tool.inputSchema["type"] == "object"
+    assert average_tool.inputSchema["properties"]["region_name"] == {
+        "anyOf": [{"type": "string"}, {"type": "null"}],
+        "default": None,
+    }
     assert [str(resource.uri) for resource in resources] == [
         "dataset://nyc-taxi/schema"
     ]
@@ -82,4 +140,14 @@ def test_dataset_contract_exposes_fixed_schema_and_profile_over_mcp():
         "truncated": False,
     }
     assert query_requests == [("top_pickup_zones", 2)]
+    assert averages.data["rows"] == [["Manhattan", 3, 5.33, 18.0]]
+    assert filtered_averages.data["rows"] == [["Bronx", 3, 5.33, 18.0]]
+    assert invalid_region.data == {
+        "error": {
+            "code": "invalid_region_name",
+            "message": "region_name must be a recognized pickup borough",
+            "retryable": False,
+        }
+    }
+    assert average_requests == [None, "Bronx", "Atlantis"]
     assert loader_call_count == 1
