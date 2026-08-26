@@ -60,7 +60,7 @@ data "aws_iam_policy_document" "ai_app_task" {
     content {
       sid       = "InvokeConfiguredBedrockModels"
       effect    = "Allow"
-      actions   = ["bedrock:InvokeModel"]
+      actions   = ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"]
       resources = statement.value
     }
   }

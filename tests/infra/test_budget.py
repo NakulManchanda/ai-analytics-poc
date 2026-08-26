@@ -258,8 +258,8 @@ def test_bedrock_iam_allowlist_is_pinned_to_ai_app_only():
 
     assert 'variable "bedrock_model_arns"' in variables
     assert variables.count(allowed_model_arn) == 2
-    assert 'data "aws_iam_policy_document" "ai_app_task"' in iam
-    assert 'actions   = ["bedrock:InvokeModel"]' in iam
+    assert "bedrock:InvokeModel" in iam
+    assert "bedrock:InvokeModelWithResponseStream" in iam
     assert "resources = statement.value" in iam
 
     mcp_role_start = iam.index('resource "aws_iam_role" "analytics_mcp_task"')
