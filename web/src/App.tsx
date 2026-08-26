@@ -5,6 +5,7 @@ import {
   AskResponse,
   ChatTurn,
   ConversationSnapshot,
+  RunAccepted,
   RunTelemetry,
   Status,
   WorkingContextData,
@@ -52,6 +53,7 @@ export default function App() {
   const [workingContext, setWorkingContext] = useState<WorkingContextData | null>(null);
   const [runTelemetry, setRunTelemetry] = useState<RunTelemetry | null>(null);
   const [activeTab, setActiveTab] = useState<"timeline" | "context">("timeline");
+  const [streamingAnswer, setStreamingAnswer] = useState<string>("");
   const hydrationVersion = useRef(0);
 
   useEffect(() => {
@@ -144,12 +146,14 @@ export default function App() {
     hydrationVersion.current += 1;
     setIsRunning(true);
     setAnswer(null);
+    setStreamingAnswer("");
     setPromptError(null);
     setWorkingContext(null);
     setRunTelemetry(null);
 
     try {
-      const response = await fetch("/api/ask", {
+      // Run-first submission: POST /api/runs returns 202 immediately
+      const runsResponse = await fetch("/api/runs", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(
@@ -158,40 +162,102 @@ export default function App() {
             : { prompt: cleanPrompt },
         ),
       });
-      let payload:
-        | AskResponse
-        | { detail?: { code?: string; retryable?: boolean } };
+
+      let accepted: RunAccepted | { detail?: { code?: string; retryable?: boolean } };
       try {
-        if (typeof response.json === "function") {
-          payload = (await response.json()) as any;
-        } else if (typeof response.text === "function") {
-          const rawText = await response.text();
-          payload = JSON.parse(rawText);
+        if (typeof runsResponse.json === "function") {
+          accepted = (await runsResponse.json()) as any;
+        } else if (typeof runsResponse.text === "function") {
+          const rawText = await runsResponse.text();
+          accepted = JSON.parse(rawText);
         } else {
           throw new Error("Invalid response interface");
         }
       } catch {
         throw new Error(
-          response.ok
+          runsResponse.ok
             ? "Invalid server response format."
-            : `Analytics service unavailable (${response.status}). Try again.`,
+            : `Analytics service unavailable (${runsResponse.status}). Try again.`,
         );
       }
 
-      if (!response.ok) {
-        const detail = "detail" in payload ? payload.detail : undefined;
+      if (!runsResponse.ok) {
+        const detail = "detail" in accepted ? accepted.detail : undefined;
         if (detail?.code === "mcp_tool_error" && detail.retryable) {
           throw new Error("The query service is temporarily unavailable. Try again.");
         }
         throw new Error("The analytics request could not be completed. Try again.");
       }
 
-      const askResp = payload as AskResponse;
-      setAnswer(askResp);
-      setConversationId(askResp.conversation_id);
-      window.localStorage.setItem(CONVERSATION_STORAGE_KEY, askResp.conversation_id);
-      setActiveRunId(askResp.run_id);
-      await hydrateConversation(askResp.conversation_id, askResp.run_id);
+      const runAccepted = accepted as RunAccepted;
+      const runId = runAccepted.run_id;
+      const convId = runAccepted.conversation_id;
+      setActiveRunId(runId);
+      setConversationId(convId);
+      window.localStorage.setItem(CONVERSATION_STORAGE_KEY, convId);
+
+      // Stream SSE events: accumulate answer.delta and extract terminal telemetry
+      const sseResponse = await fetch(runAccepted.events_url);
+      let accumulatedAnswer = "";
+      let finalAnswer: AskResponse | null = null;
+
+      if (sseResponse.ok) {
+        const sseText = typeof sseResponse.text === "function"
+          ? await sseResponse.text()
+          : "";
+        for (const frame of sseText.split("\n\n")) {
+          const dataLine = frame.split("\n").find((l) => l.startsWith("data: "));
+          if (!dataLine) continue;
+          try {
+            const event = JSON.parse(dataLine.slice(6)) as {
+              event_type: string;
+              payload: Record<string, unknown>;
+            };
+            if (event.event_type === "answer.delta" && typeof event.payload.delta === "string") {
+              accumulatedAnswer += event.payload.delta;
+              setStreamingAnswer(accumulatedAnswer);
+            } else if (
+              event.event_type === "run.completed" ||
+              event.event_type === "run.failed" ||
+              event.event_type === "run.budget_exceeded"
+            ) {
+              const p = event.payload;
+              setRunTelemetry({
+                input_tokens: p.input_tokens as number | undefined,
+                output_tokens: p.output_tokens as number | undefined,
+                total_tokens: p.total_tokens as number | undefined,
+                estimated_cost_usd: p.estimated_cost_usd as number | undefined,
+                end_to_end_latency_ms: p.end_to_end_latency_ms as number | undefined,
+                proposal_llm_latency_ms: p.proposal_llm_latency_ms as number | undefined,
+                tool_latency_ms: p.tool_latency_ms as number | undefined,
+                final_answer_llm_latency_ms: p.final_answer_llm_latency_ms as number | undefined,
+                ttft: p.ttft as RunTelemetry["ttft"],
+              });
+              if (accumulatedAnswer) {
+                finalAnswer = {
+                  answer: accumulatedAnswer,
+                  usage: {
+                    input_tokens: (p.input_tokens as number) ?? 0,
+                    output_tokens: (p.output_tokens as number) ?? 0,
+                    total_tokens: (p.total_tokens as number) ?? 0,
+                  },
+                  latency_ms: (p.end_to_end_latency_ms as number) ?? 0,
+                  conversation_id: convId,
+                  run_id: runId,
+                };
+              }
+            }
+          } catch {
+            // malformed SSE frame — skip
+          }
+        }
+      }
+
+      if (finalAnswer) {
+        setAnswer(finalAnswer);
+        setStreamingAnswer("");
+      }
+      await hydrateConversation(convId, runId);
 
       setPrompt("");
     } catch (error) {
@@ -371,7 +437,12 @@ export default function App() {
             </p>
 
             <div aria-live="polite" className="run-result">
-              {isRunning && <p className="running-msg">Calling the governed query tool…</p>}
+              {isRunning && !streamingAnswer && <p className="running-msg">Calling the governed query tool…</p>}
+              {isRunning && streamingAnswer && (
+                <div className="answer-box streaming">
+                  <p className="answer">{streamingAnswer}</p>
+                </div>
+              )}
               {promptError && <p className="prompt-error">{promptError}</p>}
               {answer && (
                 <div className="answer-box">
@@ -390,7 +461,9 @@ export default function App() {
                   <div><dt>Total input tokens</dt><dd>{metricValue(runTelemetry.input_tokens)}</dd></div>
                   <div><dt>Total output tokens</dt><dd>{metricValue(runTelemetry.output_tokens)}</dd></div>
                   <div><dt>Estimated cost</dt><dd>{costValue(runTelemetry.estimated_cost_usd)}</dd></div>
-                  <div><dt>TTFT</dt><dd>{runTelemetry.ttft?.available ? "Available" : "Unavailable (non-streaming)"}</dd></div>
+                  <div><dt>TTFT</dt><dd>{runTelemetry.ttft?.available
+                    ? `Available · ${runTelemetry.ttft.latency_ms} ms (${runTelemetry.ttft.source ?? "provider_stream"})`
+                    : "Unavailable (non-streaming)"}</dd></div>
                 </dl>
               )}
             </div>
