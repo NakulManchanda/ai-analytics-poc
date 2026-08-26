@@ -127,7 +127,11 @@ class FastMCPDatasetProfileClient:
             raise MCPToolError(retryable=False)
         error = result.data.get("error")
         if isinstance(error, Mapping) and error.get("retryable") is False:
-            raise MCPToolError(retryable=False)
+            err_msg = error.get("message")
+            raise MCPToolError(
+                retryable=False,
+                message=str(err_msg) if err_msg else "Invalid region_name",
+            )
         return sanitize_query_result(result.data)
 
 

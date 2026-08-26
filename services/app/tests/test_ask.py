@@ -555,3 +555,51 @@ def test_bedrock_client_stream_raises_llm_provider_error_mid_stream() -> None:
     ], "Deltas emitted before the stream error must be observable by the caller"
     # The error must be retryable for InternalServerException
     assert exc_info.value.retryable is True
+
+
+def test_bedrock_propose_taxi_query_schema_includes_borough_enum() -> None:
+    captured_request: dict[str, object] = {}
+
+    class MockRuntimeClient:
+        def converse(self, **request: object) -> dict[str, object]:
+            captured_request.update(request)
+            return {
+                "output": {
+                    "message": {
+                        "content": [
+                            {
+                                "toolUse": {
+                                    "name": "average_trip_metrics",
+                                    "input": {"region_name": "Manhattan"},
+                                }
+                            }
+                        ]
+                    }
+                },
+                "modelId": "amazon.nova-micro-v1:0",
+                "usage": {"inputTokens": 10, "outputTokens": 5},
+                "metrics": {"latencyMs": 15},
+            }
+
+    llm_client = BedrockLLMClient(
+        "amazon.nova-micro-v1:0",
+        runtime_client=MockRuntimeClient(),
+    )
+    result = llm_client.propose_taxi_query("Compare boroughs", {"dataset": "nyc-taxi"})
+    assert result.name == "average_trip_metrics"
+    assert result.arguments == {"region_name": "Manhattan"}
+
+    tool_config = captured_request.get("toolConfig", {})
+    tools = tool_config.get("tools", [])
+    avg_tool = next(
+        t["toolSpec"] for t in tools if t["toolSpec"]["name"] == "average_trip_metrics"
+    )
+    region_prop = avg_tool["inputSchema"]["json"]["properties"]["region_name"]
+
+    assert region_prop["enum"] == [
+        "Manhattan",
+        "Brooklyn",
+        "Queens",
+        "Bronx",
+        "Staten Island",
+    ]
