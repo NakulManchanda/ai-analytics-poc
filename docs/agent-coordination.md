@@ -25,12 +25,28 @@ Ownership labels describe the intended local tool, not a GitHub identity. Assign
 | Main coordinator | Codex `gpt-5.6-sol`, high reasoning |
 | Normal Codex subtask | Codex `gpt-5.6-terra`, medium reasoning |
 | Complex code/security review | Codex `gpt-5.6-terra`, high reasoning |
-| Architecture/security/adversarial review | Claude Opus 4.8 via `claude`, high effort |
+| Cross-service/architecture/security PR review | Claude Opus via `claude`, normal/default effort |
+| Easy localized PR review | Claude Sonnet via `claude`, normal/default effort |
 | Research, schemas, docs, test matrices | Gemini/Antigravity 3.7 Flash High via `agy`, high effort |
-| Pull-request review | GitHub Copilot |
-| Merge gate | GitHub Actions |
+| Independent pull-request review | Exactly one continuing Claude session |
+| Merge gate | GitHub Actions, started in parallel with review |
 
 Do not select Luna unless the task is explicitly speed-only.
+
+### Review lifecycle
+
+- Push a reviewable commit, then start one Claude review in parallel with GitHub Actions. Do not
+  run Claude and Gemini as duplicate PR reviewers unless the user explicitly requests both.
+- Use Opus at normal/default effort for cross-service, architecture, security, or adversarial
+  changes. Use Sonnet at normal/default effort for easy, localized fixes. Do not select high effort
+  by default because it consumes the review budget too quickly.
+- Give the initial reviewer enough context to judge the change independently: `AGENTS.md`, the
+  linked issue and acceptance criteria, explicit scope exclusions, base and head SHAs, the PR URL,
+  and the exact verification already run. Keep the review read-only.
+- Record the Claude session ID. After addressing findings, resume that same session with the new
+  head SHA, a concise summary of the fixes, and the prior findings to recheck. Do not start a fresh
+  session for each follow-up review.
+- Prefer one long CI wait or infrequent status snapshots. Do not repeatedly poll GitHub Actions.
 
 ## Handoff templates
 
@@ -79,9 +95,21 @@ tool per worktree, and never share a write worktree.
 ```sh
 cd .worktrees/<issue-name>
 
-# Claude — Opus 4.8, high effort
-claude --dangerously-skip-permissions --effort high --model claude-opus-4-8 \
-  "GitHub issue #[ISSUE]: follow CLAUDE.md (@AGENTS.md) and docs/agent-coordination.md; [TASK]."
+# Claude review — Opus at normal/default effort; capture the returned session ID
+claude --dangerously-skip-permissions --model opus --print --output-format json \
+  "Read-only review of PR #[PR]. Read CLAUDE.md (@AGENTS.md) and docs/agent-coordination.md. \
+Issue #[ISSUE]; acceptance: [CHECKLIST]; exclusions: [OUT-OF-SCOPE]; base [BASE_SHA], \
+head [HEAD_SHA]; verification: [COMMANDS AND RESULTS]. Do not edit, commit, push, merge, or deploy."
+
+# Easy localized review — use Sonnet with the same context shape
+claude --dangerously-skip-permissions --model sonnet --print --output-format json \
+  "Read-only review of PR #[PR]. [CONTEXT AS ABOVE]."
+
+# Follow-up — resume the original reviewer after fixes
+claude --dangerously-skip-permissions --resume "[CLAUDE_SESSION_ID]" \
+  --print --output-format json \
+  "Re-review new head [NEW_HEAD_SHA]. Fixes since the prior review: [SUMMARY]. \
+Recheck every prior finding and inspect the incremental diff for regressions. Remain read-only."
 
 # Gemini / Antigravity — 3.7 Flash High, accept-edits
 agy --dangerously-skip-permissions --mode=accept-edits --effort=high \
@@ -96,7 +124,7 @@ checklist, and the instruction to comment evidence on the issue.
 
 | Tool | Model | Effort | Mode flag |
 | --- | --- | --- | --- |
-| `claude` | `claude-opus-4-8` (Opus 4.8) | `--effort high` | `--dangerously-skip-permissions` |
+| `claude` | `opus` for complex reviews; `sonnet` for easy localized reviews | normal/default (omit `--effort`) | `--dangerously-skip-permissions` |
 | `agy` | `gemini-3.7-flash-high` (Gemini 3.7 Flash High) | `--effort=high` | `--dangerously-skip-permissions --mode=accept-edits` |
 
 `--dangerously-skip-permissions` is authorized **only** inside the isolated `.worktrees/<issue-name>`

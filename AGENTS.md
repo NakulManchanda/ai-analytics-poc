@@ -46,9 +46,14 @@ and `.github/copilot-instructions.md`) must stay thin and refer here rather than
   the issue explicitly authorizes that action.
 - Main orchestration uses `gpt-5.6-sol` at high reasoning. Default Codex subagents use
   `gpt-5.6-terra` at medium; use Terra high for complex reviews, not Luna unless speed-only.
-  Use Claude Opus/high for architecture, security, or adversarial review; Gemini/Antigravity
-  Flash/high for research, schemas, docs, or test matrices; Copilot for PR review; and GitHub
-  Actions for merge gates. See `docs/agent-coordination.md` for handoff commands.
+  Use exactly one Claude session for independent PR code review: Opus at normal/default effort
+  for cross-service, architecture, security, or adversarial work, and Sonnet at normal/default
+  effort for easy localized changes. Start that review in parallel with GitHub Actions after the
+  reviewable commit is pushed. Give the initial reviewer the issue, acceptance criteria, scope
+  constraints, base/head SHAs, and verification context; after updates, resume the same session ID
+  with the new head SHA instead of starting another reviewer. Do not poll CI frequently. Use
+  Gemini/Antigravity Flash/high for research, schemas, docs, or test matrices, not as an additional
+  PR reviewer unless explicitly requested. See `docs/agent-coordination.md` for handoff commands.
 
 ## Implementation and interoperability
 
