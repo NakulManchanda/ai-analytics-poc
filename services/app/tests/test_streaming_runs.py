@@ -31,9 +31,7 @@ def test_run_first_endpoint_returns_before_dispatched_execution() -> None:
         )
     )
 
-    response = client.post(
-        "/api/runs", json={"prompt": "Which pickup zones lead?"}
-    )
+    response = client.post("/api/runs", json={"prompt": "Which pickup zones lead?"})
 
     assert response.status_code == 202
     assert response.json() == {

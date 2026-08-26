@@ -245,7 +245,9 @@ def test_orchestration_loop_max_tool_bytes_exceeded() -> None:
     assert result.status == "budget_exceeded"
 
 
-def test_prepare_run_durably_creates_state_and_publishes_received_before_execute() -> None:
+def test_prepare_run_durably_creates_state_and_publishes_received_before_execute() -> (
+    None
+):
     """prepare_run must persist conversation, user message, and in-progress run, then
     publish run.received — all before execute() is ever called."""
 
@@ -285,11 +287,6 @@ def test_prepare_run_durably_creates_state_and_publishes_received_before_execute
     assert "run.received" in received_events
 
     # execute() must complete the run using prepare_run's state
-    execute_called = []
-
-    class RecordingRepo(InMemoryStateRepository):
-        pass
-
     loop.execute(submission)
 
     completed_run = repo.get_run(submission.run_id)

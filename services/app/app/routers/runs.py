@@ -70,4 +70,3 @@ def create_runs_router(
         )
 
     return router
-

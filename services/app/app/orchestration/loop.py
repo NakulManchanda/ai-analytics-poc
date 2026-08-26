@@ -301,7 +301,9 @@ class OrchestrationLoop:
 
         # Re-fetch the in-progress run record for started_at reference
         run = self._repo.get_run(run_id)
-        assert run is not None, f"Run {run_id} not found; prepare_run must be called first"
+        assert (
+            run is not None
+        ), f"Run {run_id} not found; prepare_run must be called first"
 
         def emit(
             event_type: str,
@@ -603,14 +605,18 @@ class OrchestrationLoop:
                 )
                 ans_start = self._monotonic()
 
-                def publish_answer_delta(delta: str) -> None:
+                def publish_answer_delta(
+                    delta: str,
+                    _start: float = ans_start,
+                    _call_id: str = answer_call_id,
+                ) -> None:
                     nonlocal ttft_ms
                     if ttft_ms is None:
-                        ttft_ms = int((self._monotonic() - ans_start) * 1000)
+                        ttft_ms = int((self._monotonic() - _start) * 1000)
                     emit(
                         "answer.delta",
                         {"delta": delta},
-                        llm_call_id=answer_call_id,
+                        llm_call_id=_call_id,
                     )
 
                 try:

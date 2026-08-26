@@ -14,7 +14,11 @@ from app.events.models import (
     context_reduced_payload,
     terminal_run_payload,
 )
-from app.events.publisher import EventPublisher, InMemoryEventPublisher, RUN_EVENTS_STREAM
+from app.events.publisher import (
+    RUN_EVENTS_STREAM,
+    EventPublisher,
+    InMemoryEventPublisher,
+)
 from app.state import InMemoryStateRepository, StateRepository
 
 logger = logging.getLogger(__name__)

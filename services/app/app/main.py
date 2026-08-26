@@ -6,7 +6,7 @@ from typing import Any
 from fastapi import FastAPI
 
 from app.config import Settings
-from app.events import EventPublisher, InMemoryEventPublisher, RedisEventPublisher
+from app.events import EventPublisher, RedisEventPublisher
 from app.jobs import JobProducer
 from app.llm import LLMClient, create_llm_client
 from app.mcp_client import DatasetProfileMCPClient, FastMCPDatasetProfileClient

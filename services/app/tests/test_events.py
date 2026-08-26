@@ -307,8 +307,7 @@ def test_orchestration_loop_emits_full_event_sequence() -> None:
     assert event_types == expected_order
 
 
-def test_orchestration_loop_emits_provider_deltas_and_truthful_ttft(
-) -> None:
+def test_orchestration_loop_emits_provider_deltas_and_truthful_ttft() -> None:
     class StreamingLLMClient(LocalFakeLLMClient):
         def stream_answer_with_query_result(
             self,
@@ -340,7 +339,9 @@ def test_orchestration_loop_emits_provider_deltas_and_truthful_ttft(
     result = loop.run("Which pickup zones have the most trips?")
 
     events = publisher.get_events_for_run(result.run_id)
-    answer_events = [event for event in events if event.event_type.startswith("answer.")]
+    answer_events = [
+        event for event in events if event.event_type.startswith("answer.")
+    ]
     assert [(event.event_type, event.payload) for event in answer_events] == [
         ("answer.delta", {"delta": "JFK "}),
         ("answer.delta", {"delta": "leads."}),
@@ -359,7 +360,8 @@ def test_orchestration_loop_emits_provider_deltas_and_truthful_ttft(
 
 def test_sse_endpoint_delivers_in_progress_answer_delta_before_terminal_event() -> None:
     """The SSE endpoint must stream answer.delta events to a connected client before the
-    terminal run.completed arrives.  This tests live in-memory delivery without Redis."""
+    terminal run.completed arrives.  This tests live in-memory delivery without Redis.
+    """
     repo = InMemoryStateRepository()
     publisher = InMemoryEventPublisher()
 
@@ -393,9 +395,7 @@ def test_sse_endpoint_delivers_in_progress_answer_delta_before_terminal_event() 
 
     # Connect to SSE with the in-memory publisher injected
     # The endpoint must deliver answer.delta events (not just reconstruct terminal steps)
-    client = TestClient(
-        create_app(state_repository=repo, event_publisher=publisher)
-    )
+    client = TestClient(create_app(state_repository=repo, event_publisher=publisher))
     response = client.get(f"/api/runs/{result.run_id}/events")
     assert response.status_code == 200
     content = response.text

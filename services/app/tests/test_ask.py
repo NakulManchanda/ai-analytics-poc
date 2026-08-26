@@ -508,10 +508,11 @@ def test_create_llm_client_disables_bedrock_runtime_retries(
     }
 
 
-def test_bedrock_client_stream_raises_llm_provider_error_mid_stream_and_partial_deltas_are_emitted() -> None:
+def test_bedrock_client_stream_raises_llm_provider_error_mid_stream() -> None:
     """A ClientError raised mid-stream (after some deltas) must raise LLMProviderError.
     Partial deltas already passed to on_delta are caller-observable; the method does NOT
-    return partial text — it raises.  This defines the truthful partial-output contract."""
+    return partial text — it raises.  This defines the truthful partial-output contract.
+    """
 
     class MidStreamFailingRuntimeClient:
         def converse_stream(self, **request: object) -> dict[str, object]:
@@ -524,7 +525,10 @@ def test_bedrock_client_stream_raises_llm_provider_error_mid_stream_and_partial_
                 }
                 # Raise ClientError mid-stream
                 error_response = {
-                    "Error": {"Code": "InternalServerException", "Message": "stream fault"}
+                    "Error": {
+                        "Code": "InternalServerException",
+                        "Message": "stream fault",
+                    }
                 }
                 raise ClientError(error_response, "ConverseStream")
 
@@ -546,8 +550,8 @@ def test_bedrock_client_stream_raises_llm_provider_error_mid_stream_and_partial_
         )
 
     # Partial deltas emitted before the error are visible to the caller
-    assert partial_deltas == ["Partial "], (
-        "Deltas emitted before the stream error must be observable by the caller"
-    )
+    assert partial_deltas == [
+        "Partial "
+    ], "Deltas emitted before the stream error must be observable by the caller"
     # The error must be retryable for InternalServerException
     assert exc_info.value.retryable is True
