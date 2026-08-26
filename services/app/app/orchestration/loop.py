@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import concurrent.futures
 import json
 import logging
 import time
@@ -370,6 +371,29 @@ class OrchestrationLoop:
         run = self._repo.get_run(run_id)
         return run is not None and run.status in ("cancel_requested", "cancelled")
 
+    def _run_with_cancellation(
+        self,
+        func: Callable[..., Any],
+        *args: Any,
+        run_id: str,
+        poll_interval: float = 0.05,
+        partial_text: str = "",
+        **kwargs: Any,
+    ) -> Any:
+        """Execute a blocking callable in a background thread with fast cooperative cancellation."""
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        try:
+            future = executor.submit(func, *args, **kwargs)
+            while not future.done():
+                if self.is_cancelled(run_id):
+                    future.cancel()
+                    executor.shutdown(wait=False, cancel_futures=True)
+                    raise RunCancelledError(partial_text=partial_text)
+                time.sleep(poll_interval)
+            return future.result()
+        finally:
+            executor.shutdown(wait=False, cancel_futures=True)
+
     def _execute_loop(
         self,
         prompt: str,
@@ -398,11 +422,10 @@ class OrchestrationLoop:
             llm_call_id: str | None = None,
             tool_call_id: str | None = None,
             query_id: str | None = None,
-        ) -> None:
+        ) -> RunEvent | None:
             nonlocal evt_sequence
             if self._publisher is None:
-                return
-            evt_sequence += 1
+                return None
             evt = RunEvent(
                 event_type=event_type,
                 run_id=run_id,
@@ -415,13 +438,16 @@ class OrchestrationLoop:
                 query_id=query_id,
             )
             self._publisher.publish(evt)
+            evt_sequence += 1
+            return evt
 
+        steps: list[RunStep] = []
+        step_seq = 1
+        llm_calls: list[LLMCall] = []
         executed_tool_signatures: set[str] = set()
         last_tool_call_id: str | None = None
         last_query_id: str | None = None
-        steps: list[RunStep] = []
-        llm_calls: list[LLMCall] = []
-        step_seq = 1
+
         proposal_latency_ms: int | None = None
         tool_latency_ms: int | None = None
         final_answer_latency_ms: int | None = None
@@ -486,7 +512,9 @@ class OrchestrationLoop:
                 check_cancellation()
                 emit("context.loading", {"resource": "dataset://nyc-taxi/schema"})
                 try:
-                    raw_schema = mcp.get_dataset_schema()
+                    raw_schema = self._run_with_cancellation(
+                        mcp.get_dataset_schema, run_id=run_id
+                    )
                     schema = sanitize_dataset_schema(raw_schema)
                 except MCPToolError as err:
                     raise OrchestrationError(
@@ -499,7 +527,9 @@ class OrchestrationLoop:
                 emit("llm.started", {"llm_call_id": llm_call_id, "phase": "proposal"})
                 call_start = self._monotonic()
                 try:
-                    proposal = llm.propose_taxi_query(prompt, schema)
+                    proposal = self._run_with_cancellation(
+                        llm.propose_taxi_query, prompt, schema, run_id=run_id
+                    )
                 except LLMConfigurationError as err:
                     raise OrchestrationError(
                         "llm_configuration_error", False, llm_call_id, str(err)
@@ -601,13 +631,17 @@ class OrchestrationLoop:
                 tool_start = self._monotonic()
                 try:
                     if tool_name == AVERAGE_METRICS_TOOL_NAME:
-                        raw_query_result = mcp.average_trip_metrics(
-                            region_name=tool_arguments.get("region_name")
+                        raw_query_result = self._run_with_cancellation(
+                            mcp.average_trip_metrics,
+                            region_name=tool_arguments.get("region_name"),
+                            run_id=run_id,
                         )
                     else:
-                        raw_query_result = mcp.query_taxi_data(
+                        raw_query_result = self._run_with_cancellation(
+                            mcp.query_taxi_data,
                             analysis=str(tool_arguments["analysis"]),
                             limit=int(tool_arguments["limit"]),
+                            run_id=run_id,
                         )
                     query_result = sanitize_query_result(raw_query_result)
                 except MCPToolError as err:
