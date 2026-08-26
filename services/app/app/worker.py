@@ -39,7 +39,9 @@ class JobWorker:
         self._consumer = job_consumer
         self._mcp_client = mcp_client
         self._event_publisher = event_publisher
-        self._artifacts_dir = Path(artifacts_dir) if artifacts_dir else DEFAULT_ARTIFACTS_DIR
+        self._artifacts_dir = (
+            Path(artifacts_dir) if artifacts_dir else DEFAULT_ARTIFACTS_DIR
+        )
 
     def _get_mcp_client(self) -> DatasetProfileMCPClient:
         if self._mcp_client is None:
@@ -82,7 +84,9 @@ class JobWorker:
         job = self._repo.get_job(job_id)
         if job is None:
             raw_params = data.get("params", "{}")
-            params = json.loads(raw_params) if isinstance(raw_params, str) else raw_params
+            params = (
+                json.loads(raw_params) if isinstance(raw_params, str) else raw_params
+            )
             job = Job(
                 job_id=job_id,
                 job_type=data.get("job_type", "create_full_report"),
@@ -154,7 +158,9 @@ class JobWorker:
                     artifact_file = self._artifacts_dir / f"{job.job_id}.json"
                     artifact_file.write_text(json.dumps(report_data, indent=2))
                 except Exception as file_error:
-                    logger.warning("Could not write local artifact file: %s", file_error)
+                    logger.warning(
+                        "Could not write local artifact file: %s", file_error
+                    )
 
                 completed_job = Job(
                     job_id=job.job_id,
@@ -256,7 +262,9 @@ def create_worker(
     artifacts_dir: str | Path | None = None,
 ) -> JobWorker:
     """Factory helper creating a JobWorker instance."""
-    resolved_redis_url = redis_url or os.environ.get("REDIS_URL", "redis://localhost:6379/0")
+    resolved_redis_url = redis_url or os.environ.get(
+        "REDIS_URL", "redis://localhost:6379/0"
+    )
 
     if state_repository is None:
         try:

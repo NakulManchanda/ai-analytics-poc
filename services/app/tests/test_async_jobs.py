@@ -95,7 +95,9 @@ class FakeRedisStreamClient:
         stream_list.append((msg_id, str_fields))
         return msg_id
 
-    def xgroup_create(self, stream: str, group: str, id: str = "0", mkstream: bool = False) -> None:
+    def xgroup_create(
+        self, stream: str, group: str, id: str = "0", mkstream: bool = False
+    ) -> None:
         self.groups.add((stream, group))
         if stream not in self.streams:
             self.streams[stream] = []

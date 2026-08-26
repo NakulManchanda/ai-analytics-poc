@@ -9,7 +9,9 @@ def test_run_first_endpoint_returns_before_dispatched_execution() -> None:
     pending_tasks: list[object] = []
 
     class RunFirstLoop:
-        def prepare_run(self, prompt: str, conversation_id: str | None = None) -> SimpleNamespace:
+        def prepare_run(
+            self, prompt: str, conversation_id: str | None = None
+        ) -> SimpleNamespace:
             assert prompt == "Which pickup zones lead?"
             assert conversation_id is None
             return SimpleNamespace(

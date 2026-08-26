@@ -3,7 +3,9 @@ from dataclasses import dataclass
 
 M4_AWS_REGION = "us-east-1"
 DEFAULT_MODEL_ID = "amazon.nova-micro-v1:0"
-M4_BEDROCK_MODEL_ARN = f"arn:aws:bedrock:{M4_AWS_REGION}::foundation-model/{DEFAULT_MODEL_ID}"
+M4_BEDROCK_MODEL_ARN = (
+    f"arn:aws:bedrock:{M4_AWS_REGION}::foundation-model/{DEFAULT_MODEL_ID}"
+)
 
 
 class LLMConfigurationError(ValueError):

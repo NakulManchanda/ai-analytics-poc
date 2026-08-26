@@ -42,7 +42,9 @@ class FakeGovernedQueryLLM:
         self.proposal_inputs: list[tuple[str, dict[str, object]]] = []
         self.answer_inputs: list[tuple[str, dict[str, object]]] = []
 
-    def propose_taxi_query(self, prompt: str, schema: dict[str, object]) -> ToolProposalResult:
+    def propose_taxi_query(
+        self, prompt: str, schema: dict[str, object]
+    ) -> ToolProposalResult:
         self.proposal_inputs.append((prompt, schema))
         return ToolProposalResult(
             name=str(self.proposal["name"]),
@@ -53,7 +55,9 @@ class FakeGovernedQueryLLM:
             latency_ms=11,
         )
 
-    def answer_with_query_result(self, prompt: str, query_result: dict[str, object]) -> LLMResult:
+    def answer_with_query_result(
+        self, prompt: str, query_result: dict[str, object]
+    ) -> LLMResult:
         self.answer_inputs.append((prompt, query_result))
         return LLMResult(
             text="Alpha has the most pickups with 3 trips.",
@@ -88,7 +92,9 @@ class FakeAverageTripMetricsLLM(FakeGovernedQueryLLM):
             }
         )
 
-    def answer_with_query_result(self, prompt: str, query_result: dict[str, object]) -> LLMResult:
+    def answer_with_query_result(
+        self, prompt: str, query_result: dict[str, object]
+    ) -> LLMResult:
         self.answer_inputs.append((prompt, query_result))
         return LLMResult(
             text="Manhattan averages 5.33 miles and $18.00 in fare across 3 trips.",
@@ -104,21 +110,29 @@ class FakeAverageTripMetricsMCP(FakeGovernedQueryMCP):
         super().__init__()
         self.average_requests: list[str | None] = []
 
-    def average_trip_metrics(self, *, region_name: str | None = None) -> dict[str, object]:
+    def average_trip_metrics(
+        self, *, region_name: str | None = None
+    ) -> dict[str, object]:
         self.average_requests.append(region_name)
         return AVERAGE_METRICS_RESULT
 
 
-def test_exact_borough_comparison_prompt_runs_the_governed_average_metrics_tool() -> None:
+def test_exact_borough_comparison_prompt_runs_the_governed_average_metrics_tool() -> (
+    None
+):
     """Catches routing the public borough comparison prompt to the old query tool."""
-    prompt = "Compare average trip distance and fare amount across major pickup boroughs"
+    prompt = (
+        "Compare average trip distance and fare amount across major pickup boroughs"
+    )
     llm_client = FakeAverageTripMetricsLLM()
     mcp_client = FakeAverageTripMetricsMCP()
     client = TestClient(
         create_app(
             llm_client=llm_client,
             mcp_client=mcp_client,
-            llm_call_id_factory=iter(["llm_average_proposal", "llm_average_answer"]).__next__,
+            llm_call_id_factory=iter(
+                ["llm_average_proposal", "llm_average_answer"]
+            ).__next__,
             tool_call_id_factory=lambda: "tool_average_metrics",
         )
     )
@@ -148,7 +162,9 @@ def test_ask_supplies_schema_and_runs_one_validated_governed_query() -> None:
         )
     )
 
-    response = client.post("/api/ask", json={"prompt": "Which pickup zones have the most trips?"})
+    response = client.post(
+        "/api/ask", json={"prompt": "Which pickup zones have the most trips?"}
+    )
 
     assert response.status_code == 200
     payload = response.json()
@@ -181,10 +197,14 @@ def test_ask_supplies_schema_and_runs_one_validated_governed_query() -> None:
         "usage": {"input_tokens": 24, "output_tokens": 12, "total_tokens": 36},
         "latency_ms": 28,
     }
-    assert llm_client.proposal_inputs == [("Which pickup zones have the most trips?", SCHEMA)]
+    assert llm_client.proposal_inputs == [
+        ("Which pickup zones have the most trips?", SCHEMA)
+    ]
     assert mcp_client.schema_reads == 1
     assert mcp_client.query_requests == [("top_pickup_zones", 5)]
-    assert llm_client.answer_inputs == [("Which pickup zones have the most trips?", QUERY_RESULT)]
+    assert llm_client.answer_inputs == [
+        ("Which pickup zones have the most trips?", QUERY_RESULT)
+    ]
 
 
 @pytest.mark.parametrize(

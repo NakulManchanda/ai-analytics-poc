@@ -107,7 +107,10 @@ def create_conversations_router(state_repository: StateRepository) -> APIRouter:
                 _message_response(message)
                 for message in state_repository.list_messages(conversation_id)
             ],
-            runs=[_run_response(run, state_repository.list_run_steps(run.run_id)) for run in runs],
+            runs=[
+                _run_response(run, state_repository.list_run_steps(run.run_id))
+                for run in runs
+            ],
         )
 
     return router

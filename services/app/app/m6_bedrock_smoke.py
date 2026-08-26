@@ -13,7 +13,9 @@ def _validate_usage(payload: object) -> dict[str, int]:
             raise ValueError(f"usage.{field_name} must be a non-negative integer")
         usage[field_name] = value
     if usage["total_tokens"] != usage["input_tokens"] + usage["output_tokens"]:
-        raise ValueError("usage.total_tokens must equal input_tokens plus output_tokens")
+        raise ValueError(
+            "usage.total_tokens must equal input_tokens plus output_tokens"
+        )
     return usage
 
 
@@ -25,7 +27,11 @@ def _validate_llm_call(payload: object) -> dict[str, Any]:
     if payload.get("model_id") != DEFAULT_MODEL_ID:
         raise ValueError(f"model_id must equal {DEFAULT_MODEL_ID}")
     latency_ms = payload.get("latency_ms")
-    if isinstance(latency_ms, bool) or not isinstance(latency_ms, int) or latency_ms < 0:
+    if (
+        isinstance(latency_ms, bool)
+        or not isinstance(latency_ms, int)
+        or latency_ms < 0
+    ):
         raise ValueError("latency_ms must be a non-negative integer")
     return {**payload, "usage": _validate_usage(payload.get("usage"))}
 

@@ -8,7 +8,9 @@ from fastapi.testclient import TestClient
 
 
 class ContractLLMClient:
-    def propose_taxi_query(self, _prompt: str, _schema: dict[str, object]) -> ToolProposalResult:
+    def propose_taxi_query(
+        self, _prompt: str, _schema: dict[str, object]
+    ) -> ToolProposalResult:
         return ToolProposalResult(
             name="query_taxi_data",
             arguments={"analysis": "top_pickup_zones", "limit": 5},
@@ -18,7 +20,9 @@ class ContractLLMClient:
             latency_ms=3,
         )
 
-    def answer_with_query_result(self, _prompt: str, _query_result: dict[str, object]) -> LLMResult:
+    def answer_with_query_result(
+        self, _prompt: str, _query_result: dict[str, object]
+    ) -> LLMResult:
         return LLMResult(
             text="JFK Airport has the most trips.",
             model_id="amazon.nova-micro-v1:0",

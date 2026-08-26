@@ -14,7 +14,9 @@ def main() -> None:
     response = TestClient(create_app()).post(
         "/api/ask",
         json={
-            "prompt": ("Use the dataset profile tool, then reply with exactly M5_BEDROCK_SMOKE_OK.")
+            "prompt": (
+                "Use the dataset profile tool, then reply with exactly M5_BEDROCK_SMOKE_OK."
+            )
         },
     )
     response.raise_for_status()

@@ -25,14 +25,18 @@ class JobConsumer(Protocol):
 class InMemoryJobConsumer:
     """In-memory job consumer for testing."""
 
-    def __init__(self, messages: list[tuple[str, dict[str, Any]]] | None = None) -> None:
+    def __init__(
+        self, messages: list[tuple[str, dict[str, Any]]] | None = None
+    ) -> None:
         self._queue: list[tuple[str, dict[str, Any]]] = list(messages or [])
         self.acked: list[str] = []
 
     def push(self, message_id: str, data: dict[str, Any]) -> None:
         self._queue.append((message_id, data))
 
-    def read_jobs(self, count: int = 1, block_ms: int = 1000) -> list[tuple[str, dict[str, Any]]]:
+    def read_jobs(
+        self, count: int = 1, block_ms: int = 1000
+    ) -> list[tuple[str, dict[str, Any]]]:
         if not self._queue:
             return []
         items = self._queue[:count]
@@ -81,7 +85,9 @@ class RedisJobConsumer:
                 logger.debug("xgroup_create for stream %s: %s", self._stream, error)
         self._group_created = True
 
-    def read_jobs(self, count: int = 1, block_ms: int = 1000) -> list[tuple[str, dict[str, Any]]]:
+    def read_jobs(
+        self, count: int = 1, block_ms: int = 1000
+    ) -> list[tuple[str, dict[str, Any]]]:
         try:
             self._ensure_group()
             client = self._get_client()

@@ -56,7 +56,9 @@ class DynamoDBStateRepository:
             or os.environ.get("STATE_TABLE_NAME")
             or DEFAULT_TABLE_NAME
         )
-        self._dynamodb = dynamodb_resource or boto3.resource("dynamodb", region_name=region_name)
+        self._dynamodb = dynamodb_resource or boto3.resource(
+            "dynamodb", region_name=region_name
+        )
         self._table = self._dynamodb.Table(self._table_name)
 
     def create_conversation(self, conversation: Conversation) -> Conversation:
@@ -87,7 +89,9 @@ class DynamoDBStateRepository:
 
     def get_conversation(self, conversation_id: str) -> Conversation | None:
         try:
-            response = self._table.get_item(Key={"pk": f"CONV#{conversation_id}", "sk": "METADATA"})
+            response = self._table.get_item(
+                Key={"pk": f"CONV#{conversation_id}", "sk": "METADATA"}
+            )
         except ClientError as error:
             raise StateError(f"Failed to get conversation: {error}") from error
 
@@ -106,7 +110,9 @@ class DynamoDBStateRepository:
         # Verify conversation exists first
         conv = self.get_conversation(message.conversation_id)
         if conv is None:
-            raise EntityNotFoundError(f"Conversation {message.conversation_id} not found")
+            raise EntityNotFoundError(
+                f"Conversation {message.conversation_id} not found"
+            )
 
         sk = f"MSG#{message.sequence:06d}#{message.message_id}"
         item = {
@@ -136,11 +142,14 @@ class DynamoDBStateRepository:
             raise StateError(f"Failed to add message: {error}") from error
         return message
 
-    def list_messages(self, conversation_id: str, limit: int | None = None) -> list[Message]:
+    def list_messages(
+        self, conversation_id: str, limit: int | None = None
+    ) -> list[Message]:
         try:
             kwargs: dict[str, Any] = {
                 "KeyConditionExpression": (
-                    Key("pk").eq(f"CONV#{conversation_id}") & Key("sk").begins_with("MSG#")
+                    Key("pk").eq(f"CONV#{conversation_id}")
+                    & Key("sk").begins_with("MSG#")
                 ),
                 "ScanIndexForward": True,
             }
@@ -198,7 +207,9 @@ class DynamoDBStateRepository:
         except ClientError as error:
             code = error.response.get("Error", {}).get("Code")
             if code == "ConditionalCheckFailedException":
-                raise DuplicateEntityError(f"Run {run.run_id} already exists") from error
+                raise DuplicateEntityError(
+                    f"Run {run.run_id} already exists"
+                ) from error
             raise StateError(f"Failed to create run: {error}") from error
 
         conversation_index = {
@@ -219,7 +230,9 @@ class DynamoDBStateRepository:
 
     def get_run(self, run_id: str) -> Run | None:
         try:
-            response = self._table.get_item(Key={"pk": f"RUN#{run_id}", "sk": "METADATA"})
+            response = self._table.get_item(
+                Key={"pk": f"RUN#{run_id}", "sk": "METADATA"}
+            )
         except ClientError as error:
             raise StateError(f"Failed to get run: {error}") from error
 
@@ -278,7 +291,8 @@ class DynamoDBStateRepository:
         try:
             response = self._table.query(
                 KeyConditionExpression=(
-                    Key("pk").eq(f"CONV#{conversation_id}") & Key("sk").begins_with("RUN#")
+                    Key("pk").eq(f"CONV#{conversation_id}")
+                    & Key("sk").begins_with("RUN#")
                 ),
                 ScanIndexForward=True,
             )
@@ -327,7 +341,9 @@ class DynamoDBStateRepository:
         except ClientError as error:
             code = error.response.get("Error", {}).get("Code")
             if code == "ConditionalCheckFailedException":
-                raise DuplicateEntityError(f"Step {step.step_id} already exists") from error
+                raise DuplicateEntityError(
+                    f"Step {step.step_id} already exists"
+                ) from error
             raise StateError(f"Failed to add run step: {error}") from error
         return step
 
@@ -391,13 +407,17 @@ class DynamoDBStateRepository:
         except ClientError as error:
             code = error.response.get("Error", {}).get("Code")
             if code == "ConditionalCheckFailedException":
-                raise DuplicateEntityError(f"Job {job.job_id} already exists") from error
+                raise DuplicateEntityError(
+                    f"Job {job.job_id} already exists"
+                ) from error
             raise StateError(f"Failed to create job: {error}") from error
         return job
 
     def get_job(self, job_id: str) -> Job | None:
         try:
-            response = self._table.get_item(Key={"pk": f"JOB#{job_id}", "sk": "METADATA"})
+            response = self._table.get_item(
+                Key={"pk": f"JOB#{job_id}", "sk": "METADATA"}
+            )
         except ClientError as error:
             raise StateError(f"Failed to get job: {error}") from error
 

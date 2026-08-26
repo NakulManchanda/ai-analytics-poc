@@ -40,7 +40,9 @@ def test_context_reducer_keeps_current_request_verbatim() -> None:
 
 
 def test_context_reducer_multi_turn_divergence_and_summarization() -> None:
-    reducer = ContextReducer(recent_turns_window=2)  # Max 4 historical messages (2 turns)
+    reducer = ContextReducer(
+        recent_turns_window=2
+    )  # Max 4 historical messages (2 turns)
     conv_id = "conv_multi_turn"
 
     # Simulate 3 turns stored in durable state (6 messages)
@@ -100,13 +102,16 @@ def test_context_reducer_multi_turn_divergence_and_summarization() -> None:
     assert working_context.stored_message_count == 6
     # Included: 4 recent messages (turns 2 & 3) + 1 current prompt = 5
     assert working_context.included_message_count == 5
-    assert working_context.stored_message_count != working_context.included_message_count
+    assert (
+        working_context.stored_message_count != working_context.included_message_count
+    )
 
     # Turn 1 should be summarized
     assert working_context.conversation_summary is not None
     assert "user: What dataset is this?" in working_context.conversation_summary
     assert (
-        "assistant: This is the NYC TLC yellow taxi dataset" in working_context.conversation_summary
+        "assistant: This is the NYC TLC yellow taxi dataset"
+        in working_context.conversation_summary
     )
 
     # Recent messages should contain m3, m4, m5, m6
@@ -172,7 +177,9 @@ def test_context_reducer_computes_remaining_budgets() -> None:
     )
     tracker = BudgetTracker(budgets=budgets)
     tracker.record_iteration()
-    tracker.record_llm_call(input_tokens=1500, output_tokens=200, estimated_cost_usd=0.0075)
+    tracker.record_llm_call(
+        input_tokens=1500, output_tokens=200, estimated_cost_usd=0.0075
+    )
     tracker.record_tool_call(result_bytes=512)
 
     reducer = ContextReducer()

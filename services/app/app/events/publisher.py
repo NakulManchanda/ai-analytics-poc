@@ -63,4 +63,6 @@ class RedisEventPublisher:
             )
         except Exception as error:
             # Redis is disposable: failure to publish a transient event must not crash the run
-            logger.warning("Failed to publish event %s to Redis: %s", event.event_type, error)
+            logger.warning(
+                "Failed to publish event %s to Redis: %s", event.event_type, error
+            )

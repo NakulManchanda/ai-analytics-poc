@@ -184,7 +184,9 @@ def test_events_endpoint_reconstructs_durable_context_and_telemetry() -> None:
         )
     )
 
-    response = TestClient(create_app(state_repository=repo)).get(f"/api/runs/{run_id}/events")
+    response = TestClient(create_app(state_repository=repo)).get(
+        f"/api/runs/{run_id}/events"
+    )
 
     assert "event: context.reduced" in response.text
     assert '"stored_message_count": 5' in response.text
@@ -204,10 +206,13 @@ def test_reconstructed_events_match_live_context_and_terminal_telemetry() -> Non
 
     result = loop.run("Which pickup zones have the most trips?")
     live_events = {
-        event.event_type: event.payload for event in publisher.get_events_for_run(result.run_id)
+        event.event_type: event.payload
+        for event in publisher.get_events_for_run(result.run_id)
     }
     reconstructed_events = _sse_events(
-        TestClient(create_app(state_repository=repo)).get(f"/api/runs/{result.run_id}/events").text
+        TestClient(create_app(state_repository=repo))
+        .get(f"/api/runs/{result.run_id}/events")
+        .text
     )
 
     for event_type, keys in {
@@ -236,7 +241,9 @@ def test_reconstructed_events_match_live_context_and_terminal_telemetry() -> Non
 
 def test_reconstructed_failed_terminal_event_matches_live_contract() -> None:
     class FailingLLMClient(LocalFakeLLMClient):
-        def propose_taxi_query(self, prompt: str, schema: dict[str, object]) -> ToolProposalResult:
+        def propose_taxi_query(
+            self, prompt: str, schema: dict[str, object]
+        ) -> ToolProposalResult:
             raise LLMProviderError(retryable=True)
 
     repo = InMemoryStateRepository()
@@ -258,7 +265,9 @@ def test_reconstructed_failed_terminal_event_matches_live_contract() -> None:
         if event.event_type == "run.failed"
     )
     reconstructed_payload = _sse_events(
-        TestClient(create_app(state_repository=repo)).get(f"/api/runs/{run_id}/events").text
+        TestClient(create_app(state_repository=repo))
+        .get(f"/api/runs/{run_id}/events")
+        .text
     )["run.failed"]
 
     assert reconstructed_payload == live_payload
@@ -331,7 +340,9 @@ def test_orchestration_loop_emits_provider_deltas_and_truthful_ttft() -> None:
     result = loop.run("Which pickup zones have the most trips?")
 
     events = publisher.get_events_for_run(result.run_id)
-    answer_events = [event for event in events if event.event_type.startswith("answer.")]
+    answer_events = [
+        event for event in events if event.event_type.startswith("answer.")
+    ]
     assert [(event.event_type, event.payload) for event in answer_events] == [
         ("answer.delta", {"delta": "JFK "}),
         ("answer.delta", {"delta": "leads."}),
@@ -423,14 +434,18 @@ def test_orchestration_loop_emits_budget_exceeded_event() -> None:
     assert "run.budget_exceeded" in event_types
 
 
-def test_orchestration_loop_emits_tool_failed_and_surfaces_error_in_run_failed() -> None:
+def test_orchestration_loop_emits_tool_failed_and_surfaces_error_in_run_failed() -> (
+    None
+):
     repo = InMemoryStateRepository()
     publisher = InMemoryEventPublisher()
     llm = LocalFakeLLMClient()
 
     class FailingMCPClient(FakeMCPClient):
         def query_taxi_data(self, *, analysis: str, limit: int) -> dict[str, object]:
-            raise MCPToolError(retryable=True, message="Unknown tool: average_trip_metrics")
+            raise MCPToolError(
+                retryable=True, message="Unknown tool: average_trip_metrics"
+            )
 
     loop = OrchestrationLoop(
         llm_client=llm,
@@ -466,4 +481,6 @@ def test_orchestration_loop_emits_tool_failed_and_surfaces_error_in_run_failed()
     failed_steps = [s for s in steps if s.status == "failed"]
     assert len(failed_steps) == 1
     assert failed_steps[0].step_type == "tool_call"
-    assert "Unknown tool: average_trip_metrics" in (failed_steps[0].output_summary or "")
+    assert "Unknown tool: average_trip_metrics" in (
+        failed_steps[0].output_summary or ""
+    )

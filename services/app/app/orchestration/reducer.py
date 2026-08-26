@@ -163,12 +163,19 @@ class ContextReducer:
             remaining_iterations = max(
                 0, active_budgets.max_iterations - budget_tracker.iteration_count
             )
-            remaining_tools = max(0, active_budgets.max_tool_calls - budget_tracker.tool_call_count)
-            remaining_llm = max(0, active_budgets.max_llm_calls - budget_tracker.llm_call_count)
-            remaining_tokens = max(0, active_budgets.max_input_tokens - budget_tracker.input_tokens)
+            remaining_tools = max(
+                0, active_budgets.max_tool_calls - budget_tracker.tool_call_count
+            )
+            remaining_llm = max(
+                0, active_budgets.max_llm_calls - budget_tracker.llm_call_count
+            )
+            remaining_tokens = max(
+                0, active_budgets.max_input_tokens - budget_tracker.input_tokens
+            )
             remaining_cost = max(
                 0.0,
-                active_budgets.max_estimated_cost_usd - budget_tracker.estimated_cost_usd,
+                active_budgets.max_estimated_cost_usd
+                - budget_tracker.estimated_cost_usd,
             )
             current_iter = budget_tracker.iteration_count
         else:
@@ -198,7 +205,9 @@ class ContextReducer:
         return WorkingContext(
             conversation_summary=conversation_summary,
             current_user_message=(
-                current_message.content if current_message is not None else current_prompt
+                current_message.content
+                if current_message is not None
+                else current_prompt
             ),
             recent_messages=recent_formatted,
             available_tools=tools_list,

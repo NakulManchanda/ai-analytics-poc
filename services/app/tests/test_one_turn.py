@@ -14,7 +14,9 @@ class FakeOneTurnLLM:
             "arguments": {"analysis": "top_pickup_zones", "limit": 5},
         }
 
-    def propose_taxi_query(self, prompt: str, _schema: dict[str, object]) -> ToolProposalResult:
+    def propose_taxi_query(
+        self, prompt: str, _schema: dict[str, object]
+    ) -> ToolProposalResult:
         self.proposal_prompts.append(prompt)
         return ToolProposalResult(
             name=str(self.proposal["name"]),
@@ -25,7 +27,9 @@ class FakeOneTurnLLM:
             latency_ms=13,
         )
 
-    def answer_with_query_result(self, prompt: str, query_result: dict[str, object]) -> LLMResult:
+    def answer_with_query_result(
+        self, prompt: str, query_result: dict[str, object]
+    ) -> LLMResult:
         self.answer_inputs.append((prompt, query_result))
         return LLMResult(
             text="The profile contains 3 taxi trips.",
@@ -59,7 +63,9 @@ class FakeDatasetProfileMCP:
         }
 
 
-def test_ask_runs_one_validated_profile_tool_sequence_and_returns_bounded_metadata() -> None:
+def test_ask_runs_one_validated_profile_tool_sequence_and_returns_bounded_metadata() -> (
+    None
+):
     llm_client = FakeOneTurnLLM()
     mcp_client = FakeDatasetProfileMCP()
     call_ids = iter(["llm_m5_proposal", "llm_m5_answer"])
@@ -183,7 +189,9 @@ def test_local_fake_llm_supports_the_same_fixed_one_turn_sequence_without_aws() 
 def test_local_fake_llm_answers_the_public_borough_comparison_prompt() -> None:
     """Catches the local smoke path rejecting the four-column governed metrics result."""
     llm_client = create_llm_client(Settings(llm_provider="fake"))
-    prompt = "Compare average trip distance and fare amount across major pickup boroughs"
+    prompt = (
+        "Compare average trip distance and fare amount across major pickup boroughs"
+    )
 
     proposal = llm_client.propose_taxi_query(
         prompt,
@@ -212,4 +220,7 @@ def test_local_fake_llm_answers_the_public_borough_comparison_prompt() -> None:
 
     assert proposal.name == "average_trip_metrics"
     assert proposal.arguments == {}
-    assert answer.text == "Manhattan averages 5.33 miles and $18.00 in fare across 3 trips."
+    assert (
+        answer.text
+        == "Manhattan averages 5.33 miles and $18.00 in fare across 3 trips."
+    )
