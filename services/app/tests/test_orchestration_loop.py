@@ -79,9 +79,10 @@ def test_orchestration_loop_normal_completion() -> None:
     assert telemetry["proposal_llm_latency_ms"] == steps[0].duration_ms
     assert telemetry["tool_latency_ms"] == steps[1].duration_ms
     assert telemetry["final_answer_llm_latency_ms"] == steps[3].duration_ms
-    assert telemetry["ttft"]["available"] is True
-    assert telemetry["ttft"]["latency_ms"] >= 0
-    assert telemetry["ttft"]["source"] == "provider_stream"
+    assert telemetry["ttft"] == {
+        "available": False,
+        "reason": "non_streaming_blocking",
+    }
     assert steps[2].metadata["working_context"]["stored_message_count"] == 1
 
 

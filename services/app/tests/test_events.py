@@ -300,7 +300,6 @@ def test_orchestration_loop_emits_full_event_sequence() -> None:
         "tool.completed",
         "context.reduced",
         "llm.started",
-        "answer.delta",
         "answer.completed",
         "llm.completed",
         "run.completed",

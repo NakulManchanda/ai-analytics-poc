@@ -337,31 +337,38 @@ class OrchestrationLoop:
         proposal_latency_ms: int | None = None
         tool_latency_ms: int | None = None
         final_answer_latency_ms: int | None = None
+        final_answer_phase_reached = False
         final_answer_stream_started = False
         ttft_ms: int | None = None
 
         def telemetry(end_to_end_latency_ms: int) -> dict[str, Any]:
+            if ttft_ms is not None:
+                ttft_data = {
+                    "available": True,
+                    "latency_ms": ttft_ms,
+                    "source": "provider_stream",
+                }
+            elif final_answer_stream_started:
+                ttft_data = {
+                    "available": False,
+                    "reason": "provider_stream_returned_no_text_delta",
+                }
+            elif final_answer_phase_reached:
+                ttft_data = {
+                    "available": False,
+                    "reason": "non_streaming_blocking",
+                }
+            else:
+                ttft_data = {
+                    "available": False,
+                    "reason": "final_answer_not_started",
+                }
             return {
                 "end_to_end_latency_ms": end_to_end_latency_ms,
                 "proposal_llm_latency_ms": proposal_latency_ms,
                 "tool_latency_ms": tool_latency_ms,
                 "final_answer_llm_latency_ms": final_answer_latency_ms,
-                "ttft": (
-                    {
-                        "available": True,
-                        "latency_ms": ttft_ms,
-                        "source": "provider_stream",
-                    }
-                    if ttft_ms is not None
-                    else {
-                        "available": False,
-                        "reason": (
-                            "provider_stream_returned_no_text_delta"
-                            if final_answer_stream_started
-                            else "final_answer_not_started"
-                        ),
-                    }
-                ),
+                "ttft": ttft_data,
             }
 
         try:
@@ -589,12 +596,12 @@ class OrchestrationLoop:
                 step_seq += 1
 
                 answer_call_id = self._llm_call_id_factory()
+                final_answer_phase_reached = True
                 emit(
                     "llm.started",
                     {"llm_call_id": answer_call_id, "phase": "final_answer"},
                 )
                 ans_start = self._monotonic()
-                final_answer_stream_started = True
 
                 def publish_answer_delta(delta: str) -> None:
                     nonlocal ttft_ms
@@ -611,12 +618,14 @@ class OrchestrationLoop:
                         llm, "stream_answer_with_query_result", None
                     )
                     if callable(stream_answer):
+                        final_answer_stream_started = True
                         answer_result = stream_answer(
                             prompt,
                             query_result,
                             publish_answer_delta,
                         )
                     else:
+                        final_answer_stream_started = False
                         answer_result = llm.answer_with_query_result(
                             prompt, query_result
                         )

@@ -66,13 +66,6 @@ class LLMClient(Protocol):
         self, prompt: str, query_result: Mapping[str, object]
     ) -> LLMResult: ...
 
-    def stream_answer_with_query_result(
-        self,
-        prompt: str,
-        query_result: Mapping[str, object],
-        on_delta: Callable[[str], None],
-    ) -> LLMResult: ...
-
 
 class LocalFakeLLMClient:
     """Deterministic local-only client used by the Compose M5 smoke path."""
@@ -172,16 +165,6 @@ class LocalFakeLLMClient:
                 f"{first_row[0]} has an average trip distance of {first_row[1]} miles."
             )
         return self._result(prompt, text)
-
-    def stream_answer_with_query_result(
-        self,
-        prompt: str,
-        query_result: Mapping[str, object],
-        on_delta: Callable[[str], None],
-    ) -> LLMResult:
-        result = self.answer_with_query_result(prompt, query_result)
-        on_delta(result.text)
-        return result
 
     def _result(self, prompt: str, text: str) -> LLMResult:
         return LLMResult(
