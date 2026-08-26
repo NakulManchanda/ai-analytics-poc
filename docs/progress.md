@@ -44,8 +44,26 @@ truthful provider TTFT latency metrics, progressive React frontend rendering, an
 enhanced high-contrast sample query chips. Live Redis Streams coordinate in-flight delivery
 while DynamoDB durably owns completed conversation and run step state.
 
+## v3 cancellable runs and fast abort
+
+The v3 cancellable runs milestone is delivered and merged on `main`:
+
+- #74 — Run state model expansion & `POST /api/runs/{run_id}/cancel` (PR #78, `3dbcfa7`)
+- #75 — Orchestration loop cancellation checkpoints & Bedrock stream abort (PR #79, `3c3e375`)
+- #76 — Frontend cancellation controls, stop button, and timeline cancel badges (PR #80, `10464c4`)
+- #77 — Integration smoke checks, documentation update, and deployed verification
+
+Milestone v3 provides:
+1. Fast cooperative cancellation through Redis `run:cancel:{run_id}` fast-flag (sub-millisecond lookup).
+2. Checkpoints before every step (context loading, LLM proposal, MCP tool call, context reduction, final answer synthesis).
+3. Immediate interruption of Bedrock token streaming on cancellation detection.
+4. Clean partial text preservation in durable conversation state marked with `[interrupted]` and `interrupted: True`.
+5. Emitted `run.cancel_requested` and `run.cancelled` lifecycle events on Redis Streams and SSE with full partial token telemetry.
+6. React frontend Stop button and visual warning badges in the Timeline Inspector.
+
 ## Historical baseline
 
 Milestones 0–16 and prior public-UAT work remain historical baseline work. Any
 previous live-deployment statements are not v1.1 deployment evidence; use the
 current local and public UAT guides for this release's verification boundaries.
+
