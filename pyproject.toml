@@ -4,6 +4,9 @@ version = "0.0.0"
 description = "Production-shaped AI analytics architecture POC"
 requires-python = ">=3.12"
 
+[tool.uv]
+managed = false
+
 [tool.pytest.ini_options]
 addopts = "-ra"
 testpaths = ["services", "tests"]
