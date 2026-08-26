@@ -89,6 +89,17 @@ class LLMCall:
     latency_ms: int
 
 
+@dataclass(frozen=True)
+class RunSubmission:
+    """Carry-token from prepare_run to execute: identifies the pre-created durable state."""
+
+    prompt: str
+    conversation_id: str
+    message_id: str
+    run_id: str
+    next_seq: int
+
+
 class OrchestrationError(ValueError):
     """A controlled application-boundary failure from the orchestration loop."""
 
@@ -148,6 +159,7 @@ class OrchestrationLoop:
         context_reducer: ContextReducer | None = None,
         llm_call_id_factory: Callable[[], str] = generate_llm_call_id,
         tool_call_id_factory: Callable[[], str] = generate_tool_call_id,
+        monotonic_factory: Callable[[], float] = time.monotonic,
     ) -> None:
         self._llm_client = llm_client
         self._llm_client_factory = llm_client_factory
@@ -159,6 +171,7 @@ class OrchestrationLoop:
         self._reducer = context_reducer or ContextReducer()
         self._llm_call_id_factory = llm_call_id_factory
         self._tool_call_id_factory = tool_call_id_factory
+        self._monotonic = monotonic_factory
 
     def _get_llm_client(self) -> LLMClient:
         if self._llm_client is not None:
@@ -174,16 +187,13 @@ class OrchestrationLoop:
             return self._mcp_client_factory()
         raise MCPToolError("No MCP client or factory configured", retryable=False)
 
-    def run(
+    def prepare_run(
         self,
         prompt: str,
         conversation_id: str | None = None,
-        budgets: ExecutionBudgets | None = None,
-    ) -> LoopResult:
-        active_budgets = budgets or self._budgets
-        tracker = BudgetTracker(budgets=active_budgets)
-        start_mono = time.monotonic()
-        evt_sequence = 0
+    ) -> RunSubmission:
+        """Durably create conversation, user message, and in-progress run, then publish
+        run.received.  Returns a RunSubmission token for use by execute()."""
 
         # 1. Initialize or load Conversation
         conv_id = conversation_id or generate_conversation_id()
@@ -227,6 +237,72 @@ class OrchestrationLoop:
         )
         self._repo.create_run(run)
 
+        # 4. Publish run.received before returning (so SSE clients see it before execute)
+        if self._publisher is not None:
+            self._publisher.publish(
+                RunEvent(
+                    event_type="run.received",
+                    run_id=run_id,
+                    conversation_id=conv_id,
+                    sequence=1,
+                    payload={"prompt_summary": prompt[:80], "status": "in_progress"},
+                )
+            )
+
+        return RunSubmission(
+            prompt=prompt,
+            conversation_id=conv_id,
+            message_id=user_msg_id,
+            run_id=run_id,
+            next_seq=next_seq,
+        )
+
+    def execute(
+        self,
+        submission: RunSubmission,
+        budgets: ExecutionBudgets | None = None,
+    ) -> LoopResult:
+        """Execute the orchestration loop using state prepared by prepare_run()."""
+        return self._execute_loop(
+            prompt=submission.prompt,
+            conv_id=submission.conversation_id,
+            user_msg_id=submission.message_id,
+            run_id=submission.run_id,
+            next_seq=submission.next_seq,
+            # run.received was already emitted by prepare_run; start evt_sequence at 1
+            initial_evt_sequence=1,
+            budgets=budgets,
+        )
+
+    def run(
+        self,
+        prompt: str,
+        conversation_id: str | None = None,
+        budgets: ExecutionBudgets | None = None,
+    ) -> LoopResult:
+        """Synchronous one-shot execution (preserves /api/ask compatibility)."""
+        submission = self.prepare_run(prompt, conversation_id)
+        return self.execute(submission, budgets=budgets)
+
+    def _execute_loop(
+        self,
+        prompt: str,
+        conv_id: str,
+        user_msg_id: str,
+        run_id: str,
+        next_seq: int,
+        initial_evt_sequence: int = 1,
+        budgets: ExecutionBudgets | None = None,
+    ) -> LoopResult:
+        active_budgets = budgets or self._budgets
+        tracker = BudgetTracker(budgets=active_budgets)
+        start_mono = self._monotonic()
+        evt_sequence = initial_evt_sequence
+
+        # Re-fetch the in-progress run record for started_at reference
+        run = self._repo.get_run(run_id)
+        assert run is not None, f"Run {run_id} not found; prepare_run must be called first"
+
         def emit(
             event_type: str,
             payload: dict[str, Any] | None = None,
@@ -252,9 +328,6 @@ class OrchestrationLoop:
             )
             self._publisher.publish(evt)
 
-        # Emit initial event
-        emit("run.received", {"prompt_summary": prompt[:80], "status": "in_progress"})
-
         executed_tool_signatures: set[str] = set()
         last_tool_call_id: str | None = None
         last_query_id: str | None = None
@@ -264,6 +337,8 @@ class OrchestrationLoop:
         proposal_latency_ms: int | None = None
         tool_latency_ms: int | None = None
         final_answer_latency_ms: int | None = None
+        final_answer_stream_started = False
+        ttft_ms: int | None = None
 
         def telemetry(end_to_end_latency_ms: int) -> dict[str, Any]:
             return {
@@ -271,7 +346,22 @@ class OrchestrationLoop:
                 "proposal_llm_latency_ms": proposal_latency_ms,
                 "tool_latency_ms": tool_latency_ms,
                 "final_answer_llm_latency_ms": final_answer_latency_ms,
-                "ttft": {"available": False, "reason": "non_streaming_blocking"},
+                "ttft": (
+                    {
+                        "available": True,
+                        "latency_ms": ttft_ms,
+                        "source": "provider_stream",
+                    }
+                    if ttft_ms is not None
+                    else {
+                        "available": False,
+                        "reason": (
+                            "provider_stream_returned_no_text_delta"
+                            if final_answer_stream_started
+                            else "final_answer_not_started"
+                        ),
+                    }
+                ),
             }
 
         try:
@@ -305,7 +395,7 @@ class OrchestrationLoop:
                 # Step B: LLM Propose Taxi Query
                 llm_call_id = proposal_call_id
                 emit("llm.started", {"llm_call_id": llm_call_id, "phase": "proposal"})
-                call_start = time.monotonic()
+                call_start = self._monotonic()
                 try:
                     proposal = llm.propose_taxi_query(prompt, schema)
                 except LLMConfigurationError as err:
@@ -316,7 +406,7 @@ class OrchestrationLoop:
                     raise OrchestrationError(
                         "llm_provider_error", err.retryable, llm_call_id, str(err)
                     ) from err
-                call_latency_ms = int((time.monotonic() - call_start) * 1000)
+                call_latency_ms = int((self._monotonic() - call_start) * 1000)
                 proposal_latency_ms = call_latency_ms
 
                 cost = estimate_cost(proposal.input_tokens, proposal.output_tokens)
@@ -405,7 +495,7 @@ class OrchestrationLoop:
                     "tool.started",
                     {"tool_call_id": tool_call_id, "tool_name": proposal.name},
                 )
-                tool_start = time.monotonic()
+                tool_start = self._monotonic()
                 try:
                     if tool_name == AVERAGE_METRICS_TOOL_NAME:
                         raw_query_result = mcp.average_trip_metrics(
@@ -421,7 +511,7 @@ class OrchestrationLoop:
                     raise OrchestrationError(
                         "mcp_tool_error", err.retryable, llm_call_id, str(err)
                     ) from err
-                tool_duration_ms = int((time.monotonic() - tool_start) * 1000)
+                tool_duration_ms = int((self._monotonic() - tool_start) * 1000)
                 tool_latency_ms = tool_duration_ms
 
                 query_id_val = str(query_result.get("query_id", ""))
@@ -503,9 +593,33 @@ class OrchestrationLoop:
                     "llm.started",
                     {"llm_call_id": answer_call_id, "phase": "final_answer"},
                 )
-                ans_start = time.monotonic()
+                ans_start = self._monotonic()
+                final_answer_stream_started = True
+
+                def publish_answer_delta(delta: str) -> None:
+                    nonlocal ttft_ms
+                    if ttft_ms is None:
+                        ttft_ms = int((self._monotonic() - ans_start) * 1000)
+                    emit(
+                        "answer.delta",
+                        {"delta": delta},
+                        llm_call_id=answer_call_id,
+                    )
+
                 try:
-                    answer_result = llm.answer_with_query_result(prompt, query_result)
+                    stream_answer = getattr(
+                        llm, "stream_answer_with_query_result", None
+                    )
+                    if callable(stream_answer):
+                        answer_result = stream_answer(
+                            prompt,
+                            query_result,
+                            publish_answer_delta,
+                        )
+                    else:
+                        answer_result = llm.answer_with_query_result(
+                            prompt, query_result
+                        )
                 except LLMConfigurationError as err:
                     raise OrchestrationError(
                         "llm_configuration_error", False, answer_call_id, str(err)
@@ -514,8 +628,14 @@ class OrchestrationLoop:
                     raise OrchestrationError(
                         "llm_provider_error", err.retryable, answer_call_id, str(err)
                     ) from err
-                ans_latency_ms = int((time.monotonic() - ans_start) * 1000)
+                ans_latency_ms = int((self._monotonic() - ans_start) * 1000)
                 final_answer_latency_ms = ans_latency_ms
+
+                emit(
+                    "answer.completed",
+                    {"answer": answer_result.text},
+                    llm_call_id=answer_call_id,
+                )
 
                 ans_cost = estimate_cost(
                     answer_result.input_tokens, answer_result.output_tokens
@@ -575,7 +695,7 @@ class OrchestrationLoop:
                 )
 
                 # Update Run to completed
-                total_latency_ms = int((time.monotonic() - start_mono) * 1000)
+                total_latency_ms = int((self._monotonic() - start_mono) * 1000)
                 run_telemetry = telemetry(total_latency_ms)
                 completed_run = Run(
                     run_id=run_id,
@@ -624,7 +744,7 @@ class OrchestrationLoop:
 
         except BudgetExceededError as err:
             logger.warning("Agent loop budget exceeded: %s", err.reason)
-            total_latency_ms = int((time.monotonic() - start_mono) * 1000)
+            total_latency_ms = int((self._monotonic() - start_mono) * 1000)
             run_telemetry = telemetry(total_latency_ms)
             exceeded_run = Run(
                 run_id=run_id,
@@ -678,7 +798,7 @@ class OrchestrationLoop:
                 telemetry=run_telemetry,
             )
         except OrchestrationError as err:
-            total_latency_ms = int((time.monotonic() - start_mono) * 1000)
+            total_latency_ms = int((self._monotonic() - start_mono) * 1000)
             run_telemetry = telemetry(total_latency_ms)
             failed_run = Run(
                 run_id=run_id,

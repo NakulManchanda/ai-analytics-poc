@@ -16,6 +16,7 @@ from app.routers.conversations import create_conversations_router
 from app.routers.events import create_events_router
 from app.routers.health import router as health_router
 from app.routers.jobs import create_jobs_router
+from app.routers.runs import RunDispatcher, create_runs_router
 from app.routers.status import router as status_router
 from app.state import DynamoDBStateRepository, InMemoryStateRepository, StateRepository
 
@@ -30,6 +31,7 @@ def create_app(
     llm_call_id_factory: Callable[[], str] | None = None,
     tool_call_id_factory: Callable[[], str] | None = None,
     orchestration_loop: OrchestrationLoop | None = None,
+    run_dispatcher: RunDispatcher | None = None,
 ) -> FastAPI:
     resolved_settings = settings or Settings.from_environment()
     shared_state_repo = state_repository or (
@@ -62,6 +64,12 @@ def create_app(
     )
     application.include_router(health_router)
     application.include_router(create_ask_router(loop))
+    application.include_router(
+        create_runs_router(
+            loop,
+            **({"run_dispatcher": run_dispatcher} if run_dispatcher else {}),
+        )
+    )
     application.include_router(create_conversations_router(shared_state_repo))
     application.include_router(
         create_events_router(

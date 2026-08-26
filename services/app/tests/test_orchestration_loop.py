@@ -79,10 +79,9 @@ def test_orchestration_loop_normal_completion() -> None:
     assert telemetry["proposal_llm_latency_ms"] == steps[0].duration_ms
     assert telemetry["tool_latency_ms"] == steps[1].duration_ms
     assert telemetry["final_answer_llm_latency_ms"] == steps[3].duration_ms
-    assert telemetry["ttft"] == {
-        "available": False,
-        "reason": "non_streaming_blocking",
-    }
+    assert telemetry["ttft"]["available"] is True
+    assert telemetry["ttft"]["latency_ms"] >= 0
+    assert telemetry["ttft"]["source"] == "provider_stream"
     assert steps[2].metadata["working_context"]["stored_message_count"] == 1
 
 
@@ -118,7 +117,7 @@ def test_orchestration_loop_persists_failed_run_for_non_budget_provider_error() 
     assert run.completed_at is not None
     assert run.metadata["telemetry"]["ttft"] == {
         "available": False,
-        "reason": "non_streaming_blocking",
+        "reason": "final_answer_not_started",
     }
 
 
@@ -243,6 +242,62 @@ def test_orchestration_loop_max_tool_bytes_exceeded() -> None:
 
     result = loop.run("Which pickup zones have the most trips?")
     assert result.status == "budget_exceeded"
+
+
+def test_prepare_run_durably_creates_state_and_publishes_received_before_execute() -> None:
+    """prepare_run must persist conversation, user message, and in-progress run, then
+    publish run.received — all before execute() is ever called."""
+
+    repo = InMemoryStateRepository()
+    received_events: list[str] = []
+
+    class CapturingPublisher:
+        def publish(self, evt: Any) -> None:
+            received_events.append(evt.event_type)
+
+    loop = OrchestrationLoop(
+        llm_client=LocalFakeLLMClient(),
+        mcp_client=FakeMCPClient(),  # type: ignore[arg-type]
+        state_repository=repo,
+        event_publisher=CapturingPublisher(),  # type: ignore[arg-type]
+    )
+
+    submission = loop.prepare_run("Which pickup zones lead?")
+
+    # Durable state must exist immediately, before execute()
+    conv = repo.get_conversation(submission.conversation_id)
+    assert conv is not None
+
+    messages = repo.list_messages(submission.conversation_id)
+    assert len(messages) == 1
+    assert messages[0].role == "user"
+    assert messages[0].content == "Which pickup zones lead?"
+    assert messages[0].message_id == submission.message_id
+
+    run = repo.get_run(submission.run_id)
+    assert run is not None
+    assert run.status == "in_progress"
+    assert run.conversation_id == submission.conversation_id
+    assert run.message_id == submission.message_id
+
+    # run.received must be published before execute() returns
+    assert "run.received" in received_events
+
+    # execute() must complete the run using prepare_run's state
+    execute_called = []
+
+    class RecordingRepo(InMemoryStateRepository):
+        pass
+
+    loop.execute(submission)
+
+    completed_run = repo.get_run(submission.run_id)
+    assert completed_run is not None
+    assert completed_run.status in ("completed", "budget_exceeded", "failed")
+    # The assistant answer message must have been persisted
+    all_messages = repo.list_messages(submission.conversation_id)
+    assert len(all_messages) == 2
+    assert all_messages[1].role == "assistant"
 
 
 def test_orchestration_loop_invalid_tool_proposal_rejected() -> None:

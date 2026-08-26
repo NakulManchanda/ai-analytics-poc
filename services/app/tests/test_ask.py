@@ -221,6 +221,85 @@ def test_bedrock_client_maps_converse_response_and_uses_bounded_request() -> Non
     ]
 
 
+def test_bedrock_client_streams_real_answer_deltas_and_returns_final_metadata() -> None:
+    class StreamingRuntimeClient:
+        def __init__(self) -> None:
+            self.request: dict[str, object] | None = None
+
+        def converse_stream(self, **request: object) -> dict[str, object]:
+            self.request = request
+            return {
+                "stream": iter(
+                    [
+                        {"messageStart": {"role": "assistant"}},
+                        {
+                            "contentBlockDelta": {
+                                "contentBlockIndex": 0,
+                                "delta": {"text": "Bedrock "},
+                            }
+                        },
+                        {
+                            "contentBlockDelta": {
+                                "contentBlockIndex": 0,
+                                "delta": {"text": "answer."},
+                            }
+                        },
+                        {"messageStop": {"stopReason": "end_turn"}},
+                        {
+                            "metadata": {
+                                "usage": {
+                                    "inputTokens": 6,
+                                    "outputTokens": 4,
+                                    "totalTokens": 10,
+                                },
+                                "metrics": {"latencyMs": 23},
+                            }
+                        },
+                    ]
+                )
+            }
+
+    runtime_client = StreamingRuntimeClient()
+    llm_client = BedrockLLMClient(
+        "amazon.nova-micro-v1:0", runtime_client=runtime_client
+    )
+    deltas: list[str] = []
+
+    result = llm_client.stream_answer_with_query_result(
+        "Which zone leads?",
+        {"columns": ["pickup_zone", "trip_count"], "rows": [["Alpha", 3]]},
+        deltas.append,
+    )
+
+    assert deltas == ["Bedrock ", "answer."]
+    assert result == LLMResult(
+        text="Bedrock answer.",
+        model_id="amazon.nova-micro-v1:0",
+        input_tokens=6,
+        output_tokens=4,
+        latency_ms=23,
+    )
+    assert runtime_client.request == {
+        "modelId": "amazon.nova-micro-v1:0",
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "text": (
+                            "Answer the user's question using only this governed query result. "
+                            "Question: Which zone leads?\n"
+                            'Query result: {"columns":["pickup_zone","trip_count"],'
+                            '"rows":[["Alpha",3]]}'
+                        )
+                    }
+                ],
+            }
+        ],
+        "inferenceConfig": {"maxTokens": 128, "temperature": 0.0},
+    }
+
+
 def test_bedrock_client_exposes_only_the_fixed_no_argument_profile_tool() -> None:
     class ToolUseRuntimeClient:
         def __init__(self) -> None:
