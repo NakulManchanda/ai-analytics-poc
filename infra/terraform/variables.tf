@@ -189,3 +189,20 @@ variable "enable_custom_domain" {
   type        = bool
   default     = true
 }
+
+variable "redis_node_type" {
+  description = "ElastiCache node type for the single-node Redis cluster (transient event delivery)."
+  type        = string
+  default     = "cache.t4g.micro"
+}
+
+variable "redis_engine_version" {
+  description = "Redis engine version for ElastiCache. Must be a Redis 7.x release."
+  type        = string
+  default     = "7.1"
+
+  validation {
+    condition     = can(regex("^7\\.", var.redis_engine_version))
+    error_message = "redis_engine_version must be a Redis 7.x version (e.g. 7.1)."
+  }
+}

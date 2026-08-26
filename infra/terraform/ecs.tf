@@ -112,6 +112,10 @@ resource "aws_ecs_task_definition" "ai_app" {
         {
           name  = "LLM_MODEL_ID"
           value = var.bedrock_model_id
+        },
+        {
+          name  = "REDIS_URL"
+          value = "redis://${aws_elasticache_cluster.redis.cache_nodes[0].address}:6379/0"
         }
       ]
       logConfiguration = {

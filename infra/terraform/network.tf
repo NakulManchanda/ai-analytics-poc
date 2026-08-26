@@ -144,3 +144,15 @@ resource "aws_security_group" "ecs_tasks" {
     Name = "${local.name}-ecs-tasks"
   }
 }
+
+# Separate rule to break the circular dependency between ecs_tasks and redis
+# security groups. Inline rules cannot mutually reference each other.
+resource "aws_security_group_rule" "ecs_tasks_to_redis" {
+  type                     = "egress"
+  description              = "Redis event delivery to ElastiCache"
+  from_port                = 6379
+  to_port                  = 6379
+  protocol                 = "tcp"
+  security_group_id        = aws_security_group.ecs_tasks.id
+  source_security_group_id = aws_security_group.redis.id
+}
