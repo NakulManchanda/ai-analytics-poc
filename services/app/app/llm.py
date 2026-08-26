@@ -311,9 +311,10 @@ class BedrockLLMClient:
                         "toolSpec": {
                             "name": "average_trip_metrics",
                             "description": (
-                                "Compare average trip distance and fare amount across "
-                                "governed pickup boroughs (Manhattan, Brooklyn, Queens, Bronx, Staten Island). "
-                                "Leave region_name empty to compare all boroughs, or provide exactly one single borough name."
+                                "Compare average trip distance and fare amount across governed "
+                                "pickup boroughs (Manhattan, Brooklyn, Queens, Bronx, "
+                                "Staten Island). Leave region_name empty to compare all "
+                                "boroughs, or provide exactly one single borough name."
                             ),
                             "inputSchema": {
                                 "json": {
