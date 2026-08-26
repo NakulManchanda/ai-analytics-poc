@@ -15,8 +15,7 @@ def main() -> None:
         "/api/ask",
         json={
             "prompt": (
-                "Use the dataset profile tool, then reply with exactly "
-                "M5_BEDROCK_SMOKE_OK."
+                "Use the dataset profile tool, then reply with exactly M5_BEDROCK_SMOKE_OK."
             )
         },
     )

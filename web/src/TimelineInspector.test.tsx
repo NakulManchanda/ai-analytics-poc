@@ -153,4 +153,41 @@ describe("TimelineInspector SSE lifecycle", () => {
       ttft: { available: false, reason: "non_streaming_blocking" },
     } satisfies RunTelemetry);
   });
+
+  it("renders tool.failed and detailed run.failed error events", async () => {
+    render(<TimelineInspector runId="run_same" />);
+
+    const stream = MockEventSource.instances[0];
+    await act(async () => {
+      stream.emit("tool.failed", {
+        event_id: "evt_tool_fail",
+        event_type: "tool.failed",
+        run_id: "run_same",
+        conversation_id: "conversation_1",
+        sequence: 2,
+        timestamp: "2026-08-25T00:00:01Z",
+        payload: {
+          tool_name: "average_trip_metrics",
+          error: "Unknown tool: average_trip_metrics",
+        },
+      });
+      stream.emit("run.failed", {
+        event_id: "evt_run_fail",
+        event_type: "run.failed",
+        run_id: "run_same",
+        conversation_id: "conversation_1",
+        sequence: 3,
+        timestamp: "2026-08-25T00:00:02Z",
+        payload: {
+          failure_code: "mcp_tool_error",
+          error: "Unknown tool: average_trip_metrics",
+        },
+      });
+    });
+
+    expect(screen.getByText("tool.failed")).toBeVisible();
+    expect(screen.getByText(/Tool average_trip_metrics failed: Unknown tool: average_trip_metrics/)).toBeVisible();
+    expect(screen.getByText("run.failed")).toBeVisible();
+    expect(screen.getByText(/Run failed: \[mcp_tool_error\] Unknown tool: average_trip_metrics/)).toBeVisible();
+  });
 });

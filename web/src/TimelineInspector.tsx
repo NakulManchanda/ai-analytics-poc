@@ -42,6 +42,7 @@ export const KNOWN_EVENT_TYPES = [
   "tool.requested",
   "tool.started",
   "tool.completed",
+  "tool.failed",
   "context.reduced",
   "run.completed",
   "run.budget_exceeded",
@@ -58,11 +59,11 @@ export const KNOWN_EVENT_TYPES = [
 ];
 
 export function getEventBadgeClass(eventType: string): string {
+  if (eventType === "tool.failed" || eventType === "run.budget_exceeded" || eventType === "run.failed" || eventType === "job.failed") return "badge-danger";
   if (eventType.startsWith("llm.") || eventType === "step.llm_proposal" || eventType === "step.tool_proposal" || eventType === "step.final_answer" || eventType === "step.llm_final_answer") return "badge-llm";
   if (eventType.startsWith("tool.") || eventType === "step.tool_execution" || eventType === "step.tool_call") return "badge-tool";
   if (eventType.startsWith("context.")) return "badge-context";
   if (eventType === "run.completed" || eventType === "job.completed") return "badge-success";
-  if (eventType === "run.budget_exceeded" || eventType === "run.failed" || eventType === "job.failed") return "badge-danger";
   return "badge-default";
 }
 
@@ -87,6 +88,8 @@ export function formatEventSummary(event: RunEvent): string {
     case "step.tool_execution":
     case "step.tool_call":
       return `DuckDB query ${p.query_id || ""} completed · ${p.row_count ?? p.output_summary ?? 0} rows · ${p.duration_ms ?? 0}ms`;
+    case "tool.failed":
+      return `Tool ${p.tool_name || "execution"} failed: ${p.error || "execution error"}`;
     case "step.final_answer":
     case "step.llm_final_answer":
       return `Final answer synthesized · ${p.output_summary ? `"${p.output_summary.slice(0, 80)}..."` : "response ready"}`;
@@ -99,7 +102,7 @@ export function formatEventSummary(event: RunEvent): string {
       return `Budget exceeded: ${p.reason || p.failure_code || "limit breached"}`;
     case "run.failed":
     case "job.failed":
-      return `Run failed: ${p.error || p.failure_code || "error"}`;
+      return `Run failed: ${p.error ? `${p.failure_code ? `[${p.failure_code}] ` : ""}${p.error}` : p.failure_code || "error"}`;
     default:
       if (event.event_type.startsWith("step.")) {
         return `${p.input_summary || ""} -> ${p.output_summary || ""}`.trim() || event.event_type;

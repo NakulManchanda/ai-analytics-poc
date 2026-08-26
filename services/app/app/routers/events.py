@@ -245,6 +245,7 @@ def create_events_router(
                                 telemetry=telemetry,
                                 reason=current_run.metadata.get("reason"),
                                 retryable=current_run.metadata.get("retryable"),
+                                error=current_run.metadata.get("error"),
                             ),
                         )
                         if term_evt.event_id not in emitted_event_ids:

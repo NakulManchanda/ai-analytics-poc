@@ -108,6 +108,7 @@ class OrchestrationError(ValueError):
         self.code = code
         self.retryable = retryable
         self.llm_call_id = llm_call_id
+        self.message = message
 
 
 def parse_query_proposal(
@@ -517,8 +518,35 @@ class OrchestrationLoop:
                         )
                     query_result = sanitize_query_result(raw_query_result)
                 except MCPToolError as err:
+                    fail_duration_ms = int((self._monotonic() - tool_start) * 1000)
+                    error_msg = err.message or str(err)
+                    emit(
+                        "tool.failed",
+                        {
+                            "tool_call_id": tool_call_id,
+                            "tool_name": proposal.name,
+                            "error": error_msg,
+                            "duration_ms": fail_duration_ms,
+                        },
+                        tool_call_id=tool_call_id,
+                    )
+                    failed_tool_step = RunStep(
+                        step_id=generate_step_id(),
+                        run_id=run_id,
+                        sequence=step_seq,
+                        step_type="tool_call",
+                        status="failed",
+                        tool_name=proposal.name,
+                        tool_call_id=tool_call_id,
+                        input_summary=json.dumps(tool_arguments, sort_keys=True),
+                        output_summary=f"error: {error_msg}",
+                        duration_ms=fail_duration_ms,
+                    )
+                    self._repo.add_run_step(failed_tool_step)
+                    steps.append(failed_tool_step)
+                    step_seq += 1
                     raise OrchestrationError(
-                        "mcp_tool_error", err.retryable, llm_call_id, str(err)
+                        "mcp_tool_error", err.retryable, llm_call_id, error_msg
                     ) from err
                 tool_duration_ms = int((self._monotonic() - tool_start) * 1000)
                 tool_latency_ms = tool_duration_ms
@@ -845,6 +873,7 @@ class OrchestrationLoop:
                     failure_code=err.code,
                     telemetry=run_telemetry,
                     retryable=err.retryable,
+                    error=err.message or str(err),
                 ),
                 llm_call_id=err.llm_call_id or None,
             )

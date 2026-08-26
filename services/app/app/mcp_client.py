@@ -22,9 +22,10 @@ SCHEMA_RESOURCE_URI = "dataset://nyc-taxi/schema"
 
 
 class MCPToolError(Exception):
-    def __init__(self, retryable: bool) -> None:
-        super().__init__()
+    def __init__(self, retryable: bool, message: str | None = None) -> None:
+        super().__init__(message or "MCP tool execution failed")
         self.retryable = retryable
+        self.message = message or "MCP tool execution failed"
 
 
 class DatasetProfileMCPClient(Protocol):
@@ -49,23 +50,27 @@ class FastMCPDatasetProfileClient:
         try:
             return asyncio.run(self._get_dataset_profile())
         except (ClientError, HTTPError, McpError, OSError, RuntimeError) as error:
-            raise MCPToolError(retryable=True) from error
+            raise MCPToolError(retryable=True, message=str(error)) from error
 
     def get_dataset_schema(self) -> dict[str, object]:
         try:
             return asyncio.run(self._get_dataset_schema())
         except (ClientError, HTTPError, McpError, OSError, RuntimeError) as error:
-            raise MCPToolError(retryable=True) from error
+            raise MCPToolError(retryable=True, message=str(error)) from error
 
     def query_taxi_data(self, *, analysis: str, limit: int) -> dict[str, object]:
         if analysis not in ALLOWED_ANALYSES:
-            raise MCPToolError(retryable=False)
+            raise MCPToolError(
+                retryable=False, message=f"Disallowed analysis '{analysis}'"
+            )
         if isinstance(limit, bool) or not 1 <= limit <= 20:
-            raise MCPToolError(retryable=False)
+            raise MCPToolError(
+                retryable=False, message=f"Limit {limit} outside allowed range [1, 20]"
+            )
         try:
             return asyncio.run(self._query_taxi_data(analysis=analysis, limit=limit))
         except (ClientError, HTTPError, McpError, OSError, RuntimeError) as error:
-            raise MCPToolError(retryable=True) from error
+            raise MCPToolError(retryable=True, message=str(error)) from error
 
     def average_trip_metrics(
         self, *, region_name: str | None = None
@@ -75,11 +80,13 @@ class FastMCPDatasetProfileClient:
             or not region_name.strip()
             or len(region_name) > 128
         ):
-            raise MCPToolError(retryable=False)
+            raise MCPToolError(
+                retryable=False, message=f"Invalid region_name '{region_name}'"
+            )
         try:
             return asyncio.run(self._average_trip_metrics(region_name=region_name))
         except (ClientError, HTTPError, McpError, OSError, RuntimeError) as error:
-            raise MCPToolError(retryable=True) from error
+            raise MCPToolError(retryable=True, message=str(error)) from error
 
     async def _get_dataset_profile(self) -> dict[str, object]:
         async with Client(self._mcp_url) as client:
