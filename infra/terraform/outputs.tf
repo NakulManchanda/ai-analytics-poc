@@ -122,6 +122,16 @@ output "custom_domain_urls" {
   ] : []
 }
 
+output "elasticache_redis_endpoint" {
+  description = "Primary endpoint address of the ElastiCache Redis node (transient event delivery)."
+  value       = aws_elasticache_cluster.redis.cache_nodes[0].address
+}
+
+output "elasticache_redis_url" {
+  description = "Full REDIS_URL for the ECS app and worker tasks."
+  value       = "redis://${aws_elasticache_cluster.redis.cache_nodes[0].address}:6379/0"
+}
+
 output "budget_name" {
   description = "Name of the monthly AWS cost budget, if enabled."
   value       = try(aws_budgets_budget.monthly_cost[0].name, null)
