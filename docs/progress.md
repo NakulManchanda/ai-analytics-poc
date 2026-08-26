@@ -24,13 +24,20 @@ four-message/two-run conversation with completed steps; and a replacement ECS
 task restored the same conversation, six reconstructed SSE events, telemetry,
 and TTFT in a fresh Chrome tab. Details are recorded in work history 0030.
 
-The release is not yet CloudWatch-clean: without `REDIS_URL`, the app defaults
-to `redis://localhost:6379/0` and logs connection-refused publish/read errors.
-Issue #57 tracks this deployment configuration gap, so the CloudWatch-clean
-criterion and v1.1 tag remain pending.
+The user confirmed the deployed/manual checkpoint, and release commit `2febb216`
+is tagged `v1.1-foundation-truthful-state`. The unconfigured Redis path is not a
+v1.1 blocker; issue #57 now belongs to v2 transient streaming delivery.
 
 The v1.1 integration review logged two non-blocking follow-ups: #54 (stale
 conversation pointers) and #55 (unavailable telemetry and partial snapshots).
+
+## v2 streaming text
+
+Issue #61 is the active architectural milestone. It replaces the blocking final
+answer with a run-first lifecycle, genuine Bedrock answer deltas over live SSE,
+truthful provider TTFT, progressive browser rendering, and durable persistence
+of the completed answer. Redis #57 is transient delivery only; cancellation and
+voice remain later conceptual steps.
 
 ## Historical baseline
 

@@ -34,4 +34,6 @@ Monotonically numbered log of every post-bootstrap task. Each entry records the 
 | [0028](0028-v11-sse-stability.md) | v1.1 | [#50](https://github.com/NakulManchanda/ai-analytics-poc/pull/50) | Stable Timeline Inspector SSE lifecycle | Merged (`84c298f`) |
 | [0029](0029-v11-truthful-ui.md) | v1.1 | [#53](https://github.com/NakulManchanda/ai-analytics-poc/pull/53) | Truthful durable conversation, context, and telemetry UI | Merged (`60373f3`) |
 | [0030](0030-v11-integration.md) | v1.1 | [#56](https://github.com/NakulManchanda/ai-analytics-poc/pull/56) | Local integration contract smoke and truthful UAT boundary | Draft for #49 |
-| [0031](0031-average-trip-metrics.md) | v1.1 backlog | [#60](https://github.com/NakulManchanda/ai-analytics-poc/pull/60) | Governed average trip metrics and sample-chip contrast | Draft for #58/#59 |
+| [0031](0031-average-trip-metrics.md) | v1.1 backlog | [#60](https://github.com/NakulManchanda/ai-analytics-poc/pull/60) | Governed average trip metrics and sample-chip contrast | Merged (`a0c372e`) |
+| [0032](0032-elasticache-redis.md) | v2 infra | [#63](https://github.com/NakulManchanda/ai-analytics-poc/pull/63) | Provision ElastiCache Redis for transient delivery | Merged (`6ad927b`) |
+| [0033](0033-v2-streaming-text.md) | v2 | [#62](https://github.com/NakulManchanda/ai-analytics-poc/pull/62) | Genuine provider text streaming over live run-first SSE | In progress for #61 |
