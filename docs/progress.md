@@ -31,13 +31,18 @@ v1.1 blocker; issue #57 now belongs to v2 transient streaming delivery.
 The v1.1 integration review logged two non-blocking follow-ups: #54 (stale
 conversation pointers) and #55 (unavailable telemetry and partial snapshots).
 
-## v2 streaming text
+## v2 streaming text and live event delivery
 
-Issue #61 is the active architectural milestone. It replaces the blocking final
-answer with a run-first lifecycle, genuine Bedrock answer deltas over live SSE,
-truthful provider TTFT, progressive browser rendering, and durable persistence
-of the completed answer. Redis #57 is transient delivery only; cancellation and
-voice remain later conceptual steps.
+The v2 live streaming text milestone is merged on `main`:
+
+- #57 — provision ElastiCache Redis for transient delivery (PR #63, `6ad927b`)
+- #61 — genuine provider text streaming over live run-first SSE (PR #62, `f536f54`)
+
+Issue #61 delivers the run-first `POST /api/runs` lifecycle returning `202 Accepted`
+with immediate `run_id`, live SSE token delta streaming via Bedrock `converse_stream`,
+truthful provider TTFT latency metrics, progressive React frontend rendering, and
+enhanced high-contrast sample query chips. Live Redis Streams coordinate in-flight delivery
+while DynamoDB durably owns completed conversation and run step state.
 
 ## Historical baseline
 
