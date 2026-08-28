@@ -1,119 +1,64 @@
-# Next session handoff
+# Next Session Handoff
 
-Last updated: 2026-08-25 (America/Toronto)
+Last updated: 2026-08-27 (America/Toronto)
 
-## Start here
+## Current Baseline & Release State
 
-The next implementation slice is one deliberately narrow PR that closes GitHub issues
-[#58](https://github.com/NakulManchanda/ai-analytics-poc/issues/58) and
-[#59](https://github.com/NakulManchanda/ai-analytics-poc/issues/59):
+- **Current `main` commit**: `30c65efd71ceeec8b34531d94e9f4f47fd32e91d` (PR #85 merge).
+- **Git Tags**:
+  - `v1` (`9f1eef8`)
+  - `v1.1-foundation-truthful-state`
+  - `v2` and `v2-streaming-text` (`a5fc606`)
+  - `v3` and `v3-cancellable-runs` (`dfc444e` / `30c65ef`)
+- **Live Deployed Stack**:
+  - URL: **[https://ai.sibkaro.com](https://ai.sibkaro.com)**
+  - ECS Fargate Task Definition: `ai-analytics-poc-demo-ai-app:6` (running `v3` image)
+  - FastMCP Analytics Service: `analytics-mcp` (Service Connect `http://analytics-mcp:8001/mcp`)
+  - Elasticache Redis: `ai-analytics-poc-demo-redis.k60bcs.0001.use1.cache.amazonaws.com:6379`
+  - CloudFront CDN + S3 Static Hosting: `E1OSFZYOVXM62O` / `ai-analytics-poc-demo-107207236011-us-east-1-frontend`
 
-1. Add a governed, parameterized MCP tool named `average_trip_metrics`.
-2. Fix the unreadable sample-question chip text color.
+---
 
-Do not include Redis issue #57, the other v1.1 follow-ups, v2 streaming, or unrelated cleanup
-in this PR.
+## Milestone Accomplishments
 
-## Repository and deployment baseline
+### 1. Milestone v1 & v1.1 — Foundation & Truthful Governed Analytics
+- FastMCP tool governance: `query_taxi_data` and parameterized `average_trip_metrics` with zero-copy DuckDB execution over pinned NYC yellow taxi parquet.
+- AWS Bedrock Nova Micro proposal and synthesis with zero hallucinated SQL.
+- DynamoDB durable state persistence for conversations, messages, runs, and steps with full restart recovery.
 
-- Remote `main`: `2febb2166281e408af4dea9922b343394d4dd388`, merge commit for PR #56.
-- Existing `v1` tag: annotated tag object `9f1eef8`, pointing to `fa5fe2f`.
-- No `v1.1-foundation-truthful-state` tag was observed at this handoff.
-- Last verified deployed application image/source checkpoint: `60373f3`, ECS task definition
-  `ai-app:5`. PR #56 added integration verification and documentation after that runtime build.
-- DynamoDB restart/reload recovery was verified for one conversation, four messages, two runs,
-  and their steps.
-- Redis is intentionally unconfigured in the deployed stack. Durable SSE reconstruction works,
-  while the separate localhost-fallback cleanup remains issue #57. Do not provision new AWS
-  infrastructure in this slice.
+### 2. Milestone v2 — Realtime Streaming Text & Live Telemetry
+- Amazon Bedrock `InvokeModelWithResponseStream` progressive token streaming with sub-300ms TTFT.
+- Live Server-Sent Events (SSE) `/api/runs/{run_id}/events` stream backed by Redis Streams (`XADD`/`XREAD`) with durable fallback.
+- Multi-borough tool call auto-collapse ensuring Bedrock Nova Micro aggregates all boroughs in a single governed execution.
 
-## Failure evidence for issue #58
+### 3. Milestone v3 — Cancellable Runs & Instant Abort
+- **State & API**: Added `cancel_requested` and `cancelled` run statuses and `POST /api/runs/{run_id}/cancel` endpoint (returning `202 Accepted`).
+- **Sub-100ms Cooperative Abort**: `_run_with_cancellation` helper executes heavy DuckDB queries and LLM calls in thread tasks with 50ms Redis cancel-flag polling, aborting in-flight execution immediately without socket blocking.
+- **Bedrock Token Abort**: Token stream checks cancellation per chunk, halts immediately, and saves partial text with `[interrupted]`.
+- **SSE Stream Lifecycle**: SSE event generator terminates immediately upon emitting `run.cancelled`.
+- **Frontend UX**: React UI Stop button with `AbortController` instantly unblocks form actions (<50ms) and renders warning badges and partial telemetry in the Run Timeline Inspector.
 
-The public sample prompt is:
+---
 
-```text
-Compare average trip distance and fare amount across major pickup boroughs
-```
+## Start Here: Next Milestone (Milestone 4 — Voice & Multimodal Interaction)
 
-The deployed API returned HTTP 422. DynamoDB run `run_a299b56584de4b4e` recorded:
+According to `ai_analytics_poc_realtime_multimodal_plan.md` and `docs/implementation-plan.md`, the next conceptual phase is **Milestone 4: Voice / Audio Ingestion & Realtime Streaming**.
 
-- run status `failed`;
-- failure code `tool_validation_error`;
-- completed `llm_proposal` step with an empty tool name;
-- failed `validation_error` step with `arguments: None`;
-- no MCP/DuckDB execution.
+### Core Architecture Goals for Next Slice:
+1. **Voice Activity & Audio Input**:
+   - Ingest microphone audio chunks in the browser UI.
+   - Integrate with AWS Transcribe streaming or Bedrock multimodal audio input.
+2. **Instant Voice Barge-In (Interruption)**:
+   - Leverage the sub-50ms instant cancellation and partial message preservation established in Milestone v3 when speech is detected (barge-in).
+3. **Audio Output Streaming (TTS)**:
+   - Stream synthesized speech audio chunks (e.g. AWS Polly / Bedrock voice output) back to the browser.
 
-The existing governed query surface only contains `top_pickup_zones`,
-`trip_volume_by_hour`, and `average_distance_by_weekday`. This is an isolated analytics
-capability gap, not a DynamoDB or Redis failure.
+---
 
-## Approved tool direction
-
-Use the generic tool name `average_trip_metrics`, not
-`average_trip_metrics_by_pickup_borough`.
-
-The bounded initial contract is:
-
-- optional governed `region_name` input;
-- omitted region compares valid major pickup regions;
-- supplied region filters to that named pickup region;
-- output includes region name, trip count, average trip distance, and average fare amount;
-- regions come from the pinned taxi-zone lookup;
-- default comparison excludes sentinel/non-borough values such as `Unknown`, `N/A`, and `EWR`;
-- unknown or malformed regions receive a stable, truthful, non-retryable validation response;
-- no arbitrary SQL, paths, column selection, or unbounded grouping crosses the MCP boundary;
-- existing governed analyses remain supported.
-
-Keep the MCP server LLM-free. The application continues to own model calls, proposal validation,
-loop budgets, and durable state.
-
-## UI contrast evidence for issue #59
-
-In `web/src/styles.css`, `.sample-chip` resolves `--color-surface-muted` to dark navy, while
-`--color-text` is undefined and falls back to another dark color. The hover state must also keep
-a readable foreground/background pair. Fix default, hover, and keyboard-focus contrast without
-redesigning the page or changing click-to-populate behavior. Verify WCAG AA contrast and capture
-browser evidence.
-
-## Execution shape
+## Suggested Prompt for Next Agent Session
 
 ```text
-remote main (2febb216)
-        |
-        +-- .worktrees/average-trip-metrics
-                branch: codex/average-trip-metrics
-                issues: #58 + #59
-                PR: one narrow PR linking both issues
-```
-
-Likely shared/backend files are listed in issue #58. The UI change should remain confined to
-`web/src/styles.css` and focused verification. Start with failing tests for the tool contract and
-the exact public prompt, then implement the dataset, MCP, application proposal/validation, and
-answer-formatting path. Run focused tests, relevant full service suites, the frontend production
-build, and GitHub Actions. Record architecture impact, exact commands, results, limitations, and
-the repository-required work-history entry.
-
-AWS checks are not needed on every local commit. After merge and a meaningful deploy checkpoint,
-build immutable image tags from the merge commit, deploy intentionally, then run public smoke and
-AWS/DynamoDB verification. Deployment is separate from merging unless an explicit workflow does
-both.
-
-## Separate open work
-
-- #57: remove implicit localhost Redis behavior when Redis is unconfigured; no new infrastructure.
-- #54 and #55: v1.1 UI/telemetry follow-ups.
-- #44: v1.1 roadmap tracking.
-
-Do not silently expand the #58/#59 PR to cover these issues.
-
-## Suggested prompt for a new Codex task
-
-```text
-Read AGENTS.md, docs/next-session-handoff.md, issues #58 and #59, and the required project
-requirements/plans. Implement #58 and #59 together in the single approved next PR. Work only in
-the existing `.worktrees/average-trip-metrics` worktree on `codex/average-trip-metrics`, and use
-TDD. The MCP tool must be named `average_trip_metrics` and accept an optional governed
-`region_name`; do not add arbitrary SQL or start v2 streaming. Also fix sample-question chip
-contrast. Link both issues, keep the PR narrow, run all relevant local checks and GitHub CI,
-perform independent review, and report deployment as a separate post-merge action.
+Read AGENTS.md, docs/next-session-handoff.md, docs/progress.md, and ai_analytics_poc_realtime_multimodal_plan.md.
+Milestones v1, v1.1, v2, and v3 are completed, merged into main (at commit 30c65ef), deployed to https://ai.sibkaro.com, and tagged v3 / v3-cancellable-runs.
+Proceed with planning and implementing the next milestone (Milestone 4: Voice / Audio Ingestion & Barge-In) in focused, reviewable PR tracks using dedicated worktrees under .worktrees/.
 ```
