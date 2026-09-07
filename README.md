@@ -175,6 +175,23 @@ docker compose up --build
 
 > 💡 **How to Test Locally**: For a step-by-step checklist with command snippets and expected outputs, see the **[Local Docker Testing Guide](docs/local-uat-guide.md)**.
 
+### Opt-in local Bedrock mode
+
+The default Compose and automated test paths use the deterministic fake LLM.
+For an integration-realistic local call to Amazon Nova Micro, provide the name
+of the already-provisioned shared DynamoDB state table and use your existing AWS
+profile; credentials are mounted read-only and are never copied into the image:
+
+```bash
+export DYNAMODB_TABLE_NAME=your-shared-state-table
+export AWS_PROFILE=your-profile
+make local-bedrock-compose
+```
+
+This path fails closed without `DYNAMODB_TABLE_NAME`. Its real Bedrock calls
+share the application-wide monthly allowance; a local in-memory repository
+cannot coordinate that allowance between processes.
+
 ### 2. Run All Automated Test Suites
 
 Execute all Python pytest suites (app, MCP, dataset spike, infrastructure) and React vitest tests:

@@ -3,6 +3,7 @@ from app.config import Settings
 from app.llm import (
     BEDROCK_RUNTIME_CONFIG,
     BedrockLLMClient,
+    LLMProviderError,
     LLMResult,
     ToolProposalResult,
     create_llm_client,
@@ -135,6 +136,27 @@ def test_ask_returns_the_fake_client_answer_and_usage_metadata() -> None:
     }
     assert llm_client.proposal_prompts == ["Summarize this."]
     assert llm_client.answer_prompts == ["Summarize this."]
+
+
+def test_ask_returns_a_clear_response_when_shared_bedrock_allowance_is_exhausted() -> None:
+    class ExhaustedLLMClient(FakeLLMClient):
+        def propose_taxi_query(
+            self, _prompt: str, _schema: dict[str, object]
+        ) -> ToolProposalResult:
+            raise LLMProviderError(False, code="bedrock_budget_exhausted")
+
+    client = TestClient(
+        create_app(llm_client=ExhaustedLLMClient(), mcp_client=FakeMCPClient())
+    )
+
+    response = client.post("/api/ask", json={"prompt": "Summarize this."})
+
+    assert response.status_code == 429
+    assert response.json()["detail"] == {
+        "code": "bedrock_budget_exhausted",
+        "llm_call_id": response.json()["detail"]["llm_call_id"],
+        "retryable": False,
+    }
 
 
 def test_ask_assigns_a_distinct_opaque_id_to_each_call() -> None:
@@ -498,7 +520,11 @@ def test_create_llm_client_disables_bedrock_runtime_retries(
 
     monkeypatch.setattr(boto3, "client", fake_boto3_client)
 
-    llm_client = create_llm_client(Settings())
+    class NoopBudget:
+        def reserve(self, _model_id: str) -> None:
+            return None
+
+    llm_client = create_llm_client(Settings(), budget=NoopBudget())
 
     assert llm_client._get_runtime_client() is runtime_client
     assert captured == {

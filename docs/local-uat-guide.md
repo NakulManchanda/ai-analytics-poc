@@ -15,6 +15,27 @@ docker compose up --build -d
 The web gateway is available at <http://localhost:3000>. The Compose path uses
 the local fake LLM, so these checks do not invoke Bedrock.
 
+## Opt-in real Bedrock mode
+
+Use this only when an integration-realistic Nova Micro invocation is useful.
+It reuses the host AWS profile through a read-only mount and requires the
+shared durable state table, so its reservations participate in the same
+application-wide monthly allowance as hosted calls:
+
+```bash
+export DYNAMODB_TABLE_NAME=your-shared-state-table
+export AWS_PROFILE=your-profile
+make local-bedrock-compose
+```
+
+`GLOBAL_BEDROCK_MONTHLY_LIMIT_USD` defaults to `5.00` and may be set before
+startup. The application reserves a conservative amount before every blocking
+or streaming Nova Micro call. It does not settle actual usage or guarantee the
+whole AWS invoice; it only caps this application's authorized Bedrock calls.
+If the shared table, supported model pricing, or reservation check is
+unavailable, the call is rejected. Do not use purely local/in-memory state for
+this mode because it cannot coordinate a global allowance across processes.
+
 ## One durable-conversation API flow
 
 The server creates the conversation ID on the first request. Reuse that ID for

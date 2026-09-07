@@ -73,3 +73,12 @@ current local and public UAT guides for this release's verification boundaries.
 Terraform park/resume support preserves the deployed architecture while avoiding
 continuous backend charges between tests. Read [the runtime runbook](demo-runtime.md)
 and [next-session status](next-session-handoff.md) before starting AWS testing.
+
+## Shared Bedrock application allowance
+
+Issue #88 adds a configurable USD 5.00 monthly UTC allowance for this
+application's Nova Micro invocations. It uses a durable atomic reservation
+before every blocking or streaming call and fails closed if the shared budget
+cannot be safely authorized. The default local stack remains fake; an explicit
+local real-Bedrock mode requires portable `DYNAMODB_TABLE_NAME` and AWS profile
+configuration. This is an application guardrail, not an AWS billing cap.

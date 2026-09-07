@@ -84,6 +84,8 @@ def create_ask_router(orchestration_loop: OrchestrationLoop) -> APIRouter:
             status_code = 503 if error.retryable else 502
             if error.code == "llm_configuration_error":
                 status_code = 503
+            elif error.code == "bedrock_budget_exhausted":
+                status_code = 429
             elif error.code == "tool_validation_error":
                 status_code = 422
             elif error.code == "conversation_not_found":

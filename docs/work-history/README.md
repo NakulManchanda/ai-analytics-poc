@@ -50,3 +50,4 @@ Monotonically numbered log of every post-bootstrap task. Each entry records the 
 | [0044](0044-cancel-sse-stream-close.md) | v3 | [#85](https://github.com/NakulManchanda/ai-analytics-poc/pull/85) | SSE stream close on cancel and client-side abort | Draft for #84 |
 
 - [0045 — Terraform demo runtime parking](0045-demo-runtime-parking.md)
+- [0046 — Shared Bedrock application allowance](0046-global-bedrock-application-allowance.md)
