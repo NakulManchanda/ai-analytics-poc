@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from decimal import Decimal
+from decimal import ROUND_CEILING, Decimal
 from typing import Any
 
 import boto3
@@ -11,12 +11,23 @@ from app.config import DEFAULT_MODEL_ID
 
 DEFAULT_MONTHLY_BEDROCK_LIMIT_USD = "5.00"
 MICRO_USD_PER_USD = 1_000_000
-NOVA_MICRO_INPUT_MICRO_USD_PER_TOKEN = 35 // 1_000
-NOVA_MICRO_OUTPUT_MICRO_USD_PER_TOKEN = 140 // 1_000
 NOVA_MICRO_MAX_INPUT_TOKENS = 128_000
 NOVA_MICRO_MAX_OUTPUT_TOKENS = 128
-# $0.035/M input and $0.140/M output, using the model's 128K context window.
-NOVA_MICRO_MAX_CALL_RESERVATION_MICRO_USD = 4_498
+NOVA_MICRO_INPUT_USD_PER_MILLION_TOKENS = Decimal("0.035")
+NOVA_MICRO_OUTPUT_USD_PER_MILLION_TOKENS = Decimal("0.140")
+# Conservatively prices a 128K-token input plus the application's 128-token
+# output ceiling at the pinned model's on-demand rates, rounded upward.
+NOVA_MICRO_MAX_CALL_RESERVATION_MICRO_USD = int(
+    (
+        (
+            NOVA_MICRO_MAX_INPUT_TOKENS * NOVA_MICRO_INPUT_USD_PER_MILLION_TOKENS
+            + NOVA_MICRO_MAX_OUTPUT_TOKENS
+            * NOVA_MICRO_OUTPUT_USD_PER_MILLION_TOKENS
+        )
+        * MICRO_USD_PER_USD
+        / 1_000_000
+    ).to_integral_value(rounding=ROUND_CEILING)
+)
 
 
 class BedrockBudgetError(Exception):

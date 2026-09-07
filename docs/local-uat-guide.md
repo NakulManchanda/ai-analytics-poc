@@ -35,6 +35,9 @@ whole AWS invoice; it only caps this application's authorized Bedrock calls.
 If the shared table, supported model pricing, or reservation check is
 unavailable, the call is rejected. Do not use purely local/in-memory state for
 this mode because it cannot coordinate a global allowance across processes.
+The reservation uses the current Nova Micro on-demand price snapshot and the
+application's request ceilings. Review that snapshot before changing the model,
+region, provider pricing, or request token limits.
 
 ## One durable-conversation API flow
 

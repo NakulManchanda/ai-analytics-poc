@@ -39,3 +39,5 @@ was performed.
 
 An application-side allowance can safely reserve a conservative upper bound,
 but cannot represent unrelated AWS usage or exact post-call provider billing.
+The Nova Micro price snapshot must be reviewed when provider pricing, model,
+region, or request token limits change.
