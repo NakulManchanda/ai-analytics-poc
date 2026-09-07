@@ -1,6 +1,19 @@
 # Next Session Handoff
 
-Last updated: 2026-08-27 (America/Toronto)
+Last updated: 2026-09-07 (America/Toronto)
+
+> **AWS demo cost control (2026-09-07):** Before AWS testing, read
+> [the park/resume runbook](demo-runtime.md) and the latest apply evidence on
+> [issue #86](https://github.com/NakulManchanda/ai-analytics-poc/issues/86).
+> Run `terraform -chdir=infra/terraform output -raw demo_enabled` in the main
+> checkout to check the last applied mode. Persist `demo_enabled = true` in
+> local `infra/terraform/terraform.tfvars` before resuming, then review
+> `make -C infra/terraform runtime-plan` and run `runtime-apply` when authorized.
+> Return it to `false` after testing. Preserve the pinned image digests in
+> local tfvars. Main-checkout state is authoritative; never apply a worktree
+> planning snapshot or copy it back. Local Docker/Compose is unchanged.
+> The deployment details below are historical v3 evidence, not proof that
+> AWS is currently running.
 
 ## Current Baseline & Release State
 

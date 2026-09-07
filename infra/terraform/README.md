@@ -60,3 +60,9 @@ To enable the account-level spend alerts (Layer 3 billing safety net):
    - $10 forecasted spend (`GREATER_THAN` $10.00 forecasted)
 
 > **Note on Forecast Alerts:** AWS Budgets forecasted notifications require historical account usage telemetry. On brand-new AWS accounts without historical usage data, forecasted alerts may not trigger until sufficient billing history has accumulated. Actual spend alerts fire as usage is recorded.
+
+## Park between demos
+
+See [the park/resume runbook](../../docs/demo-runtime.md) before deploying or
+changing runtime state. Persist `demo_enabled` in local `terraform.tfvars`;
+use `make runtime-plan` and apply only the reviewed plan.

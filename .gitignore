@@ -48,3 +48,6 @@ data/
 artifacts/
 *.duckdb
 *.duckdb.wal
+
+# Saved Terraform plans can contain sensitive values
+*.tfplan
