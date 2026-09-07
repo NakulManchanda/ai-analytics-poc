@@ -31,3 +31,6 @@ bedrock_model_arns = [
 enable_budget_alerts     = false
 budget_alert_email       = "alert-recipient@example.com"
 monthly_budget_limit_usd = "10.0"
+
+# Set false between demos; true before testing. See docs/demo-runtime.md.
+demo_enabled = true

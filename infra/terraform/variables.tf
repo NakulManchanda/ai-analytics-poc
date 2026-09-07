@@ -119,13 +119,13 @@ variable "monthly_budget_limit_usd" {
 }
 
 variable "ai_app_image_tag" {
-  description = "Image tag to deploy for the ai-app service."
+  description = "Image tag or sha256 digest to deploy for the ai-app service."
   type        = string
   default     = "latest"
 }
 
 variable "analytics_mcp_image_tag" {
-  description = "Image tag to deploy for the analytics-mcp service."
+  description = "Image tag or sha256 digest to deploy for the analytics-mcp service."
   type        = string
   default     = "latest"
 }

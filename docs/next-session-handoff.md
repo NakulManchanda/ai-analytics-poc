@@ -2,6 +2,25 @@
 
 Last updated: 2026-08-27 (America/Toronto)
 
+> **Demo-runtime change in progress:** The deployed demo is currently **LIVE**;
+> do not report it as parked. Issue #86's draft PR is pending and no apply has
+> occurred. The user has authorized the apply after the PR merges.
+> The future runtime toggle defaults to `demo_enabled = true`; setting the
+> persisted local `infra/terraform/terraform.tfvars` value to `false` parks
+> the runtime, and `true` resumes it. Before any apply, integrate the code
+> with the authoritative main-checkout
+> `infra/terraform/terraform.tfstate`; this worktree's state is a planning
+> snapshot only and must never be applied or copied back. Use
+> `make -C infra/terraform runtime-plan` to write the ignored saved plan and
+> `make -C infra/terraform runtime-apply` to apply it. After merging, use
+> `git pull --ff-only` in the main checkout before planning/applying. Recovery
+> pins `ai_app_image_tag` to
+> `sha256:9f9de9e0b36134ec9f86ced47846b8f8480f4e85fc99453c0b7e990b0ce4fa08`
+> and `analytics_mcp_image_tag` to
+> `sha256:234bcabadcdb29175c10a0c87c08225f529362951253e05c3cf40e1ebf8cc40d`;
+> both variables accept tags or digests. See `docs/demo-runtime.md` for the
+> exact resume and validation commands.
+
 ## Current Baseline & Release State
 
 - **Current `main` commit**: `30c65efd71ceeec8b34531d94e9f4f47fd32e91d` (PR #85 merge).

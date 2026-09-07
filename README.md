@@ -294,3 +294,10 @@ Every request operates under an immutable `ExecutionBudget` with strict limits:
 - [Monotonic Work History Ledger](docs/work-history/README.md)
 - [Architectural Decisions](docs/decisions/README.md)
 - [Progress Log](docs/progress.md)
+
+## Demo availability and cost control
+
+The hosted backend can be parked between testing sessions. Static hosting and
+durable data remain; API calls return 503 while parked. See the
+[Terraform park/resume runbook](docs/demo-runtime.md) for restart steps and
+[next-session handoff](docs/next-session-handoff.md) for the recorded apply status.

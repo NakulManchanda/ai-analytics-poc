@@ -38,7 +38,7 @@ resource "aws_ecs_task_definition" "analytics_mcp" {
   container_definitions = jsonencode([
     {
       name      = "analytics-mcp"
-      image     = "${aws_ecr_repository.analytics_mcp.repository_url}:${var.analytics_mcp_image_tag}"
+      image     = "${aws_ecr_repository.analytics_mcp.repository_url}${startswith(var.analytics_mcp_image_tag, "sha256:") ? "@" : ":"}${var.analytics_mcp_image_tag}"
       essential = true
       portMappings = [
         {
@@ -62,6 +62,8 @@ resource "aws_ecs_task_definition" "analytics_mcp" {
 }
 
 resource "aws_ecs_task_definition" "ai_app" {
+  count = var.demo_enabled ? 1 : 0
+
   family                   = "${local.name}-ai-app"
   network_mode             = "awsvpc"
   requires_compatibilities = ["FARGATE"]
@@ -73,7 +75,7 @@ resource "aws_ecs_task_definition" "ai_app" {
   container_definitions = jsonencode([
     {
       name      = "ai-app"
-      image     = "${aws_ecr_repository.ai_app.repository_url}:${var.ai_app_image_tag}"
+      image     = "${aws_ecr_repository.ai_app.repository_url}${startswith(var.ai_app_image_tag, "sha256:") ? "@" : ":"}${var.ai_app_image_tag}"
       essential = true
       portMappings = [
         {
@@ -115,7 +117,7 @@ resource "aws_ecs_task_definition" "ai_app" {
         },
         {
           name  = "REDIS_URL"
-          value = "redis://${aws_elasticache_cluster.redis.cache_nodes[0].address}:6379/0"
+          value = "redis://${aws_elasticache_cluster.redis[0].cache_nodes[0].address}:6379/0"
         }
       ]
       logConfiguration = {
@@ -131,6 +133,8 @@ resource "aws_ecs_task_definition" "ai_app" {
 }
 
 resource "aws_ecs_service" "analytics_mcp" {
+  count = var.demo_enabled ? 1 : 0
+
   name            = "${local.name}-analytics-mcp"
   cluster         = aws_ecs_cluster.main.id
   task_definition = aws_ecs_task_definition.analytics_mcp.arn
@@ -158,9 +162,11 @@ resource "aws_ecs_service" "analytics_mcp" {
 }
 
 resource "aws_ecs_service" "ai_app" {
+  count = var.demo_enabled ? 1 : 0
+
   name            = "${local.name}-ai-app"
   cluster         = aws_ecs_cluster.main.id
-  task_definition = aws_ecs_task_definition.ai_app.arn
+  task_definition = aws_ecs_task_definition.ai_app[0].arn
   desired_count   = var.ai_app_desired_count
   launch_type     = "FARGATE"
 

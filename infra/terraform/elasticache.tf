@@ -41,6 +41,8 @@ resource "aws_security_group" "redis" {
 }
 
 resource "aws_elasticache_cluster" "redis" {
+  count = var.demo_enabled ? 1 : 0
+
   cluster_id           = "${local.name}-redis"
   engine               = "redis"
   engine_version       = var.redis_engine_version

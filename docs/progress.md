@@ -67,3 +67,9 @@ Milestones 0–16 and prior public-UAT work remain historical baseline work. Any
 previous live-deployment statements are not v1.1 deployment evidence; use the
 current local and public UAT guides for this release's verification boundaries.
 
+
+## Demo cost control
+
+Terraform park/resume support preserves the deployed architecture while avoiding
+continuous backend charges between tests. Read [the runtime runbook](demo-runtime.md)
+and [next-session status](next-session-handoff.md) before starting AWS testing.

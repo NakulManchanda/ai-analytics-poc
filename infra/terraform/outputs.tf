@@ -70,29 +70,29 @@ output "console_links" {
     ai_app_log_group        = "https://${var.aws_region}.console.aws.amazon.com/cloudwatch/home?region=${var.aws_region}#logsV2:log-groups/log-group/${urlencode(aws_cloudwatch_log_group.ai_app.name)}"
     analytics_mcp_log_group = "https://${var.aws_region}.console.aws.amazon.com/cloudwatch/home?region=${var.aws_region}#logsV2:log-groups/log-group/${urlencode(aws_cloudwatch_log_group.analytics_mcp.name)}"
     budgets                 = "https://console.aws.amazon.com/costmanagement/home#/budgets"
-    alb                     = "https://${var.aws_region}.console.aws.amazon.com/ec2/home?region=${var.aws_region}#LoadBalancers:loadBalancerArn=${aws_lb.main.arn}"
+    alb                     = try("https://${var.aws_region}.console.aws.amazon.com/ec2/home?region=${var.aws_region}#LoadBalancers:loadBalancerArn=${aws_lb.main[0].arn}", null)
     cloudfront_distribution = "https://console.aws.amazon.com/cloudfront/v4/home#/distributions/${aws_cloudfront_distribution.main.id}"
   }
 }
 
 output "alb_dns_name" {
   description = "Public DNS name of the Application Load Balancer."
-  value       = aws_lb.main.dns_name
+  value       = try(aws_lb.main[0].dns_name, null)
 }
 
 output "alb_arn" {
   description = "ARN of the Application Load Balancer."
-  value       = aws_lb.main.arn
+  value       = try(aws_lb.main[0].arn, null)
 }
 
 output "ai_app_service_name" {
   description = "Name of the ai-app ECS service."
-  value       = aws_ecs_service.ai_app.name
+  value       = try(aws_ecs_service.ai_app[0].name, null)
 }
 
 output "analytics_mcp_service_name" {
   description = "Name of the analytics-mcp ECS service."
-  value       = aws_ecs_service.analytics_mcp.name
+  value       = try(aws_ecs_service.analytics_mcp[0].name, null)
 }
 
 output "service_connect_namespace" {
@@ -124,12 +124,12 @@ output "custom_domain_urls" {
 
 output "elasticache_redis_endpoint" {
   description = "Primary endpoint address of the ElastiCache Redis node (transient event delivery)."
-  value       = aws_elasticache_cluster.redis.cache_nodes[0].address
+  value       = try(aws_elasticache_cluster.redis[0].cache_nodes[0].address, null)
 }
 
 output "elasticache_redis_url" {
   description = "Full REDIS_URL for the ECS app and worker tasks."
-  value       = "redis://${aws_elasticache_cluster.redis.cache_nodes[0].address}:6379/0"
+  value       = try("redis://${aws_elasticache_cluster.redis[0].cache_nodes[0].address}:6379/0", null)
 }
 
 output "budget_name" {

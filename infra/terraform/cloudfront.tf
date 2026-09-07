@@ -46,17 +46,20 @@ resource "aws_cloudfront_distribution" "main" {
   }
 
   # Origin 2: Application Load Balancer for /api/* requests
-  origin {
-    domain_name = aws_lb.main.dns_name
-    origin_id   = "ALB-${aws_lb.main.name}"
+  dynamic "origin" {
+    for_each = var.demo_enabled ? [1] : []
+    content {
+      domain_name = aws_lb.main[0].dns_name
+      origin_id   = "ALB-${aws_lb.main[0].name}"
 
-    custom_origin_config {
-      http_port                = 80
-      https_port               = 443
-      origin_protocol_policy   = "http-only"
-      origin_ssl_protocols     = ["TLSv1.2"]
-      origin_keepalive_timeout = 60
-      origin_read_timeout      = 60
+      custom_origin_config {
+        http_port                = 80
+        https_port               = 443
+        origin_protocol_policy   = "http-only"
+        origin_ssl_protocols     = ["TLSv1.2"]
+        origin_keepalive_timeout = 60
+        origin_read_timeout      = 60
+      }
     }
   }
 
@@ -75,11 +78,19 @@ resource "aws_cloudfront_distribution" "main" {
   # Dynamic API cache behavior: route /api/* to ALB with caching disabled and headers preserved
   ordered_cache_behavior {
     path_pattern           = "/api/*"
-    target_origin_id       = "ALB-${aws_lb.main.name}"
+    target_origin_id       = var.demo_enabled ? "ALB-${aws_lb.main[0].name}" : "S3-${aws_s3_bucket.frontend.id}"
     viewer_protocol_policy = "redirect-to-https"
     allowed_methods        = ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"]
     cached_methods         = ["GET", "HEAD", "OPTIONS"]
     compress               = false
+
+    dynamic "function_association" {
+      for_each = var.demo_enabled ? [] : [1]
+      content {
+        event_type   = "viewer-request"
+        function_arn = aws_cloudfront_function.demo_offline.arn
+      }
+    }
 
     # Managed-CachingDisabled (4135ea2d-6df8-44a3-9df3-4b5a84be39ad)
     cache_policy_id = "4135ea2d-6df8-44a3-9df3-4b5a84be39ad"

@@ -140,19 +140,18 @@ resource "aws_security_group" "ecs_tasks" {
     self        = true
   }
 
+  # Keep all ECS egress inline. Mixing standalone and inline rules causes
+  # Terraform to revoke the Redis rule on the next apply. Private subnet CIDRs
+  # avoid a security-group dependency cycle; Redis ingress still permits only ECS.
+  egress {
+    description = "Redis event delivery to private cache subnets"
+    from_port   = 6379
+    to_port     = 6379
+    protocol    = "tcp"
+    cidr_blocks = var.private_subnet_cidrs
+  }
+
   tags = {
     Name = "${local.name}-ecs-tasks"
   }
-}
-
-# Separate rule to break the circular dependency between ecs_tasks and redis
-# security groups. Inline rules cannot mutually reference each other.
-resource "aws_security_group_rule" "ecs_tasks_to_redis" {
-  type                     = "egress"
-  description              = "Redis event delivery to ElastiCache"
-  from_port                = 6379
-  to_port                  = 6379
-  protocol                 = "tcp"
-  security_group_id        = aws_security_group.ecs_tasks.id
-  source_security_group_id = aws_security_group.redis.id
 }
