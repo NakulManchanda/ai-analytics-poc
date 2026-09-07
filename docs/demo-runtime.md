@@ -1,8 +1,15 @@
 # Demo Runtime: Park and Resume
 
-The demo is **live** today. This runbook describes the pending park/resume
-change; no Terraform apply has been run yet. Issue #86 has an in-progress
-draft PR.
+Use this runbook before AWS testing. Read the latest apply evidence on
+[issue #86](https://github.com/NakulManchanda/ai-analytics-poc/issues/86), then
+check the authoritative local Terraform output:
+
+```sh
+terraform -chdir=infra/terraform output -raw demo_enabled
+```
+
+`false` means parked; `true` means enabled in the last applied state. Verify
+AWS when diagnosing drift. Local Docker/Compose workflows are unchanged.
 
 ## State and safety
 
@@ -61,14 +68,14 @@ cd infra/terraform
 # Edit terraform.tfvars: demo_enabled = true, retaining the pinned image digests.
 make runtime-plan
 make runtime-apply
-aws ecs wait services-stable --cluster ai-analytics-poc-demo-cluster \\
+aws ecs wait services-stable --region us-east-1 --cluster ai-analytics-poc-demo-cluster \
   --services ai-analytics-poc-demo-ai-app ai-analytics-poc-demo-analytics-mcp
 curl -i https://ai.sibkaro.com/
 curl -i https://ai.sibkaro.com/api/
 ```
 
-Review the saved plan before `runtime-apply`. The authorization to apply has
-been granted for this change. Wait a few minutes for ECS, ALB, and CloudFront
+Review the saved plan before `runtime-apply`. The current request authorizes parking; resume when the user requests
+AWS testing or deployment. Wait a few minutes for ECS, ALB, and CloudFront
 routing. Confirm `/` serves the static UI and `/api/` no longer returns the
 parked JSON `503` “demo offline” response; no application health route is
 assumed by this check.

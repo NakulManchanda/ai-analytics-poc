@@ -1,25 +1,19 @@
 # Next Session Handoff
 
-Last updated: 2026-08-27 (America/Toronto)
+Last updated: 2026-09-07 (America/Toronto)
 
-> **Demo-runtime change in progress:** The deployed demo is currently **LIVE**;
-> do not report it as parked. Issue #86's draft PR is pending and no apply has
-> occurred. The user has authorized the apply after the PR merges.
-> The future runtime toggle defaults to `demo_enabled = true`; setting the
-> persisted local `infra/terraform/terraform.tfvars` value to `false` parks
-> the runtime, and `true` resumes it. Before any apply, integrate the code
-> with the authoritative main-checkout
-> `infra/terraform/terraform.tfstate`; this worktree's state is a planning
-> snapshot only and must never be applied or copied back. Use
-> `make -C infra/terraform runtime-plan` to write the ignored saved plan and
-> `make -C infra/terraform runtime-apply` to apply it. After merging, use
-> `git pull --ff-only` in the main checkout before planning/applying. Recovery
-> pins `ai_app_image_tag` to
-> `sha256:9f9de9e0b36134ec9f86ced47846b8f8480f4e85fc99453c0b7e990b0ce4fa08`
-> and `analytics_mcp_image_tag` to
-> `sha256:234bcabadcdb29175c10a0c87c08225f529362951253e05c3cf40e1ebf8cc40d`;
-> both variables accept tags or digests. See `docs/demo-runtime.md` for the
-> exact resume and validation commands.
+> **AWS demo cost control (2026-09-07):** Before AWS testing, read
+> [the park/resume runbook](demo-runtime.md) and the latest apply evidence on
+> [issue #86](https://github.com/NakulManchanda/ai-analytics-poc/issues/86).
+> Run `terraform -chdir=infra/terraform output -raw demo_enabled` in the main
+> checkout to check the last applied mode. Persist `demo_enabled = true` in
+> local `infra/terraform/terraform.tfvars` before resuming, then review
+> `make -C infra/terraform runtime-plan` and run `runtime-apply` when authorized.
+> Return it to `false` after testing. Preserve the pinned image digests in
+> local tfvars. Main-checkout state is authoritative; never apply a worktree
+> planning snapshot or copy it back. Local Docker/Compose is unchanged.
+> The deployment details below are historical v3 evidence, not proof that
+> AWS is currently running.
 
 ## Current Baseline & Release State
 
