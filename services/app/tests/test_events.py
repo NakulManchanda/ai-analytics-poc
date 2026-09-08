@@ -496,7 +496,14 @@ def test_voice_settings_load_from_environment_with_defaults(monkeypatch) -> None
     from app.config import VoiceSettings
 
     # Clear all voice env vars
-    for var in ["VOICE_ENABLED", "VOICE_PROVIDER", "VOICE_VOICE_NAME", "VOICE_NAME", "VOICE_LANGUAGE", "VOICE_STREAMING"]:
+    for var in [
+        "VOICE_ENABLED",
+        "VOICE_PROVIDER",
+        "VOICE_VOICE_NAME",
+        "VOICE_NAME",
+        "VOICE_LANGUAGE",
+        "VOICE_STREAMING",
+    ]:
         monkeypatch.delenv(var, raising=False)
 
     settings = VoiceSettings.from_environment()
@@ -525,7 +532,8 @@ def test_voice_settings_load_from_environment_with_custom_values(monkeypatch) ->
 
 
 def test_orchestration_loop_emits_answer_audio_when_voice_enabled() -> None:
-    from unittest.mock import MagicMock, patch
+    from unittest.mock import MagicMock
+
     from app.config import VoiceSettings
 
     repo = InMemoryStateRepository()
@@ -560,6 +568,7 @@ def test_orchestration_loop_emits_answer_audio_when_voice_enabled() -> None:
     assert "data" in answer_audio_event.payload
     # The audio bytes should be base64-encoded
     import base64
+
     decoded = base64.b64decode(answer_audio_event.payload["data"])
     assert decoded == b"fake_audio_bytes"
     assert answer_audio_event.payload["voice_name"] == "Joanna"
@@ -595,6 +604,7 @@ def test_orchestration_loop_skips_audio_when_voice_disabled() -> None:
 
 def test_orchestration_loop_handles_polly_synthesis_failure_gracefully() -> None:
     from unittest.mock import MagicMock
+
     from app.config import VoiceSettings
 
     repo = InMemoryStateRepository()
