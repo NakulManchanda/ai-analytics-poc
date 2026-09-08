@@ -138,7 +138,9 @@ def test_ask_returns_the_fake_client_answer_and_usage_metadata() -> None:
     assert llm_client.answer_prompts == ["Summarize this."]
 
 
-def test_ask_returns_a_clear_response_when_shared_bedrock_allowance_is_exhausted() -> None:
+def test_ask_returns_a_clear_response_when_shared_bedrock_allowance_is_exhausted() -> (
+    None
+):
     class ExhaustedLLMClient(FakeLLMClient):
         def propose_taxi_query(
             self, _prompt: str, _schema: dict[str, object]

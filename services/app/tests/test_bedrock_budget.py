@@ -51,20 +51,23 @@ class AtomicBudgetResource:
 def test_reservation_is_durable_and_uses_a_utc_month_key() -> None:
     table = AtomicBudgetTable()
     budget = DynamoDBBedrockBudget(
-        "shared-state", monthly_limit_micro_usd=NOVA_MICRO_MAX_CALL_RESERVATION_MICRO_USD * 2,
+        "shared-state",
+        monthly_limit_micro_usd=NOVA_MICRO_MAX_CALL_RESERVATION_MICRO_USD * 2,
         dynamodb_resource=AtomicBudgetResource(table),
     )
 
     budget.reserve_nova_micro_call("2026-09")
 
-    assert table.items[("BUDGET#BEDROCK", "MONTH#2026-09")][
-        "reserved_micro_usd"
-    ] == NOVA_MICRO_MAX_CALL_RESERVATION_MICRO_USD
+    assert (
+        table.items[("BUDGET#BEDROCK", "MONTH#2026-09")]["reserved_micro_usd"]
+        == NOVA_MICRO_MAX_CALL_RESERVATION_MICRO_USD
+    )
 
 
 def test_reservation_rejects_exhausted_month_before_invocation() -> None:
     budget = DynamoDBBedrockBudget(
-        "shared-state", monthly_limit_micro_usd=NOVA_MICRO_MAX_CALL_RESERVATION_MICRO_USD,
+        "shared-state",
+        monthly_limit_micro_usd=NOVA_MICRO_MAX_CALL_RESERVATION_MICRO_USD,
         dynamodb_resource=AtomicBudgetResource(AtomicBudgetTable()),
     )
 
@@ -76,7 +79,8 @@ def test_reservation_rejects_exhausted_month_before_invocation() -> None:
 def test_reservations_are_atomic_under_concurrency() -> None:
     table = AtomicBudgetTable()
     budget = DynamoDBBedrockBudget(
-        "shared-state", monthly_limit_micro_usd=NOVA_MICRO_MAX_CALL_RESERVATION_MICRO_USD * 3,
+        "shared-state",
+        monthly_limit_micro_usd=NOVA_MICRO_MAX_CALL_RESERVATION_MICRO_USD * 3,
         dynamodb_resource=AtomicBudgetResource(table),
     )
 
@@ -91,14 +95,16 @@ def test_reservations_are_atomic_under_concurrency() -> None:
         admitted = list(executor.map(lambda _: reserve(), range(12)))
 
     assert sum(admitted) == 3
-    assert table.items[("BUDGET#BEDROCK", "MONTH#2026-09")][
-        "reserved_micro_usd"
-    ] == NOVA_MICRO_MAX_CALL_RESERVATION_MICRO_USD * 3
+    assert (
+        table.items[("BUDGET#BEDROCK", "MONTH#2026-09")]["reserved_micro_usd"]
+        == NOVA_MICRO_MAX_CALL_RESERVATION_MICRO_USD * 3
+    )
 
 
 def test_new_utc_month_has_an_independent_allowance() -> None:
     budget = DynamoDBBedrockBudget(
-        "shared-state", monthly_limit_micro_usd=NOVA_MICRO_MAX_CALL_RESERVATION_MICRO_USD,
+        "shared-state",
+        monthly_limit_micro_usd=NOVA_MICRO_MAX_CALL_RESERVATION_MICRO_USD,
         dynamodb_resource=AtomicBudgetResource(AtomicBudgetTable()),
     )
 
@@ -149,7 +155,9 @@ def test_real_bedrock_client_reserves_before_each_provider_invocation() -> None:
     assert calls == ["amazon.nova-micro-v1:0"]
 
 
-def test_real_bedrock_client_does_not_invoke_provider_when_budget_is_exhausted() -> None:
+def test_real_bedrock_client_does_not_invoke_provider_when_budget_is_exhausted() -> (
+    None
+):
     class ExhaustedBudget:
         def reserve(self, _model_id: str) -> None:
             raise BedrockBudgetExceededError()

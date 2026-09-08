@@ -76,9 +76,9 @@ def test_bedrock_compose_override_is_explicit_and_uses_shared_durable_state() ->
     override = (ROOT / "docker-compose.bedrock.yml").read_text(encoding="utf-8")
 
     assert "LLM_PROVIDER: bedrock" in override
-    assert "DYNAMODB_TABLE_NAME: \"${DYNAMODB_TABLE_NAME:?" in override
+    assert 'DYNAMODB_TABLE_NAME: "${DYNAMODB_TABLE_NAME:?' in override
     assert "${HOME}/.aws:/aws:ro" in override
     assert (
-        "GLOBAL_BEDROCK_MONTHLY_LIMIT_USD: \""
+        'GLOBAL_BEDROCK_MONTHLY_LIMIT_USD: "'
         "${GLOBAL_BEDROCK_MONTHLY_LIMIT_USD:-5.00}" in override
     )

@@ -21,8 +21,7 @@ NOVA_MICRO_MAX_CALL_RESERVATION_MICRO_USD = int(
     (
         (
             NOVA_MICRO_MAX_INPUT_TOKENS * NOVA_MICRO_INPUT_USD_PER_MILLION_TOKENS
-            + NOVA_MICRO_MAX_OUTPUT_TOKENS
-            * NOVA_MICRO_OUTPUT_USD_PER_MILLION_TOKENS
+            + NOVA_MICRO_MAX_OUTPUT_TOKENS * NOVA_MICRO_OUTPUT_USD_PER_MILLION_TOKENS
         )
         * MICRO_USD_PER_USD
         / 1_000_000
@@ -56,7 +55,9 @@ def monthly_limit_micro_usd(value: str = DEFAULT_MONTHLY_BEDROCK_LIMIT_USD) -> i
         ) from error
     micro_usd = amount * MICRO_USD_PER_USD
     if amount <= 0 or micro_usd != micro_usd.to_integral_value():
-        raise ValueError("GLOBAL_BEDROCK_MONTHLY_LIMIT_USD must be a positive USD amount")
+        raise ValueError(
+            "GLOBAL_BEDROCK_MONTHLY_LIMIT_USD must be a positive USD amount"
+        )
     return int(micro_usd)
 
 
@@ -72,13 +73,17 @@ class DynamoDBBedrockBudget:
         region_name: str | None = None,
     ) -> None:
         if not table_name:
-            raise ValueError("A durable DynamoDB table is required for Bedrock budget enforcement")
+            raise ValueError(
+                "A durable DynamoDB table is required for Bedrock budget enforcement"
+            )
         if monthly_limit_micro_usd < NOVA_MICRO_MAX_CALL_RESERVATION_MICRO_USD:
             raise ValueError(
                 "Monthly Bedrock allowance cannot fund one conservative Nova Micro call"
             )
         self._monthly_limit_micro_usd = monthly_limit_micro_usd
-        resource = dynamodb_resource or boto3.resource("dynamodb", region_name=region_name)
+        resource = dynamodb_resource or boto3.resource(
+            "dynamodb", region_name=region_name
+        )
         self._table = resource.Table(table_name)
 
     def reserve_nova_micro_call(self, month: str | None = None) -> None:
@@ -104,7 +109,10 @@ class DynamoDBBedrockBudget:
                 },
             )
         except ClientError as error:
-            if error.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":
+            if (
+                error.response.get("Error", {}).get("Code")
+                == "ConditionalCheckFailedException"
+            ):
                 raise BedrockBudgetExceededError(
                     "The shared monthly Bedrock allowance is exhausted"
                 ) from error
