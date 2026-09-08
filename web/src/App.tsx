@@ -1,6 +1,8 @@
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { ContextInspector } from "./ContextInspector";
 import { TimelineInspector } from "./TimelineInspector";
+import { useVoiceInput } from "./useVoiceInput";
+import { WaveformVisualizer } from "./WaveformVisualizer";
 import {
   AskResponse,
   ChatTurn,
@@ -57,6 +59,24 @@ export default function App() {
   const [streamingAnswer, setStreamingAnswer] = useState<string>("");
   const hydrationVersion = useRef(0);
   const activeAbortController = useRef<AbortController | null>(null);
+
+  // Voice Input State & Audio Streaming
+  const handleVoiceTranscript = useCallback((text: string) => {
+    setPrompt((prev) => {
+      const trimmed = prev.trim();
+      return trimmed ? `${trimmed} ${text}` : text;
+    });
+  }, []);
+
+  const {
+    isListening,
+    isProcessing: isVoiceProcessing,
+    audioLevel,
+    error: voiceError,
+    startListening,
+    stopListening,
+    resetError: resetVoiceError,
+  } = useVoiceInput({ onTranscript: handleVoiceTranscript });
 
   useEffect(() => {
     let active = true;
@@ -434,6 +454,16 @@ export default function App() {
               <button type="submit" disabled={!prompt.trim() || isRunning}>
                 {isRunning ? "Running analysis…" : "Run analysis"}
               </button>
+              <button
+                type="button"
+                className={`btn-mic ${isListening ? "active" : ""}`}
+                onClick={isListening ? stopListening : startListening}
+                disabled={isRunning || isVoiceProcessing}
+                aria-label={isListening ? "Stop listening" : "Start voice input"}
+                title={isListening ? "Stop listening" : "Speak your question using microphone"}
+              >
+                {isListening ? "⏹ Stop Listening" : isVoiceProcessing ? "⏳ Transcribing…" : "🎤 Voice"}
+              </button>
               {isRunning && (
                 <button
                   type="button"
@@ -464,6 +494,27 @@ export default function App() {
                 </button>
               )}
             </div>
+
+            <WaveformVisualizer
+              isListening={isListening}
+              isProcessing={isVoiceProcessing}
+              audioLevel={audioLevel}
+              onStop={stopListening}
+            />
+
+            {voiceError && (
+              <div className="voice-error-banner" role="alert">
+                <span>⚠️ {voiceError}</span>
+                <button
+                  type="button"
+                  className="btn-dismiss-error"
+                  onClick={resetVoiceError}
+                  aria-label="Dismiss voice error"
+                >
+                  ✕
+                </button>
+              </div>
+            )}
 
             {/* Sample Questions Pills */}
             <div className="sample-questions-box">
