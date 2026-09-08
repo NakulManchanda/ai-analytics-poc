@@ -2,7 +2,7 @@ import json
 import logging
 from pathlib import Path
 
-from app.metrics import format_cloudwatch_emf, emit_run_metrics
+from app.metrics import emit_run_metrics, format_cloudwatch_emf
 
 
 def test_format_cloudwatch_emf_structure() -> None:

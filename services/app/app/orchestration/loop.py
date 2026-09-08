@@ -15,7 +15,6 @@ from app.events import (
     context_reduced_payload,
     terminal_run_payload,
 )
-from app.metrics import emit_run_metrics
 from app.llm import LLMClient, LLMProviderError, ToolProposalResult
 from app.mcp_client import (
     ALLOWED_ANALYSES,
@@ -24,6 +23,7 @@ from app.mcp_client import (
     sanitize_dataset_schema,
     sanitize_query_result,
 )
+from app.metrics import emit_run_metrics
 from app.orchestration.budgets import (
     BudgetExceededError,
     BudgetTracker,

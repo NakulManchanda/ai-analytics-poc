@@ -41,13 +41,21 @@ def format_cloudwatch_emf(
     if end_to_end_latency_ms is not None:
         metric_definitions.append({"Name": "EndToEndLatency", "Unit": "Milliseconds"})
     if proposal_llm_latency_ms is not None:
-        metric_definitions.append({"Name": "ProposalLLMLatency", "Unit": "Milliseconds"})
+        metric_definitions.append(
+            {"Name": "ProposalLLMLatency", "Unit": "Milliseconds"}
+        )
     if tool_latency_ms is not None:
-        metric_definitions.append({"Name": "ToolExecutionLatency", "Unit": "Milliseconds"})
+        metric_definitions.append(
+            {"Name": "ToolExecutionLatency", "Unit": "Milliseconds"}
+        )
     if final_answer_llm_latency_ms is not None:
-        metric_definitions.append({"Name": "FinalAnswerLLMLatency", "Unit": "Milliseconds"})
+        metric_definitions.append(
+            {"Name": "FinalAnswerLLMLatency", "Unit": "Milliseconds"}
+        )
     if ttft_latency_ms is not None:
-        metric_definitions.append({"Name": "TimeToOneFirstToken", "Unit": "Milliseconds"})
+        metric_definitions.append(
+            {"Name": "TimeToOneFirstToken", "Unit": "Milliseconds"}
+        )
 
     payload: dict[str, Any] = {
         "_aws": {
@@ -114,7 +122,11 @@ def emit_run_metrics(
     t = telemetry or {}
     ttft_raw = t.get("ttft")
     ttft_ms = None
-    if isinstance(ttft_raw, dict) and ttft_raw.get("available") and isinstance(ttft_raw.get("latency_ms"), (int, float)):
+    if (
+        isinstance(ttft_raw, dict)
+        and ttft_raw.get("available")
+        and isinstance(ttft_raw.get("latency_ms"), (int, float))
+    ):
         ttft_ms = int(ttft_raw["latency_ms"])
 
     record = format_cloudwatch_emf(
