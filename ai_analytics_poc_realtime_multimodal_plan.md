@@ -50,12 +50,13 @@ Suggested tags:
 v1.1-foundation-truthful-state
 v2-streaming-text
 v3-cancellable-runs
+v3.1-streaming-answer-eventsource
 v4-voice-input
 v5-voice-output
 v6-full-duplex-voice
 v7-multimodal-reasoning
 v8-native-speech-comparison
-v11-telephone-calls
+v9-telephone-calls
 ```
 
 Each tag should represent a working, deployed checkpoint that can be demonstrated independently.
@@ -451,6 +452,40 @@ v3-cancellable-runs
 
 ---
 
+## 5.1 v3.1 — Streaming Answer EventSource UI
+
+### Objective
+
+Complete the text streaming user experience by replacing buffered `fetch` response accumulation with real-time `EventSource` consumption on the client.
+
+### Architecture
+
+```text
+POST /api/runs (202 Accepted)
+        |
+        v
+GET /api/runs/{run_id}/events (EventSource)
+        |
+        +-- on "answer.delta" -> append chunk to streamingAnswer state (progressive character-by-character UI)
+        +-- on terminal event -> extract telemetry, persist final answer, close EventSource
+        +-- on cancel / abort -> close EventSource immediately, tag run as [interrupted]
+```
+
+### Exit criteria
+
+- Answer text renders progressively character-by-character as SSE frames arrive;
+- Telemetry (TTFT, latency, tokens, cost) is extracted from terminal SSE payload;
+- User cancellation closes the EventSource connection and leaves no hanging streams;
+- Client-side test suite verifies real-time EventSource dispatching.
+
+Create tag:
+
+```text
+v3.1-streaming-answer-eventsource
+```
+
+---
+
 # 6. Specialist Voice Architecture
 
 Use specialist services first:
@@ -716,7 +751,7 @@ v8-native-speech-comparison
 
 ---
 
-# 11. v11 — Telephone Calls
+# 12. v9 — Telephone Calls
 
 ## Objective
 
@@ -736,7 +771,7 @@ This milestone is deferred pending v1–v8 stability and production metrics.
 Create tag:
 
 ```text
-v11-telephone-calls
+v9-telephone-calls
 ```
 
 ---

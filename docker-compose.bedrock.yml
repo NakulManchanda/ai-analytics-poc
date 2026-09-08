@@ -11,5 +11,7 @@ services:
       AWS_SDK_LOAD_CONFIG: "1"
       AWS_CONFIG_FILE: /aws/config
       AWS_SHARED_CREDENTIALS_FILE: /aws/credentials
+      HOME: /tmp
+      UV_CACHE_DIR: /tmp/uv-cache
     volumes:
       - "${HOME}/.aws:/aws:ro"
