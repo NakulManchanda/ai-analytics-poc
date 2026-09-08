@@ -15,7 +15,7 @@ Milestone v4.1 requires continuous microphone audio streaming over a bidirection
 - **Amazon Transcribe Streaming Integration**: Integrated `amazon-transcribe` (`TranscribeStreamingClient`) using AWS CRT async audio streaming, converting live PCM byte streams into continuous transcription events with partial/final stability detection.
 - **Deterministic Fake STT Provider**: Built `FakeSTTProvider` yielding progressive simulated partial transcripts and final text based on audio chunk volume, enabling complete local test coverage and zero-cost offline development without AWS credentials.
 - **Provider Selection via Configuration**: `get_stt_provider()` auto-selects `AmazonTranscribeProvider` when `STT_PROVIDER=transcribe` or `LLM_PROVIDER=bedrock`, and defaults to `FakeSTTProvider` for local testing.
-- **Compose & Makefile Support**: Updated `docker-compose.bedrock.yml` with `STT_PROVIDER: transcribe`, created `docker-compose.aws.yml` symlink, and added `local-aws-compose` target to `Makefile`.
+- **Compose & Makefile Support**: Created `docker-compose.aws.yml` with `LLM_PROVIDER: bedrock` and `STT_PROVIDER: transcribe` (replacing `docker-compose.bedrock.yml`), and added `local-aws-compose` target to `Makefile`.
 
 ## Verification and status
 
