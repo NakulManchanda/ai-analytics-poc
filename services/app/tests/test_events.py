@@ -274,6 +274,8 @@ def test_reconstructed_failed_terminal_event_matches_live_contract() -> None:
 
 
 def test_orchestration_loop_emits_full_event_sequence() -> None:
+    from app.config import VoiceSettings
+
     repo = InMemoryStateRepository()
     publisher = InMemoryEventPublisher()
     llm = LocalFakeLLMClient()
@@ -284,6 +286,7 @@ def test_orchestration_loop_emits_full_event_sequence() -> None:
         mcp_client=mcp,  # type: ignore[arg-type]
         state_repository=repo,
         event_publisher=publisher,
+        voice_settings=VoiceSettings(enabled=False),
     )
 
     result = loop.run("Which pickup zones have the most trips?")
@@ -309,6 +312,8 @@ def test_orchestration_loop_emits_full_event_sequence() -> None:
 
 
 def test_orchestration_loop_emits_provider_deltas_and_truthful_ttft() -> None:
+    from app.config import VoiceSettings
+
     class StreamingLLMClient(LocalFakeLLMClient):
         def stream_answer_with_query_result(
             self,
@@ -334,6 +339,7 @@ def test_orchestration_loop_emits_provider_deltas_and_truthful_ttft() -> None:
         mcp_client=FakeMCPClient(),  # type: ignore[arg-type]
         state_repository=repo,
         event_publisher=publisher,
+        voice_settings=VoiceSettings(enabled=False),
         monotonic_factory=lambda: next(monotonic_values),
     )
 
@@ -484,3 +490,140 @@ def test_orchestration_loop_emits_tool_failed_and_surfaces_error_in_run_failed()
     assert "Unknown tool: average_trip_metrics" in (
         failed_steps[0].output_summary or ""
     )
+
+
+def test_voice_settings_load_from_environment_with_defaults(monkeypatch) -> None:
+    from app.config import VoiceSettings
+
+    # Clear all voice env vars
+    for var in ["VOICE_ENABLED", "VOICE_PROVIDER", "VOICE_VOICE_NAME", "VOICE_NAME", "VOICE_LANGUAGE", "VOICE_STREAMING"]:
+        monkeypatch.delenv(var, raising=False)
+
+    settings = VoiceSettings.from_environment()
+    assert settings.enabled is True
+    assert settings.provider == "polly"
+    assert settings.voice_name == "Joanna"
+    assert settings.language == "en-US"
+    assert settings.streaming is False
+
+
+def test_voice_settings_load_from_environment_with_custom_values(monkeypatch) -> None:
+    from app.config import VoiceSettings
+
+    monkeypatch.setenv("VOICE_ENABLED", "false")
+    monkeypatch.setenv("VOICE_PROVIDER", "polly")
+    monkeypatch.setenv("VOICE_VOICE_NAME", "Matthew")
+    monkeypatch.setenv("VOICE_LANGUAGE", "es-ES")
+    monkeypatch.setenv("VOICE_STREAMING", "true")
+
+    settings = VoiceSettings.from_environment()
+    assert settings.enabled is False
+    assert settings.provider == "polly"
+    assert settings.voice_name == "Matthew"
+    assert settings.language == "es-ES"
+    assert settings.streaming is True
+
+
+def test_orchestration_loop_emits_answer_audio_when_voice_enabled() -> None:
+    from unittest.mock import MagicMock, patch
+    from app.config import VoiceSettings
+
+    repo = InMemoryStateRepository()
+    publisher = InMemoryEventPublisher()
+    llm = LocalFakeLLMClient()
+    mcp = FakeMCPClient()
+    voice_settings = VoiceSettings(enabled=True, provider="polly")
+
+    # Mock Polly client to return fake audio bytes
+    mock_polly = MagicMock()
+    mock_polly.synthesize_speech.return_value = b"fake_audio_bytes"
+
+    loop = OrchestrationLoop(
+        llm_client=llm,
+        mcp_client=mcp,  # type: ignore[arg-type]
+        state_repository=repo,
+        event_publisher=publisher,
+        voice_settings=voice_settings,
+    )
+    # Inject mock Polly client
+    loop._polly_client = mock_polly
+
+    result = loop.run("Which pickup zones have the most trips?")
+    assert result.status == "completed"
+
+    events = publisher.get_events_for_run(result.run_id)
+    event_types = [e.event_type for e in events]
+
+    # Verify answer.audio event was emitted
+    assert "answer.audio" in event_types
+    answer_audio_event = next(e for e in events if e.event_type == "answer.audio")
+    assert "data" in answer_audio_event.payload
+    # The audio bytes should be base64-encoded
+    import base64
+    decoded = base64.b64decode(answer_audio_event.payload["data"])
+    assert decoded == b"fake_audio_bytes"
+    assert answer_audio_event.payload["voice_name"] == "Joanna"
+    assert answer_audio_event.payload["format"] == "mp3"
+
+
+def test_orchestration_loop_skips_audio_when_voice_disabled() -> None:
+    from app.config import VoiceSettings
+
+    repo = InMemoryStateRepository()
+    publisher = InMemoryEventPublisher()
+    llm = LocalFakeLLMClient()
+    mcp = FakeMCPClient()
+    voice_settings = VoiceSettings(enabled=False)
+
+    loop = OrchestrationLoop(
+        llm_client=llm,
+        mcp_client=mcp,  # type: ignore[arg-type]
+        state_repository=repo,
+        event_publisher=publisher,
+        voice_settings=voice_settings,
+    )
+
+    result = loop.run("Which pickup zones have the most trips?")
+    assert result.status == "completed"
+
+    events = publisher.get_events_for_run(result.run_id)
+    event_types = [e.event_type for e in events]
+
+    # Verify answer.audio event was NOT emitted
+    assert "answer.audio" not in event_types
+
+
+def test_orchestration_loop_handles_polly_synthesis_failure_gracefully() -> None:
+    from unittest.mock import MagicMock
+    from app.config import VoiceSettings
+
+    repo = InMemoryStateRepository()
+    publisher = InMemoryEventPublisher()
+    llm = LocalFakeLLMClient()
+    mcp = FakeMCPClient()
+    voice_settings = VoiceSettings(enabled=True, provider="polly")
+
+    # Mock Polly client to return None (simulating failure)
+    mock_polly = MagicMock()
+    mock_polly.synthesize_speech.return_value = None
+
+    loop = OrchestrationLoop(
+        llm_client=llm,
+        mcp_client=mcp,  # type: ignore[arg-type]
+        state_repository=repo,
+        event_publisher=publisher,
+        voice_settings=voice_settings,
+    )
+    loop._polly_client = mock_polly
+
+    # Run should complete successfully despite Polly returning None
+    result = loop.run("Which pickup zones have the most trips?")
+    assert result.status == "completed"
+
+    events = publisher.get_events_for_run(result.run_id)
+    event_types = [e.event_type for e in events]
+
+    # Verify answer.audio event was NOT emitted when synthesis returns None
+    assert "answer.audio" not in event_types
+    # But the run should still be completed
+    assert "run.completed" in event_types
