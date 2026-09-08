@@ -61,6 +61,23 @@ Milestone v3 provides:
 5. Emitted `run.cancel_requested` and `run.cancelled` lifecycle events on Redis Streams and SSE with full partial token telemetry.
 6. React frontend Stop button and visual warning badges in the Timeline Inspector.
 
+## v4.1 voice input: WebSocket and continuous chunking
+
+The Milestone v4.1 voice input pipeline is merged on `main`:
+
+- #100 — Audio plumbing, WebSocket endpoint `/ws/voice`, and Amazon Transcribe streaming (PR #101, `5406fce`)
+- #102 — React AudioWorklet capture, waveform visualizer, and transcript input (PR #103, `fe5debe`)
+
+Milestone v4.1 delivers:
+1. Bidirectional WebSocket `/ws/voice` accepting signed 16-bit linear PCM mono @ 16kHz (~100ms / 3200-byte frames) and JSON stop controls.
+2. Official `amazon-transcribe` streaming integration for AWS mode, plus deterministic `FakeSTTProvider` for zero-cost offline tests.
+3. React Web Audio capture downsampling microphone audio to 16kHz PCM chunks via `useVoiceInput`.
+4. Live 16-bar frequency audio `WaveformVisualizer` animated by microphone volume energy.
+5. Interactive `🎤 Voice` button with recording pulse animation and manual `⏹ Done Speaking` stop control.
+6. Delivery of final speech transcripts directly into the query prompt textarea for review, refinement, and execution.
+7. Local `docker-compose.aws.yml` override supporting real Bedrock and Amazon Transcribe with `make local-aws-compose`.
+
+
 ## Historical baseline
 
 Milestones 0–16 and prior public-UAT work remain historical baseline work. Any

@@ -1,5 +1,8 @@
 # 0052 — v4.1 Voice Input Backend: WebSocket `/ws/voice` and Amazon Transcribe Streaming
 
+**Pull Request**: [#101](https://github.com/NakulManchanda/ai-analytics-poc/pull/101) (Merged `5406fce`)
+**Issue**: [#100](https://github.com/NakulManchanda/ai-analytics-poc/issues/100)
+
 ## Goal
 
 Implement the server-side audio ingestion and real-time speech-to-text pipeline for Milestone v4.1 (Voice Input) per ADR [0008-v4-voice-input-websocket-architecture.md](../decisions/0008-v4-voice-input-websocket-architecture.md), supporting low-latency 16kHz PCM audio streaming to Amazon Transcribe with a deterministic local fake provider for testing.

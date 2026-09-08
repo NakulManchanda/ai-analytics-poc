@@ -1,5 +1,8 @@
 # 0053 — v4.1 Voice Input Frontend: React AudioWorklet Capture, Waveform Visualizer, and Transcript Input
 
+**Pull Request**: [#103](https://github.com/NakulManchanda/ai-analytics-poc/pull/103) (Merged `fe5debe`)
+**Issue**: [#102](https://github.com/NakulManchanda/ai-analytics-poc/issues/102)
+
 ## Goal
 
 Implement the frontend user interface and real-time audio capture for Milestone v4.1 (Voice Input) per ADR [0008-v4-voice-input-websocket-architecture.md](../decisions/0008-v4-voice-input-websocket-architecture.md), allowing users to speak their questions into the microphone, view live audio energy in an animated waveform visualizer, and receive the finalized transcript directly in the editable prompt box for review and analysis.
