@@ -55,4 +55,4 @@ Monotonically numbered log of every post-bootstrap task. Each entry records the 
 - [0048 — Next-session roadmap refresh](0048-next-session-roadmap-refresh.md)
 - [0049 — Streaming answer UI: EventSource character-by-character rendering](0049-streaming-answer-eventsource.md)
 - [0050 — Telemetry metrics collection: CloudWatch EMF, local JSONL sink, and Streamlit comparison dashboard](0050-metrics-collection-dashboard.md)
-
+- [0051 — Dispatch Terraform release from main on GitHub Actions](0051-dispatch-terraform-from-main.md)

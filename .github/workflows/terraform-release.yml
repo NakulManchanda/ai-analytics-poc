@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: Exact approved v* tag to deploy
+        description: Exact approved v* tag or 'main' to deploy
         required: true
         type: string
       demo_enabled:
@@ -31,18 +31,23 @@ jobs:
       TF_VAR_private_subnet_cidrs: ${{ vars.TF_PRIVATE_SUBNET_CIDRS }}
       TF_VAR_demo_enabled: ${{ inputs.demo_enabled }}
     steps:
-      - name: Check out the exact release tag
+      - name: Check out the exact release ref
         uses: actions/checkout@v4
         with:
           ref: ${{ inputs.release_tag }}
           fetch-depth: 0
-      - name: Verify tag provenance
+      - name: Verify release ref provenance
         shell: bash
         run: |
           set -euo pipefail
           set +x
-          [[ "$RELEASE_TAG" =~ ^v[0-9]+(\.[0-9]+){0,2}([-.][0-9A-Za-z.-]+)?$ ]]
-          test "$(git rev-list -n 1 "$RELEASE_TAG")" = "$(git rev-parse HEAD)"
+          if [ "$RELEASE_TAG" = "main" ]; then
+            test "$(git rev-parse origin/main)" = "$(git rev-parse HEAD)"
+          else
+            [[ "$RELEASE_TAG" =~ ^v[0-9]+(\.[0-9]+){0,2}([-.][0-9A-Za-z.-]+)?$ ]]
+            test "$(git rev-list -n 1 "$RELEASE_TAG")" = "$(git rev-parse HEAD)"
+          fi
+
       - name: Configure AWS credentials through protected OIDC
         uses: aws-actions/configure-aws-credentials@v5
         with:

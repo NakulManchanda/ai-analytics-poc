@@ -4,7 +4,7 @@ TF_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 TFVARS ?= terraform.tfvars
 BACKEND_CONFIG ?= backend.hcl
 
-.PHONY: help init-backendless init-remote fmt fmt-check validate plan
+.PHONY: help init-backendless init-remote fmt fmt-check validate plan dispatch
 
 help:
 	@printf '%s\n' 'Terraform foundation targets:' \
@@ -15,7 +15,9 @@ help:
 	  '  make validate         Validate Terraform configuration (after init-backendless)' \
 	  '  make plan             Create a read-only plan using TFVARS=$(TFVARS)' \
 	  '  make runtime-plan     Save the configured park/resume plan to runtime.tfplan' \
-	  '  make runtime-apply    Apply the reviewed runtime.tfplan (authorization required)'
+	  '  make runtime-apply    Apply the reviewed runtime.tfplan (authorization required)' \
+	  '  make dispatch         Trigger approved Terraform release on GitHub Actions via gh CLI'
+
 
 init-backendless:
 	terraform -chdir=$(TF_DIR) init -backend=false
@@ -43,3 +45,9 @@ runtime-plan:
 
 runtime-apply:
 	terraform -chdir=$(TF_DIR) apply runtime.tfplan
+
+dispatch: ## Run Terraform release on GitHub Actions (usage: make dispatch [REF=main] [DEMO=false])
+	@REF=$${REF:-main}; \
+	DEMO_VAL=$${DEMO:-false}; \
+	gh workflow run terraform-release.yml --ref main -f release_tag="$$REF" -f demo_enabled="$$DEMO_VAL" && \
+	gh run watch
