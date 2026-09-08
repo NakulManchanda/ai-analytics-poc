@@ -202,33 +202,33 @@ export default function App() {
       setConversationId(convId);
       window.localStorage.setItem(CONVERSATION_STORAGE_KEY, convId);
 
-      // Stream SSE events: accumulate answer.delta and extract terminal telemetry
-      const sseResponse = await fetch(runAccepted.events_url, { signal: controller.signal });
+      // Stream SSE events using EventSource: accumulate answer.delta and extract terminal telemetry
       let accumulatedAnswer = "";
       let finalAnswer: AskResponse | null = null;
 
-      if (sseResponse.ok) {
-        const sseText = typeof sseResponse.text === "function"
-          ? await sseResponse.text()
-          : "";
-        for (const frame of sseText.split("\n\n")) {
-          const dataLine = frame.split("\n").find((l) => l.startsWith("data: "));
-          if (!dataLine) continue;
+      await new Promise<void>((resolve) => {
+        const eventSource = new EventSource(runAccepted.events_url);
+
+        const handleRawEvent = (sseEvent: Event) => {
           try {
-            const event = JSON.parse(dataLine.slice(6)) as {
-              event_type: string;
-              payload: Record<string, unknown>;
+            const dataStr = (sseEvent as MessageEvent).data;
+            if (typeof dataStr !== "string") return;
+            const event = JSON.parse(dataStr) as {
+              event_type?: string;
+              payload?: Record<string, unknown>;
             };
-            if (event.event_type === "answer.delta" && typeof event.payload.delta === "string") {
-              accumulatedAnswer += event.payload.delta;
+            const eventType = event.event_type || sseEvent.type;
+            const p = event.payload || {};
+
+            if (eventType === "answer.delta" && typeof p.delta === "string") {
+              accumulatedAnswer += p.delta;
               setStreamingAnswer(accumulatedAnswer);
             } else if (
-              event.event_type === "run.completed" ||
-              event.event_type === "run.failed" ||
-              event.event_type === "run.budget_exceeded" ||
-              event.event_type === "run.cancelled"
+              eventType === "run.completed" ||
+              eventType === "run.failed" ||
+              eventType === "run.budget_exceeded" ||
+              eventType === "run.cancelled"
             ) {
-              const p = event.payload;
               setRunTelemetry({
                 input_tokens: p.input_tokens as number | undefined,
                 output_tokens: p.output_tokens as number | undefined,
@@ -242,7 +242,7 @@ export default function App() {
               });
               if (accumulatedAnswer) {
                 finalAnswer = {
-                  answer: event.event_type === "run.cancelled" ? `${accumulatedAnswer} [interrupted]` : accumulatedAnswer,
+                  answer: eventType === "run.cancelled" ? `${accumulatedAnswer} [interrupted]` : accumulatedAnswer,
                   usage: {
                     input_tokens: (p.input_tokens as number) ?? 0,
                     output_tokens: (p.output_tokens as number) ?? 0,
@@ -253,12 +253,41 @@ export default function App() {
                   run_id: runId,
                 };
               }
+              // Terminal event received; close the stream
+              eventSource.close();
+              resolve();
             }
           } catch {
             // malformed SSE frame — skip
           }
-        }
-      }
+        };
+
+        const eventTypesToListen = [
+          "message",
+          "answer.delta",
+          "run.received",
+          "run.completed",
+          "run.failed",
+          "run.budget_exceeded",
+          "run.cancelled",
+          "run.cancel_requested",
+        ];
+
+        eventTypesToListen.forEach((type) => {
+          eventSource.addEventListener(type, handleRawEvent);
+        });
+
+        eventSource.addEventListener("error", () => {
+          eventSource.close();
+          resolve();
+        });
+
+        // Handle AbortController signal by closing the EventSource
+        controller.signal.addEventListener("abort", () => {
+          eventSource.close();
+          resolve();
+        });
+      });
 
       if (finalAnswer) {
         setAnswer(finalAnswer);

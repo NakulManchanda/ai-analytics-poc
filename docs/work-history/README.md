@@ -52,3 +52,4 @@ Monotonically numbered log of every post-bootstrap task. Each entry records the 
 - [0045 — Terraform demo runtime parking](0045-demo-runtime-parking.md)
 - [0046 — Shared Bedrock application allowance](0046-global-bedrock-application-allowance.md)
 - [0048 — Next-session roadmap refresh](0048-next-session-roadmap-refresh.md)
+- [0049 — Streaming answer UI: EventSource character-by-character rendering](0049-streaming-answer-eventsource.md)
