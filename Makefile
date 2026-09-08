@@ -3,7 +3,8 @@
 APP_HOST_PORT := $(or $(APP_PORT),$(PORT),8080)
 MCP_HOST_PORT := $(or $(MCP_PORT),$(PORT),8001)
 
-.PHONY: help check-bootstrap dev mcp-dev mcp-smoke dataset-test dataset-smoke smoke test mcp-test infra-test web-test compose-smoke local-bedrock-compose bedrock-smoke m5-bedrock-smoke m6-bedrock-smoke dashboard
+.PHONY: help check-bootstrap dev mcp-dev mcp-smoke dataset-test dataset-smoke smoke test mcp-test infra-test web-test compose-smoke local-bedrock-compose bedrock-smoke m5-bedrock-smoke m6-bedrock-smoke dashboard tf-dispatch tf-resume tf-park
+
 
 help: ## Show available commands
 	@awk 'BEGIN {FS = ":.*## "; print "Targets:"} /^[a-zA-Z_-]+:.*## / {printf "  %-18s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -87,3 +88,17 @@ cloudfront-smoke: ## Run end-to-end smoke check against CloudFront distribution
 
 deploy-frontend: ## Build React app, upload to S3, and invalidate CloudFront cache
 	./scripts/deploy_frontend.sh
+
+tf-dispatch: ## Run Terraform release on GitHub Actions (usage: make tf-dispatch [REF=main] [DEMO=false])
+	@REF=$${REF:-main}; \
+	DEMO_VAL=$${DEMO:-false}; \
+	echo "Dispatching Terraform release on GitHub Actions (ref=$$REF, demo_enabled=$$DEMO_VAL)..."; \
+	gh workflow run terraform-release.yml --ref main -f release_tag="$$REF" -f demo_enabled="$$DEMO_VAL" && \
+	echo "Workflow dispatched. Watching run..." && \
+	gh run watch
+
+tf-resume: ## Run Terraform on GitHub Actions with demo_enabled=true (resumes paid demo backend)
+	@$(MAKE) tf-dispatch REF=$(or $(REF),main) DEMO=true
+
+tf-park: ## Run Terraform on GitHub Actions with demo_enabled=false (parks demo backend to stop costs)
+	@$(MAKE) tf-dispatch REF=$(or $(REF),main) DEMO=false
