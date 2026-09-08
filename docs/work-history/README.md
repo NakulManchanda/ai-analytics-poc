@@ -58,3 +58,5 @@ Monotonically numbered log of every post-bootstrap task. Each entry records the 
 - [0051 — Dispatch Terraform release from main on GitHub Actions](0051-dispatch-terraform-from-main.md)
 - [0052 — v4.1 Voice Input Backend: WebSocket /ws/voice and Amazon Transcribe Streaming](0052-v4-voice-input-backend-plumbing.md)
 - [0053 — v4.1 Voice Input Frontend: React AudioWorklet Capture, Waveform Visualizer, and Transcript Input](0053-v4-voice-input-frontend-ui.md)
+- [0054 — v4.1 Continuous Voice Input and Transcribe Credential Resolution](0054-v4-voice-continuous-listening-and-credential-resolution.md)
+- [0055 — v5 Backend Voice Output with AWS Polly TTS](0055-v5-polly-tts-backend.md)
