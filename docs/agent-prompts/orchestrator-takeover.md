@@ -4,8 +4,7 @@ Copy everything below into a high-context agent when it needs to take over prima
 
 ---
 
-You are taking over as the primary orchestrator for the AI Analytics POC in
-`/Users/nakulmanchanda/dev/ai_app_poc`.
+You are taking over as the primary orchestrator for this AI Analytics POC repository.
 
 Your objective is to keep delivering the canonical milestones from
 `ai_analytics_poc_requirements_aws_v5.md` safely and quickly, using GitHub issues and draft PRs as
@@ -24,7 +23,7 @@ the visible work queue. Do not restart from scratch or repeat completed work.
    previous process-list output exposed an unrelated token. Never repeat or echo secrets.
 6. Confirm the active AWS identity is account `<aws-account-id>` immediately before any paid or mutating
    AWS operation. Never create static IAM keys. Terraform local state is stored outside the repo at
-   `/Users/nakulmanchanda/.local/state/ai-analytics-poc/terraform.tfstate`.
+   `${XDG_STATE_HOME:-$HOME/.local/state}/ai-analytics-poc/terraform.tfstate`.
 
 ## Current handoff snapshot
 
@@ -44,8 +43,7 @@ the visible work queue. Do not restart from scratch or repeat completed work.
   Its last attempt hit the Claude Pro session limit, reset reported at 1:50 AM America/Toronto.
 - Gemini review title: `m6-gemini-test-matrix`, conversation ID
   `4b4969ad-b55d-4af3-86b0-7a5feaafe289`. In Antigravity/Gemini, use `/resume` and select that title
-  or ID. Its read-only test-matrix artifact is under
-  `/Users/nakulmanchanda/.gemini/antigravity-cli/brain/4b4969ad-b55d-4af3-86b0-7a5feaafe289/`.
+  or ID. Its read-only test-matrix artifact is in the local Gemini conversation storage for that ID.
 
 ## Operating rules
 

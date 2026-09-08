@@ -47,6 +47,7 @@ crash.*.log
 # Local data and artifacts
 data/
 artifacts/
+metrics/*.jsonl
 *.duckdb
 *.duckdb.wal
 

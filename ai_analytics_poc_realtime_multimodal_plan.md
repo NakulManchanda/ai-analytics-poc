@@ -50,11 +50,13 @@ Suggested tags:
 v1.1-foundation-truthful-state
 v2-streaming-text
 v3-cancellable-runs
+v3.1-streaming-answer-eventsource
 v4-voice-input
 v5-voice-output
 v6-full-duplex-voice
-v7-multimodal
+v7-multimodal-reasoning
 v8-native-speech-comparison
+v9-telephone-calls
 ```
 
 Each tag should represent a working, deployed checkpoint that can be demonstrated independently.
@@ -450,6 +452,40 @@ v3-cancellable-runs
 
 ---
 
+## 5.1 v3.1 — Streaming Answer EventSource UI
+
+### Objective
+
+Complete the text streaming user experience by replacing buffered `fetch` response accumulation with real-time `EventSource` consumption on the client.
+
+### Architecture
+
+```text
+POST /api/runs (202 Accepted)
+        |
+        v
+GET /api/runs/{run_id}/events (EventSource)
+        |
+        +-- on "answer.delta" -> append chunk to streamingAnswer state (progressive character-by-character UI)
+        +-- on terminal event -> extract telemetry, persist final answer, close EventSource
+        +-- on cancel / abort -> close EventSource immediately, tag run as [interrupted]
+```
+
+### Exit criteria
+
+- Answer text renders progressively character-by-character as SSE frames arrive;
+- Telemetry (TTFT, latency, tokens, cost) is extracted from terminal SSE payload;
+- User cancellation closes the EventSource connection and leaves no hanging streams;
+- Client-side test suite verifies real-time EventSource dispatching.
+
+Create tag:
+
+```text
+v3.1-streaming-answer-eventsource
+```
+
+---
+
 # 6. Specialist Voice Architecture
 
 Use specialist services first:
@@ -637,47 +673,47 @@ v6-full-duplex-voice
 
 ---
 
-# 10. v7 — Multimodal Taxi Analytics
+# 10. v7 — Multimodal Reasoning
 
 ## Objective
 
-Allow text, audio and image inputs to ground the same governed taxi analytics agent.
+Combine voice input, text queries, and audio grounding to produce richer taxi analytics reasoning.
 
-Examples:
+Example:
 
 ```text
-Upload a taxi-zone map + ask by voice:
-"Which highlighted area has the most evening pickups?"
+"Play me the ambient audio from last night's peak zone.
+What does the pickup surge sound like in real-time?"
 
-Upload a dashboard screenshot:
-"Does our taxi data show the same 7 PM peak?"
+AI listens to audio, analyzes concurrent trip data,
+and correlates what it hears with observed patterns.
 ```
 
 Target architecture:
 
 ```text
-Text -------------------+
-                        |
-Audio -> STT -----------+--> normalized multimodal context
-                        |             |
-Image -> vision model --+             v
-                                Application Orchestrator
-                                         |
-                                         v
-                                        MCP
-                                         |
-                                         v
-                                  grounded taxi data
+Text query ----------------+
+                           |
+Audio -> STT ---------------+--> normalized multimodal context
+                           |             |
+Audio artifact playback ---+             v
+                                 Application Orchestrator
+                                          |
+                                          v
+                                         MCP
+                                          |
+                                          v
+                                   grounded taxi data
 ```
 
-Use a Bedrock model that supports the required image/document modality for image understanding while preserving specialist STT/TTS for realtime voice.
+Preserve specialist STT/TTS for realtime voice while integrating audio analysis into the reasoning loop.
 
-Large files/images should be stored as artifacts with bounded model context and provenance.
+Audio artifacts should be stored with bounded model context and clear provenance.
 
 Create tag:
 
 ```text
-v7-multimodal
+v7-multimodal-reasoning
 ```
 
 ---
@@ -715,7 +751,32 @@ v8-native-speech-comparison
 
 ---
 
-# 12. Metrics Dashboard Evolution
+# 12. v9 — Telephone Calls
+
+## Objective
+
+Extend voice interaction to support inbound and outbound telephone calls using traditional PSTN or VoIP routing.
+
+Scope:
+
+```text
+Inbound: customer calls a phone number -> agent answers -> MCP tools handle the query
+Outbound: agent initiates a call -> customer picks up -> conversation flows
+Call transfer: human handoff if needed
+Call recording: durable transcript and audio artifacts
+```
+
+This milestone is deferred pending v1–v8 stability and production metrics.
+
+Create tag:
+
+```text
+v9-telephone-calls
+```
+
+---
+
+# 13. Metrics Dashboard Evolution
 
 Keep adding metrics to the same on-screen control room rather than hiding them only in logs.
 
@@ -770,133 +831,4 @@ end-to-end conversational latency
 barge-in detection latency
 TTS stop latency
 LLM cancellation latency
-```
-
----
-
-# 13. Guardrails
-
-Preserve the original POC invariants throughout all versions:
-
-- Application Server owns the AI execution harness.
-- MCP server never calls the LLM.
-- Model never determines authorization.
-- DynamoDB is durable application state.
-- Redis is transient coordination/event state.
-- Large analytical artifacts do not belong in DynamoDB or Redis.
-- Every run has bounded time, token, tool and cost budgets.
-- Every external side effect is represented by durable run/step state.
-- Voice/media frameworks must not become sources of business identity or authorization.
-
----
-
-# 14. Immediate Codex Scope
-
-Do **only v1.1** first.
-
-Do not implement streaming, cancellation, STT, TTS, Pipecat or multimodal input in the first change.
-
-The goal is to establish a trustworthy baseline before the realtime branch begins.
-
-## Required v1.1 tasks
-
-1. Trace how the deployed app selects `StateRepository` and wire DynamoDB for AWS runtime.
-2. Persist real Conversation, Message, Run and RunStep entities.
-3. Add/reuse APIs needed to reload durable conversation history.
-4. Stop generating authoritative conversation state only in React memory.
-5. Display `conversation_id` and current `run_id` immediately.
-6. Fix SSE reconnect-on-keystroke behavior.
-7. Remove frontend-generated fake Working Context.
-8. Ensure Context Inspector consumes real `context.reduced` backend events/state.
-9. Ensure backend ContextReducer consumes actual persisted messages, MCP schema, tool results and active budgets.
-10. Add baseline latency/cost telemetry to the UI.
-11. Display `TTFT: N/A (non-streaming)` for this version.
-12. Add automated tests for persistence, SSE stability where practical, reducer truthfulness and conversation reload.
-13. Document a manual AWS verification procedure including ECS restart + conversation recovery.
-14. Do not change the user-facing analytical behavior beyond what is necessary for correctness.
-
-## Definition of done
-
-A reviewer can:
-
-```text
-create conversation
-ask Q1
-ask Q2
-inspect real DynamoDB records
-inspect real ContextReducer state
-refresh browser
-restart ECS app
-reload same conversation
-inspect run IDs and steps
-see no UI flash while typing
-see truthful latency/cost metrics
-```
-
-and all displayed state can be traced to a real backend source.
-
----
-
-# 15. Codex Kickoff Prompt
-
-Use this prompt to start the implementation:
-
-```text
-Work on repository NakulManchanda/ai-analytics-poc.
-
-Read these first:
-- ai_analytics_poc_requirements_aws_v5.md
-- ai_analytics_poc_realtime_multimodal_plan.md
-- docs/system-design-blog.md
-
-Implement ONLY milestone v1.1-foundation-truthful-state from ai_analytics_poc_realtime_multimodal_plan.md.
-Do not start streaming text, cancellation, voice, Pipecat, STT, TTS, or multimodal work yet.
-
-Before changing code, inspect the current runtime path and produce a short implementation plan covering:
-1. how FastAPI currently selects StateRepository in local/test/AWS runtime;
-2. why the deployed DynamoDB table may be empty;
-3. how conversation/message/run/run-step persistence currently works;
-4. where the frontend synthesizes or hardcodes Working Context;
-5. why typing can restart the SSE EventSource;
-6. which APIs/state are needed to reload a conversation after refresh/restart;
-7. where latency/token/cost telemetry currently comes from.
-
-Then implement the smallest coherent change that makes the deployed application truthful:
-- AWS runtime uses DynamoDBStateRepository;
-- persist Conversation + user Message + Run + RunSteps + assistant Message;
-- backend-generated conversation_id/run_id are returned and displayed immediately;
-- reload durable conversation history from backend rather than depending on React-only chatTurns;
-- fix EventSource reconnects caused by unstable React callback/effect dependencies;
-- remove frontend fake Working Context fallback data (hardcoded schema, Alpha preview row, synthetic counts/budgets/artifacts);
-- Context Inspector must consume actual ContextReducer/backend state;
-- ContextReducer must use real persisted messages, real MCP schema/tool observations and actual budget tracker values;
-- add visible baseline telemetry: end-to-end latency, proposal LLM latency, tool latency, final-answer LLM latency, tokens, cost;
-- display TTFT as `N/A (non-streaming)` in this milestone.
-
-Preserve existing architecture boundaries:
-- Application Server owns orchestration and LLM calls;
-- MCP server owns governed analytical tools and never calls the LLM;
-- DynamoDB is durable state;
-- Redis/SSE is transient event delivery;
-- do not add new infrastructure.
-
-Add/update tests before declaring completion.
-
-Verification must include:
-1. two-turn conversation;
-2. DynamoDB contains conversation/messages/runs/steps;
-3. browser refresh restores conversation;
-4. ECS/app restart does not lose conversation;
-5. typing a new question after a completed run does not reconnect or flash the SSE timeline;
-6. Context Inspector values can be traced to backend runtime state;
-7. existing analytics questions still work.
-
-After implementation, summarize:
-- files changed;
-- architecture changes;
-- tests run/results;
-- manual AWS verification commands/steps;
-- any remaining gaps.
-
-Do not create the Git tag automatically. Stop once v1.1 is ready for human verification and propose the tag name `v1.1-foundation-truthful-state`.
 ```

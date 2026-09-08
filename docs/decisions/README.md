@@ -6,3 +6,8 @@ alternatives, and consequences. Do not create ADRs for routine implementation de
 
 Pull-request chronology belongs in `docs/work-history/`; the active session handoff belongs in
 `docs/progress.md`.
+
+## Index
+
+- [ADR 0006 — Allow the existing local AWS profile for Terraform operations](0006-local-terraform-operator-profile.md)
+- [ADR 0007 — Telemetry, CloudWatch Metrics, and Local Comparison Architecture](0007-telemetry-metrics-comparison-architecture.md)

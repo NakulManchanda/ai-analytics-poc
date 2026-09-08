@@ -1,0 +1,17 @@
+# Explicit opt-in only: combines with docker-compose.yml for local real Bedrock calls.
+services:
+  app:
+    user: "${LOCAL_UID:?Set LOCAL_UID to your host user id}"
+    environment:
+      LLM_PROVIDER: bedrock
+      DYNAMODB_TABLE_NAME: "${DYNAMODB_TABLE_NAME:?Set DYNAMODB_TABLE_NAME to the shared state table}"
+      GLOBAL_BEDROCK_MONTHLY_LIMIT_USD: "${GLOBAL_BEDROCK_MONTHLY_LIMIT_USD:-5.00}"
+      AWS_REGION: "${AWS_REGION:-us-east-1}"
+      AWS_PROFILE: "${AWS_PROFILE:-default}"
+      AWS_SDK_LOAD_CONFIG: "1"
+      AWS_CONFIG_FILE: /aws/config
+      AWS_SHARED_CREDENTIALS_FILE: /aws/credentials
+      HOME: /tmp
+      UV_CACHE_DIR: /tmp/uv-cache
+    volumes:
+      - "${HOME}/.aws:/aws:ro"

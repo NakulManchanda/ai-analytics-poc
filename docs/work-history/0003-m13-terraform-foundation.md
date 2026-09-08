@@ -7,9 +7,8 @@ application or changing AWS resources from this pull request.
 
 ## Starting state
 
-The branch `feat/m13-terraform-foundation` was created in the isolated
-`/Users/nakulmanchanda/dev/wt-m13-terraform-foundation` worktree from
-`origin/main` at `a44351e`.
+The branch `feat/m13-terraform-foundation` was created in an isolated
+`wt-m13-terraform-foundation` worktree from `origin/main` at `a44351e`.
 
 ## Decisions
 

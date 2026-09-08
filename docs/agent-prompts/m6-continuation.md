@@ -4,20 +4,18 @@ Copy everything below into one external agent. Use only one write agent at a tim
 
 ---
 
-You are helping complete Milestone 6 in the private repository
-`/Users/nakulmanchanda/dev/ai_app_poc`.
+You are helping complete Milestone 6 in this repository.
 
 Read these sources before acting:
 
-1. `/Users/nakulmanchanda/dev/ai_app_poc/AGENTS.md`
-2. `/Users/nakulmanchanda/dev/ai_app_poc/ai_analytics_poc_requirements_aws_v5.md`, especially
+1. `AGENTS.md`
+2. `ai_analytics_poc_requirements_aws_v5.md`, especially
    “Milestone 6 — Governed analytical query tool”
 3. GitHub issue `#24` and draft PR `#33`
-4. `/Users/nakulmanchanda/dev/ai_app_poc/.worktrees/m6-governed-query/docs/progress.md`
+4. `.worktrees/m6-governed-query/docs/progress.md`
 5. The current diff and recent commits on branch `feat/m6-governed-query`
 
-The active write worktree is:
-`/Users/nakulmanchanda/dev/ai_app_poc/.worktrees/m6-governed-query`.
+The active write worktree is `.worktrees/m6-governed-query`.
 
 Default to **read-only review** because the primary Codex agent may be editing that worktree. Do not
 edit, commit, push, merge, change GitHub, mutate AWS, or stop/reuse another task's services unless

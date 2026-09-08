@@ -38,6 +38,8 @@ and `.github/copilot-instructions.md`) must stay thin and refer here rather than
   `README.md` and `docs/progress.md` when the active milestone requires it.
 - Do not rewrite or discard unrelated user work. Never commit credentials, tokens, private keys,
   `.env` values, or other secret material; use placeholders and ignored local configuration.
+- Committed documentation must use repository-relative or portable environment-based paths; never
+  include developer-specific absolute paths.
 - Never stop, reuse, or clean up another task's local services or Compose project. Human-facing
   commands may use explicit service-specific ports (then `PORT` as a fallback), but automated
   smoke scripts must select an ephemeral or task-specific host port and an isolated Compose
