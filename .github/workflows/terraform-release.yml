@@ -1,0 +1,79 @@
+name: Approved Terraform release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Exact approved v* tag to deploy
+        required: true
+        type: string
+      demo_enabled:
+        description: Confirm that this release may resume paid runtime infrastructure
+        required: true
+        type: boolean
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  release:
+    name: Plan and apply approved release
+    runs-on: ubuntu-latest
+    environment: terraform-production
+    env:
+      RELEASE_TAG: ${{ inputs.release_tag }}
+      TF_IN_AUTOMATION: "true"
+      TF_INPUT: "false"
+      TF_VAR_aws_region: ${{ vars.AWS_REGION }}
+      TF_VAR_availability_zones: ${{ vars.TF_AVAILABILITY_ZONES }}
+      TF_VAR_public_subnet_cidrs: ${{ vars.TF_PUBLIC_SUBNET_CIDRS }}
+      TF_VAR_private_subnet_cidrs: ${{ vars.TF_PRIVATE_SUBNET_CIDRS }}
+      TF_VAR_demo_enabled: ${{ inputs.demo_enabled }}
+    steps:
+      - name: Check out the exact release tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_tag }}
+          fetch-depth: 0
+      - name: Verify tag provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +x
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+(\.[0-9]+){0,2}([-.][0-9A-Za-z.-]+)?$ ]]
+          test "$(git rev-list -n 1 "$RELEASE_TAG")" = "$(git rev-parse HEAD)"
+      - name: Configure AWS credentials through protected OIDC
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ vars.TERRAFORM_RELEASE_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-session-name: terraform-release
+          mask-aws-account-id: true
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.16.1
+          terraform_wrapper: false
+      - name: Initialize remote state without logging identifiers
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          backend="$RUNNER_TEMP/backend.hcl"
+          printf '%s\n' "bucket=${{ vars.TF_STATE_BUCKET }}" "key=${{ vars.TF_STATE_KEY }}" "region=${{ vars.AWS_REGION }}" "encrypt=true" > "$backend"
+          terraform -chdir=infra/terraform init -input=false -reconfigure -backend-config="$backend" >/dev/null 2>&1 || { echo "Remote backend initialization failed without printing protected configuration." >&2; exit 1; }
+      - name: Create and summarize the reviewed plan
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +x
+          terraform -chdir=infra/terraform plan -input=false -out=terraform-release.tfplan >/dev/null 2>&1 || { echo "Terraform plan failed without printing protected configuration." >&2; exit 1; }
+          terraform -chdir=infra/terraform show -json terraform-release.tfplan | jq -r '[.resource_changes[]?.change.actions[]] | group_by(.) | map({key: .[0], value: length}) | from_entries | {add: (.create // 0), change: (.update // 0), destroy: (.delete // 0)} | "Terraform plan summary: add=\(.add) change=\(.change) destroy=\(.destroy)"'
+      - name: Apply the exact reviewed plan
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +x
+          terraform -chdir=infra/terraform apply -input=false terraform-release.tfplan >/dev/null 2>&1 || { echo "Terraform apply failed; inspect protected AWS and GitHub audit logs." >&2; exit 1; }

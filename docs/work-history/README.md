@@ -51,6 +51,8 @@ Monotonically numbered log of every post-bootstrap task. Each entry records the 
 
 - [0045 — Terraform demo runtime parking](0045-demo-runtime-parking.md)
 - [0046 — Shared Bedrock application allowance](0046-global-bedrock-application-allowance.md)
+- [0047 — Remote Terraform state and approved release workflow](0047-remote-terraform-state-and-approved-release.md)
 - [0048 — Next-session roadmap refresh](0048-next-session-roadmap-refresh.md)
 - [0049 — Streaming answer UI: EventSource character-by-character rendering](0049-streaming-answer-eventsource.md)
 - [0050 — Telemetry metrics collection: CloudWatch EMF, local JSONL sink, and Streamlit comparison dashboard](0050-metrics-collection-dashboard.md)
+

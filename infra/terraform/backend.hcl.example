@@ -1,0 +1,6 @@
+# Copy to ignored backend.hcl and replace placeholders during the approved
+# migration. Do not commit the populated file.
+bucket  = "<terraform-state-bucket>"
+key     = "ai-analytics-poc/demo/terraform.tfstate"
+region  = "us-east-1"
+encrypt = true

@@ -13,10 +13,9 @@ AWS when diagnosing drift. Local Docker/Compose workflows are unchanged.
 
 ## State and safety
 
-`infra/terraform/terraform.tfstate` in the main checkout is authoritative.
-The state in this worktree is a planning snapshot only: never apply it and
-never copy it back. Integrate the implementation with the authoritative state
-before creating a fresh plan for an apply.
+Until approved migration completes, the encrypted operator-held local state is
+authoritative. Afterwards, private S3 remote state is authoritative; no
+worktree copy is state. Never apply a planning snapshot or copy it into S3.
 
 Set the persisted local `infra/terraform/terraform.tfvars` value to control
 the runtime:
@@ -58,9 +57,10 @@ JSON `503` “demo offline” response for `/api/*`.
 
 ## Resume
 
-After the PR merges, work from the main checkout and its authoritative local
+After the PR merges, work from the main checkout and authoritative remote
 state. Preserve unrelated local changes; do not use or copy this worktree's
-planning snapshot.
+planning snapshot. Resuming paid infrastructure needs the protected tag workflow
+with `demo_enabled=true` or explicit human approval.
 
 ```sh
 git pull --ff-only
