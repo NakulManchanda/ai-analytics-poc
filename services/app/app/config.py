@@ -8,6 +8,29 @@ M4_BEDROCK_MODEL_ARN = (
 )
 
 
+@dataclass(frozen=True)
+class VoiceSettings:
+    """Configuration for voice output (TTS) synthesis."""
+
+    enabled: bool = True
+    provider: str = "polly"
+    voice_name: str = "Joanna"
+    language: str = "en-US"
+    streaming: bool = False
+
+    @classmethod
+    def from_environment(cls) -> "VoiceSettings":
+        """Load voice settings from environment variables."""
+        return cls(
+            enabled=os.getenv("VOICE_ENABLED", "true").lower() in ("true", "1", "yes"),
+            provider=os.getenv("VOICE_PROVIDER", "polly"),
+            voice_name=os.getenv("VOICE_VOICE_NAME", os.getenv("VOICE_NAME", "Joanna")),
+            language=os.getenv("VOICE_LANGUAGE", "en-US"),
+            streaming=os.getenv("VOICE_STREAMING", "false").lower()
+            in ("true", "1", "yes"),
+        )
+
+
 class LLMConfigurationError(ValueError):
     """Raised when M4 configuration does not match its deployed IAM allowlist."""
 
