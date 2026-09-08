@@ -55,8 +55,11 @@ compose-smoke: ## Run the browser to FastAPI to FastMCP Compose smoke
 	WEB_PORT=$(or $(WEB_PORT),$(PORT)) ./scripts/smoke/03_compose_ui.sh
 
 local-aws-compose: ## Start local Compose with opt-in real AWS (Bedrock + Transcribe) and shared DynamoDB budget
-	@test -n "$(DYNAMODB_TABLE_NAME)" || (echo "Set DYNAMODB_TABLE_NAME to the shared state table." >&2; exit 2)
-	LOCAL_UID=$$(id -u) docker compose -f docker-compose.yml -f docker-compose.aws.yml up --build
+	DYNAMODB_TABLE_NAME=$(or $(DYNAMODB_TABLE_NAME),ai-analytics-poc-demo-application-state) \
+	AWS_PROFILE=$(or $(AWS_PROFILE),default) \
+	LOCAL_UID=$$(id -u) \
+	WEB_PORT=$(or $(WEB_PORT),3000) \
+	docker compose -f docker-compose.yml -f docker-compose.aws.yml up --build -d
 
 local-bedrock-compose: local-aws-compose ## Deprecated alias for local-aws-compose
 
