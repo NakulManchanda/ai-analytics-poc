@@ -22,7 +22,9 @@ build/
 *.egg-info/
 
 # JavaScript
+node_modules
 node_modules/
+**/node_modules
 frontend/dist/
 web/dist/
 *.tsbuildinfo

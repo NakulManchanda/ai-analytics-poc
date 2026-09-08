@@ -57,3 +57,4 @@ Monotonically numbered log of every post-bootstrap task. Each entry records the 
 - [0050 — Telemetry metrics collection: CloudWatch EMF, local JSONL sink, and Streamlit comparison dashboard](0050-metrics-collection-dashboard.md)
 - [0051 — Dispatch Terraform release from main on GitHub Actions](0051-dispatch-terraform-from-main.md)
 - [0052 — v4.1 Voice Input Backend: WebSocket /ws/voice and Amazon Transcribe Streaming](0052-v4-voice-input-backend-plumbing.md)
+- [0053 — v4.1 Voice Input Frontend: React AudioWorklet Capture, Waveform Visualizer, and Transcript Input](0053-v4-voice-input-frontend-ui.md)
