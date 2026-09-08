@@ -58,6 +58,8 @@ local-bedrock-compose: ## Start local Compose with opt-in real Bedrock and share
 	@test -n "$(DYNAMODB_TABLE_NAME)" || (echo "Set DYNAMODB_TABLE_NAME to the shared state table." >&2; exit 2)
 	LOCAL_UID=$$(id -u) docker compose -f docker-compose.yml -f docker-compose.bedrock.yml up --build
 
+local-aws-compose: local-bedrock-compose ## Alias for local-bedrock-compose (Bedrock + Transcribe)
+
 bedrock-smoke: ## Make one opt-in, bounded paid Bedrock call through POST /api/ask
 	uv run --project services/app python services/app/scripts/bedrock_smoke.py
 

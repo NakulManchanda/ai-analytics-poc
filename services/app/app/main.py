@@ -19,6 +19,7 @@ from app.routers.jobs import create_jobs_router
 from app.routers.runs import RunDispatcher, create_runs_router
 from app.routers.status import router as status_router
 from app.state import DynamoDBStateRepository, InMemoryStateRepository, StateRepository
+from app.voice.router import router as voice_router
 
 
 def create_app(
@@ -90,6 +91,7 @@ def create_app(
         )
     )
     application.include_router(status_router)
+    application.include_router(voice_router)
     return application
 
 

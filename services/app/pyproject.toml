@@ -9,6 +9,7 @@ dependencies = [
     "fastmcp>=2,<3",
     "redis>=5,<6",
     "uvicorn[standard]>=0.35,<1",
+    "amazon-transcribe>=0.6.4,<1",
 ]
 
 [dependency-groups]
