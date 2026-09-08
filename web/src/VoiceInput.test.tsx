@@ -203,7 +203,15 @@ describe("Voice Input UI Integration", () => {
       expect(screen.getByRole("button", { name: "Stop listening" })).toBeDefined();
     });
 
-    // Stop listening
+    // Simulate backend sending transcript.final while listening
+    await act(async () => {
+      ws.simulateServerMessage({
+        type: "transcript.final",
+        text: "Which pickup zones have the highest tips?",
+      });
+    });
+
+    // Stop listening (now that we have accumulated transcript)
     const stopBtn = screen.getByRole("button", { name: "Stop listening" });
     await act(async () => {
       fireEvent.click(stopBtn);
@@ -213,15 +221,8 @@ describe("Voice Input UI Integration", () => {
     expect(ws.sentMessages).toContain(JSON.stringify({ type: "stop" }));
     expect(mockTrack.stop).toHaveBeenCalled();
 
-    // Simulate backend sending transcript.final
-    await act(async () => {
-      ws.simulateServerMessage({
-        type: "transcript.final",
-        text: "Which pickup zones have the highest tips?",
-      });
-    });
-
     // Verify textarea value was updated with the final transcript
+    // (delivered via onTranscript callback when stopListening was called)
     const textarea = screen.getByLabelText("Ask about NYC taxi activity") as HTMLTextAreaElement;
     expect(textarea.value).toBe("Which pickup zones have the highest tips?");
   });
