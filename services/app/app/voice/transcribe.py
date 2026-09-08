@@ -138,7 +138,14 @@ class AmazonTranscribeSession:
                             await session_self._on_transcript(text, is_partial)
 
         handler = StreamHandler(self._stream.output_stream)
-        self._handler_task = asyncio.create_task(handler.handle_events())
+
+        async def run_handler() -> None:
+            try:
+                await handler.handle_events()
+            except Exception as err:
+                logger.warning("Transcribe event streaming error: %s", err)
+
+        self._handler_task = asyncio.create_task(run_handler())
 
     async def send_audio(self, chunk: bytes) -> None:
         if self._closed or not self._stream:
@@ -171,7 +178,33 @@ class AmazonTranscribeProvider:
         self.region = region or os.getenv("AWS_REGION", "us-east-1")
         from amazon_transcribe.client import TranscribeStreamingClient
 
-        self._client = TranscribeStreamingClient(region=self.region)
+        resolver = None
+        try:
+            import boto3
+            from amazon_transcribe.auth import StaticCredentialResolver
+
+            session = boto3.Session()
+            creds = session.get_credentials()
+            if creds:
+                frozen = creds.get_frozen_credentials()
+                resolver = StaticCredentialResolver(
+                    access_key_id=frozen.access_key,
+                    secret_access_key=frozen.secret_key,
+                    session_token=frozen.token,
+                )
+                logger.debug(
+                    "Successfully resolved AWS credentials for Amazon Transcribe"
+                )
+        except Exception as err:
+            logger.warning(
+                "Could not resolve boto3 credentials for Transcribe: %s", err
+            )
+
+        self._client = (
+            TranscribeStreamingClient(region=self.region, credential_resolver=resolver)
+            if resolver
+            else TranscribeStreamingClient(region=self.region)
+        )
 
     async def open_session(
         self,

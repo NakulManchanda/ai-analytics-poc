@@ -74,8 +74,9 @@ Milestone v4.1 delivers:
 3. React Web Audio capture downsampling microphone audio to 16kHz PCM chunks via `useVoiceInput`.
 4. Live 16-bar frequency audio `WaveformVisualizer` animated by microphone volume energy.
 5. Interactive `🎤 Voice` button with recording pulse animation and manual `⏹ Done Speaking` stop control.
-6. Delivery of final speech transcripts directly into the query prompt textarea for review, refinement, and execution.
-7. Local `docker-compose.aws.yml` override supporting real Bedrock and Amazon Transcribe with `make local-aws-compose`.
+6. Delivery of final speech transcripts directly into the query prompt textarea for review, refinement, and execution, with continuous speech listening across pauses until user clicks Done Speaking (Issue #104).
+7. Reliable credential resolution for Amazon Transcribe in Docker environments via boto3 StaticCredentialResolver.
+8. Local `docker-compose.aws.yml` override supporting real Bedrock and Amazon Transcribe with `make local-aws-compose`.
 
 
 ## Historical baseline

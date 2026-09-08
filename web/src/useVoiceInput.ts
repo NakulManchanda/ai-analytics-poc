@@ -13,7 +13,6 @@ export interface UseVoiceInputResult {
   startListening: () => Promise<void>;
   stopListening: () => void;
   resetError: () => void;
-  accumulatedTranscript: string;
 }
 
 function downsampleTo16k(input: Float32Array, sampleRate: number): Float32Array {
@@ -48,7 +47,6 @@ export function useVoiceInput({
   const [isProcessing, setIsProcessing] = useState(false);
   const [audioLevel, setAudioLevel] = useState(0);
   const [error, setError] = useState<string | null>(null);
-  const [accumulatedTranscript, setAccumulatedTranscript] = useState("");
 
   const socketRef = useRef<WebSocket | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -106,26 +104,26 @@ export function useVoiceInput({
     setIsListening(false);
     setIsProcessing(true);
 
-    // 1. Deliver accumulated transcript to caller
-    if (accumulatedTranscript.trim()) {
-      onTranscript(accumulatedTranscript);
-    }
-
-    // 2. Tell backend to stop
+    // 1. Tell backend to finish audio processing
     if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
       try {
         socketRef.current.send(JSON.stringify({ type: "stop" }));
       } catch {
         // ignore
       }
-      // Close WebSocket after stop message (backend will close gracefully)
-      socketRef.current.close();
     }
 
-    // 3. Shut down microphone and audio analysis
+    // 2. Shut down microphone and audio analysis
     cleanupAudio();
-    setAccumulatedTranscript("");
-  }, [cleanupAudio, isListening, accumulatedTranscript, onTranscript]);
+
+    // 3. Safety timeout: reset processing if server doesn't close within 3s
+    setTimeout(() => {
+      setIsProcessing(false);
+      if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+        socketRef.current.close();
+      }
+    }, 3000);
+  }, [cleanupAudio, isListening]);
 
   const startListening = useCallback(async () => {
     setError(null);
@@ -209,12 +207,11 @@ export function useVoiceInput({
           if (typeof event.data !== "string") return;
           const payload = JSON.parse(event.data);
           if (payload.type === "transcript.final" && payload.text) {
-            // Accumulate transcript segments (Transcribe emits .final per pause, not per session)
-            // Only deliver when user explicitly clicks Stop
-            setAccumulatedTranscript((prev) => {
-              const updated = prev ? prev + " " + payload.text : payload.text;
-              return updated;
-            });
+            onTranscript(payload.text);
+          } else if (payload.type === "voice.completed") {
+            setIsProcessing(false);
+            setIsListening(false);
+            cleanupAudio();
           } else if (payload.type === "voice.error") {
             setError(payload.error || "Speech transcription service error.");
             setIsProcessing(false);
@@ -296,6 +293,5 @@ export function useVoiceInput({
     startListening,
     stopListening,
     resetError,
-    accumulatedTranscript,
   };
 }
