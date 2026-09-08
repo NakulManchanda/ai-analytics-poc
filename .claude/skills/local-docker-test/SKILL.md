@@ -23,7 +23,12 @@ docker compose -p <conflicting-project-name> down
 
 From inside the worktree directory (e.g., `.worktrees/<topic>`):
 
-**Quick start (uses defaults):**
+**Quick start (restart from scratch):**
+```bash
+make local-aws-refresh
+```
+
+**Or start (keep running stack):**
 ```bash
 make local-aws-compose
 ```

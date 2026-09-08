@@ -3,7 +3,7 @@
 APP_HOST_PORT := $(or $(APP_PORT),$(PORT),8080)
 MCP_HOST_PORT := $(or $(MCP_PORT),$(PORT),8001)
 
-.PHONY: help check-bootstrap dev mcp-dev mcp-smoke dataset-test dataset-smoke smoke test mcp-test infra-test web-test compose-smoke local-aws-compose local-bedrock-compose bedrock-smoke m5-bedrock-smoke m6-bedrock-smoke dashboard tf-dispatch tf-resume tf-park
+.PHONY: help check-bootstrap dev mcp-dev mcp-smoke dataset-test dataset-smoke smoke test mcp-test infra-test web-test compose-smoke local-aws-compose local-aws-refresh local-bedrock-compose bedrock-smoke m5-bedrock-smoke m6-bedrock-smoke dashboard tf-dispatch tf-resume tf-park
 
 
 help: ## Show available commands
@@ -60,6 +60,10 @@ local-aws-compose: ## Start local Compose with opt-in real AWS (Bedrock + Transc
 	LOCAL_UID=$$(id -u) \
 	WEB_PORT=$(or $(WEB_PORT),3000) \
 	docker compose -f docker-compose.yml -f docker-compose.aws.yml up --build -d
+
+local-aws-refresh: ## Restart local Compose stack from scratch (down then rebuild/up)
+	docker compose -f docker-compose.yml -f docker-compose.aws.yml down
+	$(MAKE) local-aws-compose
 
 local-bedrock-compose: local-aws-compose ## Deprecated alias for local-aws-compose
 
