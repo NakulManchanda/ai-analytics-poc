@@ -15,6 +15,7 @@ from app.events import (
     context_reduced_payload,
     terminal_run_payload,
 )
+from app.metrics import emit_run_metrics
 from app.llm import LLMClient, LLMProviderError, ToolProposalResult
 from app.mcp_client import (
     ALLOWED_ANALYSES,
@@ -900,6 +901,18 @@ class OrchestrationLoop:
                         telemetry=run_telemetry,
                     ),
                 )
+                emit_run_metrics(
+                    run_id=run_id,
+                    conversation_id=conv_id,
+                    milestone="v3.1",
+                    model=DEFAULT_MODEL_ID,
+                    turn_type="text",
+                    status="completed",
+                    telemetry=run_telemetry,
+                    input_tokens=tracker.input_tokens,
+                    output_tokens=tracker.output_tokens,
+                    estimated_cost_usd=tracker.estimated_cost_usd,
+                )
 
                 return LoopResult(
                     answer=answer_result.text,
@@ -969,6 +982,18 @@ class OrchestrationLoop:
                     reason=err.reason,
                 ),
             )
+            emit_run_metrics(
+                run_id=run_id,
+                conversation_id=conv_id,
+                milestone="v3.1",
+                model=DEFAULT_MODEL_ID,
+                turn_type="text",
+                status="cancelled",
+                telemetry=run_telemetry,
+                input_tokens=tracker.input_tokens,
+                output_tokens=tracker.output_tokens,
+                estimated_cost_usd=tracker.estimated_cost_usd,
+            )
 
             return LoopResult(
                 answer=err.partial_text,
@@ -1025,6 +1050,18 @@ class OrchestrationLoop:
                     reason=err.reason,
                 ),
             )
+            emit_run_metrics(
+                run_id=run_id,
+                conversation_id=conv_id,
+                milestone="v3.1",
+                model=DEFAULT_MODEL_ID,
+                turn_type="text",
+                status="budget_exceeded",
+                telemetry=run_telemetry,
+                input_tokens=tracker.input_tokens,
+                output_tokens=tracker.output_tokens,
+                estimated_cost_usd=tracker.estimated_cost_usd,
+            )
 
             return LoopResult(
                 answer="",
@@ -1079,5 +1116,17 @@ class OrchestrationLoop:
                     error=err.message or str(err),
                 ),
                 llm_call_id=err.llm_call_id or None,
+            )
+            emit_run_metrics(
+                run_id=run_id,
+                conversation_id=conv_id,
+                milestone="v3.1",
+                model=DEFAULT_MODEL_ID,
+                turn_type="text",
+                status="failed",
+                telemetry=run_telemetry,
+                input_tokens=tracker.input_tokens,
+                output_tokens=tracker.output_tokens,
+                estimated_cost_usd=tracker.estimated_cost_usd,
             )
             raise
