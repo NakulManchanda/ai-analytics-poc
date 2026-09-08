@@ -536,7 +536,7 @@ class OrchestrationLoop:
                     ) from err
                 except LLMProviderError as err:
                     raise OrchestrationError(
-                        "llm_provider_error", err.retryable, llm_call_id, str(err)
+                        err.code, err.retryable, llm_call_id, str(err)
                     ) from err
                 call_latency_ms = int((self._monotonic() - call_start) * 1000)
                 proposal_latency_ms = call_latency_ms
@@ -802,7 +802,7 @@ class OrchestrationLoop:
                     ) from err
                 except LLMProviderError as err:
                     raise OrchestrationError(
-                        "llm_provider_error", err.retryable, answer_call_id, str(err)
+                        err.code, err.retryable, answer_call_id, str(err)
                     ) from err
                 ans_latency_ms = int((self._monotonic() - ans_start) * 1000)
                 final_answer_latency_ms = ans_latency_ms

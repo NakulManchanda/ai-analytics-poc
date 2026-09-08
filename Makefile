@@ -3,7 +3,7 @@
 APP_HOST_PORT := $(or $(APP_PORT),$(PORT),8080)
 MCP_HOST_PORT := $(or $(MCP_PORT),$(PORT),8001)
 
-.PHONY: help check-bootstrap dev mcp-dev mcp-smoke dataset-test dataset-smoke smoke test mcp-test infra-test web-test compose-smoke bedrock-smoke m5-bedrock-smoke m6-bedrock-smoke
+.PHONY: help check-bootstrap dev mcp-dev mcp-smoke dataset-test dataset-smoke smoke test mcp-test infra-test web-test compose-smoke local-bedrock-compose bedrock-smoke m5-bedrock-smoke m6-bedrock-smoke
 
 help: ## Show available commands
 	@awk 'BEGIN {FS = ":.*## "; print "Targets:"} /^[a-zA-Z_-]+:.*## / {printf "  %-18s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -48,6 +48,10 @@ web-test: ## Run React tests and production build
 
 compose-smoke: ## Run the browser to FastAPI to FastMCP Compose smoke
 	WEB_PORT=$(or $(WEB_PORT),$(PORT)) ./scripts/smoke/03_compose_ui.sh
+
+local-bedrock-compose: ## Start local Compose with opt-in real Bedrock and shared DynamoDB budget
+	@test -n "$(DYNAMODB_TABLE_NAME)" || (echo "Set DYNAMODB_TABLE_NAME to the shared state table." >&2; exit 2)
+	LOCAL_UID=$$(id -u) docker compose -f docker-compose.yml -f docker-compose.bedrock.yml up --build
 
 bedrock-smoke: ## Make one opt-in, bounded paid Bedrock call through POST /api/ask
 	uv run --project services/app python services/app/scripts/bedrock_smoke.py

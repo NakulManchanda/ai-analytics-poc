@@ -12,6 +12,12 @@ from botocore.exceptions import (
     ReadTimeoutError,
 )
 
+from app.bedrock_budget import (
+    BedrockBudgetExceededError,
+    BedrockBudgetUnavailableError,
+    DynamoDBBedrockBudget,
+    monthly_limit_micro_usd,
+)
 from app.config import DEFAULT_MODEL_ID, Settings
 
 RETRYABLE_BEDROCK_ERROR_CODES = {
@@ -25,9 +31,10 @@ BEDROCK_RUNTIME_CONFIG = Config(retries={"total_max_attempts": 1})
 
 
 class LLMProviderError(Exception):
-    def __init__(self, retryable: bool) -> None:
+    def __init__(self, retryable: bool, code: str = "llm_provider_error") -> None:
         super().__init__()
         self.retryable = retryable
+        self.code = code
 
 
 @dataclass(frozen=True)
@@ -182,10 +189,12 @@ class BedrockLLMClient:
         model_id: str,
         region_name: str | None = None,
         runtime_client: Any | None = None,
+        budget: Any | None = None,
     ) -> None:
         self._model_id = model_id
         self._region_name = region_name
         self._runtime_client = runtime_client
+        self._budget = budget
 
     def ask(self, prompt: str) -> LLMResult:
         response = self._converse(
@@ -416,6 +425,7 @@ class BedrockLLMClient:
         chunks: list[str] = []
         metadata: Mapping[str, Any] | None = None
         try:
+            self._reserve_budget()
             response = self._get_runtime_client().converse_stream(**request)
             for event in response["stream"]:
                 content_delta = event.get("contentBlockDelta")
@@ -465,6 +475,7 @@ class BedrockLLMClient:
         if tool_config is not None:
             request["toolConfig"] = tool_config
         try:
+            self._reserve_budget()
             return self._get_runtime_client().converse(**request)
         except ClientError as error:
             error_code = error.response.get("Error", {}).get("Code", "")
@@ -479,6 +490,20 @@ class BedrockLLMClient:
             raise LLMProviderError(retryable=True) from error
         except BotoCoreError as error:
             raise LLMProviderError(retryable=False) from error
+
+    def _reserve_budget(self) -> None:
+        if self._budget is None:
+            return
+        try:
+            self._budget.reserve(self._model_id)
+        except BedrockBudgetExceededError as error:
+            raise LLMProviderError(
+                retryable=False, code="bedrock_budget_exhausted"
+            ) from error
+        except BedrockBudgetUnavailableError as error:
+            raise LLMProviderError(
+                retryable=True, code="bedrock_budget_unavailable"
+            ) from error
 
     def _as_llm_result(self, response: Mapping[str, Any]) -> LLMResult:
         return LLMResult(
@@ -505,8 +530,31 @@ class BedrockLLMClient:
         return self._runtime_client
 
 
-def create_llm_client(settings: Settings) -> LLMClient:
+def create_llm_client(
+    settings: Settings,
+    *,
+    budget: Any | None = None,
+    runtime_client: Any | None = None,
+) -> LLMClient:
     if settings.llm_provider == "fake":
         return LocalFakeLLMClient()
     settings.validate_m4_alignment()
-    return BedrockLLMClient(settings.llm_model_id, settings.aws_region)
+    if budget is None:
+        if not settings.dynamodb_table_name:
+            raise ValueError(
+                "LLM_PROVIDER=bedrock requires DYNAMODB_TABLE_NAME for the shared "
+                "Bedrock allowance"
+            )
+        budget = DynamoDBBedrockBudget(
+            settings.dynamodb_table_name,
+            monthly_limit_micro_usd=monthly_limit_micro_usd(
+                settings.global_bedrock_monthly_limit_usd
+            ),
+            region_name=settings.aws_region,
+        )
+    return BedrockLLMClient(
+        settings.llm_model_id,
+        settings.aws_region,
+        runtime_client=runtime_client,
+        budget=budget,
+    )
