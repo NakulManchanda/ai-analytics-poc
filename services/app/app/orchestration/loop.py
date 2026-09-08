@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import concurrent.futures
 import json
 import logging
@@ -8,10 +9,11 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
-from app.config import DEFAULT_MODEL_ID, LLMConfigurationError
+from app.config import DEFAULT_MODEL_ID, LLMConfigurationError, VoiceSettings
 from app.events import (
     EventPublisher,
     RunEvent,
+    answer_audio_payload,
     context_reduced_payload,
     terminal_run_payload,
 )
@@ -174,6 +176,7 @@ class OrchestrationLoop:
         budgets: ExecutionBudgets | None = None,
         event_publisher: EventPublisher | None = None,
         context_reducer: ContextReducer | None = None,
+        voice_settings: VoiceSettings | None = None,
         llm_call_id_factory: Callable[[], str] = generate_llm_call_id,
         tool_call_id_factory: Callable[[], str] = generate_tool_call_id,
         monotonic_factory: Callable[[], float] = time.monotonic,
@@ -186,9 +189,17 @@ class OrchestrationLoop:
         self._budgets = budgets or ExecutionBudgets()
         self._publisher = event_publisher
         self._reducer = context_reducer or ContextReducer()
+        self._voice_settings = voice_settings or VoiceSettings.from_environment()
         self._llm_call_id_factory = llm_call_id_factory
         self._tool_call_id_factory = tool_call_id_factory
         self._monotonic = monotonic_factory
+
+        # Initialize Polly client if voice synthesis is enabled
+        if self._voice_settings.enabled and self._voice_settings.provider == "polly":
+            from app.voice.polly import get_polly_client
+            self._polly_client = get_polly_client()
+        else:
+            self._polly_client = None
 
     def _get_llm_client(self) -> LLMClient:
         if self._llm_client is not None:
@@ -813,6 +824,29 @@ class OrchestrationLoop:
                     {"answer": answer_result.text},
                     llm_call_id=answer_call_id,
                 )
+
+                # Synthesize audio if voice output is enabled
+                if self._polly_client and self._voice_settings.enabled:
+                    try:
+                        audio_bytes = self._polly_client.synthesize_speech(
+                            text=answer_result.text,
+                            voice_name=self._voice_settings.voice_name,
+                            language_code=self._voice_settings.language,
+                            output_format="mp3",
+                        )
+                        if audio_bytes:
+                            audio_base64 = base64.b64encode(audio_bytes).decode("utf-8")
+                            emit(
+                                "answer.audio",
+                                answer_audio_payload(
+                                    audio_base64=audio_base64,
+                                    voice_name=self._voice_settings.voice_name,
+                                    format="mp3",
+                                ),
+                                llm_call_id=answer_call_id,
+                            )
+                    except Exception as err:
+                        logger.warning(f"Failed to synthesize audio: {err}")
 
                 ans_cost = estimate_cost(
                     answer_result.input_tokens, answer_result.output_tokens

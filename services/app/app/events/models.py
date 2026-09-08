@@ -57,6 +57,19 @@ def terminal_run_payload(
     return payload
 
 
+def answer_audio_payload(
+    audio_base64: str,
+    voice_name: str = "Joanna",
+    format: str = "mp3",
+) -> dict[str, Any]:
+    """Build the public contract for an answer audio event."""
+    return {
+        "data": audio_base64,
+        "voice_name": voice_name,
+        "format": format,
+    }
+
+
 @dataclass(frozen=True)
 class RunEvent:
     """Represents a bounded, public, versioned execution event streamed to clients."""
