@@ -23,13 +23,25 @@ docker compose -p <conflicting-project-name> down
 
 From inside the worktree directory (e.g., `.worktrees/<topic>`):
 
+**Quick start (restart from scratch):**
 ```bash
-DYNAMODB_TABLE_NAME=ai-analytics-poc-demo-application-state \
-AWS_PROFILE=default \
-LOCAL_UID=$(id -u) \
-WEB_PORT=3000 \
-docker compose -f docker-compose.yml -f docker-compose.aws.yml up --build -d
+make local-aws-refresh
 ```
+
+**Or start (keep running stack):**
+```bash
+make local-aws-compose
+```
+
+**With custom settings:**
+```bash
+DYNAMODB_TABLE_NAME=custom-table AWS_PROFILE=profile-name WEB_PORT=3001 make local-aws-compose
+```
+
+**Defaults (if not set):**
+- `DYNAMODB_TABLE_NAME=ai-analytics-poc-demo-application-state`
+- `AWS_PROFILE=default`
+- `WEB_PORT=3000`
 
 > **Note**: Docker Compose automatically uses the worktree directory name as the Compose project name, ensuring network and container isolation.
 

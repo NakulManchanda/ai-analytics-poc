@@ -197,6 +197,7 @@ class OrchestrationLoop:
         # Initialize Polly client if voice synthesis is enabled
         if self._voice_settings.enabled and self._voice_settings.provider == "polly":
             from app.voice.polly import get_polly_client
+
             self._polly_client = get_polly_client()
         else:
             self._polly_client = None
