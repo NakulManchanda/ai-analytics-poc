@@ -63,11 +63,11 @@ You can manage Terraform in two ways:
 ## Local Development & Telemetry Dashboard
 
 - **Standard fake LLM mode**: `make dev`, `make mcp-dev`, `make smoke`, `make compose-smoke`.
-- **Real local Bedrock mode (opt-in)**:
+- **Real local AWS mode (opt-in Bedrock + Transcribe)**:
   ```sh
   export DYNAMODB_TABLE_NAME=ai-analytics-poc-demo-application-state
   export AWS_PROFILE=default
-  make local-bedrock-compose
+  make local-aws-compose
   ```
 - **Metrics Comparison Dashboard**:
   ```sh
