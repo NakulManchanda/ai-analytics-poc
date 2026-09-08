@@ -1,6 +1,5 @@
 from pathlib import Path
 
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -15,14 +14,19 @@ def test_bootstrap_state_bucket_is_private_versioned_encrypted_and_tls_only() ->
     bootstrap = (REPO_ROOT / "infra/terraform/bootstrap/state.tf").read_text()
     assert 'resource "aws_s3_bucket" "terraform_state"' in bootstrap
     assert 'resource "aws_s3_bucket_versioning" "terraform_state"' in bootstrap
-    assert 'resource "aws_s3_bucket_server_side_encryption_configuration" "terraform_state"' in bootstrap
+    assert (
+        'resource "aws_s3_bucket_server_side_encryption_configuration" "terraform_state"'
+        in bootstrap
+    )
     assert 'resource "aws_s3_bucket_public_access_block" "terraform_state"' in bootstrap
     assert "block_public_acls       = true" in bootstrap
     assert 'sid    = "DenyInsecureTransport"' in bootstrap
     assert 'variable = "aws:SecureTransport"' in bootstrap
 
 
-def test_release_apply_is_protected_and_never_publishes_sensitive_terraform_data() -> None:
+def test_release_apply_is_protected_and_never_publishes_sensitive_terraform_data() -> (
+    None
+):
     workflow = (REPO_ROOT / ".github/workflows/terraform-release.yml").read_text()
     assert "workflow_dispatch:" in workflow
     assert "environment: terraform-production" in workflow
@@ -48,4 +52,3 @@ def test_dynamodb_table_defines_gsi_for_metrics_and_runs() -> None:
     assert 'hash_key        = "entity_type"' in dynamodb_tf
     assert 'range_key       = "started_at"' in dynamodb_tf
     assert 'projection_type = "ALL"' in dynamodb_tf
-
