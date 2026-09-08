@@ -24,6 +24,9 @@ and `.github/copilot-instructions.md`) must stay thin and refer here rather than
 
 ## Change workflow
 
+- Simple documentation-only updates may be committed directly to `main` without an issue, branch,
+  worktree, PR, independent review, or work-history entry when they cannot affect application or
+  infrastructure behavior, CI/CD, security, configuration, or developer commands.
 - After bootstrap, use a dedicated branch and project-local worktree for every change. Keep the
   main checkout untouched; use `.worktrees/<topic>` and a descriptive branch name.
 - Make the smallest coherent commit, push the branch early, and open a **draft** PR as soon as
