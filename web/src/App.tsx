@@ -2,6 +2,7 @@ import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { ContextInspector } from "./ContextInspector";
 import { TimelineInspector } from "./TimelineInspector";
 import { useVoiceInput } from "./useVoiceInput";
+import { useAudioPlayback } from "./useAudioPlayback";
 import { WaveformVisualizer } from "./WaveformVisualizer";
 import {
   AskResponse,
@@ -77,6 +78,15 @@ export default function App() {
     stopListening,
     resetError: resetVoiceError,
   } = useVoiceInput({ onTranscript: handleVoiceTranscript });
+
+  // Audio Playback State
+  const {
+    isPlayingAudio,
+    audioError,
+    handleAudioEvent,
+    stop: stopAudio,
+    resetError: resetAudioError,
+  } = useAudioPlayback({ autoPlay: true });
 
   useEffect(() => {
     let active = true;
@@ -243,6 +253,9 @@ export default function App() {
             if (eventType === "answer.delta" && typeof p.delta === "string") {
               accumulatedAnswer += p.delta;
               setStreamingAnswer(accumulatedAnswer);
+            } else if (eventType === "answer.audio" && typeof p.data === "string") {
+              // Handle audio event: decode base64 MP3 and play
+              handleAudioEvent(p.data);
             } else if (
               eventType === "run.completed" ||
               eventType === "run.failed" ||
@@ -285,6 +298,7 @@ export default function App() {
         const eventTypesToListen = [
           "message",
           "answer.delta",
+          "answer.audio",
           "run.received",
           "run.completed",
           "run.failed",
@@ -348,6 +362,8 @@ export default function App() {
       activeAbortController.current.abort();
       activeAbortController.current = null;
     }
+    // Stop audio playback if running
+    stopAudio();
   };
 
   const handleInspectRun = (runId: string) => {
@@ -510,6 +526,26 @@ export default function App() {
                   className="btn-dismiss-error"
                   onClick={resetVoiceError}
                   aria-label="Dismiss voice error"
+                >
+                  ✕
+                </button>
+              </div>
+            )}
+
+            {isPlayingAudio && (
+              <div className="audio-status-banner" role="status" aria-label="Audio playback status">
+                <span>🔊 Playing audio response</span>
+              </div>
+            )}
+
+            {audioError && (
+              <div className="audio-error-banner" role="alert">
+                <span>⚠️ {audioError}</span>
+                <button
+                  type="button"
+                  className="btn-dismiss-error"
+                  onClick={resetAudioError}
+                  aria-label="Dismiss audio error"
                 >
                   ✕
                 </button>
