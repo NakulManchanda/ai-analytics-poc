@@ -7,7 +7,73 @@ import { ContextInspector } from "./ContextInspector";
 import { TimelineInspector } from "./TimelineInspector";
 import { RunEvent, WorkingContextData } from "./types";
 
+// Mock EventSource for SSE streaming tests
+class MockEventSource {
+  private url: string;
+  private listeners: Map<string, ((event: Event) => void)[]> = new Map();
+
+  constructor(url: string) {
+    this.url = url;
+    // Defer event dispatch to allow listeners to be registered
+    setTimeout(() => this.processPendingEvents(), 0);
+  }
+
+  addEventListener(eventType: string, listener: (event: Event) => void) {
+    if (!this.listeners.has(eventType)) {
+      this.listeners.set(eventType, []);
+    }
+    this.listeners.get(eventType)!.push(listener);
+  }
+
+  removeEventListener(eventType: string, listener: (event: Event) => void) {
+    const handlers = this.listeners.get(eventType);
+    if (handlers) {
+      const index = handlers.indexOf(listener);
+      if (index > -1) handlers.splice(index, 1);
+    }
+  }
+
+  close() {
+    this.listeners.clear();
+  }
+
+  private processPendingEvents() {
+    // Look up mock SSE data based on URL
+    const mockSseRegistry = (globalThis as any).__mockSseDataRegistry as Map<string, string>;
+    const mockSseData = mockSseRegistry?.get(this.url);
+    if (mockSseData) {
+      const frames = mockSseData.split("\n\n").filter((frame: string) => frame.trim());
+
+      for (const frame of frames) {
+        const lines = frame.split("\n");
+        const eventLine = lines.find((l: string) => l.startsWith("event: "));
+        const dataLine = lines.find((l: string) => l.startsWith("data: "));
+        if (dataLine) {
+          const rawData = dataLine.slice(6);
+          let eventType = eventLine ? eventLine.slice(7).trim() : "message";
+          if (!eventLine) {
+            try {
+              const parsed = JSON.parse(rawData);
+              if (parsed && typeof parsed.event_type === "string") {
+                eventType = parsed.event_type;
+              }
+            } catch {
+              // fallback to message
+            }
+          }
+          const messageEvent = new MessageEvent(eventType, { data: rawData });
+          this.listeners.get(eventType)?.forEach((listener) => listener(messageEvent));
+        }
+      }
+    }
+  }
+}
+
+// Initialize mock SSE data registry
+(globalThis as any).__mockSseDataRegistry = new Map<string, string>();
+
 beforeEach(() => {
+  vi.stubGlobal("EventSource", MockEventSource as any);
   vi.stubGlobal(
     "fetch",
     vi.fn().mockImplementation((input: string) => {
@@ -78,6 +144,9 @@ describe("App", () => {
       { event_id: "e2", event_type: "run.completed", run_id: "run_test_123", conversation_id: "conv_test", sequence: 2, timestamp: "2026-08-25T00:00:02Z", payload: { input_tokens: 16, output_tokens: 9, total_tokens: 25, estimated_cost_usd: 0.0005, end_to_end_latency_ms: 32, ttft: { available: false } } },
     ];
     const sseText = sseEvents.map((e) => `data: ${JSON.stringify(e)}\n\n`).join("");
+    const mockSseRegistry = (globalThis as any).__mockSseDataRegistry as Map<string, string>;
+    mockSseRegistry.set("/api/runs/run_test_123/events", sseText);
+
     const fetchRequest = vi.fn().mockImplementation((input: string) => {
       if (input === "/api/status") {
         return Promise.resolve({
@@ -93,9 +162,6 @@ describe("App", () => {
           ok: true,
           json: async () => ({ run_id: "run_test_123", conversation_id: "conv_test", message_id: "msg_test", events_url: "/api/runs/run_test_123/events" }),
         });
-      }
-      if (input === "/api/runs/run_test_123/events") {
-        return Promise.resolve({ ok: true, text: async () => sseText });
       }
       return Promise.resolve({
         ok: true,
@@ -166,6 +232,7 @@ describe("App", () => {
 
   it("uses backend-issued IDs from the first turn and reuses the conversation on the second", async () => {
     let turnCount = 0;
+    const mockSseRegistry = (globalThis as any).__mockSseDataRegistry as Map<string, string>;
     const fetchRequest = vi.fn().mockImplementation((input: string) => {
       if (input === "/api/status") {
         return Promise.resolve({
@@ -179,19 +246,17 @@ describe("App", () => {
       if (input === "/api/runs") {
         turnCount += 1;
         const runId = `run_turn_${turnCount}`;
-        return Promise.resolve({
-          ok: true,
-          json: async () => ({ run_id: runId, conversation_id: "conv_backend_123", message_id: `msg_${turnCount}`, events_url: `/api/runs/${runId}/events` }),
-        });
-      }
-      if (input.startsWith("/api/runs/run_turn_") && input.endsWith("/events")) {
-        const runId = input.split("/")[3];
         const answer = runId === "run_turn_1" ? "Answer for turn 1." : "Answer for turn 2.";
         const events = [
           { event_id: "e1", event_type: "answer.delta", run_id: runId, conversation_id: "conv_backend_123", sequence: 1, timestamp: "2026-08-25T00:00:01Z", payload: { delta: answer } },
           { event_id: "e2", event_type: "run.completed", run_id: runId, conversation_id: "conv_backend_123", sequence: 2, timestamp: "2026-08-25T00:00:02Z", payload: { input_tokens: 20, output_tokens: 10, total_tokens: 30, estimated_cost_usd: 0.001, end_to_end_latency_ms: 25, ttft: { available: false } } },
         ];
-        return Promise.resolve({ ok: true, text: async () => events.map((e) => `data: ${JSON.stringify(e)}\n\n`).join("") });
+        const sseText = events.map((e) => `data: ${JSON.stringify(e)}\n\n`).join("");
+        mockSseRegistry.set(`/api/runs/${runId}/events`, sseText);
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ run_id: runId, conversation_id: "conv_backend_123", message_id: `msg_${turnCount}`, events_url: `/api/runs/${runId}/events` }),
+        });
       }
       if (input === "/api/conversations/conv_backend_123") {
         const messages = turnCount === 1
@@ -267,6 +332,18 @@ describe("App", () => {
 
   it("reloads durable messages and run metadata for the backend conversation", async () => {
     window.localStorage.setItem("ai-analytics-conversation-id", "conv_durable_456");
+    const mockSseRegistry = (globalThis as any).__mockSseDataRegistry as Map<string, string>;
+    const terminalEvent = {
+      event_id: "evt_durable_terminal", event_type: "run.completed", run_id: "run_durable_1",
+      conversation_id: "conv_durable_456", sequence: 1, timestamp: "2026-08-25T00:00:02Z",
+      payload: {
+        input_tokens: 11, output_tokens: 7, total_tokens: 18, estimated_cost_usd: 0.0003,
+        end_to_end_latency_ms: 41, proposal_llm_latency_ms: 12, tool_latency_ms: 8,
+        final_answer_llm_latency_ms: 15, ttft: { available: false, reason: "non_streaming_blocking" },
+      },
+    };
+    mockSseRegistry.set("/api/runs/run_durable_1/events", `data: ${JSON.stringify(terminalEvent)}\n\n`);
+
     const fetchRequest = vi.fn().mockImplementation((input: string) => {
       if (input === "/api/status") {
         return Promise.resolve({
@@ -292,20 +369,6 @@ describe("App", () => {
           }),
         });
       }
-      if (input === "/api/runs/run_durable_1/events") {
-        return Promise.resolve({
-          ok: true,
-          text: async () => `data: ${JSON.stringify({
-            event_id: "evt_durable_terminal", event_type: "run.completed", run_id: "run_durable_1",
-            conversation_id: "conv_durable_456", sequence: 1, timestamp: "2026-08-25T00:00:02Z",
-            payload: {
-              input_tokens: 11, output_tokens: 7, total_tokens: 18, estimated_cost_usd: 0.0003,
-              end_to_end_latency_ms: 41, proposal_llm_latency_ms: 12, tool_latency_ms: 8,
-              final_answer_llm_latency_ms: 15, ttft: { available: false, reason: "non_streaming_blocking" },
-            },
-          })}\n\n`,
-        });
-      }
       return Promise.resolve({ ok: true, json: async () => ({}) });
     });
     vi.stubGlobal("fetch", fetchRequest);
@@ -327,11 +390,13 @@ describe("App", () => {
     window.localStorage.setItem("ai-analytics-conversation-id", "conv_old");
     let resolveOldSnapshot: ((value: unknown) => void) | undefined;
     const oldSnapshot = new Promise((resolve) => { resolveOldSnapshot = resolve; });
+    const mockSseRegistry = (globalThis as any).__mockSseDataRegistry as Map<string, string>;
+    const freshSseText = `data: ${JSON.stringify({ event_id: "e1", event_type: "answer.delta", run_id: "run_fresh", conversation_id: "conv_fresh", sequence: 1, timestamp: "2026-08-25T00:00:00Z", payload: { delta: "Fresh answer" } })}\n\ndata: ${JSON.stringify({ event_id: "e2", event_type: "run.completed", run_id: "run_fresh", conversation_id: "conv_fresh", sequence: 2, timestamp: "2026-08-25T00:00:01Z", payload: { input_tokens: 1, output_tokens: 1, total_tokens: 2, estimated_cost_usd: 0.0001, end_to_end_latency_ms: 2, ttft: { available: false } } })}\n\n`;
+    mockSseRegistry.set("/api/runs/run_fresh/events", freshSseText);
     vi.stubGlobal("fetch", vi.fn().mockImplementation((input: string) => {
       if (input === "/api/status") return Promise.resolve({ ok: true, json: async () => ({ app: { status: "ok", service: "ai-app" }, mcp: { status: "ok" } }) });
       if (input === "/api/conversations/conv_old") return oldSnapshot.then((snapshot) => ({ ok: true, json: async () => snapshot }));
       if (input === "/api/runs") return Promise.resolve({ ok: true, json: async () => ({ run_id: "run_fresh", conversation_id: "conv_fresh", message_id: "msg_f", events_url: "/api/runs/run_fresh/events" }) });
-      if (input === "/api/runs/run_fresh/events") return Promise.resolve({ ok: true, text: async () => `data: ${JSON.stringify({ event_id: "e1", event_type: "answer.delta", run_id: "run_fresh", conversation_id: "conv_fresh", sequence: 1, timestamp: "2026-08-25T00:00:00Z", payload: { delta: "Fresh answer" } })}\n\ndata: ${JSON.stringify({ event_id: "e2", event_type: "run.completed", run_id: "run_fresh", conversation_id: "conv_fresh", sequence: 2, timestamp: "2026-08-25T00:00:01Z", payload: { input_tokens: 1, output_tokens: 1, total_tokens: 2, estimated_cost_usd: 0.0001, end_to_end_latency_ms: 2, ttft: { available: false } } })}\n\n` });
       if (input === "/api/conversations/conv_fresh") return Promise.resolve({ ok: true, json: async () => ({ conversation_id: "conv_fresh", messages: [], runs: [] }) });
       return Promise.resolve({ ok: true, text: async () => "" });
     }));
@@ -362,13 +427,12 @@ describe("App", () => {
       sequence: 1, timestamp: "2026-08-25T00:00:01Z",
       payload: { input_tokens: 3, output_tokens: 2, total_tokens: 5, estimated_cost_usd: 0.0004, end_to_end_latency_ms: 18, ttft: { available: false } },
     };
+    const deltaEvent = { event_id: "e0", event_type: "answer.delta", run_id: "run_same", conversation_id: "conv_same", sequence: 1, timestamp: "2026-08-25T00:00:00Z", payload: { delta: "Same run answer" } };
+    const mockSseRegistry = (globalThis as any).__mockSseDataRegistry as Map<string, string>;
+    mockSseRegistry.set("/api/runs/run_same/events", `data: ${JSON.stringify(deltaEvent)}\n\ndata: ${JSON.stringify(terminalEvent)}\n\n`);
     vi.stubGlobal("fetch", vi.fn().mockImplementation((input: string) => {
       if (input === "/api/status") return Promise.resolve({ ok: true, json: async () => ({ app: { status: "ok", service: "ai-app" }, mcp: { status: "ok" } }) });
       if (input === "/api/runs") return Promise.resolve({ ok: true, json: async () => ({ run_id: "run_same", conversation_id: "conv_same", message_id: "msg_s", events_url: "/api/runs/run_same/events" }) });
-      if (input === "/api/runs/run_same/events") {
-        const deltaEvent = { event_id: "e0", event_type: "answer.delta", run_id: "run_same", conversation_id: "conv_same", sequence: 1, timestamp: "2026-08-25T00:00:00Z", payload: { delta: "Same run answer" } };
-        return Promise.resolve({ ok: true, text: async () => `data: ${JSON.stringify(deltaEvent)}\n\ndata: ${JSON.stringify(terminalEvent)}\n\n` });
-      }
       if (input === "/api/conversations/conv_same") return delayedSnapshot.then((snapshot) => ({ ok: true, json: async () => snapshot }));
       return Promise.resolve({ ok: true, text: async () => "" });
     }));
@@ -388,13 +452,16 @@ describe("App", () => {
 
   it("clears prior run context and telemetry before inspecting another run", async () => {
     window.localStorage.setItem("ai-analytics-conversation-id", "conv_switch");
+    const mockSseRegistry = (globalThis as any).__mockSseDataRegistry as Map<string, string>;
+    const firstRunEvent = { event_id: "evt_first", event_type: "run.completed", run_id: "run_first", conversation_id: "conv_switch", sequence: 1, timestamp: "2026-08-25T00:00:01Z", payload: { input_tokens: 1, output_tokens: 1, total_tokens: 2, estimated_cost_usd: 0.001, end_to_end_latency_ms: 9, ttft: { available: false } } };
+    mockSseRegistry.set("/api/runs/run_first/events", `data: ${JSON.stringify(firstRunEvent)}\n\n`);
+
     vi.stubGlobal("fetch", vi.fn().mockImplementation((input: string) => {
       if (input === "/api/status") return Promise.resolve({ ok: true, json: async () => ({ app: { status: "ok", service: "ai-app" }, mcp: { status: "ok" } }) });
       if (input === "/api/conversations/conv_switch") return Promise.resolve({ ok: true, json: async () => ({
         conversation_id: "conv_switch", messages: [],
         runs: [{ run_id: "run_first", message_id: null, status: "completed", started_at: "2026-08-25T00:00:00Z", completed_at: null, input_tokens: 1, output_tokens: 1, estimated_cost_usd: 0.001, steps: [] }],
       }) });
-      if (input === "/api/runs/run_first/events") return Promise.resolve({ ok: true, text: async () => `data: ${JSON.stringify({ event_id: "evt_first", event_type: "run.completed", run_id: "run_first", conversation_id: "conv_switch", sequence: 1, timestamp: "2026-08-25T00:00:01Z", payload: { input_tokens: 1, output_tokens: 1, total_tokens: 2, estimated_cost_usd: 0.001, end_to_end_latency_ms: 9, ttft: { available: false } } })}\n\n` });
       return Promise.resolve({ ok: true, text: async () => "" });
     }));
 
@@ -428,16 +495,15 @@ describe("App", () => {
         ttft: { available: false, reason: "non_streaming_blocking" },
       },
     };
+    const deltaEvent = { event_id: "e0", event_type: "answer.delta", run_id: "run_telemetry_1", conversation_id: "conv_telemetry_1", sequence: 1, timestamp: "2026-08-25T00:00:00Z", payload: { delta: "Telemetry answer." } };
+    const mockSseRegistry = (globalThis as any).__mockSseDataRegistry as Map<string, string>;
+    mockSseRegistry.set("/api/runs/run_telemetry_1/events", `data: ${JSON.stringify(deltaEvent)}\n\ndata: ${JSON.stringify(terminalEvent)}\n\n`);
     vi.stubGlobal("fetch", vi.fn().mockImplementation((input: string) => {
       if (input === "/api/status") {
         return Promise.resolve({ ok: true, json: async () => ({ app: { status: "ok", service: "ai-app" }, mcp: { status: "ok" } }) });
       }
       if (input === "/api/runs") {
         return Promise.resolve({ ok: true, json: async () => ({ run_id: "run_telemetry_1", conversation_id: "conv_telemetry_1", message_id: "msg_t", events_url: "/api/runs/run_telemetry_1/events" }) });
-      }
-      if (input === "/api/runs/run_telemetry_1/events") {
-        const deltaEvent = { event_id: "e0", event_type: "answer.delta", run_id: "run_telemetry_1", conversation_id: "conv_telemetry_1", sequence: 1, timestamp: "2026-08-25T00:00:00Z", payload: { delta: "Telemetry answer." } };
-        return Promise.resolve({ ok: true, text: async () => `data: ${JSON.stringify(deltaEvent)}\n\ndata: ${JSON.stringify(terminalEvent)}\n\n` });
       }
       return Promise.resolve({ ok: true, text: async () => "" });
     }));
@@ -471,11 +537,12 @@ describe("App", () => {
       { event_id: "e4", event_type: "run.completed", run_id: "run_stream", conversation_id: "conv_s", sequence: 4, timestamp: "2026-08-25T00:00:02Z", payload: { input_tokens: 5, output_tokens: 2, total_tokens: 7, estimated_cost_usd: 0.0001, end_to_end_latency_ms: 120, ttft: { available: true, latency_ms: 45, source: "provider_stream" } } },
     ];
     const sseText = deltaEvents.map((e) => `data: ${JSON.stringify(e)}\n\n`).join("");
+    const mockSseRegistry = (globalThis as any).__mockSseDataRegistry as Map<string, string>;
+    mockSseRegistry.set("/api/runs/run_stream/events", sseText);
 
     vi.stubGlobal("fetch", vi.fn().mockImplementation((input: string) => {
       if (input === "/api/status") return Promise.resolve({ ok: true, json: async () => ({ app: { status: "ok", service: "ai-app" }, mcp: { status: "ok", tools: 1, resources: 1 } }) });
       if (input === "/api/runs") return Promise.resolve({ ok: true, json: async () => ({ run_id: "run_stream", conversation_id: "conv_s", message_id: "msg_s", events_url: "/api/runs/run_stream/events" }) });
-      if (input === "/api/runs/run_stream/events") return Promise.resolve({ ok: true, text: async () => sseText });
       if (input === "/api/conversations/conv_s") return Promise.resolve({ ok: true, json: async () => ({ conversation_id: "conv_s", messages: [
         { message_id: "msg_s", sequence: 1, role: "user", content: "Which zone leads?", created_at: "2026-08-25T00:00:00Z" },
         { message_id: "msg_a", sequence: 2, role: "assistant", content: "JFK leads.", created_at: "2026-08-25T00:00:02Z" },
@@ -506,13 +573,12 @@ describe("App", () => {
         ttft: { available: true, latency_ms: 42, source: "provider_stream" },
       },
     };
+    const deltaEvent = { event_id: "e0", event_type: "answer.delta", run_id: "run_ttft", conversation_id: "conv_ttft", sequence: 1, timestamp: "2026-08-25T00:00:01Z", payload: { delta: "TTFT answer." } };
+    const mockSseRegistry = (globalThis as any).__mockSseDataRegistry as Map<string, string>;
+    mockSseRegistry.set("/api/runs/run_ttft/events", `data: ${JSON.stringify(deltaEvent)}\n\ndata: ${JSON.stringify(terminalEvent)}\n\n`);
     vi.stubGlobal("fetch", vi.fn().mockImplementation((input: string) => {
       if (input === "/api/status") return Promise.resolve({ ok: true, json: async () => ({ app: { status: "ok", service: "ai-app" }, mcp: { status: "ok" } }) });
       if (input === "/api/runs") return Promise.resolve({ ok: true, json: async () => ({ run_id: "run_ttft", conversation_id: "conv_ttft", message_id: "msg_ttft", events_url: "/api/runs/run_ttft/events" }) });
-      if (input === "/api/runs/run_ttft/events") {
-        const deltaEvent = { event_id: "e0", event_type: "answer.delta", run_id: "run_ttft", conversation_id: "conv_ttft", sequence: 1, timestamp: "2026-08-25T00:00:01Z", payload: { delta: "TTFT answer." } };
-        return Promise.resolve({ ok: true, text: async () => `data: ${JSON.stringify(deltaEvent)}\n\ndata: ${JSON.stringify(terminalEvent)}\n\n` });
-      }
       return Promise.resolve({ ok: true, text: async () => "" });
     }));
 
@@ -645,16 +711,12 @@ describe("TimelineInspector Component", () => {
     ];
 
     const sseResponseText = mockEvents.map((e) => `data: ${JSON.stringify(e)}\n\n`).join("");
+    const mockSseRegistry = (globalThis as any).__mockSseDataRegistry as Map<string, string>;
+    mockSseRegistry.set("/api/runs/run_test_sse/events", sseResponseText);
 
     vi.stubGlobal(
       "fetch",
       vi.fn().mockImplementation((url: string) => {
-        if (url.includes("/api/runs/run_test_sse/events")) {
-          return Promise.resolve({
-            ok: true,
-            text: async () => sseResponseText,
-          });
-        }
         return Promise.resolve({ ok: true, json: async () => ({}) });
       }),
     );
@@ -680,6 +742,8 @@ describe("TimelineInspector Component", () => {
       { event_id: "e3", event_type: "run.cancelled", run_id: "run_cancel_ui", conversation_id: "conv_c", sequence: 3, timestamp: "2026-08-25T00:00:02Z", payload: { status: "cancelled", input_tokens: 10, output_tokens: 4, total_tokens: 14, estimated_cost_usd: 0.0005, end_to_end_latency_ms: 80 } },
     ];
     const sseText = cancelSseEvents.map((e) => `data: ${JSON.stringify(e)}\n\n`).join("");
+    const mockSseRegistry = (globalThis as any).__mockSseDataRegistry as Map<string, string>;
+    mockSseRegistry.set("/api/runs/run_cancel_ui/events", sseText);
 
     vi.stubGlobal(
       "fetch",
@@ -693,9 +757,6 @@ describe("TimelineInspector Component", () => {
         if (input.includes("/cancel")) {
           cancelCalled();
           return Promise.resolve({ ok: true, json: async () => ({ run_id: "run_cancel_ui", status: "cancel_requested" }) });
-        }
-        if (input.includes("/events")) {
-          return Promise.resolve({ ok: true, text: async () => sseText });
         }
         if (input.startsWith("/api/conversations/")) {
           return Promise.resolve({
