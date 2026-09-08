@@ -50,7 +50,7 @@ if not metrics_path.exists() or metrics_path.stat().st_size == 0:
     st.info(
         f"**No metrics log found at `{metrics_path}` yet.**\n\n"
         "Run queries via the local application to populate metrics:\n"
-        "- Run `make dev` or `make local-bedrock-compose`\n"
+        "- Run `make dev` or `make local-aws-compose`\n"
         "- Submit analytics questions in the UI at `http://localhost:3000`\n"
         "- Or download public deployment logs:\n"
         "  ```bash\n"

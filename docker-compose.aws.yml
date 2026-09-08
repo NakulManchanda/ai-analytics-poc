@@ -1,9 +1,10 @@
-# Explicit opt-in only: combines with docker-compose.yml for local real Bedrock calls.
+# Explicit opt-in only: combines with docker-compose.yml for local real AWS (Bedrock + Transcribe) calls.
 services:
   app:
     user: "${LOCAL_UID:?Set LOCAL_UID to your host user id}"
     environment:
       LLM_PROVIDER: bedrock
+      STT_PROVIDER: "${STT_PROVIDER:-transcribe}"
       DYNAMODB_TABLE_NAME: "${DYNAMODB_TABLE_NAME:?Set DYNAMODB_TABLE_NAME to the shared state table}"
       GLOBAL_BEDROCK_MONTHLY_LIMIT_USD: "${GLOBAL_BEDROCK_MONTHLY_LIMIT_USD:-5.00}"
       AWS_REGION: "${AWS_REGION:-us-east-1}"

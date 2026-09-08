@@ -72,10 +72,11 @@ def test_ephemeral_port_helper_can_derive_distinct_ports_for_parallel_smokes() -
     assert first != second
 
 
-def test_bedrock_compose_override_is_explicit_and_uses_shared_durable_state() -> None:
-    override = (ROOT / "docker-compose.bedrock.yml").read_text(encoding="utf-8")
+def test_aws_compose_override_is_explicit_and_uses_shared_durable_state() -> None:
+    override = (ROOT / "docker-compose.aws.yml").read_text(encoding="utf-8")
 
     assert "LLM_PROVIDER: bedrock" in override
+    assert 'STT_PROVIDER: "${STT_PROVIDER:-transcribe}"' in override
     assert 'DYNAMODB_TABLE_NAME: "${DYNAMODB_TABLE_NAME:?' in override
     assert "${HOME}/.aws:/aws:ro" in override
     assert (

@@ -11,3 +11,4 @@ Pull-request chronology belongs in `docs/work-history/`; the active session hand
 
 - [ADR 0006 — Allow the existing local AWS profile for Terraform operations](0006-local-terraform-operator-profile.md)
 - [ADR 0007 — Telemetry, CloudWatch Metrics, and Local Comparison Architecture](0007-telemetry-metrics-comparison-architecture.md)
+- [ADR 0008 — V4 Voice Input: WebSocket + Continuous Chunking Architecture](0008-v4-voice-input-websocket-architecture.md)

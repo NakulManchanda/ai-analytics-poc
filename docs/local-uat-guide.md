@@ -25,7 +25,7 @@ application-wide monthly allowance as hosted calls:
 ```bash
 export DYNAMODB_TABLE_NAME=your-shared-state-table
 export AWS_PROFILE=your-profile
-make local-bedrock-compose
+make local-aws-compose
 ```
 
 `GLOBAL_BEDROCK_MONTHLY_LIMIT_USD` defaults to `5.00` and may be set before

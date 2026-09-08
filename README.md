@@ -185,7 +185,7 @@ profile; credentials are mounted read-only and are never copied into the image:
 ```bash
 export DYNAMODB_TABLE_NAME=your-shared-state-table
 export AWS_PROFILE=your-profile
-make local-bedrock-compose
+make local-aws-compose
 ```
 
 This path fails closed without `DYNAMODB_TABLE_NAME`. Its real Bedrock calls
