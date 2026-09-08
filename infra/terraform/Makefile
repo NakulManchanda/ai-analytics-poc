@@ -2,12 +2,14 @@
 
 TF_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 TFVARS ?= terraform.tfvars
+BACKEND_CONFIG ?= backend.hcl
 
-.PHONY: help init-backendless fmt fmt-check validate plan
+.PHONY: help init-backendless init-remote fmt fmt-check validate plan
 
 help:
 	@printf '%s\n' 'Terraform foundation targets:' \
 	  '  make init-backendless  Initialize providers without configuring remote state' \
+	  '  make init-remote       Initialize the approved S3 backend using ignored backend.hcl' \
 	  '  make fmt              Format Terraform files' \
 	  '  make fmt-check        Verify Terraform formatting' \
 	  '  make validate         Validate Terraform configuration (after init-backendless)' \
@@ -17,6 +19,10 @@ help:
 
 init-backendless:
 	terraform -chdir=$(TF_DIR) init -backend=false
+
+init-remote:
+	@test -f $(BACKEND_CONFIG) || { echo "Missing ignored $(BACKEND_CONFIG); copy backend.hcl.example." >&2; exit 2; }
+	terraform -chdir=$(TF_DIR) init -reconfigure -backend-config=$(BACKEND_CONFIG)
 
 fmt:
 	terraform -chdir=$(TF_DIR) fmt
