@@ -72,6 +72,10 @@ def create_voice_router(default_provider: STTProvider | None = None) -> APIRoute
                     if msg_type in ("stop", "finish", "end"):
                         logger.debug("Client requested voice stream stop")
                         await session.close()
+                        try:
+                            await websocket.send_json({"type": "voice.completed"})
+                        except Exception:
+                            pass
                         break
 
         except WebSocketDisconnect:
