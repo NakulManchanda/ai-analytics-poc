@@ -83,6 +83,10 @@ and `.github/copilot-instructions.md`) must stay thin and refer here rather than
   service suite for service changes, and cumulative smoke checks for milestone or cross-service
   changes. For containers or deployment changes, build/run the affected artifact and verify its
   externally visible contract when practical.
+- When the user requests manual testing (e.g., "start docker to test", "i can help with manual testing", "manual testing"):
+  use `.claude/skills/local-docker-test/SKILL.md` to start the local Docker AWS stack from the active worktree:
+  `DYNAMODB_TABLE_NAME=ai-analytics-poc-demo-application-state AWS_PROFILE=default LOCAL_UID=$(id -u) WEB_PORT=3000 docker compose -f docker-compose.yml -f docker-compose.aws.yml up --build -d`
+  Verify health via `curl -s http://localhost:3000/api/status` before handing off to the user for testing.
 - Before calling work complete, report exact commands and outcomes, inspect the diff and status,
   scan changed files for secrets/placeholders, and record any limitation or unverified path.
 - A milestone is complete only after its acceptance checks, documentation update, manual demo
