@@ -24,9 +24,6 @@ and `.github/copilot-instructions.md`) must stay thin and refer here rather than
 
 ## Change workflow
 
-- Simple documentation-only updates may be committed directly to `main` without an issue, branch,
-  worktree, PR, independent review, or work-history entry when they cannot affect application or
-  infrastructure behavior, CI/CD, security, configuration, or developer commands.
 - After bootstrap, use a dedicated branch and project-local worktree for every change. Keep the
   main checkout untouched; use `.worktrees/<topic>` and a descriptive branch name.
 - Make the smallest coherent commit, push the branch early, and open a **draft** PR as soon as
@@ -41,6 +38,8 @@ and `.github/copilot-instructions.md`) must stay thin and refer here rather than
   `README.md` and `docs/progress.md` when the active milestone requires it.
 - Do not rewrite or discard unrelated user work. Never commit credentials, tokens, private keys,
   `.env` values, or other secret material; use placeholders and ignored local configuration.
+- Committed documentation must use repository-relative or portable environment-based paths; never
+  include developer-specific absolute paths.
 - Never stop, reuse, or clean up another task's local services or Compose project. Human-facing
   commands may use explicit service-specific ports (then `PORT` as a fallback), but automated
   smoke scripts must select an ephemeral or task-specific host port and an isolated Compose
