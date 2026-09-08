@@ -306,7 +306,7 @@ v1.1-foundation-truthful-state
 
 Turn the current blocking final-answer experience into an incremental text stream.
 
-Use the existing text model on Bedrock. Do not introduce voice or Pipecat yet.
+Use the existing text model on Bedrock. Do not introduce voice input yet.
 
 ## 4.1 Request lifecycle
 
@@ -533,19 +533,16 @@ Do not use a native speech-to-speech model yet.
 
 Allow the user to speak a taxi analytics question while preserving the existing text reasoning path.
 
-Introduce Pipecat here if it materially simplifies the realtime media pipeline.
+Use WebSocket for audio transport and AWS Transcribe for speech-to-text. Keep the application orchestration loop in FastAPI, not in a framework.
 
-Pipecat scope:
+Architecture:
 
 ```text
-audio transport
-frame streaming
-STT integration
-VAD / speech events
-turn lifecycle
+browser: AudioWorklet capture + WebSocket binary streaming
+fastapi: /ws/voice endpoint + AWS Transcribe integration
+transcribe: streaming STT with automatic utterance segmentation
+browser: accumulate transcripts, deliver on explicit Stop
 ```
-
-Pipecat must not become the durable conversation store or own taxi analytics authorization/tool policy.
 
 Target flow:
 
@@ -654,7 +651,7 @@ user starts speaking
    +-> preserve durable transcript/run history
 ```
 
-This is where Pipecat should provide the most value.
+Keep the application orchestration in FastAPI. Add voice activity detection (VAD) to the browser-side audio capture to detect when the user starts speaking again while the agent responds.
 
 Measure:
 
