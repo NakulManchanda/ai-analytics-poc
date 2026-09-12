@@ -6,135 +6,177 @@ Accepted.
 
 ## Context
 
-As the platform transitions from text-only analytics (v1–v3.1) into realtime voice input, speech synthesis, barge-in, and multimodal comparisons (v4–v8), evaluating and improving performance requires granular telemetry. 
+As the platform transitions from text-only analytics (v1–v3.1) into realtime voice input, speech synthesis, barge-in, and multimodal comparisons (v4–v8), evaluating and improving performance requires granular telemetry.
 
-Currently, runs persist point-in-time telemetry in DynamoDB under `RUN#<run_id>` / `METADATA`. While effective for single-run hydration in the React UI, comparing performance across runs, models, and milestones currently requires a full DynamoDB table scan. 
+Runs persist point-in-time telemetry in DynamoDB under `RUN#<run_id>` / `METADATA`, but cross-run analysis needs a lower-friction aggregate path. At the same time, distributed AI execution now spans application orchestration, MCP/tool execution, and model calls, which requires trace-level correlation in addition to metrics.
 
-We need a unified, low-overhead telemetry architecture that:
-1. Introduces practically zero latency to the live analytical execution loop.
-2. Supports asynchronous CloudWatch Metrics extraction for AWS production deployments.
-3. Enables offline, local developer benchmarking and visual comparison without frontend UI bloat.
-4. Provides standard, downloadable 12-factor log exports from deployed AWS environments.
-5. Establishes a rigorous question-driven metrics framework for upcoming voice and model comparisons.
+We need a unified observability model that:
+1. Keeps the live analytical loop low-overhead.
+2. Preserves CloudWatch EMF for aggregate/fleet metrics.
+3. Adds vendor-neutral OpenTelemetry tracing across app and MCP boundaries.
+4. Adds an AI-native trace backend for model/tool/agent inspection.
+5. Keeps semantic run events, distributed traces, and aggregate metrics distinct but correlated.
 
 ---
 
 ## Decisions
 
-### 1. Dual Ingestion: 12-Factor `stdout` (EMF) and Optional Local Append
-- **Production Path**: The application writes a single structured JSON line to `stdout` containing the AWS Embedded Metric Format (`_aws.CloudWatchMetrics`) specification when each run completes or cancels. This introduces $< 0.1\text{ ms}$ overhead in Python and zero blocking network calls. AWS ECS/CloudWatch Logs ingests and parses these logs asynchronously into CloudWatch Metrics.
-- **Local Developer Path**: When running locally via Docker Compose, a mounted directory (`./metrics:/app/metrics`) allows the application to append run summaries to `runs.jsonl`. Appending one string to an open file buffer takes $\approx 0.03\text{ ms}$, adding negligible overhead.
+### 1. CloudWatch EMF remains the aggregate metrics path
 
-### 2. DynamoDB GSI via Terraform
-- Update `infra/terraform/dynamodb.tf` to introduce a Global Secondary Index (`GSI_EntityTypeDate`) on the existing `application-state` table:
-  - Partition Key (`gsi1pk`): `entity_type` (e.g., `"run"`, `"run#v3.1"`, `"run#v4"`)
-  - Sort Key (`gsi1sk`): `started_at` (ISO timestamp)
-  - Projection: Selected telemetry metrics (`ttft_ms`, `end_to_end_latency_ms`, `estimated_cost_usd`, `model`, `status`).
-- This eliminates table scans for cross-run queries while preserving on-demand zero-base-cost pricing and table integrity.
+Production emits structured EMF JSON to `stdout`; local development may append compatible run summaries to `metrics/runs.jsonl` for DuckDB/Streamlit comparison.
 
-### 3. Local Comparison Dashboard via Streamlit (`make dashboard`)
-- Rather than bloating the production React UI with charting libraries and comparative state, developer comparison tooling is isolated to a standalone **Streamlit** script (`scripts/dashboard.py`).
-- Run via an isolated Make target using ephemeral dependencies:
-  ```makefile
-  dashboard: ## Run local Streamlit metrics & model comparison dashboard
-  	uv run --with streamlit --with duckdb streamlit run scripts/dashboard.py
-  ```
-- Uses embedded **DuckDB** to execute instant SQL aggregations (`AVG`, `QUANTILE_CONT` p50/p90/p95, group-bys) directly over `metrics/runs.jsonl`.
+CloudWatch answers population-level questions such as p50/p95 latency, error rate, TTFT, token usage, cost trends, and model/milestone comparison.
 
-### 4. Portable Log Extraction from Public Deployments
-- All deployed telemetry is 12-factor standard output. Operators can download deployment metrics and run traces from CloudWatch Logs at any time into a local JSONL file:
-  ```bash
-  aws logs tail /aws/ecs/ai-app \
-    --filter-pattern '{ $.entity_type = "run" }' \
-    --format json > local_downloaded_runs.jsonl
-  ```
-- Downloaded logs can be analyzed immediately in the local Streamlit dashboard or DuckDB terminal with zero transformation.
+### 2. DynamoDB remains durable run metadata
+
+A GSI may be used for efficient cross-run lookup without table scans. DynamoDB is not the tracing backend.
+
+### 3. Streamlit + DuckDB remains the local comparison workflow
+
+Developer benchmarking stays outside the production React UI. Local JSONL exports can be queried directly with DuckDB and visualized with Streamlit.
+
+### 4. OpenTelemetry is the instrumentation and distributed-tracing standard
+
+OpenTelemetry is additive to the metrics path, not a replacement for CloudWatch EMF.
+
+```text
+Redis/SSE semantic events  -> what logically happened in this AI run
+OpenTelemetry traces       -> how the request executed across stages/services
+CloudWatch/Streamlit       -> how the population of runs behaves over time
+```
+
+Application and MCP services should propagate standard W3C trace context so one request remains reconstructable across service boundaries.
+
+Representative trace:
+
+```text
+FastAPI
+└─ ai.run
+   ├─ conversation.resolve
+   ├─ context.schema.load
+   ├─ llm.plan
+   ├─ mcp.tool.execute
+   │   └─ HTTP MCP server
+   │       └─ duckdb.query
+   ├─ context.reduce
+   └─ llm.generate
+```
+
+### 5. Langfuse is the AI-observability backend, not the instrumentation contract
+
+Keep application instrumentation vendor-neutral through OTEL/OTLP. Export AI-relevant traces to Langfuse so model, tool, agent/ReAct, token, cost, and future evaluation data can be inspected in an AI-native view.
+
+AWS/CloudWatch remains the operational and fleet observability path.
+
+```text
+App / MCP
+   ↓
+OpenTelemetry
+   ├─ AWS / Jaeger  -> operational + distributed-system observability
+   └─ Langfuse      -> AI run/model/tool observability and future evals
+```
+
+Do not couple core orchestration code directly to Langfuse-specific APIs when OTEL can carry the same trace model.
+
+### 6. Minimum AI telemetry contract
+
+Major AI/model/tool spans should use a consistent safe vocabulary, using OpenTelemetry GenAI semantic conventions where available:
+
+```text
+run_id
+conversation_id
+model
+strategy / turn_type
+step_index
+input_tokens
+output_tokens
+duration_ms
+estimated_cost
+tool_name (when applicable)
+status / error
+```
+
+Do not attach raw prompts, unrestricted user content, secrets, or raw SQL to span attributes by default.
 
 ---
 
-## Sample Log & Event Shapes
+## Question → best place
 
-### CloudWatch Embedded Metric Format (EMF) Payload (Emitted to `stdout`)
-```json
-{
-  "_aws": {
-    "Timestamp": 1757301000000,
-    "CloudWatchMetrics": [
-      {
-        "Namespace": "AIAnalyticsPOC",
-        "Dimensions": [["Milestone"], ["Model"], ["TurnType"]],
-        "Metrics": [
-          { "Name": "EndToEndLatency", "Unit": "Milliseconds" },
-          { "Name": "ProposalLLMLatency", "Unit": "Milliseconds" },
-          { "Name": "ToolExecutionLatency", "Unit": "Milliseconds" },
-          { "Name": "FinalAnswerLLMLatency", "Unit": "Milliseconds" },
-          { "Name": "TimeToOneFirstToken", "Unit": "Milliseconds" },
-          { "Name": "InputTokens", "Unit": "Count" },
-          { "Name": "OutputTokens", "Unit": "Count" },
-          { "Name": "TotalCostUSD", "Unit": "None" }
-        ]
-      }
-    ]
-  },
-  "entity_type": "run",
-  "run_id": "run_4393fe053afe4eb2",
-  "conversation_id": "conv_acbf254280ac4d9e",
-  "milestone": "v3.1-streaming",
-  "model": "amazon.nova-micro-v1:0",
-  "turn_type": "text",
-  "status": "completed",
-  "EndToEndLatency": 6138,
-  "ProposalLLMLatency": 951,
-  "ToolExecutionLatency": 2144,
-  "FinalAnswerLLMLatency": 2002,
-  "TimeToOneFirstToken": 397,
-  "InputTokens": 987,
-  "OutputTokens": 200,
-  "TotalCostUSD": 0.005961,
-  "started_at": "2026-09-08T02:55:49.511475+00:00",
-  "completed_at": "2026-09-08T02:55:55.794945+00:00"
-}
+| Question | Best place |
+| --- | --- |
+| Why is the API/MCP/service failing? | AWS / OTEL |
+| Why is p95 latency rising across requests? | CloudWatch metrics |
+| What happened inside this ReAct/agent run? | Langfuse |
+| Which model/tool step was slow or expensive? | Langfuse |
+| How many tokens/cost did this run or step consume? | Langfuse |
+| Did answer quality regress? | Langfuse / evaluation layer |
+| Is the service unhealthy? | AWS / operational monitoring |
+| How did one request cross FastAPI → MCP → DuckDB? | OTEL distributed trace |
+
+---
+
+## Existing metric payloads
+
+Existing EMF/JSONL payloads remain valid. Continue emitting run-level fields such as:
+
+```text
+run_id
+conversation_id
+milestone
+model
+turn_type
+status
+end_to_end_latency
+proposal_llm_latency
+tool_latency
+final_answer_llm_latency
+TTFT
+input_tokens
+output_tokens
+estimated_cost
+started_at
+completed_at
 ```
 
-### Local JSONL Metric Line (`metrics/runs.jsonl`)
-```json
-{"run_id": "run_4393fe053afe4eb2", "milestone": "v3.1", "model": "amazon.nova-micro-v1:0", "turn_type": "text", "status": "completed", "end_to_end_latency_ms": 6138, "proposal_llm_latency_ms": 951, "tool_latency_ms": 2144, "final_answer_llm_latency_ms": 2002, "ttft_latency_ms": 397, "input_tokens": 987, "output_tokens": 200, "estimated_cost_usd": 0.005961, "started_at": "2026-09-08T02:55:49.511475+00:00"}
-```
+These aggregate fields should reuse the same naming/vocabulary as traces where practical, without forcing all telemetry into one backend.
 
 ---
 
 ## Metrics Question Guide
 
-The metrics collection framework is designed to provide definitive, data-backed answers to the following engineering and architecture questions:
+### Voice latency
+- end-of-speech → STT final
+- tool execution
+- LLM TTFT
+- TTS time-to-first-audio
+- total turn latency
 
-### 1. Voice Latency Waterfall (Milestones v4 & v5)
-- *What is the total conversational latency from end-of-speech to start-of-audio?*
-  $$\text{Total Turn Latency} = \text{STT Finalize} + \text{Tool Execution} + \text{LLM TTFT} + \text{TTS TTFA}$$
-- *Benchmark Targets*:
-  - STT Finalize Latency: $< 200\text{ ms}$
-  - LLM TTFT (Nova Micro): $< 400\text{ ms}$
-  - TTS Time to First Audio (TTFA): $< 200\text{ ms}$
-  - Total Target Turn Latency: $< 800\text{ ms}$
+### Barge-in and cancellation
+- time from detected speech to audio halt
+- LLM cancellation latency
+- avoided tokens/audio after interruption
 
-### 2. Barge-In & Interruption Efficiency (Milestone v6)
-- *How fast does audio halt when user speech is detected?* Target: $< 150\text{ ms}$.
-- *What is the LLM cancellation abort latency?* Does Bedrock stop streaming within 100 ms of cancellation?
-- *How many output tokens and audio frames were avoided by interrupting early?*
+### Model comparison
+- p50/p90/p95 latency
+- TTFT
+- token usage
+- estimated cost
+- quality/evaluation signals
 
-### 3. Model vs. Model Benchmarking
-- *Which foundation model offers the best balance of TTFT, reasoning accuracy, and cost for governed analytics?*
-- *What is the p50, p90, and p95 latency for each candidate model across 100 standard NYC taxi prompts?*
-- *Does model precision degrade as the multi-turn conversation context window expands?*
-
-### 4. Cascaded Voice vs. Native Speech-to-Speech (Milestone v8)
-- *Does native speech-to-speech reduce conversational turn latency compared to the specialist cascade ($\text{STT} \to \text{LLM} \to \text{TTS}$)?*
-- *Can native speech-to-speech models output structured MCP tool arguments as accurately as specialized text LLMs?*
-- *What is the cost comparison per conversational minute between cascaded components vs. native speech APIs?*
+### Cascaded voice vs native speech-to-speech
+- conversational latency
+- tool-call reliability
+- observability/auditability
+- cost per conversational minute
 
 ---
 
 ## Consequences
 
-- **Preserves POC Boundaries**: Avoids introducing Kafka, Prometheus, Grafana, OpenSearch, or a separate timeseries database.
-- **Frontend Decoupling**: The React application remains focused exclusively on its role as the analytical control room; developer comparison dashboards live in a lightweight Python script.
-- **Operator Authority**: Adding the DynamoDB GSI requires a planned Terraform apply, which will be bundled with the remote state milestone (Issue #89).
+- **Separation of signals:** semantic lifecycle events, distributed traces, AI-native traces, and aggregate metrics remain distinct but correlated through stable IDs.
+- **Vendor-neutral instrumentation:** OTEL/OTLP is the application contract; backends can change independently.
+- **AI-native debugging:** Langfuse becomes the preferred place to inspect individual model/tool/agent executions.
+- **Operational authority:** AWS/CloudWatch remains the source for service health and fleet-level metrics.
+- **Frontend decoupling:** the production React app does not become the developer observability console.
+
+See `docs/research/observability/` and Issue #111 for the detailed tracing model and implementation plan.
