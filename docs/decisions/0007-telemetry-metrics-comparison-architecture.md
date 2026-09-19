@@ -20,6 +20,43 @@ We need an observability architecture that:
 6. avoids exporting prompts, raw SQL, secrets, or unrestricted user content by default; and
 7. works in Docker Compose and AWS ECS/Fargate without requiring Kubernetes.
 
+## A simple mental model
+
+Observability begins with a question, not a dashboard or vendor. Different forms of telemetry preserve different kinds of evidence:
+
+| Concept | Plain-language meaning | Example in this application |
+| --- | --- | --- |
+| Event | A meaningful thing happened | `tool.started`, `answer.delta`, or `run.completed` |
+| Span | One operation ran for a period of time | `llm.plan`, `mcp.tool.execute`, or `duckdb.query` |
+| Trace | The causally connected story of one request | API acceptance through queue, worker, MCP, and final generation |
+| Log | A process reported diagnostic detail at one moment | Worker could not connect to Redis |
+| Metric | A numeric summary of many observations | p95 TTFT or failure ratio over the last hour |
+
+A span is useful because it measures one operation. A trace is useful because it nests those spans and preserves their parent/child relationships. A metric deliberately loses per-request detail so thousands of runs can be compared cheaply. A log supplies local diagnostic detail. A semantic event describes product behavior that a generic HTTP span cannot express.
+
+The architecture keeps these signals separate because making one signal serve every purpose produces a worse result: traces are expensive to aggregate, metrics cannot reconstruct one request, logs do not reliably preserve causality, and product events should not be overloaded with infrastructure detail.
+
+## A troubleshooting story
+
+Suppose a user says, “My taxi analysis took twelve seconds.” The application gives us a `run_id`.
+
+The Timeline Inspector first shows what the user experienced: the run was received, planning started, a tool ran, context was reduced, and the final answer completed. That confirms the workflow progressed, but it does not explain why it was slow.
+
+The same `run_id` maps to an OTEL `trace_id`. Opening that trace shows that the API accepted the request quickly, the job waited six seconds in Redis, the worker spent one second in Bedrock planning, MCP and DuckDB finished in half a second, and final generation took two seconds. The trace turns “the AI was slow” into the more precise conclusion “the job waited for a worker.”
+
+Dashboard metrics then answer whether this was an isolated request or a system trend. If queue-wait p95 rose for every run while model and tool latency stayed flat, the operator investigates worker capacity. If only this trace was slow, the operator inspects its correlated worker logs. If model tokens or ReAct steps grew, Langfuse provides the AI-native hierarchy needed to understand that behavior.
+
+This story explains the choices in this ADR:
+
+- stable IDs connect the views without forcing all data into one backend;
+- explicit AI spans make the trace meaningful rather than merely showing HTTP calls;
+- queue context propagation preserves causality across asynchronous work;
+- aggregate EMF metrics distinguish a one-off incident from fleet behavior;
+- Langfuse specializes in model/tool reasoning while AWS tools specialize in operations; and
+- the Collector keeps routing and backend credentials outside business logic.
+
+The desired outcome is not “more telemetry.” It is a short path from a user symptom to a defensible engineering conclusion.
+
 ## Decision summary
 
 The four observability views remain distinct and correlate through stable identifiers.
@@ -311,6 +348,7 @@ Existing semantic events may include `trace_id`, allowing the Timeline Inspector
 
 ## References
 
+- [Day-2 Observability Dashboard Side Project](../research/observability/day2-observability-dashboards.md)
 - [OpenTelemetry Python instrumentation](https://opentelemetry.io/docs/languages/python/instrumentation/)
 - [OpenTelemetry Collector quick start](https://opentelemetry.io/docs/collector/quick-start/)
 - [AWS Distro for OpenTelemetry on ECS](https://aws-otel.github.io/docs/setup/ecs/)
