@@ -260,7 +260,7 @@ services:
       OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: http://otel-collector:4318/v1/traces
 
   otel-collector:
-    image: otel/opentelemetry-collector:0.161.0
+    image: ghcr.io/open-telemetry/opentelemetry-collector-releases/opentelemetry-collector:0.157.0
     command: ["--config=/etc/otelcol/config.yaml"]
     volumes:
       - ./observability/otel-collector.yaml:/etc/otelcol/config.yaml:ro
