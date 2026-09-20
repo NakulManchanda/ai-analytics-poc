@@ -9,6 +9,9 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
+from opentelemetry import trace
+from opentelemetry.trace import Tracer
+
 from app.config import DEFAULT_MODEL_ID, LLMConfigurationError, VoiceSettings
 from app.events import (
     EventPublisher,
@@ -180,6 +183,7 @@ class OrchestrationLoop:
         llm_call_id_factory: Callable[[], str] = generate_llm_call_id,
         tool_call_id_factory: Callable[[], str] = generate_tool_call_id,
         monotonic_factory: Callable[[], float] = time.monotonic,
+        tracer: Tracer | None = None,
     ) -> None:
         self._llm_client = llm_client
         self._llm_client_factory = llm_client_factory
@@ -193,6 +197,7 @@ class OrchestrationLoop:
         self._llm_call_id_factory = llm_call_id_factory
         self._tool_call_id_factory = tool_call_id_factory
         self._monotonic = monotonic_factory
+        self._tracer = tracer or trace.get_tracer("ai_analytics_poc.orchestration")
 
         # Initialize Polly client if voice synthesis is enabled
         if self._voice_settings.enabled and self._voice_settings.provider == "polly":
@@ -310,8 +315,19 @@ class OrchestrationLoop:
         budgets: ExecutionBudgets | None = None,
     ) -> LoopResult:
         """Synchronous one-shot execution (preserves /api/ask compatibility)."""
-        submission = self.prepare_run(prompt, conversation_id)
-        return self.execute(submission, budgets=budgets)
+        with self._tracer.start_as_current_span("ai.run") as span:
+            submission = self.prepare_run(prompt, conversation_id)
+            span.set_attributes(
+                {
+                    "ai.run_id": submission.run_id,
+                    "ai.conversation_id": submission.conversation_id,
+                    "ai.turn_type": "text",
+                    "gen_ai.request.model": DEFAULT_MODEL_ID,
+                }
+            )
+            result = self.execute(submission, budgets=budgets)
+            span.set_attribute("ai.status", result.status)
+            return result
 
     def request_cancellation(self, run_id: str) -> Run:
         """Mark an active run as cancel_requested in durable state,

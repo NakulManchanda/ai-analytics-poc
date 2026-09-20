@@ -100,3 +100,20 @@ before every blocking or streaming call and fails closed if the shared budget
 cannot be safely authorized. The default local stack remains fake; an explicit
 local real-Bedrock mode requires portable `DYNAMODB_TABLE_NAME` and AWS profile
 configuration. This is an application guardrail, not an AWS billing cap.
+
+## Observability O1: local OTEL and Jaeger trace skeleton
+
+Issue #116 is active in draft PR #117. The first bounded observability slice
+adds an opt-in, fail-open OpenTelemetry SDK path to the FastAPI application, a
+safe root `ai.run` span for synchronous `/api/ask` runs, and a local Docker
+Compose overlay containing an OTEL Collector and Jaeger.
+
+`make observability-smoke` now proves the full local path on isolated dynamic
+ports: request → `ai.run` → OTLP/HTTP Collector ingestion → batched OTLP/gRPC
+export → Jaeger v3 query API. The smoke also verifies the run/conversation/model
+attributes and confirms the prompt is absent from trace JSON.
+
+This slice intentionally preserves CloudWatch EMF/JSONL metrics and does not yet
+instrument the worker, Redis propagation, MCP, DuckDB, Bedrock child spans,
+generic HTTP RED metrics, logs, Langfuse, Grafana/Prometheus, or AWS trace
+export.

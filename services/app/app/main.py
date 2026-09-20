@@ -4,6 +4,7 @@ from collections.abc import Callable
 from typing import Any
 
 from fastapi import FastAPI
+from opentelemetry.trace import Tracer
 
 from app.config import Settings
 from app.events import EventPublisher, RedisEventPublisher
@@ -19,6 +20,7 @@ from app.routers.jobs import create_jobs_router
 from app.routers.runs import RunDispatcher, create_runs_router
 from app.routers.status import router as status_router
 from app.state import DynamoDBStateRepository, InMemoryStateRepository, StateRepository
+from app.telemetry import TelemetrySettings, build_tracing
 from app.voice.router import router as voice_router
 
 
@@ -34,6 +36,7 @@ def create_app(
     orchestration_loop: OrchestrationLoop | None = None,
     run_dispatcher: RunDispatcher | None = None,
     event_publisher: EventPublisher | None = None,
+    tracer: Tracer | None = None,
 ) -> FastAPI:
     resolved_settings = settings or Settings.from_environment()
     shared_state_repo = state_repository or (
@@ -56,6 +59,7 @@ def create_app(
         mcp_client_factory=FastMCPDatasetProfileClient,
         state_repository=shared_state_repo,
         event_publisher=resolved_publisher,
+        tracer=tracer,
         **(
             {"llm_call_id_factory": llm_call_id_factory}
             if llm_call_id_factory is not None
@@ -95,4 +99,5 @@ def create_app(
     return application
 
 
-app = create_app()
+_tracing_runtime = build_tracing(TelemetrySettings.from_environment())
+app = create_app(tracer=_tracing_runtime.tracer)
