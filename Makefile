@@ -3,7 +3,7 @@
 APP_HOST_PORT := $(or $(APP_PORT),$(PORT),8080)
 MCP_HOST_PORT := $(or $(MCP_PORT),$(PORT),8001)
 
-.PHONY: help check-bootstrap dev mcp-dev mcp-smoke dataset-test dataset-smoke smoke test mcp-test infra-test web-test compose-smoke local-aws-compose local-aws-refresh local-bedrock-compose bedrock-smoke m5-bedrock-smoke m6-bedrock-smoke dashboard tf-dispatch tf-resume tf-park
+.PHONY: help check-bootstrap dev mcp-dev mcp-smoke dataset-test dataset-smoke smoke test mcp-test infra-test web-test compose-smoke observability-up observability-down observability-smoke local-aws-compose local-aws-refresh local-bedrock-compose bedrock-smoke m5-bedrock-smoke m6-bedrock-smoke dashboard tf-dispatch tf-resume tf-park
 
 
 help: ## Show available commands
@@ -53,6 +53,16 @@ web-test: ## Run React tests and production build
 
 compose-smoke: ## Run the browser to FastAPI to FastMCP Compose smoke
 	WEB_PORT=$(or $(WEB_PORT),$(PORT)) ./scripts/smoke/03_compose_ui.sh
+
+observability-up: ## Start local Compose with the OTEL Collector and Jaeger UI
+	WEB_PORT=$(or $(WEB_PORT),3000) JAEGER_UI_PORT=$(or $(JAEGER_UI_PORT),16686) \
+		docker compose -f docker-compose.yml -f docker-compose.observability.yml up --build -d
+
+observability-down: ## Stop the local observability Compose stack
+	docker compose -f docker-compose.yml -f docker-compose.observability.yml down
+
+observability-smoke: ## Verify an application ai.run trace reaches Jaeger
+	./scripts/smoke/16_observability.sh
 
 local-aws-compose: ## Start local Compose with opt-in real AWS (Bedrock + Transcribe) and shared DynamoDB budget
 	DYNAMODB_TABLE_NAME=$(or $(DYNAMODB_TABLE_NAME),ai-analytics-poc-demo-application-state) \
