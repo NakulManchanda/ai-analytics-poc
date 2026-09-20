@@ -50,6 +50,8 @@ official GHCR `0.157.0` image is pinned instead.
 
 - Focused Python telemetry, orchestration, application-factory, and API tests:
   24 passed.
+- Full application suite: 140 passed.
+- Full MCP suite: 1 passed.
 - `docker compose -f docker-compose.yml -f docker-compose.observability.yml config --quiet` passed.
 - `make observability-smoke` passed and returned one matching `ai.run` trace
   from Jaeger.
@@ -62,8 +64,8 @@ official GHCR `0.157.0` image is pinned instead.
 - Issue: #116
 - Draft PR: #117
 - Branch: `codex/o1-local-otel-jaeger`
-- State: implementation complete locally; final full-suite verification and
-  independent PR review remain before merge readiness.
+- State: implementation and full local verification complete; independent PR
+  review remains before merge readiness.
 
 ## Limitations and next slice
 
