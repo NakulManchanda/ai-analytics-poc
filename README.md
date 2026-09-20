@@ -192,6 +192,37 @@ This path fails closed without `DYNAMODB_TABLE_NAME`. Its real Bedrock calls
 share the application-wide monthly allowance; a local in-memory repository
 cannot coordinate that allowance between processes.
 
+### Local OpenTelemetry traces
+
+Start the fake-model stack with an OpenTelemetry Collector and the Jaeger trace
+UI:
+
+```bash
+make observability-up
+curl -X POST http://localhost:3000/api/ask \
+  -H 'content-type: application/json' \
+  -d '{"prompt":"Which pickup zones have the most trips?"}'
+```
+
+Open [http://localhost:16686](http://localhost:16686), select
+`ai-analytics-app`, and search for the `ai.run` operation. Stop this exact stack
+with:
+
+```bash
+make observability-down
+```
+
+Jaeger is an adjacent development container with transient in-memory trace
+storage. The Collector is the backend-neutral OTLP ingestion and routing layer.
+Run `make observability-smoke` for an isolated end-to-end check on dynamic host
+ports.
+
+Existing CloudWatch EMF and local JSONL metrics remain the aggregate latency,
+token, and cost path. Generic endpoint RED metrics, Prometheus/Grafana,
+logs-to-OTEL, asynchronous queue/MCP propagation, Langfuse, and AWS trace export
+are later slices. The fake-model trace workflow needs no AWS login; the separate
+AWS Compose override continues to use the configured local AWS profile.
+
 ### 2. Run All Automated Test Suites
 
 Execute all Python pytest suites (app, MCP, dataset spike, infrastructure) and React vitest tests:

@@ -60,3 +60,5 @@ Monotonically numbered log of every post-bootstrap task. Each entry records the 
 - [0053 — v4.1 Voice Input Frontend: React AudioWorklet Capture, Waveform Visualizer, and Transcript Input](0053-v4-voice-input-frontend-ui.md)
 - [0054 — v4.1 Continuous Voice Input and Transcribe Credential Resolution](0054-v4-voice-continuous-listening-and-credential-resolution.md)
 - [0055 — v5 Backend Voice Output with AWS Polly TTS](0055-v5-polly-tts-backend.md)
+- [0056 — v5 Frontend Audio Playback with WebAudio](0056-v5-frontend-audio-playback.md)
+- [0057 — Local OpenTelemetry and Jaeger trace skeleton](0057-local-otel-jaeger-trace-skeleton.md)
