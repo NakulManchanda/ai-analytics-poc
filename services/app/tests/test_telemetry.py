@@ -2,7 +2,6 @@ import logging
 
 from app.telemetry import TelemetrySettings, build_tracing
 
-
 _TELEMETRY_ENVIRONMENT = (
     "OTEL_TRACING_ENABLED",
     "OTEL_SERVICE_NAME",

@@ -90,20 +90,28 @@ import os
 
 services = json.loads(os.environ["SERVICES_JSON"])
 operations = json.loads(os.environ["OPERATIONS_JSON"])
-traces = json.loads(os.environ["TRACE_JSON"])
+trace_documents = [
+    json.loads(line)
+    for line in os.environ["TRACE_JSON"].splitlines()
+    if line.strip()
+]
 
 assert "ai-analytics-app" in services["services"]
 assert any(item["name"] == "ai.run" for item in operations["operations"])
 
-for resource_spans in traces.get("result", {}).get("resourceSpans", []):
-    for scope_spans in resource_spans.get("scopeSpans", []):
-        for span in scope_spans.get("spans", []):
-            attributes = {
-                item["key"]: next(iter(item["value"].values()))
-                for item in span.get("attributes", [])
-            }
-            if span.get("name") == "ai.run" and attributes.get("ai.run_id") == os.environ["RUN_ID"]:
-                raise SystemExit(0)
+for document in trace_documents:
+    for resource_spans in document.get("result", {}).get("resourceSpans", []):
+        for scope_spans in resource_spans.get("scopeSpans", []):
+            for span in scope_spans.get("spans", []):
+                attributes = {
+                    item["key"]: next(iter(item["value"].values()))
+                    for item in span.get("attributes", [])
+                }
+                if (
+                    span.get("name") == "ai.run"
+                    and attributes.get("ai.run_id") == os.environ["RUN_ID"]
+                ):
+                    raise SystemExit(0)
 raise SystemExit(1)
 PY
   then
@@ -128,18 +136,22 @@ import os
 
 raw = os.environ["TRACE_JSON"]
 assert os.environ["SMOKE_PROMPT"] not in raw
-traces = json.loads(raw)
+trace_documents = [json.loads(line) for line in raw.splitlines() if line.strip()]
 
 matching_spans = []
-for resource_spans in traces["result"]["resourceSpans"]:
-    for scope_spans in resource_spans.get("scopeSpans", []):
-        for span in scope_spans.get("spans", []):
-            attributes = {
-                item["key"]: next(iter(item["value"].values()))
-                for item in span.get("attributes", [])
-            }
-            if span.get("name") == "ai.run" and attributes.get("ai.run_id") == os.environ["RUN_ID"]:
-                matching_spans.append(attributes)
+for document in trace_documents:
+    for resource_spans in document.get("result", {}).get("resourceSpans", []):
+        for scope_spans in resource_spans.get("scopeSpans", []):
+            for span in scope_spans.get("spans", []):
+                attributes = {
+                    item["key"]: next(iter(item["value"].values()))
+                    for item in span.get("attributes", [])
+                }
+                if (
+                    span.get("name") == "ai.run"
+                    and attributes.get("ai.run_id") == os.environ["RUN_ID"]
+                ):
+                    matching_spans.append(attributes)
 
 assert len(matching_spans) == 1
 attributes = matching_spans[0]

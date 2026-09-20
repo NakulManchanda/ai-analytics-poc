@@ -74,6 +74,8 @@ official GHCR `0.157.0` image is pinned instead.
 - The worker and MCP process do not initialize OTEL.
 - MCP, DuckDB, and Bedrock do not yet create child spans.
 - Jaeger data is intentionally lost when its local container is removed.
+- The batch processor relies on the OTEL SDK's graceful process-exit shutdown;
+  an abrupt process kill can lose the current export batch.
 - Langfuse, AWS ADOT/X-Ray, logs-to-OTEL, generic HTTP RED metrics, and
   Prometheus/Grafana are deferred.
 

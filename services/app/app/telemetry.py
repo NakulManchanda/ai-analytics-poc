@@ -31,13 +31,11 @@ class TelemetrySettings:
     traces_endpoint: str | None = None
 
     @classmethod
-    def from_environment(cls) -> "TelemetrySettings":
+    def from_environment(cls) -> TelemetrySettings:
         return cls(
             enabled=_environment_flag("OTEL_TRACING_ENABLED"),
             service_name=os.getenv("OTEL_SERVICE_NAME", "ai-analytics-app"),
-            deployment_environment=os.getenv(
-                "OTEL_DEPLOYMENT_ENVIRONMENT", "local"
-            ),
+            deployment_environment=os.getenv("OTEL_DEPLOYMENT_ENVIRONMENT", "local"),
             traces_endpoint=os.getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"),
         )
 
@@ -89,5 +87,7 @@ def build_tracing(
             provider=provider,
         )
     except Exception:
-        LOGGER.exception("Could not initialize OpenTelemetry; continuing without tracing")
+        LOGGER.exception(
+            "Could not initialize OpenTelemetry; continuing without tracing"
+        )
         return _noop_runtime()

@@ -9,7 +9,8 @@ receivers:
 processors:
   memory_limiter:
     check_interval: 1s
-    limit_mib: 128
+    limit_mib: 256
+    spike_limit_mib: 64
   batch: {}
 
 exporters:
