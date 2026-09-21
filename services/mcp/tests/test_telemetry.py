@@ -91,6 +91,29 @@ def test_enabled_mcp_telemetry_without_endpoint_fails_open(monkeypatch, caplog):
     assert "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT" in caplog.text
 
 
+def test_enabled_mcp_telemetry_resource_has_only_service_and_environment():
+    from mcp_server.telemetry import MCPTelemetrySettings, build_mcp_tracing
+
+    exporter = InMemorySpanExporter()
+    runtime = build_mcp_tracing(
+        MCPTelemetrySettings(
+            enabled=True,
+            service_name="telemetry-test",
+            deployment_environment="test",
+            traces_endpoint="http://collector.test/v1/traces",
+        ),
+        span_processor=SimpleSpanProcessor(exporter),
+    )
+    assert runtime.provider is not None
+    try:
+        assert dict(runtime.provider.resource.attributes) == {
+            "service.name": "telemetry-test",
+            "deployment.environment.name": "test",
+        }
+    finally:
+        runtime.provider.shutdown()
+
+
 def test_fastmcp_middleware_extracts_traceparent_and_makes_server_child_current():
     from fastmcp.server.middleware import Middleware
 
@@ -161,12 +184,8 @@ def test_fastmcp_middleware_ignores_malformed_traceparent():
     assert spans[0].parent is None
 
 
-def test_fastmcp_middleware_creates_root_span_when_http_request_is_unavailable(
-    monkeypatch,
-):
+def test_fastmcp_middleware_creates_root_span_when_http_request_is_unavailable():
     from mcp_server import telemetry
-
-    monkeypatch.setattr(telemetry, "get_http_request", lambda: None)
 
     async def downstream(_context):
         return "downstream response"

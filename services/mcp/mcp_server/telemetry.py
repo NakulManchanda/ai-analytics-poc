@@ -73,7 +73,7 @@ def build_mcp_tracing(
 
     try:
         provider = TracerProvider(
-            resource=Resource.create(
+            resource=Resource(
                 {
                     "service.name": settings.service_name,
                     "deployment.environment.name": settings.deployment_environment,
@@ -102,7 +102,12 @@ class MCPTracingMiddleware(Middleware):
         self._tracer = tracer
 
     async def on_request(self, context, call_next):
-        request = get_http_request()
+        try:
+            request = get_http_request()
+        except RuntimeError as error:
+            if str(error) != "No active HTTP request found.":
+                raise
+            request = None
         parent = propagate.extract(dict(request.headers) if request else {})
         with self._tracer.start_as_current_span(
             "mcp.request", context=parent, kind=trace.SpanKind.SERVER
