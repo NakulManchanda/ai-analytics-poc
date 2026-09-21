@@ -1,5 +1,7 @@
 import asyncio
+import importlib
 import json
+import sys
 
 import httpx
 import pytest
@@ -72,6 +74,156 @@ def traced_runtime():
     provider = TracerProvider(resource=Resource.create({}))
     provider.add_span_processor(SimpleSpanProcessor(exporter))
     return provider, provider.get_tracer("test"), exporter
+
+
+def test_asgi_entrypoint_propagates_remote_trace_to_governed_tool(monkeypatch):
+    """The served HTTP app must keep the incoming trace through the tool query."""
+    from dataset_spike.analytics import DatasetProfile
+    from mcp_server import server, telemetry
+
+    exporter = InMemorySpanExporter()
+    provider = TracerProvider(
+        resource=Resource.create({"service.name": "analytics-mcp"})
+    )
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    tracer = provider.get_tracer("test")
+    runtime = telemetry.MCPTracingRuntime(tracer=tracer, provider=provider)
+    profile = DatasetProfile(1, 1, ["pickup_zone"], [], {}, 1, 1)
+    original_build_mcp = server.build_mcp
+
+    def query_runner(*, analysis: str, limit: int) -> dict[str, object]:
+        assert (analysis, limit) == ("top_pickup_zones", 2)
+        return {
+            "columns": ["pickup_zone"],
+            "rows": [["Alpha"]],
+            "row_count": 1,
+            "execution_duration_ms": 1,
+            "query_id": "asgi_trace",
+            "truncated": False,
+        }
+
+    def build_test_entrypoint_mcp(*, tracer):
+        assert tracer is runtime.tracer
+        return original_build_mcp(
+            profile_loader=lambda: profile,
+            query_runner=query_runner,
+            tracer=tracer,
+        )
+
+    monkeypatch.setattr(telemetry, "build_mcp_tracing", lambda _settings: runtime)
+    monkeypatch.setattr(server, "build_mcp", build_test_entrypoint_mcp)
+    sys.modules.pop("mcp_server.asgi", None)
+    asgi = importlib.import_module("mcp_server.asgi")
+    parent_context = make_remote_parent_context()
+
+    async def exercise_protocol():
+        async with asgi.app.router.lifespan_context(asgi.app):
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=asgi.app),
+                base_url="http://testserver",
+            ) as client:
+                headers = {
+                    "content-type": "application/json",
+                    "accept": "application/json, text/event-stream",
+                    "traceparent": make_traceparent(parent_context),
+                }
+                initialized = await client.post(
+                    "/mcp",
+                    headers=headers,
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "method": "initialize",
+                        "params": {
+                            "protocolVersion": "2025-06-18",
+                            "capabilities": {},
+                            "clientInfo": {"name": "telemetry-test", "version": "1.0"},
+                        },
+                    },
+                )
+                session_id = initialized.headers["mcp-session-id"]
+                await client.post(
+                    "/mcp",
+                    headers={**headers, "mcp-session-id": session_id},
+                    json={"jsonrpc": "2.0", "method": "notifications/initialized"},
+                )
+                return await client.post(
+                    "/mcp",
+                    headers={**headers, "mcp-session-id": session_id},
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": 2,
+                        "method": "tools/call",
+                        "params": {
+                            "name": "query_taxi_data",
+                            "arguments": {"analysis": "top_pickup_zones", "limit": 2},
+                        },
+                    },
+                )
+
+    try:
+        response = asyncio.run(exercise_protocol())
+    finally:
+        provider.shutdown()
+        sys.modules.pop("mcp_server.asgi", None)
+
+    assert response.is_success
+    spans = exporter.get_finished_spans()
+    assert {span.name for span in spans} == {
+        "mcp.request",
+        "mcp.tool.execute",
+        "duckdb.query",
+    }
+    assert {span.context.trace_id for span in spans} == {parent_context.trace_id}
+    by_name = {span.name: span for span in spans}
+    assert by_name["mcp.request"].parent.span_id == parent_context.span_id
+    assert (
+        by_name["mcp.tool.execute"].parent.span_id
+        == by_name["mcp.request"].context.span_id
+    )
+    assert (
+        by_name["duckdb.query"].parent.span_id
+        == by_name["mcp.tool.execute"].context.span_id
+    )
+    assert by_name["mcp.request"].resource.attributes["service.name"] == "analytics-mcp"
+    assert (
+        by_name["mcp.request"].resource.attributes["service.name"] != "ai-analytics-app"
+    )
+
+
+def test_asgi_entrypoint_fails_open_without_tracing_endpoint(monkeypatch):
+    """A disabled traced entrypoint remains a usable HTTP MCP server without exporters."""
+    from dataset_spike.analytics import DatasetProfile
+    from mcp_server import server, telemetry
+
+    profile = DatasetProfile(1, 1, ["pickup_zone"], [], {}, 1, 1)
+    original_build_mcp = server.build_mcp
+    monkeypatch.delenv("OTEL_TRACING_ENABLED", raising=False)
+    monkeypatch.delenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", raising=False)
+    monkeypatch.setattr(
+        telemetry,
+        "OTLPSpanExporter",
+        lambda **_kwargs: pytest.fail(
+            "disabled tracing must not construct an exporter"
+        ),
+    )
+    monkeypatch.setattr(
+        server,
+        "build_mcp",
+        lambda *, tracer: original_build_mcp(
+            profile_loader=lambda: profile,
+            tracer=tracer,
+        ),
+    )
+    sys.modules.pop("mcp_server.asgi", None)
+    asgi = importlib.import_module("mcp_server.asgi")
+    try:
+        response = asyncio.run(call_mcp_asgi(asgi.app))
+    finally:
+        sys.modules.pop("mcp_server.asgi", None)
+
+    assert response.is_success
+    assert asgi.tracing_runtime.provider is None
 
 
 def test_mcp_telemetry_is_disabled_by_default(monkeypatch):

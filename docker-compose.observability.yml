@@ -1,4 +1,11 @@
 services:
+  mcp:
+    environment:
+      OTEL_TRACING_ENABLED: "true"
+      OTEL_SERVICE_NAME: analytics-mcp
+      OTEL_DEPLOYMENT_ENVIRONMENT: local-compose
+      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: http://otel-collector:4318/v1/traces
+
   app:
     environment:
       OTEL_TRACING_ENABLED: "true"
