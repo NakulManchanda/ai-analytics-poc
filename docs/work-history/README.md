@@ -48,7 +48,6 @@ Monotonically numbered log of every post-bootstrap task. Each entry records the 
 | [0042](0042-v3-integration-and-deployed-verification.md) | v3 | [#81](https://github.com/NakulManchanda/ai-analytics-poc/pull/81) | Milestone v3 integration smoke check and verification | Merged (`c7cb539`) |
 | [0043](0043-instant-tool-cancellation.md) | v3 | [#83](https://github.com/NakulManchanda/ai-analytics-poc/pull/83) | Instant async tool-call cancellation and fast abort | Merged (`dfc444e`) |
 | [0044](0044-cancel-sse-stream-close.md) | v3 | [#85](https://github.com/NakulManchanda/ai-analytics-poc/pull/85) | SSE stream close on cancel and client-side abort | Draft for #84 |
-| [0058](0058-mcp-otel-trace-propagation.md) | O2 observability | [#119](https://github.com/NakulManchanda/ai-analytics-poc/pull/119) | MCP W3C trace propagation and DuckDB child spans | Draft |
 
 - [0045 — Terraform demo runtime parking](0045-demo-runtime-parking.md)
 - [0046 — Shared Bedrock application allowance](0046-global-bedrock-application-allowance.md)
@@ -65,3 +64,4 @@ Monotonically numbered log of every post-bootstrap task. Each entry records the 
 - [0057 — Local OpenTelemetry and Jaeger trace skeleton](0057-local-otel-jaeger-trace-skeleton.md)
 - [0058 — Three-phase AI-assisted engineering workflow](0058-three-phase-engineering-workflow.md)
 - [0059 — Review effort and Make-first manual testing guidance](0059-review-effort-and-make-guidance.md)
+- [0060 — MCP W3C trace propagation and DuckDB child spans](0060-mcp-otel-trace-propagation.md) — [PR #119](https://github.com/NakulManchanda/ai-analytics-poc/pull/119), Draft
