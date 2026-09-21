@@ -118,7 +118,10 @@ class MCPTracingMiddleware(Middleware):
             request = None
         parent = propagate.extract(dict(request.headers) if request else {})
         with self._tracer.start_as_current_span(
-            "mcp.request", context=parent, kind=trace.SpanKind.SERVER
+            "mcp.request",
+            context=parent,
+            kind=trace.SpanKind.SERVER,
+            record_exception=False,
         ) as span:
             method = getattr(context, "method", None)
             method = method if method in _SAFE_PROTOCOL_METHODS else "unknown"

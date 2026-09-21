@@ -303,3 +303,89 @@ def test_failing_query_marks_tool_and_duckdb_spans_as_errors_without_arguments()
     assert spans["mcp.tool.execute"].status.status_code is StatusCode.ERROR
     assert spans["duckdb.query"].status.status_code is StatusCode.ERROR
     assert sentinel not in str(exporter.get_finished_spans())
+
+
+def test_direct_invalid_query_does_not_export_unallowlisted_analysis():
+    """Direct helper callers cannot put arbitrary analysis text on a span."""
+    from mcp_server.server import run_pinned_query
+
+    exporter = InMemorySpanExporter()
+    provider = TracerProvider(resource=Resource.create({}))
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    tracer = provider.get_tracer("test")
+    sentinel = "SELECT secret_prompt_like_text FROM private_table"
+
+    try:
+        with pytest.raises(ValueError, match="allowlisted"):
+            run_pinned_query(analysis=sentinel, limit=2, tracer=tracer)
+    finally:
+        provider.shutdown()
+
+    assert sentinel not in str(exporter.get_finished_spans())
+    assert not exporter.get_finished_spans()
+
+
+def test_default_runners_create_one_duckdb_span_per_governed_tool(monkeypatch):
+    """Default runners must trace only their actual analytics-call boundary."""
+    from fastmcp import Client
+    from mcp_server import server as mcp_server
+
+    exporter = InMemorySpanExporter()
+    provider = TracerProvider(resource=Resource.create({}))
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    tracer = provider.get_tracer("test")
+    profile = DatasetProfile(1, 1, [], [], {}, 1, 1)
+
+    monkeypatch.setattr(mcp_server.trace, "get_tracer", lambda _scope: tracer)
+
+    monkeypatch.setattr(
+        mcp_server,
+        "query_dataset",
+        lambda *_args, **_kwargs: {
+            "columns": [],
+            "rows": [],
+            "row_count": 0,
+            "execution_duration_ms": 1,
+            "query_id": "query_default",
+            "truncated": False,
+        },
+    )
+    monkeypatch.setattr(
+        mcp_server,
+        "query_average_trip_metrics",
+        lambda *_args, **_kwargs: {
+            "columns": [],
+            "rows": [],
+            "row_count": 0,
+            "execution_duration_ms": 1,
+            "query_id": "average_default",
+            "truncated": False,
+        },
+    )
+
+    async def exercise_default_runners():
+        async with Client(
+            mcp_server.build_mcp(profile_loader=lambda: profile, tracer=tracer)
+        ) as client:
+            await client.call_tool(
+                "query_taxi_data",
+                {"analysis": "top_pickup_zones", "limit": 2},
+            )
+            await client.call_tool("average_trip_metrics", {"region_name": "Bronx"})
+
+    try:
+        asyncio.run(exercise_default_runners())
+    finally:
+        provider.shutdown()
+
+    spans = exporter.get_finished_spans()
+    tool_spans = [span for span in spans if span.name == "mcp.tool.execute"]
+    duckdb_spans = [span for span in spans if span.name == "duckdb.query"]
+    assert len(duckdb_spans) == 2
+    assert {span.attributes["ai.tool.name"] for span in duckdb_spans} == {
+        "query_taxi_data",
+        "average_trip_metrics",
+    }
+    assert {span.parent.span_id for span in duckdb_spans} == {
+        span.context.span_id for span in tool_spans
+    }

@@ -29,6 +29,11 @@ AnalysisName = Literal[
     "trip_volume_by_hour",
     "average_distance_by_weekday",
 ]
+_ALLOWED_ANALYSES = {
+    "top_pickup_zones",
+    "trip_volume_by_hour",
+    "average_distance_by_weekday",
+}
 
 
 def load_pinned_profile() -> DatasetProfile:
@@ -49,6 +54,15 @@ def _run_duckdb_query(
     limit: int | None = None,
     region_name: str | None = None,
 ) -> dict[str, object]:
+    if analysis is not None:
+        if analysis not in _ALLOWED_ANALYSES:
+            raise ValueError("analysis must be an allowlisted analysis")
+        if (
+            isinstance(limit, bool)
+            or not isinstance(limit, int)
+            or not 1 <= limit <= 20
+        ):
+            raise ValueError("limit must be between 1 and 20")
     active_tracer = tracer or trace.get_tracer("ai_analytics_poc.mcp")
     with active_tracer.start_as_current_span(
         "duckdb.query", record_exception=False
@@ -154,6 +168,10 @@ def build_mcp(
         """Run one allowlisted read-only analysis with at most twenty rows."""
         if isinstance(limit, bool) or not 1 <= limit <= 20:
             raise ValueError("limit must be between 1 and 20")
+        if query_runner is run_pinned_query:
+            return run_pinned_query(
+                analysis=analysis, limit=limit, tracer=active_tracer
+            )
         return _run_duckdb_query(
             tracer=active_tracer,
             tool_name="query_taxi_data",
@@ -166,6 +184,10 @@ def build_mcp(
     def average_trip_metrics(region_name: str | None = None) -> dict[str, object]:
         """Compare average distance and fare for governed pickup boroughs only."""
         try:
+            if average_metrics_runner is run_pinned_average_trip_metrics:
+                return run_pinned_average_trip_metrics(
+                    region_name=region_name, tracer=active_tracer
+                )
             return _run_duckdb_query(
                 tracer=active_tracer,
                 tool_name="average_trip_metrics",

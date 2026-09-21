@@ -207,7 +207,7 @@ def test_fastmcp_middleware_creates_root_span_when_http_request_is_unavailable()
     assert spans[0].parent is None
 
 
-def test_fastmcp_middleware_records_downstream_exception_without_headers(
+def test_fastmcp_middleware_marks_downstream_exception_without_exporting_details(
     monkeypatch,
 ):
     from mcp_server import telemetry
@@ -222,14 +222,16 @@ def test_fastmcp_middleware_records_downstream_exception_without_headers(
     }
     monkeypatch.setattr(telemetry, "get_http_request", lambda: Request(scope))
 
+    sentinel = "SELECT private_prompt FROM secrets WHERE user_token=abc"
+
     async def downstream(_context):
-        raise RuntimeError("expected downstream failure")
+        raise RuntimeError(sentinel)
 
     provider, tracer, exporter = traced_runtime()
     middleware = telemetry.MCPTracingMiddleware(tracer)
 
     try:
-        with pytest.raises(RuntimeError, match="expected downstream failure"):
+        with pytest.raises(RuntimeError, match=sentinel):
             asyncio.run(middleware.on_request(context=object(), call_next=downstream))
     finally:
         provider.shutdown()
@@ -237,12 +239,15 @@ def test_fastmcp_middleware_records_downstream_exception_without_headers(
     spans = exporter.get_finished_spans()
     assert len(spans) == 1
     assert spans[0].status.status_code is StatusCode.ERROR
-    assert [event.name for event in spans[0].events] == ["exception"]
     serialized = json.dumps(
         {
             "attributes": dict(spans[0].attributes),
-            "events": [event.name for event in spans[0].events],
+            "events": [
+                {"name": event.name, "attributes": dict(event.attributes)}
+                for event in spans[0].events
+            ],
         }
     )
     assert "x-sensitive" not in serialized
     assert "do-not-export" not in serialized
+    assert sentinel not in serialized
