@@ -145,7 +145,7 @@ def test_fastmcp_middleware_extracts_traceparent_and_makes_server_child_current(
     assert span.name == "mcp.request"
     assert span.parent.span_id == parent_context.span_id
     assert span.context.trace_id == parent_context.trace_id
-    assert span.attributes == {"rpc.system": "mcp", "rpc.method": "unknown"}
+    assert span.attributes == {"rpc.system": "mcp", "rpc.method": "initialize"}
     assert current_spans == [span.context]
 
 

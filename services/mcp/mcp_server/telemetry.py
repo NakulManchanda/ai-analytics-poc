@@ -14,6 +14,14 @@ from opentelemetry.sdk.trace.export import BatchSpanProcessor, SpanProcessor
 
 LOGGER = logging.getLogger(__name__)
 INSTRUMENTATION_SCOPE = "ai_analytics_poc.mcp"
+SCHEMA_RESOURCE_URI = "dataset://nyc-taxi/schema"
+_SAFE_PROTOCOL_METHODS = {
+    "tools/call",
+    "resources/read",
+    "initialize",
+    "tools/list",
+    "resources/list",
+}
 
 
 def _environment_flag(name: str, default: bool = False) -> bool:
@@ -112,5 +120,21 @@ class MCPTracingMiddleware(Middleware):
         with self._tracer.start_as_current_span(
             "mcp.request", context=parent, kind=trace.SpanKind.SERVER
         ) as span:
-            span.set_attributes({"rpc.system": "mcp", "rpc.method": "unknown"})
+            method = getattr(context, "method", None)
+            method = method if method in _SAFE_PROTOCOL_METHODS else "unknown"
+            span.set_attributes({"rpc.system": "mcp", "rpc.method": method})
+            return await call_next(context)
+
+    async def on_call_tool(self, context, call_next):
+        with self._tracer.start_as_current_span(
+            "mcp.tool.execute", record_exception=False
+        ) as span:
+            span.set_attribute("mcp.tool.name", context.message.name)
+            return await call_next(context)
+
+    async def on_read_resource(self, context, call_next):
+        with self._tracer.start_as_current_span(
+            "mcp.resource.read", record_exception=False
+        ) as span:
+            span.set_attribute("mcp.resource.uri", SCHEMA_RESOURCE_URI)
             return await call_next(context)
