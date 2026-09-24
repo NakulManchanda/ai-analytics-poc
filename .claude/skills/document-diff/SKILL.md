@@ -67,7 +67,7 @@ Create/update an ADR only for a durable architectural decision with a meaningful
 
 ### 7. Diff story
 
-Create or refresh `myfiles/<issue>-<slug>/diff-story.md` and the PR description in logical dependency order:
+Create or refresh `.vscode/myfiles/<issue>-<slug>/diff-story.md` and the PR description in logical dependency order:
 
 ```text
 file
