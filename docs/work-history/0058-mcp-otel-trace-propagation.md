@@ -41,6 +41,11 @@ child spans.
    the returned `ai.run` trace identifier and prove the correlated hierarchy
    `ai.run` → `mcp.request` → `mcp.tool.execute` → `duckdb.query` using returned
    span IDs rather than response ordering.
+7. Added project-scoped `observability-dev-*` Make targets for the manual
+   walkthrough. They use `ai-analytics-119`, web port `13000`, and Jaeger port
+   `16686` by default (all overridable), expose the existing JSONL/EMF metrics
+   and bounded app/MCP/Collector logs, and tear down only that Compose project
+   with its orphans.
 
 ## Privacy and signal ownership
 
@@ -86,14 +91,25 @@ durable DynamoDB state, as defined by ADR 0007.
 - `git diff --check` passed for the implementation work. The documentation
   safety scan and final whitespace check are recorded with this work-history
   update.
+- Live manual verification on 2026-09-24 used the project-scoped defaults:
+  `observability-dev-up`, readiness checks, `observability-dev-info`,
+  `observability-dev-ask`, `observability-dev-metrics`,
+  `observability-dev-logs`, Jaeger trace polling, and
+  `observability-dev-down`. The request completed with HTTP 200; the matching
+  JSONL metric was completed; and one Jaeger trace joined `ai.run`,
+  `mcp.request`, `mcp.tool.execute`, and `duckdb.query` across
+  `ai-analytics-app` and `analytics-mcp`. Teardown left no containers or
+  network for `ai-analytics-119`.
 
 ## PR and issue state
 
 - Issue: #118
 - Draft PR: [#119](https://github.com/NakulManchanda/ai-analytics-poc/pull/119)
 - Branch: `codex/o2-mcp-tracing`
-- State: open draft. Local implementation and the isolated distributed smoke
-  proof are complete; CI and independent review determine merge readiness.
+- State: open draft. The local branch was rebased onto `origin/main` at
+  `4e51fff` and includes the manual-workflow commit `df85a65`; the remote PR
+  branch must be updated before exact-head CI and independent review determine
+  merge readiness.
 
 ## Limitations and next slice
 

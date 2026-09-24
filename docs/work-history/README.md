@@ -64,4 +64,4 @@ Monotonically numbered log of every post-bootstrap task. Each entry records the 
 - [0057 — Local OpenTelemetry and Jaeger trace skeleton](0057-local-otel-jaeger-trace-skeleton.md)
 - [0058 — Three-phase AI-assisted engineering workflow](0058-three-phase-engineering-workflow.md)
 - [0059 — Review effort and Make-first manual testing guidance](0059-review-effort-and-make-guidance.md)
-- [0060 — MCP W3C trace propagation and DuckDB child spans](0060-mcp-otel-trace-propagation.md) — [PR #119](https://github.com/NakulManchanda/ai-analytics-poc/pull/119), Draft
+- [0060 — MCP W3C trace propagation and DuckDB child spans](0060-mcp-otel-trace-propagation.md) — [PR #119](https://github.com/NakulManchanda/ai-analytics-poc/pull/119), Open draft

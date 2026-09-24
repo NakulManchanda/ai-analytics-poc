@@ -217,6 +217,24 @@ storage. The Collector is the backend-neutral OTLP ingestion and routing layer.
 Run `make observability-smoke` for an isolated end-to-end check on dynamic host
 ports.
 
+For a repeatable manual session that does not share the default Compose project
+or web port, use the issue-scoped targets:
+
+```bash
+make observability-dev-up
+make observability-dev-info
+make observability-dev-ask
+make observability-dev-metrics
+make observability-dev-logs
+make observability-dev-down
+```
+
+They default to Compose project `ai-analytics-119`, web port `13000`, and
+Jaeger port `16686`; each is overridable with the corresponding
+`OBSERVABILITY_PROJECT`, `OBSERVABILITY_WEB_PORT`, or
+`OBSERVABILITY_JAEGER_PORT` Make variable. The `down` target removes only that
+project and its orphans.
+
 Existing CloudWatch EMF and local JSONL metrics remain the aggregate latency,
 token, and cost path. Generic endpoint RED metrics, Prometheus/Grafana,
 logs-to-OTEL, asynchronous queue/MCP propagation, Langfuse, and AWS trace export
