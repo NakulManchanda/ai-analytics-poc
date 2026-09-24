@@ -1,70 +1,52 @@
 ---
 name: document-diff
-description: Use near the end of implementation to document only what the current diff reasonably requires. Produces useful module/file context, work history, PR/diff story, and affected docs without adding boilerplate or changing runtime behavior.
+description: Use near the end of implementation to document only what the current diff reasonably requires. Keeps source context, work history, affected docs, and the PR story useful without adding boilerplate or changing runtime behavior.
 ---
 
 # Document the Diff
 
-This is a bounded documentation pass over the current issue + final implementation diff.
+Run this as a bounded, lower-cost documentation pass over the issue + final diff.
 
-## Goal
+The documentation agent must not change runtime behavior and must document only behavior supported by code and verification evidence.
 
-Make the change understandable to the next engineer without turning documentation into ceremony.
+## Read first
 
-Use a lower-cost capable documentation agent when possible. The documentation agent must not change runtime behavior.
-
-## Inputs
-
-Read:
-
-- the GitHub issue and acceptance criteria;
-- `intent.md` and `plan.md` when present;
-- the final diff;
-- existing nearby documentation conventions.
-
-Document only behavior supported by the code and verification evidence. Do not invent future architecture.
+- issue + acceptance criteria;
+- `intent.md` / `plan.md` when present;
+- final diff;
+- nearby repository documentation conventions.
 
 ## Reasonable standards
 
-Apply judgment; not every standard applies to every diff.
+Apply only what helps.
 
-### 1. Meaningful source-file header
+### 1. File/module context
 
-For a new or substantially changed non-obvious source module, add a concise module/file docstring or header when it provides real orientation.
+For a new or substantially changed **non-obvious source module**, add a short top-level docstring/header when useful.
 
-Good headers answer:
+It should answer:
 
-- What responsibility does this file own?
-- What important boundary or invariant does it enforce?
-- What clearly belongs elsewhere?
+- what responsibility this file owns;
+- an important boundary/invariant;
+- what clearly belongs elsewhere, if that prevents confusion.
 
-Keep it short. Skip obvious files, generated files, configuration whose purpose is self-evident, and tiny modules where the code is clearer than a header.
+Skip obvious, tiny, generated, and self-explanatory files. Never add a header that only repeats the filename.
 
-Do not add headers that merely repeat the filename.
+### 2. Comments explain why
 
-### 2. Comments explain why, not what
+Comment non-obvious invariants, protocol/provider constraints, compatibility workarounds, surprising failure behavior, or deliberate trade-offs.
 
-Add comments only for things such as:
+Do not narrate straightforward code.
 
-- non-obvious invariants;
-- protocol or provider constraints;
-- compatibility workarounds;
-- surprising failure/retry behavior;
-- intentional trade-offs.
+### 3. Public contracts
 
-Do not narrate straightforward code line by line.
+Document public APIs when side effects, failure behavior, constraints, or semantics are not obvious from names/types.
 
-### 3. Public API documentation when needed
-
-Document public functions/classes/interfaces when their contract, side effects, failure behavior, or constraints are not obvious from names and types.
-
-Do not mechanically add docstrings to every function.
+Do not mechanically docstring every function.
 
 ### 4. Work history
 
-Every PR keeps the repository's work-history habit.
-
-Capture:
+Every PR keeps the repository work-history habit:
 
 - goal;
 - starting point;
@@ -73,66 +55,51 @@ Capture:
 - limitations / lessons;
 - issue / PR state.
 
-Keep it factual and useful for future archaeology.
+### 5. Update affected docs only
 
-### 5. README / operator docs only when behavior changes
+Update README/setup/runbook/troubleshooting docs only when the diff changes something a developer, user, or operator must know: commands, setup, configuration, operational steps, or externally visible behavior.
 
-Update README, setup, runbook, troubleshooting, or developer workflow docs only when the diff changes something a user/operator/developer needs to know.
+### 6. Architecture threshold
 
-Examples:
+Update Mermaid/architecture docs only when component relationships, flow, or ownership boundaries materially change.
 
-- new command;
-- new setup requirement;
-- new operational path;
-- changed configuration;
-- changed externally visible behavior.
+Create/update an ADR only for a durable architectural decision with a meaningful trade-off.
 
-### 6. Architecture docs only for architecture changes
+### 7. Diff story
 
-Use Mermaid or update architecture docs when component relationships, request/data flow, or ownership boundaries materially change.
-
-Create/update an ADR only for a durable architectural decision with a meaningful trade-off. Ordinary implementation choices do not need ADRs.
-
-### 7. Diff story / PR description
-
-Create or refresh `myfiles/<issue>-<slug>/diff-story.md` and the PR description.
-
-Explain changed files in logical dependency order:
+Create or refresh `myfiles/<issue>-<slug>/diff-story.md` and the PR description in logical dependency order:
 
 ```text
 file
   -> responsibility
   -> why it changed
-  -> behavior/evidence
+  -> behavior / evidence
 ```
 
-Prefer an implementation story over an alphabetical file list.
+Prefer a coherent implementation story over an alphabetical file list.
 
-### 8. Documentation must stay truthful
+## Truthfulness check
 
-Before finishing, check that docs:
+Before finishing, confirm docs:
 
-- describe implemented behavior, not intent that was later abandoned;
 - match current names, commands, paths, and configuration;
+- describe implemented behavior rather than abandoned intent;
 - do not claim tests/manual verification that did not run;
-- do not expose secrets or developer-specific absolute paths.
+- contain no secrets or developer-specific absolute paths.
 
-## Do not go overboard
+## Avoid documentation debt disguised as documentation
 
 Do not:
 
-- add comments/docstrings only to increase coverage;
+- add comments/docstrings for quota;
 - rewrite unrelated docs for style;
-- create an ADR for routine code choices;
-- create diagrams for a local implementation detail;
-- duplicate the same explanation across README, source comments, work history, and PR body;
+- duplicate the same explanation everywhere;
+- create diagrams or ADRs for local implementation details;
 - change production logic during this pass.
-
-If no documentation change is warranted for a category, explicitly skip it.
 
 ## Output
 
-Return a compact summary:
+Report only:
 
 ```text
 Updated:
