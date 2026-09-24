@@ -19,15 +19,15 @@ PHASE 2 — BUILD + VERIFY
 PHASE 3 — REVIEW + FINISH
 ```
 
-At any point the user may override, skip, redirect, or accept risk. Record material overrides in the issue or `myfiles/<issue>-<slug>/decisions.md`.
+At any point the user may override, skip, redirect, or accept risk. Record material overrides in the issue or `.vscode/myfiles/<issue>-<slug>/decisions.md`.
 
 ## Setup
 
 For repository-changing work:
 
-1. Use one GitHub issue, one branch, and one project-local `.worktrees/<issue>-<slug>` worktree whenever a local checkout is available.
+1. Use one GitHub issue, one branch, and one project-local `.worktrees/<issue>-<slug>` worktree whenever a local checkout is available. Keep branch names tool-agnostic and descriptive (e.g. `feat/<issue>-<slug>`); do not hardcode model/tool prefixes like `codex/`. Tag or note the acting agent/model in the PR description.
 2. Treat the primary checkout as read-only unless worktrees are unavailable or the user explicitly overrides.
-3. Create ignored scratch state under `myfiles/<issue>-<slug>/`.
+3. Create ignored scratch state under `.vscode/myfiles/<issue>-<slug>/`.
 
 Suggested scratch files:
 

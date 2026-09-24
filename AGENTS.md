@@ -26,7 +26,10 @@ and `.github/copilot-instructions.md`) must stay thin and refer here rather than
 
 - For new repository-changing implementation work, enter through `.claude/skills/engineering-workflow/SKILL.md`. It deliberately splits work into three short phases — intent/plan, build/verify, review/finish — so agents resume from explicit artifacts instead of carrying a long workflow in context. The focused phase skills own procedure; this file remains policy.
 - After bootstrap, use a dedicated branch and project-local worktree for every change. Keep the
-  main checkout untouched; use `.worktrees/<topic>` and a descriptive branch name.
+  main checkout untouched; use `.worktrees/<topic>` and a tool-agnostic descriptive branch name
+  (e.g., `feat/<issue>-<slug>`). Attribute the acting agent or model in the PR description rather
+  than hardcoding model prefixes into branch names. Store temporary AI scratch state under ignored
+  `.vscode/myfiles/<issue>-<slug>/`.
 - Make the smallest coherent commit, push the branch early, and open a **draft** PR as soon as
   the change is reviewable. Keep the PR description current with context, decisions, tests, and
   known limitations; finish updates on that same PR. An intermediate PR may merge without separate

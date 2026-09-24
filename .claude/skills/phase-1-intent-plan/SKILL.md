@@ -17,7 +17,7 @@ Do not implement production code in this phase.
 
 ## 1. Clarify
 
-Create `myfiles/<issue>-<slug>/intent.md` with:
+Create `.vscode/myfiles/<issue>-<slug>/intent.md` with:
 
 - goal and why it matters;
 - current vs desired behavior;
@@ -39,7 +39,7 @@ Classify unknowns as:
 
 For TESTABLE unknowns, create the smallest possible experiment under:
 
-`myfiles/<issue>-<slug>/experiments/`
+`.vscode/myfiles/<issue>-<slug>/experiments/`
 
 Prefer flat, hard-coded, disposable scripts that answer one question. Do not prematurely abstract experimental code into production code.
 
