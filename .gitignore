@@ -47,6 +47,7 @@ crash.log
 crash.*.log
 
 # Local data and artifacts
+myfiles/
 data/
 artifacts/
 metrics/*.jsonl
