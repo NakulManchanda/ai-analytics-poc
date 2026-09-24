@@ -1,6 +1,7 @@
 import json
 import subprocess
 from pathlib import Path
+
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -24,7 +25,9 @@ def test_observability_compose_overlay_declares_all_services() -> None:
         "grafana",
     ]
     for svc in expected_services:
-        assert svc in services, f"Service {svc} missing from docker-compose.observability.yml"
+        assert (
+            svc in services
+        ), f"Service {svc} missing from docker-compose.observability.yml"
 
 
 def test_observability_configuration_files_are_valid() -> None:
