@@ -2,8 +2,12 @@
 
 APP_HOST_PORT := $(or $(APP_PORT),$(PORT),8080)
 MCP_HOST_PORT := $(or $(MCP_PORT),$(PORT),8001)
+OBSERVABILITY_PROJECT ?= ai-analytics-119
+OBSERVABILITY_WEB_PORT ?= 13000
+OBSERVABILITY_JAEGER_PORT ?= 16686
+OBSERVABILITY_LOG_TAIL ?= 200
 
-.PHONY: help check-bootstrap dev mcp-dev mcp-smoke dataset-test dataset-smoke smoke test mcp-test infra-test web-test compose-smoke observability-up observability-down observability-smoke local-aws-compose local-aws-refresh local-bedrock-compose bedrock-smoke m5-bedrock-smoke m6-bedrock-smoke dashboard tf-dispatch tf-resume tf-park
+.PHONY: help check-bootstrap dev mcp-dev mcp-smoke dataset-test dataset-smoke smoke test mcp-test infra-test web-test compose-smoke observability-up observability-down observability-smoke observability-dev-up observability-dev-info observability-dev-ask observability-dev-metrics observability-dev-logs observability-dev-down local-aws-compose local-aws-refresh local-bedrock-compose bedrock-smoke m5-bedrock-smoke m6-bedrock-smoke dashboard tf-dispatch tf-resume tf-park
 
 
 help: ## Show available commands
@@ -63,6 +67,43 @@ observability-down: ## Stop the local observability Compose stack
 
 observability-smoke: ## Verify an application ai.run trace reaches Jaeger
 	./scripts/smoke/16_observability.sh
+
+observability-dev-up: ## Start the issue-owned local app, Collector, and Jaeger stack
+	WEB_PORT="$(OBSERVABILITY_WEB_PORT)" JAEGER_UI_PORT="$(OBSERVABILITY_JAEGER_PORT)" \
+		docker compose -p "$(OBSERVABILITY_PROJECT)" -f docker-compose.yml -f docker-compose.observability.yml up --build -d
+
+observability-dev-info: ## Print issue-owned observability URLs, expected spans, and Compose status
+	@set -eu; \
+	printf '%s\n' "Web: http://127.0.0.1:$(OBSERVABILITY_WEB_PORT)"; \
+	printf '%s\n' "Jaeger: http://127.0.0.1:$(OBSERVABILITY_JAEGER_PORT)"; \
+	printf '%s\n' "Metrics: metrics/runs.jsonl"; \
+	printf '%s\n' "Expected spans: ai.run -> mcp.request -> mcp.tool.execute -> duckdb.query"; \
+	printf '%s\n' "Compose project: $(OBSERVABILITY_PROJECT)"; \
+	docker compose -p "$(OBSERVABILITY_PROJECT)" -f docker-compose.yml -f docker-compose.observability.yml ps
+
+observability-dev-ask: ## Send a safe representative request to the issue-owned local stack
+	curl --fail --show-error --silent \
+		-X POST "http://127.0.0.1:$(OBSERVABILITY_WEB_PORT)/api/ask" \
+		-H 'content-type: application/json' \
+		--data '{"prompt":"Which pickup zones have the most trips?"}'
+
+observability-dev-metrics: ## Print recent local JSONL metrics; app stdout emits EMF and make dashboard compares runs
+	@set -eu; \
+	if test -f metrics/runs.jsonl; then \
+		echo "Recent metrics/runs.jsonl entries:"; \
+		tail -n 20 metrics/runs.jsonl; \
+	else \
+		echo "No local metrics/runs.jsonl yet; submit a request first."; \
+	fi; \
+	echo "Application stdout emits CloudWatch EMF; run 'make dashboard' to compare local JSONL runs."
+
+observability-dev-logs: ## Print recent app, MCP, and Collector logs; append -f to the shown command to follow
+	@docker compose -p "$(OBSERVABILITY_PROJECT)" -f docker-compose.yml -f docker-compose.observability.yml logs --tail "$(OBSERVABILITY_LOG_TAIL)" app mcp otel-collector; \
+	echo "Follow live logs with: docker compose -p '$(OBSERVABILITY_PROJECT)' -f docker-compose.yml -f docker-compose.observability.yml logs -f app mcp otel-collector"
+
+observability-dev-down: ## Stop only the issue-owned local observability project and remove its orphans
+	WEB_PORT="$(OBSERVABILITY_WEB_PORT)" JAEGER_UI_PORT="$(OBSERVABILITY_JAEGER_PORT)" \
+		docker compose -p "$(OBSERVABILITY_PROJECT)" -f docker-compose.yml -f docker-compose.observability.yml down --remove-orphans
 
 local-aws-compose: ## Start local Compose with opt-in real AWS (Bedrock + Transcribe) and shared DynamoDB budget
 	DYNAMODB_TABLE_NAME=$(or $(DYNAMODB_TABLE_NAME),ai-analytics-poc-demo-application-state) \

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import concurrent.futures
+import contextvars
 import json
 import logging
 import time
@@ -412,7 +413,8 @@ class OrchestrationLoop:
         """Execute a blocking callable in a background thread with fast cooperative cancellation."""
         executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
         try:
-            future = executor.submit(func, *args, **kwargs)
+            context = contextvars.copy_context()
+            future = executor.submit(context.run, func, *args, **kwargs)
             while not future.done():
                 if self.is_cancelled(run_id):
                     future.cancel()

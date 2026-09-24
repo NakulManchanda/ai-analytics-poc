@@ -5,6 +5,7 @@ from app.config import DEFAULT_MODEL_ID, VoiceSettings
 from app.llm import LLMProviderError, LocalFakeLLMClient, ToolProposalResult
 from app.orchestration import OrchestrationLoop
 from app.state import InMemoryStateRepository
+from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
@@ -37,6 +38,25 @@ def _tracer_and_exporter():
     provider = TracerProvider()
     provider.add_span_processor(SimpleSpanProcessor(exporter))
     return provider.get_tracer("test.orchestration"), exporter
+
+
+def test_executor_call_preserves_current_trace_context() -> None:
+    tracer, _exporter = _tracer_and_exporter()
+    loop = OrchestrationLoop(
+        llm_client=LocalFakeLLMClient(),
+        mcp_client=FakeMCPClient(),  # type: ignore[arg-type]
+        state_repository=InMemoryStateRepository(),
+        voice_settings=VoiceSettings(enabled=False),
+        tracer=tracer,
+    )
+
+    with tracer.start_as_current_span("ai.run") as parent:
+        observed_trace_id = loop._run_with_cancellation(
+            lambda: trace.get_current_span().get_span_context().trace_id,
+            run_id="run_trace_context",
+        )
+
+    assert observed_trace_id == parent.get_span_context().trace_id
 
 
 def test_run_emits_one_safe_ai_run_span() -> None:

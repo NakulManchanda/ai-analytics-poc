@@ -6,9 +6,11 @@ from collections.abc import Mapping
 from typing import Any, Protocol
 
 from fastmcp import Client
+from fastmcp.client.transports import StreamableHttpTransport
 from fastmcp.exceptions import ClientError
 from httpx import HTTPError
 from mcp import McpError
+from opentelemetry import propagate, trace
 
 DEFAULT_MCP_URL = "http://mcp:8001/mcp"
 MAX_PROFILE_BYTES = 8_192
@@ -45,6 +47,18 @@ class FastMCPDatasetProfileClient:
 
     def __init__(self, mcp_url: str | None = None) -> None:
         self._mcp_url = mcp_url or os.environ.get("MCP_URL", DEFAULT_MCP_URL)
+
+    def _trace_headers(self) -> dict[str, str]:
+        if not trace.get_current_span().get_span_context().is_valid:
+            return {}
+        headers: dict[str, str] = {}
+        propagate.inject(headers)
+        return headers
+
+    def _client(self) -> Client:
+        return Client(
+            StreamableHttpTransport(self._mcp_url, headers=self._trace_headers())
+        )
 
     def get_dataset_profile(self) -> dict[str, object]:
         try:
@@ -89,14 +103,14 @@ class FastMCPDatasetProfileClient:
             raise MCPToolError(retryable=True, message=str(error)) from error
 
     async def _get_dataset_profile(self) -> dict[str, object]:
-        async with Client(self._mcp_url) as client:
+        async with self._client() as client:
             result = await client.call_tool("get_dataset_profile")
         if not isinstance(result.data, dict):
             raise MCPToolError(retryable=False)
         return sanitize_dataset_profile(result.data)
 
     async def _get_dataset_schema(self) -> dict[str, object]:
-        async with Client(self._mcp_url) as client:
+        async with self._client() as client:
             resources = await client.read_resource(SCHEMA_RESOURCE_URI)
         if len(resources) != 1 or not isinstance(resources[0].text, str):
             raise MCPToolError(retryable=False)
@@ -109,7 +123,7 @@ class FastMCPDatasetProfileClient:
         return sanitize_dataset_schema(payload)
 
     async def _query_taxi_data(self, *, analysis: str, limit: int) -> dict[str, object]:
-        async with Client(self._mcp_url) as client:
+        async with self._client() as client:
             result = await client.call_tool(
                 "query_taxi_data", {"analysis": analysis, "limit": limit}
             )
@@ -121,7 +135,7 @@ class FastMCPDatasetProfileClient:
         self, *, region_name: str | None
     ) -> dict[str, object]:
         arguments = {} if region_name is None else {"region_name": region_name}
-        async with Client(self._mcp_url) as client:
+        async with self._client() as client:
             result = await client.call_tool("average_trip_metrics", arguments)
         if not isinstance(result.data, dict):
             raise MCPToolError(retryable=False)

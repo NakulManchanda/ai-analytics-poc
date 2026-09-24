@@ -20,4 +20,4 @@ EXPOSE 8001
 
 USER mcpuser
 
-CMD ["uv", "run", "--project", "services/mcp", "--no-sync", "fastmcp", "run", "services/mcp/mcp_server/server.py", "--transport", "http", "--host", "0.0.0.0", "--port", "8001"]
+CMD ["uv", "run", "--project", "services/mcp", "--no-sync", "uvicorn", "mcp_server.asgi:app", "--host", "0.0.0.0", "--port", "8001"]
