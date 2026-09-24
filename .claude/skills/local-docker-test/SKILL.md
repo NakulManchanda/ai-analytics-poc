@@ -1,74 +1,47 @@
 ---
 name: local-docker-test
-description: Instructions and exact commands to start, verify, and stop the local Docker AWS stack (Bedrock, Transcribe, Polly, DynamoDB, Redis) inside any project-local worktree. Use whenever asked to "start docker to test", "manual testing", "test from worktree", "run local aws", or before asking the user to manually verify a feature.
+description: Use when asked to start Docker for testing, run the local AWS stack, test from a worktree, or hand off a live local feature for manual verification.
 ---
 
-# Local Docker AWS Stack for Worktree Manual Testing
+# Local Docker testing
 
-Use this workflow whenever the user asks for manual testing (e.g., "start docker to test", "i can help with manual testing", "run local aws"), or when you need to verify changes live in an isolated worktree before opening/merging a PR.
+Use the repository's root `Makefile` as the operator interface. Do not create a second Makefile or reconstruct Compose commands already represented by a target.
 
-## 1. Pre-flight: Check for Port Conflicts
+## Prepare
 
-Check if port 3000 or another Docker Compose project is already running:
+Inspect `make help` and the relevant target before running it. Check `docker ps` for port conflicts, but never stop another task's Compose project. Select task-specific ports or a task-owned project instead.
+
+## Start from the active worktree
+
+Give the user a short, copyable sequence beginning with the real worktree path:
+
 ```bash
-docker ps
-```
-If an older or different Compose project is occupying port 3000:
-```bash
-# Stop the conflicting project by its project name, e.g.:
-docker compose -p <conflicting-project-name> down
-```
+cd <active-worktree>
 
-## 2. Start the Stack from within the Worktree
+# Fake-provider stack when real AWS is unnecessary:
+WEB_PORT=<task-owned-port> \
+JAEGER_UI_PORT=<task-owned-port> \
+make observability-up
 
-From inside the worktree directory (e.g., `.worktrees/<topic>`):
-
-**Quick start (restart from scratch):**
-```bash
-make local-aws-refresh
-```
-
-**Or start (keep running stack):**
-```bash
+# Or the opt-in real-AWS overlay when the test requires it:
+DYNAMODB_TABLE_NAME=<shared-state-table> \
+AWS_PROFILE=<local-profile> \
+WEB_PORT=<task-owned-port> \
 make local-aws-compose
 ```
 
-**With custom settings:**
-```bash
-DYNAMODB_TABLE_NAME=custom-table AWS_PROFILE=profile-name WEB_PORT=3001 make local-aws-compose
-```
+Use only the path required by the acceptance test. Real AWS is opt-in and may make paid calls; never print or commit credentials.
 
-**Defaults (if not set):**
-- `DYNAMODB_TABLE_NAME=ai-analytics-poc-demo-application-state`
-- `AWS_PROFILE=default`
-- `WEB_PORT=3000`
+## Verify and hand off
 
-> **Note**: Docker Compose automatically uses the worktree directory name as the Compose project name, ensuring network and container isolation.
-
-## 3. Verify Health
-
-Wait a few seconds for services to become healthy, then curl the health endpoint:
-```bash
-curl -s http://localhost:3000/api/status
-```
-Expected output:
-```json
-{"app":{"status":"ok","service":"ai-app"},"mcp":{"status":"ok","tools":3,"resources":1}}
-```
-
-## 4. Inspect Container Logs (if troubleshooting)
+Check the applicable health endpoint before asking the user to test:
 
 ```bash
-# View backend application logs:
-docker compose logs --tail 50 -f app
-
-# View all services:
-docker compose logs --tail 30
+curl -s http://localhost:<web-port>/api/status
 ```
 
-## 5. Teardown / Clean Up
+Then give only the useful repeatable targets and URLs. Prefer existing targets such as `observability-smoke`, `compose-smoke`, `dashboard`, and service-specific test targets. Add a small root target only when a non-trivial command has a demonstrated recurring use; keep one-off inspection commands direct.
 
-When manual testing is complete:
-```bash
-docker compose -f docker-compose.yml -f docker-compose.aws.yml down
-```
+## Stop
+
+From the same task-owned worktree, use its existing down target when available. Otherwise run the matching Compose down command with the exact files, ports, and project owned by this task. Never stop, reuse, or clean up another task's stack.
