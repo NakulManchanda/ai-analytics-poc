@@ -12,12 +12,9 @@ scrape_configs:
     params:
       module: [http_2xx]
     static_configs:
-      - targets: ["http://app:8000/health"]
+      - targets: ["http://app:8080/health"]
         labels:
           service: "app"
-      - targets: ["http://mcp:8000/health"]
-        labels:
-          service: "mcp"
       - targets: ["http://jaeger:16686/"]
         labels:
           service: "jaeger"
@@ -34,6 +31,9 @@ scrape_configs:
     params:
       module: [tcp_connect]
     static_configs:
+      - targets: ["mcp:8001"]
+        labels:
+          service: "mcp"
       - targets: ["redis:6379"]
         labels:
           service: "redis"

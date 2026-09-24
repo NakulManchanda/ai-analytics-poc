@@ -37,6 +37,27 @@ def test_observability_configuration_files_are_valid() -> None:
     prom_data = yaml.safe_load(prom_cfg.read_text())
     assert "scrape_configs" in prom_data
 
+    # Verify Blackbox probe targets match container network ports
+    scrape_jobs = {job["job_name"]: job for job in prom_data["scrape_configs"]}
+    assert "blackbox-http" in scrape_jobs
+    http_targets = [
+        target
+        for group in scrape_jobs["blackbox-http"]["static_configs"]
+        for target in group["targets"]
+    ]
+    assert "http://app:8080/health" in http_targets
+    assert "http://jaeger:16686/" in http_targets
+
+    assert "blackbox-tcp" in scrape_jobs
+    tcp_targets = [
+        target
+        for group in scrape_jobs["blackbox-tcp"]["static_configs"]
+        for target in group["targets"]
+    ]
+    assert "mcp:8001" in tcp_targets
+    assert "redis:6379" in tcp_targets
+    assert "otel-collector:4318" in tcp_targets
+
     # Blackbox config
     blackbox_cfg = ROOT / "observability/blackbox.yml"
     assert blackbox_cfg.exists()
