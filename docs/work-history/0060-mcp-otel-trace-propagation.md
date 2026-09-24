@@ -1,4 +1,4 @@
-# 0058 — MCP W3C trace propagation and DuckDB child spans
+# 0060 — MCP W3C trace propagation and DuckDB child spans
 
 ## Goal
 
@@ -54,12 +54,13 @@ conversation, turn, model, and terminal-status dimensions. MCP request spans
 record fixed `rpc.system` and allowlisted `rpc.method`; tool/resource spans use
 fixed tool names or the fixed schema resource URI; DuckDB spans record fixed
 database/tool identifiers and, only for the governed analysis tool, allowlisted
-analysis plus bounded row limit. Error status is retained without recording raw
-exception events.
+analysis plus bounded row limit. Error status is retained with no description
+and without recording raw exception events.
 
-No span attributes include prompts, raw SQL, complete tool arguments, region
-input, result rows, resource content, model output, headers, credentials,
-secrets, or other unrestricted user content. The smoke checks prompt-like,
+No span attributes, event attributes, status descriptions, or resource
+attributes include prompts, raw SQL, complete tool arguments, region input,
+result rows, resource content, model output, headers, credentials, secrets, or
+other unrestricted user content. The smoke checks prompt-like,
 fixture-row, SQL-like, and credential-like sentinels are absent from the Jaeger
 trace JSON. This keeps traces additive to—not replacements for—Redis/SSE
 workflow events, CloudWatch EMF, local JSONL metrics, structured logs, and
@@ -106,10 +107,11 @@ durable DynamoDB state, as defined by ADR 0007.
 - Issue: #118
 - Draft PR: [#119](https://github.com/NakulManchanda/ai-analytics-poc/pull/119)
 - Branch: `codex/o2-mcp-tracing`
-- State: open draft. The local branch was rebased onto `origin/main` at
-  `4e51fff` and includes the manual-workflow commit `df85a65`; the remote PR
-  branch must be updated before exact-head CI and independent review determine
-  merge readiness.
+- State: open draft. The local branch was rebased onto `main` after workflow
+  guidance PR #127 merged, and the independent review's privacy, test, FastMCP
+  robustness, and work-history findings were addressed. The remote branch must
+  be updated before exact-head CI and follow-up review determine merge
+  readiness.
 
 ## Limitations and next slice
 

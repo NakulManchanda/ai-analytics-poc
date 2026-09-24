@@ -16,6 +16,7 @@ from dataset_spike.analytics import (
 from dataset_spike.spike import run_dataset_spike
 from fastmcp import FastMCP
 from opentelemetry import trace
+from opentelemetry.trace import Status, StatusCode
 
 from mcp_server.telemetry import SCHEMA_RESOURCE_URI, MCPTracingMiddleware
 
@@ -65,7 +66,9 @@ def _run_duckdb_query(
             raise ValueError("limit must be between 1 and 20")
     active_tracer = tracer or trace.get_tracer("ai_analytics_poc.mcp")
     with active_tracer.start_as_current_span(
-        "duckdb.query", record_exception=False
+        "duckdb.query",
+        record_exception=False,
+        set_status_on_exception=False,
     ) as span:
         span.set_attributes(
             {
@@ -73,10 +76,14 @@ def _run_duckdb_query(
                 "ai.tool.name": tool_name,
             }
         )
-        if analysis is not None and limit is not None:
-            span.set_attributes({"ai.analysis": analysis, "ai.row_limit": limit})
-            return runner(analysis=analysis, limit=limit)
-        return runner(region_name=region_name)
+        try:
+            if analysis is not None and limit is not None:
+                span.set_attributes({"ai.analysis": analysis, "ai.row_limit": limit})
+                return runner(analysis=analysis, limit=limit)
+            return runner(region_name=region_name)
+        except Exception:
+            span.set_status(Status(StatusCode.ERROR))
+            raise
 
 
 def run_pinned_query(

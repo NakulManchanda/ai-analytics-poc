@@ -39,7 +39,7 @@
 | `services/mcp/Dockerfile` | Start the traced ASGI app under uvicorn rather than the FastMCP CLI-only entrypoint. |
 | `docker-compose.observability.yml` | Enable the existing MCP service's optional OTLP export to the shared Collector. |
 | `scripts/smoke/16_observability.sh` | Prove one Jaeger trace has the app root and expected MCP/DuckDB descendants while remaining privacy-safe. |
-| `docs/work-history/0058-mcp-otel-trace-propagation.md`, `docs/work-history/README.md` | Record #118 scope, decisions, verification evidence, PR state, limitations, and lessons in the next monotonically numbered history entry. |
+| `docs/work-history/0060-mcp-otel-trace-propagation.md`, `docs/work-history/README.md` | Record #118 scope, decisions, verification evidence, PR state, limitations, and lessons in the next monotonically numbered history entry. |
 
 ## Trace and Attribute Contract
 
@@ -157,7 +157,7 @@ git commit -m "feat(observability): propagate W3C context to MCP"
 
 - Produces: `MCPTelemetrySettings.from_environment() -> MCPTelemetrySettings` with `enabled: bool = False`, `service_name: str = "analytics-mcp"`, `deployment_environment: str = "local"`, and `traces_endpoint: str | None = None`.
 - Produces: `MCPTracingRuntime(tracer: trace.Tracer, provider: TracerProvider | None)` from `build_mcp_tracing(settings: MCPTelemetrySettings, *, span_processor: SpanProcessor | None = None) -> MCPTracingRuntime`.
-- Produces: `MCPTracingMiddleware(tracer: trace.Tracer)`, a FastMCP `Middleware` which uses FastMCP's `get_http_request()` only to extract the W3C carrier, starts `mcp.request` as a `SpanKind.SERVER` span in `on_request`, and makes it current while invoking the request handler.
+- Produces: `MCPTracingMiddleware(tracer: trace.Tracer)`, a FastMCP `Middleware` which uses FastMCP's `get_http_headers()` only to extract the W3C carrier, starts `mcp.request` as a `SpanKind.SERVER` span in `on_request`, and makes it current while invoking the request handler.
 - Consumes: standard `OTEL_TRACING_ENABLED`, `OTEL_SERVICE_NAME`, `OTEL_DEPLOYMENT_ENVIRONMENT`, and `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`; MCP defaults differ only in service name.
 
 - [ ] **Step 1: Write failing runtime and ASGI-boundary tests**
@@ -223,8 +223,7 @@ Implement the FastMCP request middleware conceptually as:
 ```python
 class MCPTracingMiddleware(Middleware):
     async def on_request(self, context, call_next):
-        request = get_http_request()
-        parent = propagate.extract(dict(request.headers) if request else {})
+        parent = propagate.extract(get_http_headers())
         with self._tracer.start_as_current_span(
             "mcp.request", context=parent, kind=trace.SpanKind.SERVER
         ) as span:
@@ -232,7 +231,7 @@ class MCPTracingMiddleware(Middleware):
             return await call_next(context)
 ```
 
-Use the SDK context manager's standard exception recording/error status. Do not set `http.*` attributes or save headers. The same middleware updates `rpc.method` only from its fixed protocol method before child spans are created.
+Disable SDK exception recording and automatic exception-derived status descriptions for every MCP span. On a handler failure, explicitly set `StatusCode.ERROR` with no description, then re-raise the original exception. Do not set `http.*` attributes or save headers. The same middleware updates `rpc.method` only from its fixed protocol method before child spans are created.
 
 - [ ] **Step 4: Run focused MCP telemetry tests**
 
@@ -483,7 +482,7 @@ git commit -m "test(observability): prove MCP trace propagation"
 
 **Files:**
 
-- Create: `docs/work-history/0058-mcp-otel-trace-propagation.md`
+- Create: `docs/work-history/0060-mcp-otel-trace-propagation.md`
 - Modify: `docs/work-history/README.md`
 
 **Interfaces:**
@@ -506,7 +505,7 @@ Use only repository-relative paths and no machine-specific values or live endpoi
 
 - [ ] **Step 2: Add the index row**
 
-Insert a `0058` row in the Markdown table in `docs/work-history/README.md`, linking to the entry and describing “MCP W3C trace propagation and DuckDB child spans”; use the actual PR state, not a predicted merged state.
+Insert a `0060` row in the Markdown table in `docs/work-history/README.md`, linking to the entry and describing “MCP W3C trace propagation and DuckDB child spans”; use the actual PR state, not a predicted merged state.
 
 - [ ] **Step 3: Run documentation safety checks**
 
@@ -514,7 +513,7 @@ Run:
 
 ```bash
 rg -n '/Users/|traceparent: [0-9a-f]{2}-|sk-|AKIA|LANGFUSE|AWS_SECRET' \
-  docs/work-history/0058-mcp-otel-trace-propagation.md docs/work-history/README.md \
+  docs/work-history/0060-mcp-otel-trace-propagation.md docs/work-history/README.md \
   services/app/app/mcp_client.py services/mcp/mcp_server docker-compose.observability.yml scripts/smoke/16_observability.sh
 git diff --check
 ```
@@ -524,7 +523,7 @@ Expected: no matches and no whitespace errors.
 - [ ] **Step 4: Commit documentation**
 
 ```bash
-git add docs/work-history/0058-mcp-otel-trace-propagation.md docs/work-history/README.md
+git add docs/work-history/0060-mcp-otel-trace-propagation.md docs/work-history/README.md
 git commit -m "docs(observability): record MCP trace propagation"
 ```
 

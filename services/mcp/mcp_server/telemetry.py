@@ -4,13 +4,14 @@ import logging
 import os
 from dataclasses import dataclass
 
-from fastmcp.server.dependencies import get_http_request
+from fastmcp.server.dependencies import get_http_headers
 from fastmcp.server.middleware import Middleware
 from opentelemetry import propagate, trace
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor, SpanProcessor
+from opentelemetry.trace import Status, StatusCode
 
 LOGGER = logging.getLogger(__name__)
 INSTRUMENTATION_SCOPE = "ai_analytics_poc.mcp"
@@ -110,34 +111,45 @@ class MCPTracingMiddleware(Middleware):
         self._tracer = tracer
 
     async def on_request(self, context, call_next):
-        try:
-            request = get_http_request()
-        except RuntimeError as error:
-            if str(error) != "No active HTTP request found.":
-                raise
-            request = None
-        parent = propagate.extract(dict(request.headers) if request else {})
+        parent = propagate.extract(get_http_headers())
         with self._tracer.start_as_current_span(
             "mcp.request",
             context=parent,
             kind=trace.SpanKind.SERVER,
             record_exception=False,
+            set_status_on_exception=False,
         ) as span:
             method = getattr(context, "method", None)
             method = method if method in _SAFE_PROTOCOL_METHODS else "unknown"
             span.set_attributes({"rpc.system": "mcp", "rpc.method": method})
-            return await call_next(context)
+            try:
+                return await call_next(context)
+            except Exception:
+                span.set_status(Status(StatusCode.ERROR))
+                raise
 
     async def on_call_tool(self, context, call_next):
         with self._tracer.start_as_current_span(
-            "mcp.tool.execute", record_exception=False
+            "mcp.tool.execute",
+            record_exception=False,
+            set_status_on_exception=False,
         ) as span:
             span.set_attribute("mcp.tool.name", context.message.name)
-            return await call_next(context)
+            try:
+                return await call_next(context)
+            except Exception:
+                span.set_status(Status(StatusCode.ERROR))
+                raise
 
     async def on_read_resource(self, context, call_next):
         with self._tracer.start_as_current_span(
-            "mcp.resource.read", record_exception=False
+            "mcp.resource.read",
+            record_exception=False,
+            set_status_on_exception=False,
         ) as span:
             span.set_attribute("mcp.resource.uri", SCHEMA_RESOURCE_URI)
-            return await call_next(context)
+            try:
+                return await call_next(context)
+            except Exception:
+                span.set_status(Status(StatusCode.ERROR))
+                raise

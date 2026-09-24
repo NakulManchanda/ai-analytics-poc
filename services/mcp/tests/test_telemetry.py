@@ -76,6 +76,20 @@ def traced_runtime():
     return provider, provider.get_tracer("test"), exporter
 
 
+def assert_span_excludes(span, sensitive_value: str) -> None:
+    """Check every exported span field that can carry application data."""
+    exported_data = {
+        "attributes": dict(span.attributes),
+        "events": [
+            {"name": event.name, "attributes": dict(event.attributes)}
+            for event in span.events
+        ],
+        "resource_attributes": dict(span.resource.attributes),
+        "status_description": span.status.description,
+    }
+    assert sensitive_value not in json.dumps(exported_data, default=str)
+
+
 def test_asgi_entrypoint_propagates_remote_trace_to_governed_tool(monkeypatch):
     """The served HTTP app must keep the incoming trace through the tool query."""
     from dataset_spike.analytics import DatasetProfile
@@ -363,16 +377,12 @@ def test_fastmcp_middleware_marks_downstream_exception_without_exporting_details
     monkeypatch,
 ):
     from mcp_server import telemetry
-    from starlette.requests import Request
 
-    scope = {
-        "type": "http",
-        "method": "POST",
-        "scheme": "http",
-        "path": "/mcp",
-        "headers": [(b"x-sensitive", b"do-not-export")],
-    }
-    monkeypatch.setattr(telemetry, "get_http_request", lambda: Request(scope))
+    monkeypatch.setattr(
+        telemetry,
+        "get_http_headers",
+        lambda: {"x-sensitive": "do-not-export"},
+    )
 
     sentinel = "SELECT private_prompt FROM secrets WHERE user_token=abc"
 
@@ -391,15 +401,9 @@ def test_fastmcp_middleware_marks_downstream_exception_without_exporting_details
     spans = exporter.get_finished_spans()
     assert len(spans) == 1
     assert spans[0].status.status_code is StatusCode.ERROR
-    serialized = json.dumps(
-        {
-            "attributes": dict(spans[0].attributes),
-            "events": [
-                {"name": event.name, "attributes": dict(event.attributes)}
-                for event in spans[0].events
-            ],
-        }
-    )
-    assert "x-sensitive" not in serialized
-    assert "do-not-export" not in serialized
-    assert sentinel not in serialized
+    assert "x-sensitive" not in spans[0].attributes
+    assert "do-not-export" not in spans[0].attributes.values()
+    assert spans[0].status.description in (None, "")
+    assert "x-sensitive" not in spans[0].resource.attributes
+    assert "do-not-export" not in spans[0].resource.attributes.values()
+    assert_span_excludes(spans[0], sentinel)

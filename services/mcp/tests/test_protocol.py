@@ -1,4 +1,5 @@
 import asyncio
+import json
 from dataclasses import asdict
 
 import pytest
@@ -7,6 +8,20 @@ from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
+
+def assert_span_excludes(span, sensitive_value: str) -> None:
+    """Check every exported span field that can carry application data."""
+    exported_data = {
+        "attributes": dict(span.attributes),
+        "events": [
+            {"name": event.name, "attributes": dict(event.attributes)}
+            for event in span.events
+        ],
+        "resource_attributes": dict(span.resource.attributes),
+        "status_description": span.status.description,
+    }
+    assert sensitive_value not in json.dumps(exported_data, default=str)
 
 
 def test_dataset_contract_exposes_fixed_schema_and_profile_over_mcp():
@@ -219,7 +234,8 @@ def test_governed_query_creates_safe_tool_and_duckdb_spans():
         spans["duckdb.query"].parent.span_id
         == spans["mcp.tool.execute"].context.span_id
     )
-    assert "Alpha" not in str(exporter.get_finished_spans())
+    for span in spans.values():
+        assert_span_excludes(span, "Alpha")
 
 
 def test_reading_schema_creates_safe_fixed_resource_span():
@@ -260,7 +276,7 @@ def test_reading_schema_creates_safe_fixed_resource_span():
     assert spans["mcp.resource.read"].attributes == {
         "mcp.resource.uri": "dataset://nyc-taxi/schema"
     }
-    assert "Alpha" not in str(exporter.get_finished_spans())
+    assert_span_excludes(spans["mcp.resource.read"], "Alpha")
 
 
 def test_failing_query_marks_tool_and_duckdb_spans_as_errors_without_arguments():
@@ -302,7 +318,9 @@ def test_failing_query_marks_tool_and_duckdb_spans_as_errors_without_arguments()
     spans = {span.name: span for span in exporter.get_finished_spans()}
     assert spans["mcp.tool.execute"].status.status_code is StatusCode.ERROR
     assert spans["duckdb.query"].status.status_code is StatusCode.ERROR
-    assert sentinel not in str(exporter.get_finished_spans())
+    for span in spans.values():
+        assert span.status.description in (None, "")
+        assert_span_excludes(span, sentinel)
 
 
 def test_direct_invalid_query_does_not_export_unallowlisted_analysis():
@@ -321,7 +339,6 @@ def test_direct_invalid_query_does_not_export_unallowlisted_analysis():
     finally:
         provider.shutdown()
 
-    assert sentinel not in str(exporter.get_finished_spans())
     assert not exporter.get_finished_spans()
 
 
