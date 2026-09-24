@@ -24,6 +24,7 @@ and `.github/copilot-instructions.md`) must stay thin and refer here rather than
 
 ## Change workflow
 
+- For new repository-changing implementation work, enter through `.claude/skills/engineering-workflow/SKILL.md`. It deliberately splits work into three short phases — intent/plan, build/verify, review/finish — so agents resume from explicit artifacts instead of carrying a long workflow in context. The focused phase skills own procedure; this file remains policy.
 - After bootstrap, use a dedicated branch and project-local worktree for every change. Keep the
   main checkout untouched; use `.worktrees/<topic>` and a descriptive branch name.
 - Make the smallest coherent commit, push the branch early, and open a **draft** PR as soon as
@@ -62,8 +63,8 @@ and `.github/copilot-instructions.md`) must stay thin and refer here rather than
   because local agent CLIs are not GitHub identities. Reviewers never mutate or merge. The
   coordinator may merge a gated intermediate PR under the policy above, but never deploy or apply
   infrastructure without explicit authorization.
-- Main orchestration uses `gpt-5.6-sol` at high reasoning. Default Codex subagents use
-  `gpt-5.6-terra` at medium; use Terra high for complex reviews, not Luna unless speed-only.
+- Main orchestration uses `gpt-5.6-sol` at high reasoning for intent, architecture, integration, ambiguity, and risk. Delegate bounded/mechanical work to the lowest-cost capable agent with explicit acceptance and escalation rules; the current default Codex worker is `gpt-5.6-terra` at medium. Do not spend frontier-model cost on work a bounded worker can safely complete.
+- Final independent PR review intentionally uses an adversarial frontier reviewer in a fresh read-only session; implementation cost optimization must not weaken the final review gate.
 - Requests such as “review this PR,” “validate the PR,” “is this mergeable?”, or “re-review after
   fixes” must use `.claude/skills/project-pr-review/SKILL.md`. That skill owns the independent-review
   model, session, CI timing, validation, and follow-up mechanics; do not duplicate them here.
