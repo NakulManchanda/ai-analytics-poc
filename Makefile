@@ -2,9 +2,11 @@
 
 APP_HOST_PORT := $(or $(APP_PORT),$(PORT),8080)
 MCP_HOST_PORT := $(or $(MCP_PORT),$(PORT),8001)
-OBSERVABILITY_PROJECT ?= ai-analytics-119
+OBSERVABILITY_PROJECT ?= ai-analytics-128
 OBSERVABILITY_WEB_PORT ?= 13000
 OBSERVABILITY_JAEGER_PORT ?= 16686
+OBSERVABILITY_GRAFANA_PORT ?= 13001
+OBSERVABILITY_PROMETHEUS_PORT ?= 19090
 OBSERVABILITY_LOG_TAIL ?= 200
 
 .PHONY: help check-bootstrap dev mcp-dev mcp-smoke dataset-test dataset-smoke smoke test mcp-test infra-test web-test compose-smoke observability-up observability-down observability-smoke observability-dev-up observability-dev-info observability-dev-ask observability-dev-metrics observability-dev-logs observability-dev-down local-aws-compose local-aws-refresh local-bedrock-compose bedrock-smoke m5-bedrock-smoke m6-bedrock-smoke dashboard tf-dispatch tf-resume tf-park
@@ -58,8 +60,9 @@ web-test: ## Run React tests and production build
 compose-smoke: ## Run the browser to FastAPI to FastMCP Compose smoke
 	WEB_PORT=$(or $(WEB_PORT),$(PORT)) ./scripts/smoke/03_compose_ui.sh
 
-observability-up: ## Start local Compose with the OTEL Collector and Jaeger UI
+observability-up: ## Start local Compose with OTEL Collector, Jaeger, Grafana, and Prometheus
 	WEB_PORT=$(or $(WEB_PORT),3000) JAEGER_UI_PORT=$(or $(JAEGER_UI_PORT),16686) \
+	GRAFANA_PORT=$(or $(GRAFANA_PORT),13001) PROMETHEUS_PORT=$(or $(PROMETHEUS_PORT),19090) \
 		docker compose -f docker-compose.yml -f docker-compose.observability.yml up --build -d
 
 observability-down: ## Stop the local observability Compose stack
@@ -68,15 +71,18 @@ observability-down: ## Stop the local observability Compose stack
 observability-smoke: ## Verify an application ai.run trace reaches Jaeger
 	./scripts/smoke/16_observability.sh
 
-observability-dev-up: ## Start the issue-owned local app, Collector, and Jaeger stack
+observability-dev-up: ## Start the issue-owned local app, Collector, Jaeger, Grafana, and Prometheus stack
 	WEB_PORT="$(OBSERVABILITY_WEB_PORT)" JAEGER_UI_PORT="$(OBSERVABILITY_JAEGER_PORT)" \
+	GRAFANA_PORT="$(OBSERVABILITY_GRAFANA_PORT)" PROMETHEUS_PORT="$(OBSERVABILITY_PROMETHEUS_PORT)" \
 		docker compose -p "$(OBSERVABILITY_PROJECT)" -f docker-compose.yml -f docker-compose.observability.yml up --build -d
 
 observability-dev-info: ## Print issue-owned observability URLs, expected spans, and Compose status
 	@set -eu; \
-	printf '%s\n' "Web: http://127.0.0.1:$(OBSERVABILITY_WEB_PORT)"; \
-	printf '%s\n' "Jaeger: http://127.0.0.1:$(OBSERVABILITY_JAEGER_PORT)"; \
-	printf '%s\n' "Metrics: metrics/runs.jsonl"; \
+	printf '%s\n' "Web:        http://127.0.0.1:$(OBSERVABILITY_WEB_PORT)"; \
+	printf '%s\n' "Jaeger:     http://127.0.0.1:$(OBSERVABILITY_JAEGER_PORT)"; \
+	printf '%s\n' "Grafana:    http://127.0.0.1:$(OBSERVABILITY_GRAFANA_PORT)"; \
+	printf '%s\n' "Prometheus: http://127.0.0.1:$(OBSERVABILITY_PROMETHEUS_PORT)"; \
+	printf '%s\n' "Metrics:    metrics/runs.jsonl"; \
 	printf '%s\n' "Expected spans: ai.run -> mcp.request -> mcp.tool.execute -> duckdb.query"; \
 	printf '%s\n' "Compose project: $(OBSERVABILITY_PROJECT)"; \
 	docker compose -p "$(OBSERVABILITY_PROJECT)" -f docker-compose.yml -f docker-compose.observability.yml ps
@@ -103,6 +109,7 @@ observability-dev-logs: ## Print recent app, MCP, and Collector logs; append -f 
 
 observability-dev-down: ## Stop only the issue-owned local observability project and remove its orphans
 	WEB_PORT="$(OBSERVABILITY_WEB_PORT)" JAEGER_UI_PORT="$(OBSERVABILITY_JAEGER_PORT)" \
+	GRAFANA_PORT="$(OBSERVABILITY_GRAFANA_PORT)" PROMETHEUS_PORT="$(OBSERVABILITY_PROMETHEUS_PORT)" \
 		docker compose -p "$(OBSERVABILITY_PROJECT)" -f docker-compose.yml -f docker-compose.observability.yml down --remove-orphans
 
 local-aws-compose: ## Start local Compose with opt-in real AWS (Bedrock + Transcribe) and shared DynamoDB budget

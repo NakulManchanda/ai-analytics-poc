@@ -1,0 +1,12 @@
+apiVersion: 1
+
+providers:
+  - name: 'ai-analytics-dashboards'
+    orgId: 1
+    folder: 'AI Analytics'
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 10
+    allowUiUpdates: true
+    options:
+      path: /etc/grafana/provisioning/dashboards/json
