@@ -24,12 +24,12 @@ Ownership labels describe the intended local tool, not a GitHub identity. Assign
 | Work | Default routing |
 | --- | --- |
 | Main coordinator | Codex `gpt-5.6-sol`, high reasoning |
-| Normal Codex subtask | Codex `gpt-5.6-terra`, medium reasoning |
-| Complex code/security review | Codex `gpt-5.6-terra`, high reasoning |
-| Research, schemas, docs, test matrices | Gemini/Antigravity 3.7 Flash High via `agy`, high effort |
-| Independent pull-request review and validation | `.claude/skills/project-pr-review/SKILL.md` |
+| Bounded implementation / mechanical subtask | Lowest-cost capable worker; Codex `gpt-5.6-terra` medium is the current default |
+| Research, schemas, docs, test matrices | Lowest-cost capable research worker; Gemini/Antigravity 3.7 Flash High via `agy` when appropriate |
+| Architecture, ambiguity, cross-service integration | Main coordinator / frontier reasoning |
+| Independent pull-request review and validation | Adversarial frontier reviewer via `.claude/skills/project-pr-review/SKILL.md` |
 
-Do not select Luna unless the task is explicitly speed-only.
+Choose workers by capability/cost rather than habit: if a task can be specified as a bounded artifact with explicit acceptance criteria, prefer the cheaper capable worker. Escalate uncertainty rather than guessing. Final review is the opposite: intentionally spend frontier-model capacity to challenge the completed change.
 
 ### Review lifecycle
 
