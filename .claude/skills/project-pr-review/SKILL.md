@@ -17,9 +17,8 @@ documents only when they govern the change.
 
 - Use exactly one Claude session; no Gemini, Copilot, or second reviewer unless explicitly asked.
   Existing human reviews do not count as duplicate agent reviewers.
-- Use Opus at normal/default effort for cross-service, architecture, security, or adversarial
-  changes; use Sonnet at normal/default effort for easy localized changes. Omit `--effort`; high
-  effort requires explicit direction.
+- Final validation is intentionally adversarial: use a frontier Claude model in a fresh independent session (currently Opus in this repository's Claude lane), even for a localized change. The writer/worker must not be reused as the final reviewer.
+- Review from a skeptical Staff/Principal perspective: actively try to falsify correctness and find violated requirements, bad assumptions, race/retry/idempotency bugs, security-boundary mistakes, failure-handling gaps, backward-compatibility problems, state corruption, observability blind spots, weak negative tests, and unnecessary operational complexity.
 - Keep the review read-only: do not edit, commit, push, merge, deploy, or apply infrastructure.
 - Start final validation only after implementation/docs are complete and focused local checks pass.
   Push, then run review and GitHub Actions in parallel while the main conversation continues.
