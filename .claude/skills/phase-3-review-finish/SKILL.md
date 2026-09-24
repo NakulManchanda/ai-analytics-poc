@@ -15,9 +15,9 @@ This phase owns only three things:
 
 No new feature work should begin here. New substantive scope returns to Phase 1.
 
-## 1. Explain the diff
+## 1. Explain and document the diff
 
-Create `myfiles/<issue>-<slug>/diff-story.md`.
+Use the `document-diff` skill for the bounded documentation pass. It owns the reasonable documentation standards, file/module headers, work-history check, affected README/operator docs, architecture-doc threshold, and `diff-story.md`.
 
 Explain changed files in dependency/reading order:
 
@@ -30,7 +30,7 @@ file
 
 The result should read like an implementation story rather than a file inventory.
 
-Use it to refresh the PR description with context, decisions, verification, and limitations.
+Do not duplicate the documentation standards here; `document-diff` is the source of truth for that pass. Use its output to refresh the PR description with context, decisions, verification, and limitations.
 
 ## 2. Try to break it
 
