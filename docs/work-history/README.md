@@ -62,3 +62,5 @@ Monotonically numbered log of every post-bootstrap task. Each entry records the 
 - [0055 — v5 Backend Voice Output with AWS Polly TTS](0055-v5-polly-tts-backend.md)
 - [0056 — v5 Frontend Audio Playback with WebAudio](0056-v5-frontend-audio-playback.md)
 - [0057 — Local OpenTelemetry and Jaeger trace skeleton](0057-local-otel-jaeger-trace-skeleton.md)
+- [0058 — Three-phase AI-assisted engineering workflow](0058-three-phase-engineering-workflow.md)
+- [0059 — Review effort and Make-first manual testing guidance](0059-review-effort-and-make-guidance.md)

@@ -65,6 +65,8 @@ Run focused local verification proportional to risk.
 
 When the user asks for manual testing, or a live local stack is the right acceptance path, delegate to the existing `local-docker-test` skill rather than duplicating Docker instructions here.
 
+The manual-testing guide should start with `cd` into the active worktree, then give a short ordered sequence using targets from the root `Makefile`. Do not create another Makefile. Add a small root target only for a demonstrated recurring gap; keep one-off inspection commands direct.
+
 Record exact commands, outcomes, and any unverified path.
 
 ## Exit gate
