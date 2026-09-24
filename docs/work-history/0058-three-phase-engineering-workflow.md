@@ -17,6 +17,7 @@ The repository already had canonical `AGENTS.md`, isolated issue/branch/worktree
 - Spend frontier reasoning on intent, architecture, integration, ambiguity, and final review; delegate bounded/mechanical tasks to the lowest-cost capable worker.
 - Make final PR validation deliberately adversarial, fresh, read-only, and frontier-model.
 - Reuse `local-docker-test` and `project-pr-review` rather than copying their procedures into the new phases.
+- Add a bounded `document-diff` skill so documentation is delegated to a lower-cost worker using reasonable standards without requiring boilerplate everywhere.
 
 ## Workflow
 
@@ -38,7 +39,8 @@ Human override is allowed at every phase; material overrides and accepted risks 
 - `.claude/skills/engineering-workflow/SKILL.md` — main three-phase router.
 - `.claude/skills/phase-1-intent-plan/SKILL.md` — intent, experiments, and plan.
 - `.claude/skills/phase-2-build-verify/SKILL.md` — cost-aware delegation, implementation, tests, and manual verification.
-- `.claude/skills/phase-3-review-finish/SKILL.md` — diff story, adversarial review, and exact-head readiness.
+- `.claude/skills/phase-3-review-finish/SKILL.md` — routes final documentation, adversarial review, and exact-head readiness.
+- `.claude/skills/document-diff/SKILL.md` — bounded documentation standards for file/module context, work history, affected docs, architecture thresholds, and the diff story.
 - `.claude/skills/project-pr-review/SKILL.md` — strengthen final validation to use an independent adversarial frontier reviewer.
 - `AGENTS.md` — route new implementation work into the connected workflow and codify model economics.
 - `docs/agent-coordination.md` — document lowest-cost-capable workers and frontier final review.
