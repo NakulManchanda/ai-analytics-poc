@@ -95,6 +95,8 @@ def test_makefile_observability_targets_include_grafana_and_prometheus() -> None
     assert "OBSERVABILITY_PROMETHEUS_PORT ?= 19090" in makefile
     assert "Grafana:    http://127.0.0.1:$(OBSERVABILITY_GRAFANA_PORT)" in makefile
     assert "Prometheus: http://127.0.0.1:$(OBSERVABILITY_PROMETHEUS_PORT)" in makefile
+    assert "observability-dev-burst:" in makefile
+    assert "scripts/burst_traffic.py" in makefile
 
     # Verify dry-run outputs
     info_output = subprocess.check_output(

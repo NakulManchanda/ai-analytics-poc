@@ -7,9 +7,10 @@ OBSERVABILITY_WEB_PORT ?= 13000
 OBSERVABILITY_JAEGER_PORT ?= 16686
 OBSERVABILITY_GRAFANA_PORT ?= 13001
 OBSERVABILITY_PROMETHEUS_PORT ?= 19090
+OBSERVABILITY_BURST_COUNT ?= 10
 OBSERVABILITY_LOG_TAIL ?= 200
 
-.PHONY: help check-bootstrap dev mcp-dev mcp-smoke dataset-test dataset-smoke smoke test mcp-test infra-test web-test compose-smoke observability-up observability-down observability-smoke observability-dev-up observability-dev-info observability-dev-ask observability-dev-metrics observability-dev-logs observability-dev-down local-aws-compose local-aws-refresh local-bedrock-compose bedrock-smoke m5-bedrock-smoke m6-bedrock-smoke dashboard tf-dispatch tf-resume tf-park
+.PHONY: help check-bootstrap dev mcp-dev mcp-smoke dataset-test dataset-smoke smoke test mcp-test infra-test web-test compose-smoke observability-up observability-down observability-smoke observability-dev-up observability-dev-info observability-dev-ask observability-dev-burst observability-dev-metrics observability-dev-logs observability-dev-down local-aws-compose local-aws-refresh local-bedrock-compose bedrock-smoke m5-bedrock-smoke m6-bedrock-smoke dashboard tf-dispatch tf-resume tf-park
 
 
 help: ## Show available commands
@@ -92,6 +93,9 @@ observability-dev-ask: ## Send a safe representative request to the issue-owned 
 		-X POST "http://127.0.0.1:$(OBSERVABILITY_WEB_PORT)/api/ask" \
 		-H 'content-type: application/json' \
 		--data '{"prompt":"Which pickup zones have the most trips?"}'
+
+observability-dev-burst: ## Send a burst of randomized queries to generate metrics, logs, and traces (usage: make observability-dev-burst [COUNT=10])
+	@python3 scripts/burst_traffic.py --url "http://127.0.0.1:$(OBSERVABILITY_WEB_PORT)" --count "$(or $(COUNT),$(OBSERVABILITY_BURST_COUNT))"
 
 observability-dev-metrics: ## Print recent local JSONL metrics; app stdout emits EMF and make dashboard compares runs
 	@set -eu; \

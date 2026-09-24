@@ -224,22 +224,26 @@ or web port, use the issue-scoped targets:
 make observability-dev-up
 make observability-dev-info
 make observability-dev-ask
+make observability-dev-burst
 make observability-dev-metrics
 make observability-dev-logs
 make observability-dev-down
 ```
 
-They default to Compose project `ai-analytics-119`, web port `13000`, and
-Jaeger port `16686`; each is overridable with the corresponding
-`OBSERVABILITY_PROJECT`, `OBSERVABILITY_WEB_PORT`, or
-`OBSERVABILITY_JAEGER_PORT` Make variable. The `down` target removes only that
-project and its orphans.
+They default to Compose project `ai-analytics-128`, web port `13000`,
+Jaeger port `16686`, Grafana port `13001`, and Prometheus port `19090`;
+each is overridable with the corresponding `OBSERVABILITY_PROJECT`,
+`OBSERVABILITY_WEB_PORT`, `OBSERVABILITY_JAEGER_PORT`, `OBSERVABILITY_GRAFANA_PORT`,
+or `OBSERVABILITY_PROMETHEUS_PORT` Make variable. `make observability-dev-burst` sends
+a burst of randomized questions to populate dashboards, traces, and metrics.
+The `down` target removes only that project and its orphans.
 
-Existing CloudWatch EMF and local JSONL metrics remain the aggregate latency,
-token, and cost path. Generic endpoint RED metrics, Prometheus/Grafana,
-logs-to-OTEL, asynchronous queue/MCP propagation, Langfuse, and AWS trace export
-are later slices. The fake-model trace workflow needs no AWS login; the separate
-AWS Compose override continues to use the configured local AWS profile.
+Grafana provides the operational dashboard at `http://127.0.0.1:13001` (service
+health, probe latencies, container logs via Loki), while Jaeger remains the
+distributed trace explorer at `http://127.0.0.1:16686`. Existing CloudWatch EMF and local
+JSONL metrics remain the aggregate latency, token, and cost path. The fake-model trace
+workflow needs no AWS login; the separate AWS Compose override continues to use the
+configured local AWS profile.
 
 ### 2. Run All Automated Test Suites
 
