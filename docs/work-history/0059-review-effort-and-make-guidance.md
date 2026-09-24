@@ -27,4 +27,4 @@ Make the repository workflow explicit about economical independent reviews and c
 
 Issue: [#126](https://github.com/NakulManchanda/ai-analytics-poc/issues/126)
 
-PR: pending.
+PR: [#127](https://github.com/NakulManchanda/ai-analytics-poc/pull/127) (draft).
