@@ -79,7 +79,8 @@ def test_services_are_clusterip_only_and_pods_cannot_bind_host_network_ports() -
     worker_services = {
         doc.get("metadata", {}).get("name"): doc
         for doc in services
-        if doc.get("metadata", {}).get("name") in {"inference-worker-a", "inference-worker-b"}
+        if doc.get("metadata", {}).get("name")
+        in {"inference-worker-a", "inference-worker-b"}
     }
     assert set(worker_services) == {"inference-worker-a", "inference-worker-b"}
     for name, service in worker_services.items():
@@ -88,22 +89,22 @@ def test_services_are_clusterip_only_and_pods_cannot_bind_host_network_ports() -
     for path, document in documents:
         for key, value in _walk(document):
             assert key != "hostPort", f"{path.relative_to(ROOT)} must not use hostPort"
-            assert not (key == "hostNetwork" and value is True), (
-                f"{path.relative_to(ROOT)} must not use hostNetwork"
-            )
+            assert not (
+                key == "hostNetwork" and value is True
+            ), f"{path.relative_to(ROOT)} must not use hostNetwork"
         if document.get("kind") == "Service":
-            assert document.get("spec", {}).get("type", "ClusterIP") != "NodePort", (
-                f"{path.relative_to(ROOT)} must not expose a NodePort"
-            )
+            assert (
+                document.get("spec", {}).get("type", "ClusterIP") != "NodePort"
+            ), f"{path.relative_to(ROOT)} must not expose a NodePort"
 
 
 def test_images_and_versions_are_pinned_without_latest() -> None:
     for path, document in _yaml_documents():
         for key, value in _walk(document):
             if key == "image" and isinstance(value, str):
-                assert not value.endswith(":latest"), (
-                    f"{path.relative_to(ROOT)} uses unpinned image tag ':latest': {value}"
-                )
+                assert not value.endswith(
+                    ":latest"
+                ), f"{path.relative_to(ROOT)} uses unpinned image tag ':latest': {value}"
 
 
 def test_hami_worker_slices_spec_is_present() -> None:
@@ -116,10 +117,21 @@ def test_hami_worker_slices_spec_is_present() -> None:
 
 
 def test_issue_120_has_no_gateway_or_future_scope_resources() -> None:
-    forbidden_path_parts = {"gateway", "keda", "mooncake", "lmcache", "open-webui", "ui"}
+    forbidden_path_parts = {
+        "gateway",
+        "keda",
+        "mooncake",
+        "lmcache",
+        "open-webui",
+        "ui",
+    }
     bundle_paths = [path.relative_to(BUNDLE).parts for path in BUNDLE.rglob("*")]
-    offending_paths = [parts for parts in bundle_paths if forbidden_path_parts & set(parts)]
-    assert not offending_paths, f"Future-scope paths are not permitted: {offending_paths}"
+    offending_paths = [
+        parts for parts in bundle_paths if forbidden_path_parts & set(parts)
+    ]
+    assert (
+        not offending_paths
+    ), f"Future-scope paths are not permitted: {offending_paths}"
 
     forbidden_resource_words = ("gateway", "keda", "mooncake", "lmcache", "openwebui")
     offenders: list[str] = []

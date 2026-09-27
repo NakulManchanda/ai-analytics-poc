@@ -136,7 +136,9 @@ def test_bundle_is_a_self_contained_issue_120_lab() -> None:
     missing = [path for path in required_paths if not (BUNDLE / path).exists()]
     assert not missing, f"Missing #120 bundle paths: {missing}"
 
-    missing_scripts = [name for name in LIFECYCLE_SCRIPTS if not (SCRIPTS / name).is_file()]
+    missing_scripts = [
+        name for name in LIFECYCLE_SCRIPTS if not (SCRIPTS / name).is_file()
+    ]
     assert not missing_scripts, f"Missing lifecycle scripts: {missing_scripts}"
 
 
@@ -166,23 +168,26 @@ def test_root_makefile_exposes_safe_inference_entry_points() -> None:
             text=True,
             capture_output=True,
         )
-        assert result.returncode == 0, (
-            f"{target} must be locally inspectable with make --dry-run:\n{result.stderr}"
-        )
+        assert (
+            result.returncode == 0
+        ), f"{target} must be locally inspectable with make --dry-run:\n{result.stderr}"
 
     assert "inference-connect: inference-sync" in makefile
-    assert "inference-tunnel" in makefile
     expected_up = (
-        "inference-up: inference-sync inference-config inference-bootstrap inference-deploy"
+        "inference-up: inference-sync inference-config "
+        "inference-bootstrap inference-deploy"
     )
     assert expected_up in makefile
     expected_run = (
-        "inference-run: inference-smoke inference-warmup inference-capacity inference-pull-evidence"
+        "inference-run: inference-smoke inference-warmup "
+        "inference-capacity inference-pull-evidence"
     )
     assert expected_run in makefile
 
 
-def test_lifecycle_scripts_offer_help_and_fail_closed_without_connection_config() -> None:
+def test_lifecycle_scripts_offer_help_and_fail_closed_without_connection_config() -> (
+    None
+):
     missing_env = os.environ.copy()
     for name in REQUIRED_ENV_NAMES:
         missing_env.pop(name, None)
@@ -198,7 +203,9 @@ def test_lifecycle_scripts_offer_help_and_fail_closed_without_connection_config(
             capture_output=True,
             env=missing_env,
         )
-        assert help_result.returncode == 0, f"{script_name} --help failed: {help_result.stderr}"
+        assert (
+            help_result.returncode == 0
+        ), f"{script_name} --help failed: {help_result.stderr}"
 
     sync_result = subprocess.run(
         ["bash", str(SCRIPTS / "sync.sh")],
@@ -213,7 +220,9 @@ def test_lifecycle_scripts_offer_help_and_fail_closed_without_connection_config(
 
 def test_sync_plan_is_allowlisted_and_does_not_print_connection_secret_values() -> None:
     sync_script = SCRIPTS / "sync.sh"
-    assert sync_script.is_file(), "sync must be an explicit, reviewable bundle operation"
+    assert (
+        sync_script.is_file()
+    ), "sync must be an explicit, reviewable bundle operation"
     plan_env = os.environ.copy()
     plan_env.update(
         {
@@ -300,7 +309,8 @@ def test_services_are_clusterip_only_and_pods_cannot_bind_host_network_ports() -
     worker_services = {
         doc.get("metadata", {}).get("name"): doc
         for doc in services
-        if doc.get("metadata", {}).get("name") in {"inference-worker-a", "inference-worker-b"}
+        if doc.get("metadata", {}).get("name")
+        in {"inference-worker-a", "inference-worker-b"}
     }
     assert set(worker_services) == {"inference-worker-a", "inference-worker-b"}
     for name, service in worker_services.items():
@@ -309,21 +319,32 @@ def test_services_are_clusterip_only_and_pods_cannot_bind_host_network_ports() -
     for path, document in documents:
         for key, value in _walk(document):
             assert key != "hostPort", f"{path.relative_to(ROOT)} must not use hostPort"
-            assert not (key == "hostNetwork" and value is True), (
-                f"{path.relative_to(ROOT)} must not use hostNetwork"
-            )
+            assert not (
+                key == "hostNetwork" and value is True
+            ), f"{path.relative_to(ROOT)} must not use hostNetwork"
         if document.get("kind") == "Service":
-            assert document.get("spec", {}).get("type", "ClusterIP") != "NodePort", (
-                f"{path.relative_to(ROOT)} must not expose a NodePort"
-            )
+            assert (
+                document.get("spec", {}).get("type", "ClusterIP") != "NodePort"
+            ), f"{path.relative_to(ROOT)} must not expose a NodePort"
 
 
 def test_issue_120_has_no_gateway_or_future_scope_resources() -> None:
     assert BUNDLE.is_dir(), "#120 must add the transferable infra/inference bundle"
-    forbidden_path_parts = {"gateway", "keda", "mooncake", "lmcache", "open-webui", "ui"}
+    forbidden_path_parts = {
+        "gateway",
+        "keda",
+        "mooncake",
+        "lmcache",
+        "open-webui",
+        "ui",
+    }
     bundle_paths = [path.relative_to(BUNDLE).parts for path in BUNDLE.rglob("*")]
-    offending_paths = [parts for parts in bundle_paths if forbidden_path_parts & set(parts)]
-    assert not offending_paths, f"Future-scope paths are not permitted: {offending_paths}"
+    offending_paths = [
+        parts for parts in bundle_paths if forbidden_path_parts & set(parts)
+    ]
+    assert (
+        not offending_paths
+    ), f"Future-scope paths are not permitted: {offending_paths}"
 
     forbidden_resource_words = ("gateway", "keda", "mooncake", "lmcache", "openwebui")
     offenders: list[str] = []

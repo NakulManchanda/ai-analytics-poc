@@ -9,13 +9,19 @@ from __future__ import annotations
 
 import importlib
 import json
+import sys
 import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from typing import Any
 
 import pytest
+
+ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 
 def _probe_module():
@@ -49,7 +55,9 @@ def _fake_worker(
             if self.path == "/health":
                 self._send_json(200, {"status": "ok"})
             elif self.path == "/v1/models":
-                self._send_json(200, {"data": [{"id": model} for model in served_models]})
+                self._send_json(
+                    200, {"data": [{"id": model} for model in served_models]}
+                )
             elif self.path == "/metrics":
                 metrics = b"vllm:num_requests_running 1\n"
                 self.send_response(200)
@@ -114,7 +122,11 @@ def test_probe_worker_smokes_all_required_vllm_endpoints_and_preserves_evidence(
         ("POST", "/v1/completions"),
         ("GET", "/metrics"),
     ]
-    assert calls[2][2] == {"model": "demo-model", "prompt": "Say ready.", "max_tokens": 7}
+    assert calls[2][2] == {
+        "model": "demo-model",
+        "prompt": "Say ready.",
+        "max_tokens": 7,
+    }
     assert result.model == "demo-model"
     assert result.completion_text == "worker-ready"
     assert result.completion_usage == {
@@ -129,7 +141,9 @@ def test_probe_worker_refuses_a_worker_that_does_not_advertise_the_requested_mod
     probe = _probe_module()
 
     with _fake_worker(served_models=("another-model",)) as (base_url, calls):
-        with pytest.raises(RuntimeError, match=r"demo-model.*not served|not served.*demo-model"):
+        with pytest.raises(
+            RuntimeError, match=r"demo-model.*not served|not served.*demo-model"
+        ):
             probe.probe_worker(
                 base_url=base_url,
                 model="demo-model",
@@ -143,14 +157,18 @@ def test_probe_worker_refuses_a_worker_that_does_not_advertise_the_requested_mod
     ]
 
 
-@pytest.mark.parametrize("failed_path", ("/health", "/v1/models", "/v1/completions", "/metrics"))
+@pytest.mark.parametrize(
+    "failed_path", ("/health", "/v1/models", "/v1/completions", "/metrics")
+)
 def test_probe_worker_names_the_failed_endpoint_and_status_for_non_2xx_responses(
     failed_path: str,
 ):
     probe = _probe_module()
 
     with _fake_worker(failure=(failed_path, 503)) as (base_url, _calls):
-        with pytest.raises(RuntimeError, match=rf"{failed_path}.*503|503.*{failed_path}"):
+        with pytest.raises(
+            RuntimeError, match=rf"{failed_path}.*503|503.*{failed_path}"
+        ):
             probe.probe_worker(
                 base_url=base_url,
                 model="demo-model",

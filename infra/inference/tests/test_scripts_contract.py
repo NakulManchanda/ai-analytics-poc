@@ -91,23 +91,27 @@ def test_root_makefile_exposes_safe_inference_entry_points() -> None:
             text=True,
             capture_output=True,
         )
-        assert result.returncode == 0, (
-            f"{target} must be locally inspectable with make --dry-run:\n{result.stderr}"
-        )
+        assert (
+            result.returncode == 0
+        ), f"{target} must be locally inspectable with make --dry-run:\n{result.stderr}"
 
     assert "inference-connect: inference-sync" in makefile
     assert "inference-tunnel" in makefile
     expected_up = (
-        "inference-up: inference-sync inference-config inference-bootstrap inference-deploy"
+        "inference-up: inference-sync inference-config "
+        "inference-bootstrap inference-deploy"
     )
     assert expected_up in makefile
     expected_run = (
-        "inference-run: inference-smoke inference-warmup inference-capacity inference-pull-evidence"
+        "inference-run: inference-smoke inference-warmup "
+        "inference-capacity inference-pull-evidence"
     )
     assert expected_run in makefile
 
 
-def test_lifecycle_scripts_offer_help_and_fail_closed_without_connection_config() -> None:
+def test_lifecycle_scripts_offer_help_and_fail_closed_without_connection_config() -> (
+    None
+):
     missing_env = os.environ.copy()
     for name in REQUIRED_ENV_NAMES:
         missing_env.pop(name, None)
@@ -123,7 +127,9 @@ def test_lifecycle_scripts_offer_help_and_fail_closed_without_connection_config(
             capture_output=True,
             env=missing_env,
         )
-        assert help_result.returncode == 0, f"{script_name} --help failed: {help_result.stderr}"
+        assert (
+            help_result.returncode == 0
+        ), f"{script_name} --help failed: {help_result.stderr}"
 
     sync_result = subprocess.run(
         ["bash", str(SCRIPTS / "sync.sh")],
@@ -138,7 +144,9 @@ def test_lifecycle_scripts_offer_help_and_fail_closed_without_connection_config(
 
 def test_sync_plan_is_allowlisted_and_does_not_print_connection_secret_values() -> None:
     sync_script = SCRIPTS / "sync.sh"
-    assert sync_script.is_file(), "sync must be an explicit, reviewable bundle operation"
+    assert (
+        sync_script.is_file()
+    ), "sync must be an explicit, reviewable bundle operation"
     plan_env = os.environ.copy()
     plan_env.update(
         {
