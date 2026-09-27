@@ -88,6 +88,7 @@ Prometheus/Grafana/DCGM observability, warmup/capacity measurement tools, and sa
 - Branch: `feat/120-inference-cluster`
 - Worktree: `.worktrees/120-inference-cluster`
 - Issue: #120
+- Pull request: [PR #131](https://github.com/NakulManchanda/ai-analytics-poc/pull/131), Open draft
 - State: Implementation and local verification complete; ready for draft PR and operator acceptance on Lambda when credentials are provided.
 
 ## Lessons
