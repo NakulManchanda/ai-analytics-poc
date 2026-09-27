@@ -24,6 +24,12 @@ ssh_cmd "
     --version '8.5.1' \
     -f '$(remote_dir)/observability/grafana/values.yaml' \
     --wait --timeout 10m
+  if [[ -d '$(remote_dir)/observability/grafana/dashboards' ]]; then
+    kubectl -n '$INFERENCE_NAMESPACE' create configmap inference-dashboards \
+      --from-file='$(remote_dir)/observability/grafana/dashboards' \
+      --dry-run=client -o yaml | kubectl apply -f -
+    kubectl -n '$INFERENCE_NAMESPACE' label configmap inference-dashboards grafana_dashboard=1 --overwrite
+  fi
   kubectl -n '$INFERENCE_NAMESPACE' rollout status deploy/inference-worker-a --timeout=15m
   kubectl -n '$INFERENCE_NAMESPACE' rollout status deploy/inference-worker-b --timeout=15m
 "
