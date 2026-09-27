@@ -10,7 +10,7 @@ OBSERVABILITY_PROMETHEUS_PORT ?= 19090
 OBSERVABILITY_BURST_COUNT ?= 10
 OBSERVABILITY_LOG_TAIL ?= 200
 
-.PHONY: help check-bootstrap dev mcp-dev mcp-smoke dataset-test dataset-smoke smoke test mcp-test infra-test web-test compose-smoke observability-up observability-down observability-smoke observability-dev-up observability-dev-info observability-dev-ask observability-dev-burst observability-dev-metrics observability-dev-logs observability-dev-down local-aws-compose local-aws-refresh local-bedrock-compose bedrock-smoke m5-bedrock-smoke m6-bedrock-smoke dashboard tf-dispatch tf-resume tf-park
+.PHONY: help check-bootstrap dev mcp-dev mcp-smoke dataset-test dataset-smoke smoke test mcp-test infra-test web-test compose-smoke observability-up observability-down observability-smoke observability-dev-up observability-dev-info observability-dev-ask observability-dev-burst observability-dev-metrics observability-dev-logs observability-dev-down local-aws-compose local-aws-refresh local-bedrock-compose bedrock-smoke m5-bedrock-smoke m6-bedrock-smoke dashboard tf-dispatch tf-resume tf-park inference-validate inference-sync inference-config inference-secret inference-bootstrap inference-deploy inference-up inference-tunnel inference-connect inference-smoke inference-warmup inference-capacity inference-run inference-pull-evidence inference-teardown
 
 
 help: ## Show available commands
@@ -27,6 +27,48 @@ check-bootstrap: ## Verify the tracked canonical requirements source
 		git ls-files --error-unmatch -- ai_analytics_poc_requirements_aws_v5.md >/dev/null \
 			|| { echo "Canonical requirements source must be tracked"; exit 1; }; \
 	fi
+
+inference-validate: ## Validate the isolated Lambda inference bundle locally
+	bash infra/inference/scripts/validate.sh
+
+inference-sync: ## Sync only the isolated inference bundle to Lambda
+	bash infra/inference/scripts/sync.sh
+
+inference-config: ## Apply only safe, allowlisted inference configuration remotely
+	bash infra/inference/scripts/config.sh
+
+inference-secret: ## Stream the optional Hugging Face token into the cluster secret
+	bash infra/inference/scripts/secret.sh
+
+inference-bootstrap: ## Bootstrap pinned k3s, Helm, and HAMi on Lambda
+	bash infra/inference/scripts/bootstrap.sh
+
+inference-deploy: ## Deploy workers and #120 observability configuration
+	bash infra/inference/scripts/deploy.sh
+
+inference-up: inference-sync inference-config inference-bootstrap inference-deploy ## Provision the #120 cluster lab
+
+inference-tunnel: ## Open loopback-only SSH forwards to workers and Grafana
+	bash infra/inference/scripts/tunnel.sh
+
+inference-connect: inference-sync inference-tunnel ## Sync then open the safe SSH tunnel
+
+inference-smoke: ## Smoke each worker through the SSH tunnel
+	bash infra/inference/scripts/smoke.sh
+
+inference-warmup: ## Run the issue #120 warmup runner
+	python3 infra/inference/experiments/warmup.py
+
+inference-capacity: ## Run the issue #120 capacity runner
+	python3 infra/inference/experiments/capacity.py
+
+inference-run: inference-smoke inference-warmup inference-capacity inference-pull-evidence ## Run #120 measurements and pull evidence
+
+inference-pull-evidence: ## Pull run evidence into metrics/inference
+	bash infra/inference/scripts/pull-evidence.sh
+
+inference-teardown: ## Remove only issue-owned inference resources
+	bash infra/inference/scripts/teardown.sh
 
 dev: ## Run the AI application locally on port 8080
 	uv run --project services/app uvicorn app.main:app --host 0.0.0.0 --port $(APP_HOST_PORT) --reload

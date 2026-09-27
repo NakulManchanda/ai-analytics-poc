@@ -1,0 +1,5 @@
+service:
+  type: ClusterIP
+arguments:
+  - -f
+  - /etc/dcgm-exporter/default-counters.csv
