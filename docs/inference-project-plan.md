@@ -14,13 +14,14 @@ NYC Taxi Analytics Agent on a GPU-Aware Inference Cluster**
 - Supporting experiments: prefix reuse on/off or cold/warm; no-admission vs protected admission; recompute vs KV hop; cold worker vs declared-warm worker.
 - Proof standard: every design choice must have a file, scrape, notebook cell, or Grafana panel that shows what happened.
 
-# 2. Target architecture
+# 2. Target architecture and execution boundary
 
 ```text
-Taxi Analytics App
+Local Taxi Analytics App
       |
+      | OpenAI-compatible request through SSH tunnel initially
       v
-Gateway / Control Plane :8080
+Lambda Gateway / Control Plane :8080
   guard.inspect()
   should_shed(req, snap)
   place.pick(policy)
@@ -47,57 +48,38 @@ Notebook: controlled experiments + pasted scrapes + derived goodput/latency char
 
 **Hardware starting point:** two vLLM replicas on one physical GPU using a 50/50 HAMi-style slice if feasible. Measure KV pressure. If one replica becomes the dominant KV consumer or contention distorts the experiment, move Worker B to a second GPU and document why.
 
+The existing FastAPI app, MCP/DuckDB service, web application, product observability, and durable state stay local. The gateway/control plane, vLLM workers, cluster observability, and controlled traffic runner execute on Lambda. Only `infra/inference/` is transferred. Remote run artifacts are pulled back into local `metrics/inference/`. See [ADR 0010](decisions/0010-transferable-lambda-inference-lab.md) for the ownership, provider, SSH, and capacity-measurement decisions.
+
 # 3. Repository structure
 
 ```text
-app/
-  api.py
-  agent.py
-  prompts.py
-  tools/duckdb.py
-  workloads.py
+# Local product and canonical evidence; never copied wholesale to Lambda
+services/app/                    # FastAPI agent and LLMClient providers
+services/mcp/                    # FastMCP and DuckDB
+web/
+observability/                   # existing product observability
+experiments/                     # local analysis/notebooks, when added
+metrics/inference/               # pulled scrapes, manifests, derived data
 
-control/
-  guard.py
-  admission.py
-  placement.py
-  queue.py
-  prefix_registry.py
-  hop.py
-  overflow.py
-  snapshot.py
-
-cluster/
-  vllm-worker-a.yaml
-  vllm-worker-b.yaml
-  hami/
-  lmcache/
-  mooncake/
-  prometheus/
-  grafana/
-
-observability/
-  metrics.py
-  dashboards.py
-  alerts.py
-
-experiments/
-  generate_traffic.py
-  run_prefix_reuse.py
-  run_routing_ab.py
-  run_admission_ab.py
-  run_hop_ab.py
-  run_warmup.py
-
-metrics/
-  scrapes/
-  run-manifests/
-
-plots/
-notebook/final_project.ipynb
-DESIGN.md
-README.md
+# The only remote-transferable subtree
+infra/inference/
+  README.md
+  gateway/                       # thin serve path, then control-plane policies
+  k8s/
+    hami/
+    workers/
+    services/
+    lmcache/                     # only when real integration is attempted
+    mooncake/                    # only when real integration is attempted
+  observability/
+    prometheus/
+    grafana/
+    dcgm/
+  experiments/                  # runners execute near the workers
+  scripts/                       # sync, tunnel, deploy, smoke, pull, teardown
 ```
+
+This is the target layout, not permission to pre-build future issues. #120 creates the remote cluster/capacity slice; #121 adds the serve path and provider adapter; minimal #115 adds the two workload shapes; #122 adds real gateway policies; #123 owns the final controlled experiments.
 
 # 4. Stack choices and why
 
@@ -231,7 +213,7 @@ Show a time-series panel with:
 | 503 local capacity unavailable | Overflow eligible | Yes | Capacity exhaustion can be redirected. |
 | 529 overload | Overflow eligible | Yes | Explicit overload signal. |
 
-**Overflow destination must be named in DESIGN.md:** specific provider + specific model + why it is acceptable for this workload. The overflow gate sits after the local result/decision and must preserve the original reason code in metrics.
+**Overflow destination must be named in the active decision record and run manifest:** specific provider + specific model + why it is acceptable for this workload. The overflow gate sits after the local result/decision and must preserve the original reason code in metrics.
 
 # 12. Observability plan
 
@@ -352,6 +334,6 @@ Show a time-series panel with:
 - [ ] Build traffic mixes: shared-prefix, unique, multi-step, interactive+batch, noisy tenant, stale snapshot.
 - [ ] Run E0-E5; keep same trace/model/flags for each A/B comparison.
 - [ ] Add Dynamo comparison only after the custom baseline is measurable.
-- [ ] Paste scrapes/results into DESIGN.md and notebook; export charts to plots/.
+- [ ] Pull each run manifest and scrape set into `metrics/inference/<run-id>/`; keep derived notebooks and charts under local `experiments/` when added.
 - [ ] Add four production alerts and absent-metric alerts.
 - [ ] Document actual result even if hypothesis is wrong.

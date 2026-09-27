@@ -85,6 +85,13 @@ Milestones 0–16 and prior public-UAT work remain historical baseline work. Any
 previous live-deployment statements are not v1.1 deployment evidence; use the
 current local and public UAT guides for this release's verification boundaries.
 
+## Isolated inference-course track
+
+Issue #120 and draft PR #130 define the boundary for an isolated Lambda/k3s inference lab; no
+cluster has been launched yet. The active sequence is #120, #121, the minimal #115 workload
+slice, #122, then #123. This track does not change the AWS-only product deployment boundary;
+see `docs/inference-project-plan.md` and ADR 0010.
+
 
 ## Demo cost control
 
