@@ -2,7 +2,6 @@ persistence:
   enabled: false
 service:
   type: ClusterIP
-adminPassword: change-me-locally
 sidecar:
   dashboards:
     enabled: true

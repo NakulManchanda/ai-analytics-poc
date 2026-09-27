@@ -23,7 +23,9 @@ class WorkerProbeResult:
 
 
 def _endpoint(base_url: str, path: str) -> str:
-    if not isinstance(base_url, str) or not base_url.startswith(("http://", "https://")):
+    if not isinstance(base_url, str) or not base_url.startswith(
+        ("http://", "https://")
+    ):
         raise ValueError("base_url must be an HTTP(S) URL")
     return f"{base_url.rstrip('/')}{path}"
 
@@ -34,21 +36,33 @@ def _request(endpoint: str, *, body: Mapping[str, Any] | None = None) -> bytes:
     if body is not None:
         data = json.dumps(body).encode("utf-8")
         headers["content-type"] = "application/json"
-    request = Request(endpoint, data=data, headers=headers, method="POST" if data else "GET")
+    request = Request(
+        endpoint, data=data, headers=headers, method="POST" if data else "GET"
+    )
     try:
-        with urlopen(request, timeout=_REQUEST_TIMEOUT_SECONDS) as response:  # noqa: S310 - explicit probe URL
+        with urlopen(
+            request, timeout=_REQUEST_TIMEOUT_SECONDS
+        ) as response:  # noqa: S310 - explicit probe URL
             return response.read()
     except HTTPError as exc:
-        raise RuntimeError(f"worker probe request to {endpoint} returned HTTP {exc.code}") from exc
+        raise RuntimeError(
+            f"worker probe request to {endpoint} returned HTTP {exc.code}"
+        ) from exc
     except URLError as exc:
-        raise RuntimeError(f"worker probe request to {endpoint} failed: {exc.reason}") from exc
+        raise RuntimeError(
+            f"worker probe request to {endpoint} failed: {exc.reason}"
+        ) from exc
 
 
-def _json_response(endpoint: str, *, body: Mapping[str, Any] | None = None) -> Mapping[str, Any]:
+def _json_response(
+    endpoint: str, *, body: Mapping[str, Any] | None = None
+) -> Mapping[str, Any]:
     try:
         value = json.loads(_request(endpoint, body=body))
     except json.JSONDecodeError as exc:
-        raise RuntimeError(f"worker probe request to {endpoint} returned invalid JSON") from exc
+        raise RuntimeError(
+            f"worker probe request to {endpoint} returned invalid JSON"
+        ) from exc
     if not isinstance(value, Mapping):
         raise RuntimeError(
             f"worker probe request to {endpoint} returned a non-object JSON response"
@@ -56,13 +70,19 @@ def _json_response(endpoint: str, *, body: Mapping[str, Any] | None = None) -> M
     return value
 
 
-def probe_worker(*, base_url: str, model: str, prompt: str, max_tokens: int) -> WorkerProbeResult:
+def probe_worker(
+    *, base_url: str, model: str, prompt: str, max_tokens: int
+) -> WorkerProbeResult:
     """Call the worker's direct health, model, completion, and metrics endpoints."""
     if not isinstance(model, str) or not model:
         raise ValueError("model must be a non-empty string")
     if not isinstance(prompt, str):
         raise ValueError("prompt must be a string")
-    if isinstance(max_tokens, bool) or not isinstance(max_tokens, int) or max_tokens <= 0:
+    if (
+        isinstance(max_tokens, bool)
+        or not isinstance(max_tokens, int)
+        or max_tokens <= 0
+    ):
         raise ValueError("max_tokens must be a positive integer")
 
     _json_response(_endpoint(base_url, "/health"))
@@ -86,7 +106,9 @@ def probe_worker(*, base_url: str, model: str, prompt: str, max_tokens: int) -> 
         or not isinstance(choices[0].get("text"), str)
         or not isinstance(usage, Mapping)
     ):
-        raise RuntimeError("worker completion response is missing choices text or usage")
+        raise RuntimeError(
+            "worker completion response is missing choices text or usage"
+        )
 
     raw_metrics = _request(_endpoint(base_url, "/metrics")).decode("utf-8")
     return WorkerProbeResult(
@@ -95,3 +117,32 @@ def probe_worker(*, base_url: str, model: str, prompt: str, max_tokens: int) -> 
         completion_usage=dict(usage),
         raw_metrics=raw_metrics,
     )
+
+
+def main(argv: list[str] | None = None) -> int:
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Probe a vLLM worker")
+    parser.add_argument("--base-url", required=True, help="Worker base URL")
+    parser.add_argument("--model", required=True, help="Expected model name")
+    parser.add_argument("--prompt", default="Ready probe.", help="Prompt string")
+    parser.add_argument("--max-tokens", type=int, default=5, help="Max tokens")
+    args = parser.parse_args(argv)
+
+    result = probe_worker(
+        base_url=args.base_url,
+        model=args.model,
+        prompt=args.prompt,
+        max_tokens=args.max_tokens,
+    )
+    print(f"Probe succeeded for {args.base_url}:")
+    print(f"  Model: {result.model}")
+    print(f"  Completion: {result.completion_text.strip()!r}")
+    print(f"  Usage: {result.completion_usage}")
+    return 0
+
+
+if __name__ == "__main__":
+    import sys
+
+    sys.exit(main())

@@ -12,23 +12,21 @@ WORKER_A_PORT="${1:-18001}"
 WORKER_B_PORT="${2:-18002}"
 MODEL="${INFERENCE_MODEL:-Qwen/Qwen3-0.6B}"
 
-echo "== Smoking Worker A on port $WORKER_A_PORT =="
-curl --fail --silent "http://127.0.0.1:$WORKER_A_PORT/health" >/dev/null
-curl --fail --silent "http://127.0.0.1:$WORKER_A_PORT/v1/models" >/dev/null
-curl --fail --silent "http://127.0.0.1:$WORKER_A_PORT/metrics" >/dev/null
-curl --fail --silent -X POST "http://127.0.0.1:$WORKER_A_PORT/v1/completions" \
-  -H "Content-Type: application/json" \
-  -d "{\"model\": \"$MODEL\", \"prompt\": \"Hello\", \"max_tokens\": 5}" >/dev/null
-echo "Worker A passed health, model list, metrics, and completion."
+echo "== Probing Worker A on port $WORKER_A_PORT =="
+python3 "$INFERENCE_ROOT/experiments/probe.py" \
+  --base-url "http://127.0.0.1:$WORKER_A_PORT" \
+  --model "$MODEL" \
+  --prompt "Ready worker A." \
+  --max-tokens 5
+echo "Worker A verified successfully."
 
-echo "== Smoking Worker B on port $WORKER_B_PORT =="
-curl --fail --silent "http://127.0.0.1:$WORKER_B_PORT/health" >/dev/null
-curl --fail --silent "http://127.0.0.1:$WORKER_B_PORT/v1/models" >/dev/null
-curl --fail --silent "http://127.0.0.1:$WORKER_B_PORT/metrics" >/dev/null
-curl --fail --silent -X POST "http://127.0.0.1:$WORKER_B_PORT/v1/completions" \
-  -H "Content-Type: application/json" \
-  -d "{\"model\": \"$MODEL\", \"prompt\": \"Hello\", \"max_tokens\": 5}" >/dev/null
-echo "Worker B passed health, model list, metrics, and completion."
+echo "== Probing Worker B on port $WORKER_B_PORT =="
+python3 "$INFERENCE_ROOT/experiments/probe.py" \
+  --base-url "http://127.0.0.1:$WORKER_B_PORT" \
+  --model "$MODEL" \
+  --prompt "Ready worker B." \
+  --max-tokens 5
+echo "Worker B verified successfully."
 
 if [[ -n "${LAMBDA_SSH_HOST:-}" ]]; then
   echo "== Running negative check against direct reachability on $LAMBDA_SSH_HOST =="

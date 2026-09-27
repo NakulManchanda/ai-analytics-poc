@@ -4,4 +4,40 @@ source "$(dirname "$0")/lib.sh"
 if [[ "${1:-}" == "--help" ]]; then echo "Usage: bootstrap.sh"; exit 0; fi
 load_local_env; require_connection
 : "${INFERENCE_K3S_VERSION:=v1.37.0+k3s1}"; : "${INFERENCE_HELM_VERSION:=v3.22.0}"; : "${INFERENCE_HAMI_VERSION:=2.9.0}"
-ssh_cmd "set -eu; command -v nvidia-smi; curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION='$INFERENCE_K3S_VERSION' INSTALL_K3S_EXEC='--write-kubeconfig-mode 644 --default-runtime nvidia' sh -; if ! command -v helm >/dev/null; then curl -fsSL https://get.helm.sh/helm-$INFERENCE_HELM_VERSION-linux-amd64.tar.gz | tar -xz --strip-components=1 -C /usr/local/bin linux-amd64/helm; fi; helm repo add hami-charts https://project-hami.github.io/HAMi/ >/dev/null; helm repo update >/dev/null; helm upgrade --install hami hami-charts/hami --version '$INFERENCE_HAMI_VERSION' --namespace kube-system --set devicePlugin.deviceSplitCount=2 --wait --timeout 10m"
+
+ssh_cmd "
+  set -eu
+  command -v nvidia-smi >/dev/null 2>&1 || { echo 'nvidia-smi not found on host' >&2; exit 1; }
+  
+  if [[ ! -x /usr/local/bin/k3s && ! -x /usr/bin/k3s ]]; then
+    echo 'Installing k3s $INFERENCE_K3S_VERSION...'
+    curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION='$INFERENCE_K3S_VERSION' INSTALL_K3S_EXEC='--write-kubeconfig-mode 644 --default-runtime nvidia' sh -
+  fi
+
+  export KUBECONFIG='/etc/rancher/k3s/k3s.yaml'
+  kubectl wait --for=condition=Ready node --all --timeout=60s
+
+  if ! command -v helm >/dev/null 2>&1; then
+    echo 'Installing helm...'
+    curl -sfL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+  fi
+
+  NODE=\$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}')
+  kubectl label node \"\$NODE\" gpu=on --overwrite
+
+  helm repo add hami-charts https://project-hami.github.io/HAMi/ >/dev/null 2>&1 || true
+  helm repo update hami-charts >/dev/null 2>&1 || true
+
+  K8S_VERSION=\$(kubectl version -o json | python3 -c 'import json,sys; print(json.load(sys.stdin)[\"serverVersion\"][\"gitVersion\"].split(\"+\")[0])')
+  echo \"Deploying HAMi $INFERENCE_HAMI_VERSION aligned with Kubernetes \$K8S_VERSION...\"
+
+  helm upgrade --install hami hami-charts/hami \
+    --version '$INFERENCE_HAMI_VERSION' \
+    --namespace kube-system \
+    --set scheduler.kubeScheduler.image.registry=registry.k8s.io \
+    --set scheduler.kubeScheduler.image.repository=kube-scheduler \
+    --set \"scheduler.kubeScheduler.image.tag=\${K8S_VERSION}\" \
+    --set \"scheduler.kubeScheduler.imageTag=\${K8S_VERSION}\" \
+    --set devicePlugin.deviceSplitCount=2 \
+    --wait --timeout 10m
+"

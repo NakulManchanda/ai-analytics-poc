@@ -54,7 +54,9 @@ def write_run_manifest(output_dir: str | Path, manifest: Mapping[str, Any]) -> P
         raise ValueError("output_dir must be an existing directory")
 
     destination = destination_dir / "run-manifest.json"
-    contents = json.dumps(manifest, indent=2, sort_keys=True, ensure_ascii=True, allow_nan=False)
+    contents = json.dumps(
+        manifest, indent=2, sort_keys=True, ensure_ascii=True, allow_nan=False
+    )
     contents += "\n"
 
     temporary_path: Path | None = None

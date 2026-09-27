@@ -52,13 +52,18 @@ def aggregate_warmup_ttft(samples: Sequence[float]) -> WarmupTTFTSummary:
     )
 
 
-def _measure_request_ttft(endpoint: str, model: str, prompt: str) -> float:
-    payload = json.dumps({
-        "model": model,
-        "prompt": prompt,
-        "max_tokens": 10,
-        "stream": False,
-    }).encode("utf-8")
+def _measure_request_ttft(
+    endpoint: str, model: str, prompt: str
+) -> tuple[float, float]:
+    """Measure true streaming TTFT (time to first SSE chunk) and total duration."""
+    payload = json.dumps(
+        {
+            "model": model,
+            "prompt": prompt,
+            "max_tokens": 10,
+            "stream": True,
+        }
+    ).encode("utf-8")
     req = Request(
         f"{endpoint.rstrip('/')}/v1/completions",
         data=payload,
@@ -66,10 +71,20 @@ def _measure_request_ttft(endpoint: str, model: str, prompt: str) -> float:
         method="POST",
     )
     start = time.perf_counter()
+    ttft_ms: float | None = None
     with urlopen(req, timeout=30) as resp:  # noqa: S310
-        resp.read()
+        for line in resp:
+            line_str = line.decode("utf-8").strip()
+            if (
+                line_str.startswith("data: ")
+                and line_str != "data: [DONE]"
+                and ttft_ms is None
+            ):
+                ttft_ms = (time.perf_counter() - start) * 1000.0
     duration_ms = (time.perf_counter() - start) * 1000.0
-    return duration_ms
+    if ttft_ms is None:
+        ttft_ms = duration_ms
+    return ttft_ms, duration_ms
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -112,9 +127,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         try:
             for i in range(args.rounds + 1):
                 label = "cold" if i == 0 else f"warm #{i}"
-                ttft = _measure_request_ttft(url, args.model, args.prompt)
+                ttft, duration = _measure_request_ttft(url, args.model, args.prompt)
                 samples.append(ttft)
-                print(f"  [{label}] TTFT: {ttft:.2f} ms")
+                print(f"  [{label}] TTFT: {ttft:.2f} ms (total: {duration:.2f} ms)")
             summary = aggregate_warmup_ttft(samples)
             results[url] = asdict(summary)
             print(
@@ -123,7 +138,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                 f"warm_p95={summary.warm_ttft_p95_ms:.1f}ms"
             )
         except (HTTPError, URLError, OSError, RuntimeError) as exc:
-            print(f"  Worker {url} unreachable or error ({exc}); skipping live measurement.")
+            print(
+                f"  Worker {url} unreachable or error ({exc}); skipping live measurement."
+            )
 
     if args.output_dir:
         args.output_dir.mkdir(parents=True, exist_ok=True)

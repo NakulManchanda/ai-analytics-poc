@@ -88,7 +88,9 @@ def classify_capacity_result(
             details.append(f"missing: {', '.join(sorted(missing))}")
         if invalid:
             details.append("empty or invalid paths")
-        raise ValueError(f"capacity classification requires evidence ({'; '.join(details)})")
+        raise ValueError(
+            f"capacity classification requires evidence ({'; '.join(details)})"
+        )
 
     return CapacityResult(
         first_limiter=first_limiter,
@@ -104,7 +106,9 @@ def _fetch_worker_metrics(endpoint: str) -> str:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Run KV capacity and ceilings analysis")
+    parser = argparse.ArgumentParser(
+        description="Run KV capacity and ceilings analysis"
+    )
     parser.add_argument(
         "--worker-urls",
         default="http://127.0.0.1:18001,http://127.0.0.1:18002",
@@ -119,8 +123,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--kv-heads",
         type=int,
-        default=4,
-        help="Number of KV heads (default 4 for Qwen3-0.6B)",
+        default=8,
+        help="Number of KV heads (default 8 for Qwen3-0.6B)",
     )
     parser.add_argument(
         "--head-dim",
@@ -159,7 +163,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         head_dim=args.head_dim,
         bytes_per_kv_element=args.kv_bytes,
     )
-    context_lengths = [int(x.strip()) for x in args.context_lengths.split(",") if x.strip()]
+    context_lengths = [
+        int(x.strip()) for x in args.context_lengths.split(",") if x.strip()
+    ]
     budget_bytes = args.kv_budget_mb * 1024 * 1024
     ceilings = paper_sequence_ceilings(
         kv_budget_bytes=budget_bytes,
@@ -191,7 +197,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "num_total_gpu_blocks": total_blocks,
                 "num_free_gpu_blocks": free_blocks,
             }
-            print(f"  Worker {url}: total_gpu_blocks={total_blocks}, free_gpu_blocks={free_blocks}")
+            print(
+                f"  Worker {url}: total_gpu_blocks={total_blocks}, free_gpu_blocks={free_blocks}"
+            )
         except (HTTPError, URLError, OSError, RuntimeError) as exc:
             metrics_summary[url] = {"reachable": False, "error": str(exc)}
             print(f"  Worker {url}: offline/unreachable ({exc})")

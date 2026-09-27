@@ -7,7 +7,20 @@ if [[ "${1:-}" == "--print-keys" ]]; then printf '%s\n' "${safe_keys[@]}"; exit 
 load_local_env
 require_connection
 : "${INFERENCE_NAMESPACE:=inference-lab}"
-{
-  printf '%s\n' 'apiVersion: v1' 'kind: ConfigMap' 'metadata:' "  name: inference-config" "  namespace: $INFERENCE_NAMESPACE" 'data:'
-  for key in "${safe_keys[@]}"; do printf '  %s: "%s"\n' "$key" "${!key:-}"; done
-} | ssh_cmd "kubectl apply -f -"
+
+python3 -c '
+import json, os, sys
+keys = sys.argv[1:]
+namespace = os.environ.get("INFERENCE_NAMESPACE", "inference-lab")
+data = {k: os.environ.get(k, "") for k in keys}
+manifest = {
+    "apiVersion": "v1",
+    "kind": "ConfigMap",
+    "metadata": {
+        "name": "inference-config",
+        "namespace": namespace,
+    },
+    "data": data,
+}
+print(json.dumps(manifest))
+' "${safe_keys[@]}" | ssh_cmd "kubectl create namespace '$INFERENCE_NAMESPACE' --dry-run=client -o yaml | kubectl apply -f - && kubectl apply -f -"

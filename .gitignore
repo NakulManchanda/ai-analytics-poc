@@ -51,6 +51,7 @@ myfiles/
 data/
 artifacts/
 metrics/*.jsonl
+metrics/inference/
 *.duckdb
 *.duckdb.wal
 

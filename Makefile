@@ -46,7 +46,7 @@ inference-bootstrap: ## Bootstrap pinned k3s, Helm, and HAMi on Lambda
 inference-deploy: ## Deploy workers and #120 observability configuration
 	bash infra/inference/scripts/deploy.sh
 
-inference-up: inference-sync inference-config inference-bootstrap inference-deploy ## Provision the #120 cluster lab
+inference-up: inference-sync inference-bootstrap inference-config inference-deploy ## Provision the #120 cluster lab
 
 inference-tunnel: ## Open loopback-only SSH forwards to workers and Grafana
 	bash infra/inference/scripts/tunnel.sh

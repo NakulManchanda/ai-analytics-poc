@@ -236,7 +236,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "kube_pod_container_status_restarts_total{pod=~\"inference-worker-.*|dcgm-exporter.*
+          "expr": "kube_pod_container_status_restarts_total{pod=~\"inference-worker-.*|dcgm-exporter.*\"}",
           "refId": "A",
           "legendFormat": "{{pod}}"
         }
@@ -279,7 +279,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum by (pod) (rate(container_cpu_usage_seconds_total{container!=\"\",pod=~\"inference-worker-.*|dcgm-exporter.*
+          "expr": "sum by (pod) (rate(container_cpu_usage_seconds_total{container!=\"\",pod=~\"inference-worker-.*|dcgm-exporter.*\"}[1m]))",
           "refId": "A",
           "legendFormat": "{{pod}}"
         }
@@ -322,7 +322,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "container_memory_working_set_bytes{container!=\"\",pod=~\"inference-worker-.*|dcgm-exporter.*
+          "expr": "container_memory_working_set_bytes{container!=\"\",pod=~\"inference-worker-.*|dcgm-exporter.*\"}",
           "refId": "A",
           "legendFormat": "{{pod}}"
         }
