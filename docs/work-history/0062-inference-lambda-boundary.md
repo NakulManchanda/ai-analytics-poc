@@ -41,7 +41,7 @@ Refine issue #120 and the inference plan with a durable decision for what stays 
 
 - Branch: `docs/120-inference-cluster-design`
 - Worktree: `.worktrees/120-inference-cluster-design`
-- Pull request: pending at documentation verification
+- Pull request: draft PR #130
 - Merge: pending
 
 ## Lessons
