@@ -16,6 +16,8 @@ Refine issue #120 and the inference plan with a durable decision for what stays 
 - Transfer only a self-contained `infra/inference/` bundle to Lambda.
 - Run the cluster gateway, vLLM workers, cluster observability, and controlled traffic generator on Lambda.
 - Use SSH forwarding for the initial lab; do not expose raw worker endpoints publicly.
+- Require `ClusterIP` workers, loopback-only forwarding, an SSH-only firewall, and a negative
+  external-reachability smoke check.
 - Preserve `LLMClient`, add one OpenAI-compatible adapter in #121, and defer LiteLLM Proxy.
 - Plan Superlinked/SIE as the single eligible overload destination while retaining Bedrock as an explicitly selectable provider.
 - Start capacity work from the analytical KV formula, then reconcile it with inside-pod memory, vLLM startup capacity, live metrics, and measured taxi p50/p95 contexts.
@@ -26,7 +28,10 @@ Refine issue #120 and the inference plan with a durable decision for what stays 
 - `docs/decisions/0010-transferable-lambda-inference-lab.md`
 - `docs/decisions/README.md`
 - `docs/inference-project-plan.md`
+- `docs/progress.md`
 - `docs/work-history/0062-inference-lambda-boundary.md`
+- `docs/work-history/README.md`
+- `AGENTS.md`
 
 ## Verification
 
@@ -35,6 +40,8 @@ Refine issue #120 and the inference plan with a durable decision for what stays 
 - Required relative document targets were checked with `test -f` — passed.
 - Changed committed docs were scanned for placeholders, developer-specific absolute paths, private-key markers, AWS access-key patterns, and secret-key assignments — no matches.
 - `gh issue view 120` assertions confirmed the refined body contains the isolated-lab boundary, KV formula, `infra/inference/` transfer contract, and `NakulManchanda` assignment.
+- GitHub Actions did not create an exact-head run because `.github/workflows/ci.yml` excludes
+  documentation-only changes; the required `Python services` context therefore remains absent.
 - No runtime tests were run because this change alters documentation and issue metadata only.
 
 ## PR and merge state
@@ -42,7 +49,8 @@ Refine issue #120 and the inference plan with a durable decision for what stays 
 - Branch: `docs/120-inference-cluster-design`
 - Worktree: `.worktrees/120-inference-cluster-design`
 - Pull request: draft PR #130
-- Merge: pending
+- Merge: pending; branch protection remains blocked until the coordinator chooses an explicit
+  docs-only CI or merge-policy path.
 
 ## Lessons
 

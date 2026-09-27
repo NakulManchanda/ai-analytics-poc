@@ -40,7 +40,7 @@ infra/inference/
     grafana/
     dcgm/
   experiments/                runners execute near the workers
-  scripts/                     sync, tunnel, deploy, smoke, pull, teardown
+  scripts/                     sync, tunnel, bootstrap, deploy, smoke, pull, teardown
 ```
 
 All source remains local and versioned. “Remote” means copied to and executed on Lambda. Synchronization excludes `.env`, credentials, caches, local metrics, product services, web assets, and durable state.
@@ -87,7 +87,10 @@ On one physical GPU, evaluate two observable 50/50 HAMi-style slices when feasib
 
 ### SSH boundary
 
-Use configurable local SSH forwards for the initial lab; do not expose raw vLLM ports publicly.
+Use configurable local SSH forwards for the initial lab. Worker services must remain `ClusterIP`;
+do not use `NodePort`, `hostPort`, or `hostNetwork`. Bind remote forwards or `kubectl port-forward`
+to loopback, restrict the Lambda firewall to SSH, and include a negative smoke check proving that
+worker and dashboard ports are unreachable without the tunnel.
 
 ```text
 local 18001 -> Lambda 127.0.0.1:8001   worker A smoke

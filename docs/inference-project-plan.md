@@ -213,7 +213,7 @@ Show a time-series panel with:
 | 503 local capacity unavailable | Overflow eligible | Yes | Capacity exhaustion can be redirected. |
 | 529 overload | Overflow eligible | Yes | Explicit overload signal. |
 
-**Overflow destination must be named in DESIGN.md:** specific provider + specific model + why it is acceptable for this workload. The overflow gate sits after the local result/decision and must preserve the original reason code in metrics.
+**Overflow destination must be named in the active decision record and run manifest:** specific provider + specific model + why it is acceptable for this workload. The overflow gate sits after the local result/decision and must preserve the original reason code in metrics.
 
 # 12. Observability plan
 
@@ -334,6 +334,6 @@ Show a time-series panel with:
 - [ ] Build traffic mixes: shared-prefix, unique, multi-step, interactive+batch, noisy tenant, stale snapshot.
 - [ ] Run E0-E5; keep same trace/model/flags for each A/B comparison.
 - [ ] Add Dynamo comparison only after the custom baseline is measurable.
-- [ ] Paste scrapes/results into DESIGN.md and notebook; export charts to plots/.
+- [ ] Pull each run manifest and scrape set into `metrics/inference/<run-id>/`; keep derived notebooks and charts under local `experiments/` when added.
 - [ ] Add four production alerts and absent-metric alerts.
 - [ ] Document actual result even if hypothesis is wrong.

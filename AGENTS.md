@@ -18,6 +18,8 @@ and `.github/copilot-instructions.md`) must stay thin and refer here rather than
 - Prefer the smallest externally meaningful vertical slice. Preserve the requirements document
   and its AWS-only, deliberately small POC boundaries; do not add Kubernetes, Kafka/Kinesis,
   RDS, EFS, OpenSearch, a vector database, a warehouse, or a second hosting platform.
+  [ADR 0010](docs/decisions/0010-transferable-lambda-inference-lab.md) permits only the isolated
+  Lambda/k3s inference-course lab; it does not change the AWS-only product deployment boundary.
 - Keep FastAPI orchestration and FastMCP as separate services once MCP exists. The application
   server owns every LLM call, loop budget, and durable state; the MCP server never calls an LLM.
   Redis is transient coordination only, never durable conversation state.
