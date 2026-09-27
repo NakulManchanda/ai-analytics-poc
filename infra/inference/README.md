@@ -174,9 +174,19 @@ experiments are completed, and terminate or stop the Lambda instance from the La
 ---
 
 ## Boundary to Future Issues
-- **Issue #120 (This Lab)**: Self-contained Lambda/k3s cluster, two symmetric workers, HAMi slicing,
-  cold/warm TTFT warmup runner, KV capacity calculations, and evidence retrieval.
-- **Issue #121**: Thin `/serve` path, FastAPI LLMClient adapter, and OpenAI-compatible client integration.
+
+### Downstream Provider Boundary
+```text
+Existing LLMClient abstraction
+  |-- Bedrock adapter
+  `-- OpenAI-compatible adapter
+        |-- Lambda gateway/vLLM
+        `-- Superlinked overflow
+```
+
+- **Issue #120 (This Lab)**: Self-contained Lambda/k3s cluster, two symmetric workers, HAMi slicing, cold/warm TTFT warmup runner, KV capacity calculations, and evidence retrieval. **Does not implement application adapters, gateway routing, or Superlinked overflow.**
+- **Issue #121**: Thin `/serve` path, FastAPI `LLMClient` adapter, and OpenAI-compatible client integration.
 - **Issue #115**: Deterministic and ReAct taxi analytics workload traces.
-- **Issue #122**: Control-plane gateway: guard, admission, placement, queueing, and overflow policies.
+- **Issue #122**: Control-plane gateway: guard, admission, placement, queueing, and capacity-only (`503`/`529`) Superlinked overflow policies. Superlinked keys and fallback configuration are introduced here.
 - **Issue #123**: Controlled A/B experiments (least-loaded vs prefix-aware routing) and final thesis proof.
+
