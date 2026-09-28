@@ -112,19 +112,37 @@ flags, which is why the gateway returned 400 for `tools` in the first place.
 
 ```
 uv run --project services/app pytest services/app/tests -q
-# 167 passed (159 pre-existing + 6 llm-client + 2 orchestration-loop tests)
+# 171 passed
 
 uv run --project services/app pytest infra/inference/tests tests/inference -q
-# 50 passed (includes the new worker-flags contract test)
+# 59 passed
 
-uv run --project services/app ruff check services/app/app/llm.py \
-  services/app/app/orchestration/loop.py services/app/app/config.py \
-  services/app/app/metrics.py services/app/tests/test_serve_llm_client.py \
-  services/app/tests/test_orchestration_loop.py
-# All checks passed!
+uv run --project services/app black --check services/app tests
+# All done! (CI's actual formatting gate; ruff format was checked too but is not the CI gate)
 ```
 
-## Limitations / unverified
+## Independent review fixes (this round)
+
+An independent read-only review found a CI-blocking formatting failure and two majors, all
+fixed on this head:
+- **CI blocker:** `black` (the real CI formatting gate, not `ruff format`) had not been run on
+  `llm.py`; applied and confirmed clean.
+- **Streaming JSON-branch truncation:** `_stream_completion`'s JSON-response branch never called
+  `splitter.flush()`, so up to `len(tag)-1` buffered characters were silently dropped when a
+  response arrived as one JSON object instead of SSE. Fixed by flushing/emitting after the
+  if/else. In that branch, `ttft_ms` is now left `None` with
+  `ttft_unavailable_reason="non_streaming_json_response"` instead of mislabeling full latency as
+  TTFT. New test: `test_stream_answer_json_response_does_not_truncate_trailing_text`.
+- **Lost failure telemetry / mislabeled model on failure:** a `no_tool_call`/`invalid_tool_call`
+  `LLMProviderError` previously discarded `finish_reason`, token usage, latency and the served
+  model id, and the failed `Run` fell back to `DEFAULT_MODEL_ID` (the Bedrock default) even in
+  serve mode. `LLMProviderError` now optionally carries this telemetry; a `model_id` property was
+  added to the `LLMClient` Protocol and all three client classes; the loop now resolves the model
+  id from the client instead of an `isinstance(ServeLLMClient)`-only check, and records a failed
+  `LLMCall` with real telemetry (`error_code` added to `LLMCall`). New tests assert a failed
+  serve-mode run keeps the served model id and captures `finish_reason`.
+
+## Limitations / unverified (tracked follow-ups)
 
 - Live vLLM behaviour (whether the Hermes tool-call parser and `enable_thinking` actually
   behave as vLLM's docs/OpenAPI schema imply for Qwen3-0.6B on a real GPU worker) is
@@ -134,5 +152,19 @@ uv run --project services/app ruff check services/app/app/llm.py \
   `completion_tokens_details.reasoning_tokens`) against what vLLM/Hermes actually returns.
 - `first_visible_answer_ms`/`ttft_ms` are only populated on the streaming path; the
   non-streaming path leaves them `None` since the whole response arrives as one unit.
-- This PR does not touch the ReAct loop, classifier, or prompt renderer (slice C), MCP,
+- `ThinkingSplitter.feed` holds back `len(tag)-1` characters even when the buffered tail cannot
+  be the start of a tag, which delays `first_visible_answer_ms` by at least one chunk; trailing
+  whitespace after `</think>` also counts as "visible". Not fixed in this PR.
+- The stream payload does not set `stream_options.include_usage=true`, so streamed serve
+  answers can still fall back to a word-count-estimated `output_tokens` instead of an exact
+  count. Not fixed in this PR.
+- `cost_source`/self-hosted detection still relies on `isinstance(llm, ServeLLMClient)` rather
+  than an explicit Protocol attribute; a wrapper or mock around the serve client would silently
+  revert to Bedrock cost labeling. Not fixed in this PR.
+- Nested or unbalanced `<think>` tags are not handled (low risk — Qwen does not emit them).
+- A failed call's token usage is recorded in `llm_calls` metadata but not added to the run-level
+  `tracker` totals, so a failed run's `input_tokens`/`output_tokens` understate what was actually
+  sent/received. Harmless for serve-mode cost (always 0.0); not fixed in this PR.
+- This PR does not touch the ReAct loop, classifier, or prompt renderer (slice C — since dropped
+  per #115's re-scope in favor of a prefix contract + scripted conversations), MCP,
   `dataset_spike`, the gateway, or `web/`, per the slice-B boundary.
