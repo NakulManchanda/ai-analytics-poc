@@ -627,7 +627,9 @@ class ServeLLMClient:
         headers = self._build_headers(
             partition=partition, agent_step=2, conversation_id=conversation_id
         )
-        user_content = f"{partition.conversation_shared}\n\n{partition.unique_suffix}".strip()
+        user_content = (
+            f"{partition.conversation_shared}\n\n{partition.unique_suffix}".strip()
+        )
         payload: dict[str, Any] = {
             "model": self._model_id,
             "messages": [
@@ -715,7 +717,9 @@ class ServeLLMClient:
         headers = self._build_headers(
             partition=partition, agent_step=2, conversation_id=conversation_id
         )
-        user_content = f"{partition.conversation_shared}\n\n{partition.unique_suffix}".strip()
+        user_content = (
+            f"{partition.conversation_shared}\n\n{partition.unique_suffix}".strip()
+        )
         payload: dict[str, Any] = {
             "model": self._model_id,
             "messages": [
@@ -739,7 +743,9 @@ class ServeLLMClient:
         headers = self._build_headers(
             partition=partition, agent_step=2, conversation_id=conversation_id
         )
-        user_content = f"{partition.conversation_shared}\n\n{partition.unique_suffix}".strip()
+        user_content = (
+            f"{partition.conversation_shared}\n\n{partition.unique_suffix}".strip()
+        )
         payload: dict[str, Any] = {
             "model": self._model_id,
             "messages": [
@@ -913,9 +919,8 @@ class ServeLLMClient:
                     try:
                         data = json.loads(content_bytes)
                         choice = data.get("choices", [{}])[0]
-                        text = (
-                            choice.get("message", {}).get("content")
-                            or choice.get("text", "")
+                        text = choice.get("message", {}).get("content") or choice.get(
+                            "text", ""
                         )
                         if text:
                             accumulated.append(text)
@@ -947,9 +952,12 @@ class ServeLLMClient:
                                     delta_callback(content)
                             if "usage" in chunk and chunk["usage"]:
                                 usage_dict = chunk["usage"]
-                                input_tokens = usage_dict.get("prompt_tokens", input_tokens)
-                                output_tokens = usage_dict.get("completion_tokens", output_tokens)
-
+                                input_tokens = usage_dict.get(
+                                    "prompt_tokens", input_tokens
+                                )
+                                output_tokens = usage_dict.get(
+                                    "completion_tokens", output_tokens
+                                )
 
         except (httpx.ConnectError, httpx.TimeoutException) as exc:
             raise LLMProviderError(
@@ -1010,4 +1018,3 @@ def create_llm_client(
         runtime_client=runtime_client,
         budget=budget,
     )
-

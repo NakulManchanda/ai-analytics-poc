@@ -369,7 +369,6 @@ def test_gateway_bundle_contract() -> None:
     assert svc_docs.get("spec", {}).get("type") == "ClusterIP"
 
 
-
 def test_model_credential_secret_name_matches_worker_manifests() -> None:
     secret_script = (BUNDLE / "scripts" / "secret.sh").read_text(encoding="utf-8")
     match = re.search(r"create secret generic ([a-zA-Z0-9_\-]+)", secret_script)

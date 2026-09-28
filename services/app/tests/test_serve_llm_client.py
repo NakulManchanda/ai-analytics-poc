@@ -72,7 +72,11 @@ def test_serve_llm_client_ask_headers_and_payload() -> None:
                         "finish_reason": "stop",
                     }
                 ],
-                "usage": {"prompt_tokens": 50, "completion_tokens": 10, "total_tokens": 60},
+                "usage": {
+                    "prompt_tokens": 50,
+                    "completion_tokens": 10,
+                    "total_tokens": 60,
+                },
             },
         )
 
@@ -84,7 +88,9 @@ def test_serve_llm_client_ask_headers_and_payload() -> None:
         http_client=http_client,
     )
 
-    result = serve_client.ask("Tell me about Manhattan taxis.", conversation_id="conv-123")
+    result = serve_client.ask(
+        "Tell me about Manhattan taxis.", conversation_id="conv-123"
+    )
     assert result.text == "Manhattan has high taxi volume."
     assert result.input_tokens == 50
     assert result.output_tokens == 10
@@ -154,7 +160,7 @@ def test_serve_llm_client_stream_answer() -> None:
         chunks = [
             'data: {"choices": [{"delta": {"content": "There were "}}]}\n\n',
             'data: {"choices": [{"delta": {"content": "1,000 trips."}}]}\n\n',
-            'data: [DONE]\n\n',
+            "data: [DONE]\n\n",
         ]
         return httpx.Response(
             200,

@@ -35,7 +35,6 @@ class PromptRegion(StrEnum):
     UNIQUE_SUFFIX = "unique_suffix"
 
 
-
 @dataclass(frozen=True)
 class PrefixPartition:
     """Explicit token breakdown of a prompt across reuse boundaries."""
@@ -49,7 +48,11 @@ class PrefixPartition:
 
     @property
     def full_prompt(self) -> str:
-        parts = [p for p in (self.global_shared, self.conversation_shared, self.unique_suffix) if p]
+        parts = [
+            p
+            for p in (self.global_shared, self.conversation_shared, self.unique_suffix)
+            if p
+        ]
         return "\n\n".join(parts)
 
 
@@ -84,7 +87,7 @@ def create_prefix_partition(
 
     shared_combined = f"{clean_global}\n{clean_conv}".strip()
     prefix_id = compute_prefix_id(clean_global, clean_conv)
-    
+
     shared_tokens = estimate_tokens(shared_combined)
     total_tokens = estimate_tokens(f"{shared_combined}\n{clean_suffix}".strip())
 
@@ -111,7 +114,7 @@ def build_ask_partition(
             role = msg.get("role", "user")
             content = msg.get("content", "")
             conv_parts.append(f"{role.upper()}: {content}")
-    
+
     return create_prefix_partition(
         global_shared=system_prompt,
         conversation_shared="\n".join(conv_parts),
@@ -167,7 +170,7 @@ def build_query_answer_partition(
     if prior_turns:
         for turn in prior_turns:
             conv_parts.append(f"PAST_TURN: {json.dumps(turn, sort_keys=True)}")
-    
+
     # Tool observation belongs to conversation context
     result_json = json.dumps(query_result, separators=(",", ":"), sort_keys=True)
     conv_parts.append(f"Observation (query_result): {result_json}")

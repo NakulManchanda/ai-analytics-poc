@@ -92,4 +92,3 @@ class Settings:
 
         if not self.inference_model_id:
             raise LLMConfigurationError("INFERENCE_MODEL_ID must be specified")
-

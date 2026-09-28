@@ -86,8 +86,13 @@ def test_build_ask_partition_structure() -> None:
 
 
 def test_build_dataset_profile_partition_structure() -> None:
-    profile = {"row_count": 2500000, "columns": ["tpep_pickup_datetime", "trip_distance"]}
-    part = build_dataset_profile_partition("How many trips are in the dataset?", profile)
+    profile = {
+        "row_count": 2500000,
+        "columns": ["tpep_pickup_datetime", "trip_distance"],
+    }
+    part = build_dataset_profile_partition(
+        "How many trips are in the dataset?", profile
+    )
     assert DEFAULT_SYSTEM_PROMPT in part.global_shared
     assert "2500000" in part.conversation_shared
     assert "How many trips are in the dataset?" in part.unique_suffix

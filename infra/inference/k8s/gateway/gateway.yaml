@@ -51,3 +51,11 @@ spec:
             limits:
               cpu: "1000m"
               memory: "1024Mi"
+          volumeMounts:
+            - name: gateway-code
+              mountPath: /app
+      volumes:
+        - name: gateway-code
+          configMap:
+            name: inference-gateway-code
+

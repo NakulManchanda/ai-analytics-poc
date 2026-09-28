@@ -2,7 +2,6 @@
 and confirming end-to-end taxi agent execution on the serve path.
 """
 
-
 import json
 from typing import Any
 
@@ -85,7 +84,10 @@ def test_taxi_agent_end_to_end_through_serve_path() -> None:
                                         "function": {
                                             "name": "query_taxi_data",
                                             "arguments": json.dumps(
-                                                {"analysis": "top_pickup_zones", "limit": 5}
+                                                {
+                                                    "analysis": "top_pickup_zones",
+                                                    "limit": 5,
+                                                }
                                             ),
                                         },
                                     }
