@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+import time
 from collections.abc import Mapping
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -127,6 +129,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--model", required=True, help="Expected model name")
     parser.add_argument("--prompt", default="Ready probe.", help="Prompt string")
     parser.add_argument("--max-tokens", type=int, default=5, help="Max tokens")
+    parser.add_argument(
+        "--output-file",
+        default=None,
+        help="Optional JSONL file to append probe response record",
+    )
     args = parser.parse_args(argv)
 
     result = probe_worker(
@@ -139,6 +146,19 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  Model: {result.model}")
     print(f"  Completion: {result.completion_text.strip()!r}")
     print(f"  Usage: {result.completion_usage}")
+
+    if args.output_file:
+        out_path = Path(args.output_file)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        record = {
+            "timestamp": time.time(),
+            "endpoint": args.base_url,
+            "model": result.model,
+            "completion": result.completion_text,
+            "usage": result.completion_usage,
+        }
+        with open(out_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(record) + "\n")
     return 0
 
 

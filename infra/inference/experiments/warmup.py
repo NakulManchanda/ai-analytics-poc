@@ -124,16 +124,63 @@ def main(argv: Sequence[str] | None = None) -> int:
     for url in urls:
         print(f"== Measuring warmup TTFT for worker at {url} ==")
         samples: list[float] = []
+        raw_records = []
         try:
             for i in range(args.rounds + 1):
-                label = "cold" if i == 0 else f"warm #{i}"
+                label = "unwarmed" if i == 0 else f"warm #{i}"
                 ttft, duration = _measure_request_ttft(url, args.model, args.prompt)
                 samples.append(ttft)
+                raw_records.append({
+                    "timestamp": time.time(),
+                    "endpoint": url,
+                    "model": args.model,
+                    "label": label,
+                    "ttft_ms": ttft,
+                    "duration_ms": duration,
+                })
                 print(f"  [{label}] TTFT: {ttft:.2f} ms (total: {duration:.2f} ms)")
             summary = aggregate_warmup_ttft(samples)
-            results[url] = asdict(summary)
+            summary_dict = asdict(summary)
+            summary_dict["unwarmed_request_ttft_ms"] = summary.cold_ttft_ms
+
+            # Attempt to extract true cold-start model load time from pods evidence if available
+            pods_file = args.output_dir / "kubectl" / "pods.json" if args.output_dir else None
+            if pods_file and pods_file.is_file():
+                try:
+                    pods_doc = json.loads(pods_file.read_text(encoding="utf-8"))
+                    for pod in pods_doc.get("items", []):
+                        app_label = pod.get("metadata", {}).get("labels", {}).get("app", "")
+                        match_a = "worker-a" in url and app_label == "inference-worker-a"
+                        match_b = "worker-b" in url and app_label == "inference-worker-b"
+                        if match_a or match_b:
+                            statuses = pod.get("status", {}).get("containerStatuses", [])
+                            conditions = pod.get("status", {}).get("conditions", [])
+                            started_at = (
+                                statuses[0].get("state", {}).get("running", {}).get("startedAt")
+                                if statuses
+                                else None
+                            )
+                            ready_at = None
+                            for cond in conditions:
+                                if cond.get("type") == "Ready" and cond.get("status") == "True":
+                                    ready_at = cond.get("lastTransitionTime")
+                            if started_at and ready_at:
+                                from datetime import datetime
+
+                                t_start = datetime.fromisoformat(started_at.replace("Z", "+00:00"))
+                                t_ready = datetime.fromisoformat(ready_at.replace("Z", "+00:00"))
+                                load_sec = (t_ready - t_start).total_seconds()
+                                summary_dict["model_load_duration_seconds"] = load_sec
+                                print(
+                                    f"  Container start to Ready condition (model load): "
+                                    f"{load_sec:.1f}s"
+                                )
+                except Exception:
+                    pass
+
+            results[url] = summary_dict
             print(
-                f"  Summary for {url}: cold={summary.cold_ttft_ms:.1f}ms, "
+                f"  Summary for {url}: unwarmed_ttft={summary.cold_ttft_ms:.1f}ms, "
                 f"warm_p50={summary.warm_ttft_p50_ms:.1f}ms, "
                 f"warm_p95={summary.warm_ttft_p95_ms:.1f}ms"
             )
@@ -141,6 +188,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(
                 f"  Worker {url} unreachable or error ({exc}); skipping live measurement."
             )
+
+        if args.output_dir and raw_records:
+            raw_dir = args.output_dir / "raw"
+            raw_dir.mkdir(parents=True, exist_ok=True)
+            with open(raw_dir / "warmup_responses.jsonl", "a", encoding="utf-8") as f:
+                for rec in raw_records:
+                    f.write(json.dumps(rec) + "\n")
+            with open(raw_dir / "responses.jsonl", "a", encoding="utf-8") as f:
+                for rec in raw_records:
+                    f.write(json.dumps(rec) + "\n")
 
     if args.output_dir:
         args.output_dir.mkdir(parents=True, exist_ok=True)

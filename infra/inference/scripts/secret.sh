@@ -6,4 +6,4 @@ load_local_env
 require_connection
 : "${INFERENCE_NAMESPACE:=inference-lab}"
 [[ -n "${HF_TOKEN:-}" ]] || { echo "HF_TOKEN is optional; nothing to stream"; exit 0; }
-printf '%s' "$HF_TOKEN" | ssh_cmd "kubectl -n '$INFERENCE_NAMESPACE' create secret generic inference-model-token --from-file=token=/dev/stdin --dry-run=client -o yaml | kubectl apply -f -"
+printf '%s' "$HF_TOKEN" | ssh_cmd "kubectl -n '$INFERENCE_NAMESPACE' create secret generic hf-token --from-file=token=/dev/stdin --dry-run=client -o yaml | kubectl apply -f -"

@@ -60,23 +60,27 @@ inference-tunnel: ## Open loopback-only SSH forwards to workers and Grafana
 
 inference-connect: inference-sync inference-tunnel ## Sync then open the safe SSH tunnel
 
+INFERENCE_RUN_ID := $(or $(RUN_ID),$(shell date +run-%Y%m%d_%H%M%S))
+INFERENCE_RUN_DIR := metrics/inference/$(INFERENCE_RUN_ID)
+
 inference-smoke: ## Smoke each worker through the SSH tunnel
-	@mkdir -p $(INFERENCE_LOG_DIR)
-	@set -o pipefail; bash infra/inference/scripts/smoke.sh 2>&1 | tee $(INFERENCE_LOG_DIR)/smoke.log
+	@mkdir -p $(INFERENCE_LOG_DIR) $(INFERENCE_RUN_DIR)/raw
+	@set -o pipefail; bash infra/inference/scripts/smoke.sh 18001 18002 $(INFERENCE_RUN_DIR) 2>&1 | tee $(INFERENCE_LOG_DIR)/smoke.log
 
 inference-warmup: ## Run the issue #120 warmup runner
-	@mkdir -p $(INFERENCE_LOG_DIR)
-	@set -o pipefail; python3 infra/inference/experiments/warmup.py 2>&1 | tee $(INFERENCE_LOG_DIR)/warmup.log
+	@mkdir -p $(INFERENCE_LOG_DIR) $(INFERENCE_RUN_DIR)/raw
+	@set -o pipefail; python3 infra/inference/experiments/warmup.py --output-dir $(INFERENCE_RUN_DIR) 2>&1 | tee $(INFERENCE_LOG_DIR)/warmup.log
 
 inference-capacity: ## Run the issue #120 capacity runner
-	@mkdir -p $(INFERENCE_LOG_DIR)
-	@set -o pipefail; python3 infra/inference/experiments/capacity.py 2>&1 | tee $(INFERENCE_LOG_DIR)/capacity.log
+	@mkdir -p $(INFERENCE_LOG_DIR) $(INFERENCE_RUN_DIR)/raw
+	@set -o pipefail; python3 infra/inference/experiments/capacity.py --output-dir $(INFERENCE_RUN_DIR) 2>&1 | tee $(INFERENCE_LOG_DIR)/capacity.log
 
 inference-run: inference-smoke inference-warmup inference-capacity inference-pull-evidence ## Run #120 measurements and pull evidence
+	@python3 infra/inference/experiments/evidence.py --run-id $(INFERENCE_RUN_ID) --output-dir $(INFERENCE_RUN_DIR)
 
 inference-pull-evidence: ## Pull run evidence into metrics/inference
 	@mkdir -p $(INFERENCE_LOG_DIR)
-	@set -o pipefail; bash infra/inference/scripts/pull-evidence.sh 2>&1 | tee $(INFERENCE_LOG_DIR)/pull-evidence.log
+	@set -o pipefail; bash infra/inference/scripts/pull-evidence.sh $(INFERENCE_RUN_ID) 2>&1 | tee $(INFERENCE_LOG_DIR)/pull-evidence.log
 
 inference-teardown: ## Remove only issue-owned inference resources
 	@mkdir -p $(INFERENCE_LOG_DIR)

@@ -8,7 +8,7 @@ load_local_env; require_connection
 ssh_cmd "
   set -eu
   command -v nvidia-smi >/dev/null 2>&1 || { echo 'nvidia-smi not found on host' >&2; exit 1; }
-  
+
   if [[ ! -x /usr/local/bin/k3s && ! -x /usr/bin/k3s ]]; then
     echo 'Installing k3s $INFERENCE_K3S_VERSION...'
     curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION='$INFERENCE_K3S_VERSION' INSTALL_K3S_EXEC='--write-kubeconfig-mode 644 --default-runtime nvidia' sh -
@@ -18,10 +18,16 @@ ssh_cmd "
   mkdir -p ~/.kube && cp -f /etc/rancher/k3s/k3s.yaml ~/.kube/config 2>/dev/null && chmod 600 ~/.kube/config 2>/dev/null || true
   kubectl wait --for=condition=Ready node --all --timeout=60s
 
-  if ! command -v helm >/dev/null 2>&1; then
-    echo 'Installing helm...'
-    curl -sfL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+  CURRENT_HELM=""
+  if command -v helm >/dev/null 2>&1; then
+    CURRENT_HELM=\$(helm version --template '{{.Version}}' 2>/dev/null || helm version --short 2>/dev/null || true)
   fi
+  if [[ "\$CURRENT_HELM" != *"$INFERENCE_HELM_VERSION"* ]]; then
+    echo "Installing helm $INFERENCE_HELM_VERSION..."
+    curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | DESIRED_VERSION='$INFERENCE_HELM_VERSION' bash
+  fi
+  HELM_VER=\$(helm version --template '{{.Version}}' 2>/dev/null || helm version --short 2>/dev/null || echo 'unknown')
+  echo "Helm version verified: \$HELM_VER"
 
   NODE=\$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}')
   kubectl label node \"\$NODE\" gpu=on --overwrite

@@ -189,4 +189,3 @@ Existing LLMClient abstraction
 - **Issue #115**: Deterministic and ReAct taxi analytics workload traces.
 - **Issue #122**: Control-plane gateway: guard, admission, placement, queueing, and capacity-only (`503`/`529`) Superlinked overflow policies. Superlinked keys and fallback configuration are introduced here.
 - **Issue #123**: Controlled A/B experiments (least-loaded vs prefix-aware routing) and final thesis proof.
-

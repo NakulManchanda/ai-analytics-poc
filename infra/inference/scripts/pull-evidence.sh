@@ -19,6 +19,7 @@ mkdir -p "$LOCAL_EVIDENCE_DIR"
 echo "== Capturing remote cluster evidence for run: $RUN_ID =="
 ssh_cmd "
   set -eu
+  export KUBECONFIG=\"\${KUBECONFIG:-/etc/rancher/k3s/k3s.yaml}\"
   EVID_DIR=\"$(remote_dir)/evidence/$RUN_ID\"
   mkdir -p \"\$EVID_DIR/kubectl\" \"\$EVID_DIR/logs\" \"\$EVID_DIR/hardware\" \"\$EVID_DIR/prometheus\"
 
@@ -36,10 +37,32 @@ ssh_cmd "
   if command -v nvidia-smi >/dev/null 2>&1; then
     nvidia-smi --query-gpu=name,memory.total,memory.used,memory.free,utilization.gpu,temperature.gpu --format=csv > \"\$EVID_DIR/hardware/nvidia-smi.csv\" 2>/dev/null || true
   fi
+
+  # 4. Scrapes for vLLM, DCGM, and Prometheus
+  WORKER_A_IP=\$(kubectl get svc -n '$INFERENCE_NAMESPACE' inference-worker-a -o jsonpath='{.spec.clusterIP}' 2>/dev/null || echo '')
+  if [[ -n \"\$WORKER_A_IP\" ]]; then
+    curl -s --connect-timeout 5 \"http://\$WORKER_A_IP:8000/metrics\" > \"\$EVID_DIR/prometheus/vllm-worker-a.prom\" 2>/dev/null || true
+  fi
+  WORKER_B_IP=\$(kubectl get svc -n '$INFERENCE_NAMESPACE' inference-worker-b -o jsonpath='{.spec.clusterIP}' 2>/dev/null || echo '')
+  if [[ -n \"\$WORKER_B_IP\" ]]; then
+    curl -s --connect-timeout 5 \"http://\$WORKER_B_IP:8000/metrics\" > \"\$EVID_DIR/prometheus/vllm-worker-b.prom\" 2>/dev/null || true
+  fi
+  DCGM_IP=\$(kubectl get svc -n '$INFERENCE_NAMESPACE' dcgm-exporter -o jsonpath='{.spec.clusterIP}' 2>/dev/null || echo '')
+  if [[ -n \"\$DCGM_IP\" ]]; then
+    curl -s --connect-timeout 5 \"http://\$DCGM_IP:9400/metrics\" > \"\$EVID_DIR/prometheus/dcgm.prom\" 2>/dev/null || true
+  fi
+  PROM_IP=\$(kubectl get svc -n '$INFERENCE_NAMESPACE' prometheus-server -o jsonpath='{.spec.clusterIP}' 2>/dev/null || echo '')
+  if [[ -n \"\$PROM_IP\" ]]; then
+    curl -s --connect-timeout 5 \"http://\$PROM_IP:80/metrics\" > \"\$EVID_DIR/prometheus/prometheus-server.prom\" 2>/dev/null || true
+  fi
 "
 
 echo "== Pulling evidence to $LOCAL_EVIDENCE_DIR =="
 rsync -az -e "ssh -i $LAMBDA_SSH_KEY_PATH -o StrictHostKeyChecking=accept-new" \
   "$(ssh_target):$(remote_dir)/evidence/$RUN_ID/" "$LOCAL_EVIDENCE_DIR/"
+
+if [[ -f "$INFERENCE_ROOT/experiments/evidence.py" ]]; then
+  python3 "$INFERENCE_ROOT/experiments/evidence.py" --run-id "$RUN_ID" --output-dir "$LOCAL_EVIDENCE_DIR" || true
+fi
 
 echo "Evidence successfully pulled to $LOCAL_EVIDENCE_DIR"

@@ -357,3 +357,30 @@ def test_issue_120_has_no_gateway_or_future_scope_resources() -> None:
         if any(word in identity for word in forbidden_resource_words):
             offenders.append(str(path.relative_to(ROOT)))
     assert not offenders, f"#120 must not define future-scope resources: {offenders}"
+
+
+def test_model_credential_secret_name_matches_worker_manifests() -> None:
+    secret_script = (BUNDLE / "scripts" / "secret.sh").read_text(encoding="utf-8")
+    match = re.search(r"create secret generic ([a-zA-Z0-9_\-]+)", secret_script)
+    assert match is not None, "secret.sh must create a named Kubernetes secret"
+    created_secret_name = match.group(1)
+
+    documents = _yaml_documents()
+    worker_deployments = [
+        doc
+        for _path, doc in documents
+        if doc.get("kind") == "Deployment"
+        and doc.get("metadata", {}).get("name")
+        in {"inference-worker-a", "inference-worker-b"}
+    ]
+    assert len(worker_deployments) == 2, "Expected 2 worker deployments"
+
+    for doc in worker_deployments:
+        secret_refs = [
+            val.get("name")
+            for key, val in _walk(doc)
+            if key == "secretKeyRef" and isinstance(val, dict)
+        ]
+        assert (
+            created_secret_name in secret_refs
+        ), f"Worker manifest {doc['metadata']['name']} must reference secret {created_secret_name}"
