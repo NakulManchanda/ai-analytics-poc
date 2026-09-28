@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: hami-worker-slices
+  namespace: inference-lab
+  labels:
+    app.kubernetes.io/part-of: ai-analytics-inference
+data:
+  description: "HAMi GPU virtualization policy for symmetric 50/50 single-GPU slicing"
+  device_split_count: "2"
+  worker_a_gpumem: "50"
+  worker_a_gpucores: "50"
+  worker_b_gpumem: "50"
+  worker_b_gpucores: "50"
+  allocation_policy: "symmetric-isolated"

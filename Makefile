@@ -10,7 +10,7 @@ OBSERVABILITY_PROMETHEUS_PORT ?= 19090
 OBSERVABILITY_BURST_COUNT ?= 10
 OBSERVABILITY_LOG_TAIL ?= 200
 
-.PHONY: help check-bootstrap dev mcp-dev mcp-smoke dataset-test dataset-smoke smoke test mcp-test infra-test web-test compose-smoke observability-up observability-down observability-smoke observability-dev-up observability-dev-info observability-dev-ask observability-dev-burst observability-dev-metrics observability-dev-logs observability-dev-down local-aws-compose local-aws-refresh local-bedrock-compose bedrock-smoke m5-bedrock-smoke m6-bedrock-smoke dashboard tf-dispatch tf-resume tf-park
+.PHONY: help check-bootstrap dev mcp-dev mcp-smoke dataset-test dataset-smoke smoke test mcp-test infra-test web-test compose-smoke observability-up observability-down observability-smoke observability-dev-up observability-dev-info observability-dev-ask observability-dev-burst observability-dev-metrics observability-dev-logs observability-dev-down local-aws-compose local-aws-refresh local-bedrock-compose bedrock-smoke m5-bedrock-smoke m6-bedrock-smoke dashboard tf-dispatch tf-resume tf-park inference-validate inference-sync inference-config inference-secret inference-bootstrap inference-deploy inference-up inference-tunnel inference-connect inference-smoke inference-warmup inference-capacity inference-restart inference-run inference-pull-evidence inference-teardown
 
 
 help: ## Show available commands
@@ -27,6 +27,68 @@ check-bootstrap: ## Verify the tracked canonical requirements source
 		git ls-files --error-unmatch -- ai_analytics_poc_requirements_aws_v5.md >/dev/null \
 			|| { echo "Canonical requirements source must be tracked"; exit 1; }; \
 	fi
+
+INFERENCE_LOG_DIR ?= .vscode/myfiles/120-inference-cluster/logs
+
+inference-validate: ## Validate the isolated Lambda inference bundle locally
+	@mkdir -p $(INFERENCE_LOG_DIR)
+	@set -o pipefail; bash infra/inference/scripts/validate.sh 2>&1 | tee $(INFERENCE_LOG_DIR)/validate.log
+
+inference-sync: ## Sync only the isolated inference bundle to Lambda
+	@mkdir -p $(INFERENCE_LOG_DIR)
+	@set -o pipefail; bash infra/inference/scripts/sync.sh 2>&1 | tee $(INFERENCE_LOG_DIR)/sync.log
+
+inference-config: ## Apply only safe, allowlisted inference configuration remotely
+	@mkdir -p $(INFERENCE_LOG_DIR)
+	@set -o pipefail; bash infra/inference/scripts/config.sh 2>&1 | tee $(INFERENCE_LOG_DIR)/config.log
+
+inference-secret: ## Stream the optional Hugging Face token into the cluster secret
+	bash infra/inference/scripts/secret.sh
+
+inference-bootstrap: ## Bootstrap pinned k3s, Helm, and HAMi on Lambda
+	@mkdir -p $(INFERENCE_LOG_DIR)
+	@set -o pipefail; bash infra/inference/scripts/bootstrap.sh 2>&1 | tee $(INFERENCE_LOG_DIR)/bootstrap.log
+
+inference-deploy: ## Deploy workers and #120 observability configuration
+	@mkdir -p $(INFERENCE_LOG_DIR)
+	@set -o pipefail; bash infra/inference/scripts/deploy.sh 2>&1 | tee $(INFERENCE_LOG_DIR)/deploy.log
+
+inference-up: inference-sync inference-bootstrap inference-config inference-deploy ## Provision the #120 cluster lab
+
+inference-tunnel: ## Open loopback-only SSH forwards to workers and Grafana
+	bash infra/inference/scripts/tunnel.sh
+
+inference-connect: inference-sync inference-tunnel ## Sync then open the safe SSH tunnel
+
+INFERENCE_RUN_ID := $(or $(RUN_ID),$(shell date +run-%Y%m%d_%H%M%S))
+INFERENCE_RUN_DIR := metrics/inference/$(INFERENCE_RUN_ID)
+
+inference-smoke: ## Smoke each worker through the SSH tunnel
+	@mkdir -p $(INFERENCE_LOG_DIR) $(INFERENCE_RUN_DIR)/raw
+	@set -o pipefail; bash infra/inference/scripts/smoke.sh 18001 18002 $(INFERENCE_RUN_DIR) 2>&1 | tee $(INFERENCE_LOG_DIR)/smoke.log
+
+inference-warmup: ## Run the issue #120 warmup runner
+	@mkdir -p $(INFERENCE_LOG_DIR) $(INFERENCE_RUN_DIR)/raw
+	@set -o pipefail; python3 infra/inference/experiments/warmup.py --output-dir $(INFERENCE_RUN_DIR) 2>&1 | tee $(INFERENCE_LOG_DIR)/warmup.log
+
+inference-capacity: ## Run the issue #120 capacity runner
+	@mkdir -p $(INFERENCE_LOG_DIR) $(INFERENCE_RUN_DIR)/raw
+	@set -o pipefail; python3 infra/inference/experiments/capacity.py --output-dir $(INFERENCE_RUN_DIR) 2>&1 | tee $(INFERENCE_LOG_DIR)/capacity.log
+
+inference-restart: ## Run a deliberate worker restart and recovery test
+	@mkdir -p $(INFERENCE_LOG_DIR) $(INFERENCE_RUN_DIR)
+	@set -o pipefail; bash infra/inference/scripts/restart-test.sh inference-worker-b $(INFERENCE_RUN_DIR) 2>&1 | tee $(INFERENCE_LOG_DIR)/restart-test.log
+
+inference-run: inference-smoke inference-warmup inference-capacity inference-pull-evidence ## Run #120 measurements and pull evidence
+	@python3 infra/inference/experiments/evidence.py --run-id $(INFERENCE_RUN_ID) --output-dir $(INFERENCE_RUN_DIR)
+
+inference-pull-evidence: ## Pull run evidence into metrics/inference
+	@mkdir -p $(INFERENCE_LOG_DIR)
+	@set -o pipefail; bash infra/inference/scripts/pull-evidence.sh $(INFERENCE_RUN_ID) 2>&1 | tee $(INFERENCE_LOG_DIR)/pull-evidence.log
+
+inference-teardown: ## Remove only issue-owned inference resources
+	@mkdir -p $(INFERENCE_LOG_DIR)
+	@set -o pipefail; bash infra/inference/scripts/teardown.sh 2>&1 | tee $(INFERENCE_LOG_DIR)/teardown.log
 
 dev: ## Run the AI application locally on port 8080
 	uv run --project services/app uvicorn app.main:app --host 0.0.0.0 --port $(APP_HOST_PORT) --reload

@@ -10,6 +10,7 @@ managed = false
 [tool.pytest.ini_options]
 addopts = "-ra"
 testpaths = ["services", "tests"]
+pythonpath = ["."]
 
 [tool.ruff]
 line-length = 100

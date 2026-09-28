@@ -65,4 +65,5 @@ Monotonically numbered log of every post-bootstrap task. Each entry records the 
 - [0058 — Three-phase AI-assisted engineering workflow](0058-three-phase-engineering-workflow.md)
 - [0059 — Review effort and Make-first manual testing guidance](0059-review-effort-and-make-guidance.md)
 - [0060 — MCP W3C trace propagation and DuckDB child spans](0060-mcp-otel-trace-propagation.md) — [PR #119](https://github.com/NakulManchanda/ai-analytics-poc/pull/119), Open draft
-- [0062 — Inference Lambda deployment boundary](0062-inference-lambda-boundary.md) — [PR #130](https://github.com/NakulManchanda/ai-analytics-poc/pull/130), Open draft
+- [0062 — Inference Lambda deployment boundary](0062-inference-lambda-boundary.md) — [PR #130](https://github.com/NakulManchanda/ai-analytics-poc/pull/130), Merged
+- [0063 — Isolated Lambda inference cluster bundle](0063-lambda-inference-cluster.md) — [PR #131](https://github.com/NakulManchanda/ai-analytics-poc/pull/131), Open draft
