@@ -32,6 +32,11 @@ and `.github/copilot-instructions.md`) must stay thin and refer here rather than
   (e.g., `feat/<issue>-<slug>`). Attribute the acting agent or model in the PR description rather
   than hardcoding model prefixes into branch names. Store temporary AI scratch state under ignored
   `.vscode/myfiles/<issue>-<slug>/`.
+- Exception: simple documentation changes and small bug fixes touching 1-2 files may be committed
+  directly to `main` and pushed without a branch, worktree, draft PR, or work-history entry. Keep
+  the commit focused, stage only the intended files, run the relevant focused check, and pull with
+  rebase before pushing. Anything larger, anything touching infrastructure or deployment behavior,
+  or any milestone implementation still uses the branch/worktree/PR workflow.
 - Make the smallest coherent commit, push the branch early, and open a **draft** PR as soon as
   the change is reviewable. Keep the PR description current with context, decisions, tests, and
   known limitations; finish updates on that same PR. An intermediate PR may merge without separate
