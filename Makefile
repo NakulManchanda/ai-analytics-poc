@@ -53,6 +53,9 @@ inference-deploy: ## Deploy workers and #120 observability configuration
 	@mkdir -p $(INFERENCE_LOG_DIR)
 	@set -o pipefail; bash infra/inference/scripts/deploy.sh 2>&1 | tee $(INFERENCE_LOG_DIR)/deploy.log
 
+inference-dashboards: ## Regenerate the #115 slice E Grafana dashboards (stdlib-only, deterministic)
+	python3 infra/inference/observability/grafana/dashboards.py
+
 inference-up: inference-sync inference-bootstrap inference-config inference-deploy ## Provision the #120 cluster lab
 
 inference-tunnel: ## Open loopback-only SSH forwards to workers and Grafana
