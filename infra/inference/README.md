@@ -161,6 +161,41 @@ Evidence lands in `metrics/inference/<run-id>/` including `run-manifest.json`, s
 If the pulled run has no capacity request-results file (e.g. a cluster-snapshot-only pull), the
 `run-manifest.json` summarizer step is skipped with a clear message instead of failing.
 
+### 7b. Regenerate Grafana Dashboards (#115 slice E)
+The dashboards under `observability/grafana/dashboards/` are generated, not hand-edited.
+Regenerate and commit them after changing `observability/grafana/dashboards.py`:
+```bash
+make inference-dashboards
+```
+This writes deterministic JSON (sorted keys, stable panel ids/uids) for:
+- **KV & Prefix Cache** (`kv_prefix_cache.json`): KV usage %, prefix-cache hit ratio, hits/queries
+  per second, preemptions per second, and a `cache_config_info` table, all split per worker.
+- **Prefill vs Decode** (`prefill_decode.json`): prefill/decode/queue/inference time p50/p95, TTFT,
+  inter-token latency, prompt vs generation tokens/s, per-step `iteration_tokens_total`
+  distribution, prompt/generation token-count distributions, and prefill time share of
+  prefill+decode time, all split per worker.
+- **Scheduler & Concurrency** (`scheduler_concurrency.json`): running vs waiting, a slot-saturation
+  line (`running / max_num_seqs`, read from the worker manifests), e2e p95, and success rate by
+  `finished_reason`, all split per worker.
+- **GPU & HAMi Slices** (`gpu_slices.json`): DCGM GPU/memory-copy utilization, framebuffer used/free,
+  power (device-wide, since HAMi splits compute/memory quota, not DCGM's own telemetry), plus
+  inference-lab pod restarts, ready replicas, and pod phase (kube-state, split per pod).
+- **Cluster** (`cluster.json`): the same node/pod/container/DCGM overview as before this change.
+
+Every worker-scoped vLLM panel is split by the `instance` label — the only label that
+distinguishes worker A from worker B in these series, because Prometheus scrapes both workers as
+two static-config targets rather than via per-pod service discovery (see
+`observability/prometheus/values.yaml`). Kube-state and cAdvisor panels are split by `pod` instead.
+
+Dashboards for the future gateway/router/KV-hop metrics (`orch_*`, KEDA, Mooncake) are **not**
+included here; they land with issues #122/#133 once those services exist.
+
+Contract tests for the generator live in `tests/test_dashboards_contract.py` and run with the
+rest of the inference test suite:
+```bash
+uv run --project services/app pytest infra/inference/tests tests/inference -q
+```
+
 ### 8. Teardown
 When finished, tear down the remote cluster resources to stop GPU resource usage:
 ```bash
