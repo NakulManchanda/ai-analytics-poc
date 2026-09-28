@@ -276,6 +276,8 @@
             "uid": "prometheus"
           },
           "expr": "vllm:cache_config_info",
+          "format": "table",
+          "instant": true,
           "legendFormat": "{{instance}} block_size={{block_size}} num_gpu_blocks={{num_gpu_blocks}}",
           "refId": "A"
         }

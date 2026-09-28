@@ -35,11 +35,21 @@ ALLOWED_NON_PROM_METRICS = frozenset(
 METRIC_NAME_RE = re.compile(r"[A-Za-z_:][A-Za-z0-9_:]*")
 
 # PromQL keywords/functions that the regex below will also match; excluded from the
-# "must exist" check.
+# "must exist" check even if not immediately followed by "(" (belt-and-suspenders on
+# top of the function-call and grouping-clause stripping below).
 PROMQL_KEYWORDS = frozenset(
     {
         "sum",
         "by",
+        "without",
+        "avg",
+        "min",
+        "max",
+        "count",
+        "group",
+        "on",
+        "ignoring",
+        "offset",
         "rate",
         "histogram_quantile",
         "clamp_min",
@@ -48,6 +58,46 @@ PROMQL_KEYWORDS = frozenset(
         "and",
     }
 )
+
+# Scientific-notation number literals (e.g. "1e-9") so the identifier regex doesn't
+# pick up a stray "e" as a fake metric name.
+SCI_NOTATION_RE = re.compile(r"\b\d+(?:\.\d+)?[eE]-?\d+\b")
+
+# PromQL duration literals (e.g. "5m", "1h30m") used inside range-vector selectors
+# ("[5m]") and `offset`/subquery clauses, so the identifier regex doesn't pick up
+# their unit suffix (e.g. the "m" in "5m") as a fake metric name.
+DURATION_RE = re.compile(r"\b\d+(?:ms|[smhdwy])\b")
+
+# Label-matcher blocks, e.g. `{pod=~"...",container!=""}`.
+LABEL_MATCHER_RE = re.compile(r"\{[^}]*\}")
+
+# Aggregation grouping clauses, e.g. `by (le, instance)` / `without (pod)`, which
+# contain label names, not metric names.
+GROUPING_CLAUSE_RE = re.compile(r"\b(?:by|without)\s*\([^)]*\)")
+
+# An identifier immediately followed by "(" (ignoring whitespace) is a PromQL
+# function call, not a metric name.
+FUNCTION_CALL_RE = re.compile(r"([A-Za-z_:][A-Za-z0-9_:]*)\s*\(")
+
+
+def _extract_metric_identifiers(expr: str) -> set[str]:
+    """Extract bare metric-name identifiers from a PromQL expression string.
+
+    Excludes: string literals, label names inside `{...}` matchers, grouping-clause
+    label lists (`by (...)`/`without (...)`), PromQL function names (identifiers
+    immediately followed by `(`), and scientific-notation number literals.
+    """
+    text = SCI_NOTATION_RE.sub(" ", expr)
+    text = DURATION_RE.sub(" ", text)
+    text = LABEL_MATCHER_RE.sub(" ", text)
+    text = GROUPING_CLAUSE_RE.sub(" ", text)
+    function_names = set(FUNCTION_CALL_RE.findall(text))
+    identifiers: set[str] = set()
+    for token in METRIC_NAME_RE.findall(text):
+        if token in function_names or token in PROMQL_KEYWORDS:
+            continue
+        identifiers.add(token)
+    return identifiers
 
 
 def _load_module():
@@ -84,6 +134,12 @@ def test_generator_is_deterministic() -> None:
     assert json.dumps(first, sort_keys=True) == json.dumps(second, sort_keys=True)
 
 
+def _base_names(names: set[str]) -> set[str]:
+    # Histogram metrics expose derived series (_bucket, _sum, _count) that are not
+    # themselves listed in the `# TYPE` lines of the .prom fixtures.
+    return {re.sub(r"_(bucket|sum|count)$", "", name) for name in names}
+
+
 def test_all_promql_metric_names_are_known() -> None:
     module = _load_module()
     known = _fixture_metric_names() | ALLOWED_NON_PROM_METRICS
@@ -93,20 +149,23 @@ def test_all_promql_metric_names_are_known() -> None:
         for panel in dashboard["panels"]:
             for target in panel.get("targets", []):
                 expr = target.get("expr", "")
-                for token in METRIC_NAME_RE.findall(expr):
-                    if token in PROMQL_KEYWORDS or ":" not in token and token.islower() and "_" not in token:
-                        continue
-                    if token.startswith(("vllm:", "DCGM_", "kube_", "node_", "container_")):
-                        used.add(token)
-    # Histogram metrics expose derived series (_bucket, _sum, _count) that are not
-    # themselves listed in the `# TYPE` lines of the .prom fixtures.
-    base_names = {
-        re.sub(r"_(bucket|sum|count)$", "", name) for name in used
-    }
+                used |= _extract_metric_identifiers(expr)
+    base_names = _base_names(used)
     unknown = {name for name in base_names if name not in known}
     assert not unknown, f"Unknown/invented metric names used in dashboards: {sorted(unknown)}"
     # Sanity: we should have found a non-trivial number of real metric references.
     assert len(used) >= 10
+
+
+def test_generator_metric_name_constant_is_known() -> None:
+    """The generator's own METRIC_NAMES/ALLOWED_METRIC_NAMES list must not itself
+    contain an invented metric name: it must be a subset of the fixtures ∪ the
+    documented non-vLLM allowlist."""
+    module = _load_module()
+    known = _fixture_metric_names() | ALLOWED_NON_PROM_METRICS
+    declared = _base_names(set(module.ALLOWED_METRIC_NAMES))
+    unknown = {name for name in declared if name not in known}
+    assert not unknown, f"Generator declares unknown/invented metric names: {sorted(unknown)}"
 
 
 def test_committed_json_matches_generator_output(tmp_path: Path) -> None:

@@ -15,8 +15,12 @@ Worker-distinguishing label: Prometheus scrapes the two workers as two separate
 ``inference-worker-b...:8000``. There is no ``pod``/``app``/``job`` label split per
 worker in these series (no Prometheus pod service-discovery relabeling is configured),
 so ``instance`` is the only label that distinguishes worker A from worker B in the
-vLLM metrics. Kube-state-metrics and cAdvisor series (pods, containers, DCGM GPU) are
-labelled by ``pod``/``namespace`` as usual and are split by ``pod`` instead.
+vLLM metrics. Kube-state-metrics and cAdvisor series (pods, containers) are labelled
+by ``pod``/``namespace`` as usual and are split by ``pod`` instead. DCGM is scraped as
+a single static target for the shared GPU (see
+``infra/inference/observability/prometheus/values.yaml``), so its series have no
+``pod`` label at all and are split by ``instance`` (the DCGM exporter's scrape
+target), not by ``pod``.
 
 Regenerate with ``python3 infra/inference/observability/grafana/dashboards.py`` (or
 ``make inference-dashboards``) and commit the resulting JSON.
@@ -83,10 +87,21 @@ ALLOWED_METRIC_NAMES = frozenset(
 )
 
 
-def _target(expr: str, legend: str = "", ref: str = "A") -> dict:
+def _target(
+    expr: str,
+    legend: str = "",
+    ref: str = "A",
+    *,
+    instant: bool = False,
+    fmt: str = "",
+) -> dict:
     target: dict = {"datasource": PROM, "expr": expr, "refId": ref}
     if legend:
         target["legendFormat"] = legend
+    if instant:
+        target["instant"] = True
+    if fmt:
+        target["format"] = fmt
     return target
 
 
@@ -104,9 +119,12 @@ def _panel(
     extra: list[tuple[str, str]] | None = None,
     unit: str = "",
 ) -> dict:
-    targets = [_target(expr, legend, "A")]
+    is_table = kind == "table"
+    targets = [_target(expr, legend, "A", instant=is_table, fmt="table" if is_table else "")]
     for i, (ex, leg) in enumerate(extra or []):
-        targets.append(_target(ex, leg, chr(ord("B") + i)))
+        targets.append(
+            _target(ex, leg, chr(ord("B") + i), instant=is_table, fmt="table" if is_table else "")
+        )
     defaults: dict = {"custom": {"drawStyle": "line", "fillOpacity": 10, "lineWidth": 1}}
     if unit:
         defaults["unit"] = unit
