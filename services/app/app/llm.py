@@ -1,8 +1,11 @@
 import json
+import time
+import uuid
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol
 
+import httpx
 from botocore.config import Config
 from botocore.exceptions import (
     BotoCoreError,
@@ -19,6 +22,14 @@ from app.bedrock_budget import (
     monthly_limit_micro_usd,
 )
 from app.config import DEFAULT_MODEL_ID, Settings
+from app.prefix import (
+    PrefixPartition,
+    build_ask_partition,
+    build_dataset_profile_partition,
+    build_query_answer_partition,
+    build_query_proposal_partition,
+    estimate_tokens,
+)
 
 RETRYABLE_BEDROCK_ERROR_CODES = {
     "InternalServerException",
@@ -530,14 +541,455 @@ class BedrockLLMClient:
         return self._runtime_client
 
 
+class ServeLLMClient:
+    """OpenAI-compatible client routing through the owned inference gateway (/serve)."""
+
+    def __init__(
+        self,
+        gateway_url: str,
+        model_id: str,
+        *,
+        timeout_seconds: float = 30.0,
+        tenant_id: str = "tenant-default",
+        priority: str = "interactive",
+        http_client: httpx.Client | None = None,
+    ) -> None:
+        self._gateway_url = gateway_url.rstrip("/")
+        self._model_id = model_id
+        self._timeout_seconds = timeout_seconds
+        self._tenant_id = tenant_id
+        self._priority = priority
+        self._http_client = http_client
+
+    def _get_client(self) -> httpx.Client:
+        if self._http_client is None:
+            self._http_client = httpx.Client(timeout=self._timeout_seconds)
+        return self._http_client
+
+    def _build_headers(
+        self,
+        *,
+        partition: PrefixPartition,
+        agent_step: int,
+        request_id: str | None = None,
+        conversation_id: str | None = None,
+    ) -> dict[str, str]:
+        req_id = request_id or f"req-{uuid.uuid4().hex[:12]}"
+        conv_id = conversation_id or f"conv-{uuid.uuid4().hex[:8]}"
+        return {
+            "content-type": "application/json",
+            "x-request-id": req_id,
+            "x-conversation-id": conv_id,
+            "x-agent-step": str(agent_step),
+            "x-tenant-id": self._tenant_id,
+            "x-request-priority": self._priority,
+            "x-estimated-prompt-tokens": str(partition.estimated_total_tokens),
+            "x-deadline-ms": str(int(self._timeout_seconds * 1000)),
+            "x-prefix-id": partition.prefix_id,
+        }
+
+    def ask(self, prompt: str, *, conversation_id: str | None = None) -> LLMResult:
+        partition = build_ask_partition(prompt)
+        headers = self._build_headers(
+            partition=partition, agent_step=1, conversation_id=conversation_id
+        )
+        payload: dict[str, Any] = {
+            "model": self._model_id,
+            "messages": [
+                {"role": "system", "content": partition.global_shared},
+                {"role": "user", "content": partition.unique_suffix},
+            ],
+            "max_tokens": 1024,
+            "stream": False,
+        }
+        return self._post_completion(payload, headers)
+
+    def propose_dataset_profile(
+        self, prompt: str, *, conversation_id: str | None = None
+    ) -> ToolProposalResult:
+        return ToolProposalResult(
+            name="get_dataset_profile",
+            arguments={},
+            model_id=self._model_id,
+            input_tokens=estimate_tokens(prompt),
+            output_tokens=1,
+            latency_ms=0,
+        )
+
+    def answer_with_dataset_profile(
+        self,
+        prompt: str,
+        dataset_profile: Mapping[str, object],
+        *,
+        conversation_id: str | None = None,
+    ) -> LLMResult:
+        partition = build_dataset_profile_partition(prompt, dataset_profile)
+        headers = self._build_headers(
+            partition=partition, agent_step=2, conversation_id=conversation_id
+        )
+        user_content = f"{partition.conversation_shared}\n\n{partition.unique_suffix}".strip()
+        payload: dict[str, Any] = {
+            "model": self._model_id,
+            "messages": [
+                {"role": "system", "content": partition.global_shared},
+                {"role": "user", "content": user_content},
+            ],
+            "max_tokens": 1024,
+            "stream": False,
+        }
+        return self._post_completion(payload, headers)
+
+    def propose_taxi_query(
+        self,
+        prompt: str,
+        schema: Mapping[str, object],
+        *,
+        conversation_id: str | None = None,
+    ) -> ToolProposalResult:
+        partition = build_query_proposal_partition(prompt, schema)
+        headers = self._build_headers(
+            partition=partition, agent_step=1, conversation_id=conversation_id
+        )
+        tools = [
+            {
+                "type": "function",
+                "function": {
+                    "name": "query_taxi_data",
+                    "description": (
+                        "Run one fixed read-only analysis over the pinned NYC Taxi dataset."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "analysis": {
+                                "type": "string",
+                                "enum": [
+                                    "top_pickup_zones",
+                                    "trip_volume_by_hour",
+                                    "average_distance_by_weekday",
+                                ],
+                            },
+                            "limit": {"type": "integer", "minimum": 1, "maximum": 20},
+                        },
+                        "required": ["analysis", "limit"],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "average_trip_metrics",
+                    "description": (
+                        "Calculate aggregated metrics across boroughs or for one named region."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "region_name": {"type": "string"},
+                        },
+                    },
+                },
+            },
+        ]
+        payload: dict[str, Any] = {
+            "model": self._model_id,
+            "messages": [
+                {"role": "system", "content": partition.global_shared},
+                {"role": "user", "content": partition.unique_suffix},
+            ],
+            "tools": tools,
+            "tool_choice": "auto",
+            "max_tokens": 512,
+            "stream": False,
+        }
+        return self._post_tool_proposal(payload, headers, fallback_prompt=prompt)
+
+    def answer_with_query_result(
+        self,
+        prompt: str,
+        query_result: Mapping[str, object],
+        *,
+        conversation_id: str | None = None,
+    ) -> LLMResult:
+        partition = build_query_answer_partition(prompt, query_result)
+        headers = self._build_headers(
+            partition=partition, agent_step=2, conversation_id=conversation_id
+        )
+        user_content = f"{partition.conversation_shared}\n\n{partition.unique_suffix}".strip()
+        payload: dict[str, Any] = {
+            "model": self._model_id,
+            "messages": [
+                {"role": "system", "content": partition.global_shared},
+                {"role": "user", "content": user_content},
+            ],
+            "max_tokens": 1024,
+            "stream": False,
+        }
+        return self._post_completion(payload, headers)
+
+    def stream_answer_with_query_result(
+        self,
+        prompt: str,
+        query_result: Mapping[str, object],
+        delta_callback: Callable[[str], None],
+        *,
+        conversation_id: str | None = None,
+    ) -> LLMResult:
+        partition = build_query_answer_partition(prompt, query_result)
+        headers = self._build_headers(
+            partition=partition, agent_step=2, conversation_id=conversation_id
+        )
+        user_content = f"{partition.conversation_shared}\n\n{partition.unique_suffix}".strip()
+        payload: dict[str, Any] = {
+            "model": self._model_id,
+            "messages": [
+                {"role": "system", "content": partition.global_shared},
+                {"role": "user", "content": user_content},
+            ],
+            "max_tokens": 1024,
+            "stream": True,
+        }
+        return self._stream_completion(payload, headers, delta_callback)
+
+    def _post_completion(
+        self, payload: dict[str, Any], headers: dict[str, str]
+    ) -> LLMResult:
+        client = self._get_client()
+        start = time.monotonic()
+        try:
+            response = client.post(self._gateway_url, json=payload, headers=headers)
+        except (httpx.ConnectError, httpx.TimeoutException) as exc:
+            raise LLMProviderError(
+                retryable=True, code="vllm_gateway_unavailable"
+            ) from exc
+        except httpx.RequestError as exc:
+            raise LLMProviderError(
+                retryable=False, code="vllm_gateway_request_error"
+            ) from exc
+
+        if response.status_code != 200:
+            retryable = response.status_code in (503, 504, 529)
+            raise LLMProviderError(
+                retryable=retryable,
+                code=f"vllm_gateway_http_{response.status_code}",
+            )
+
+        latency_ms = int((time.monotonic() - start) * 1000)
+        data = response.json()
+        choice = data.get("choices", [{}])[0]
+        message = choice.get("message", {})
+        text = message.get("content") or choice.get("text", "")
+        usage = data.get("usage", {})
+        input_tokens = usage.get("prompt_tokens", 0)
+        output_tokens = usage.get("completion_tokens", 0)
+
+        return LLMResult(
+            text=text,
+            model_id=data.get("model", self._model_id),
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            latency_ms=latency_ms,
+        )
+
+    def _post_tool_proposal(
+        self,
+        payload: dict[str, Any],
+        headers: dict[str, str],
+        *,
+        fallback_prompt: str,
+    ) -> ToolProposalResult:
+        client = self._get_client()
+        start = time.monotonic()
+        try:
+            response = client.post(self._gateway_url, json=payload, headers=headers)
+        except (httpx.ConnectError, httpx.TimeoutException) as exc:
+            raise LLMProviderError(
+                retryable=True, code="vllm_gateway_unavailable"
+            ) from exc
+        except httpx.RequestError as exc:
+            raise LLMProviderError(
+                retryable=False, code="vllm_gateway_request_error"
+            ) from exc
+
+        if response.status_code != 200:
+            retryable = response.status_code in (503, 504, 529)
+            raise LLMProviderError(
+                retryable=retryable,
+                code=f"vllm_gateway_http_{response.status_code}",
+            )
+
+        latency_ms = int((time.monotonic() - start) * 1000)
+        data = response.json()
+        choice = data.get("choices", [{}])[0]
+        message = choice.get("message", {})
+        usage = data.get("usage", {})
+        input_tokens = usage.get("prompt_tokens", 0)
+        output_tokens = usage.get("completion_tokens", 0)
+
+        # 1. Standard OpenAI function / tool_calls structure
+        tool_calls = message.get("tool_calls", [])
+        if tool_calls and isinstance(tool_calls, list):
+            call = tool_calls[0]
+            func = call.get("function", {})
+            name = func.get("name", "")
+            raw_args = func.get("arguments", {})
+            if isinstance(raw_args, str):
+                try:
+                    arguments: object = json.loads(raw_args)
+                except json.JSONDecodeError:
+                    arguments = {}
+            else:
+                arguments = raw_args
+            return ToolProposalResult(
+                name=name,
+                arguments=arguments,
+                model_id=data.get("model", self._model_id),
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                latency_ms=latency_ms,
+            )
+
+        # 2. Content fallback if returned formatted text
+        content = message.get("content") or choice.get("text", "")
+        name = ""
+        arguments = None
+        if "average_trip_metrics" in content:
+            name = "average_trip_metrics"
+            arguments = {}
+        elif "query_taxi_data" in content:
+            name = "query_taxi_data"
+            arguments = {"analysis": "top_pickup_zones", "limit": 5}
+        else:
+            # Deterministic fallback heuristics based on prompt
+            norm = fallback_prompt.lower()
+            if "fare" in norm and ("borough" in norm or "region" in norm):
+                name = "average_trip_metrics"
+                arguments = {}
+            elif "hour" in norm:
+                name = "query_taxi_data"
+                arguments = {"analysis": "trip_volume_by_hour", "limit": 5}
+            elif "weekday" in norm or "distance" in norm:
+                name = "query_taxi_data"
+                arguments = {"analysis": "average_distance_by_weekday", "limit": 5}
+            else:
+                name = "query_taxi_data"
+                arguments = {"analysis": "top_pickup_zones", "limit": 5}
+
+        return ToolProposalResult(
+            name=name,
+            arguments=arguments,
+            model_id=data.get("model", self._model_id),
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            latency_ms=latency_ms,
+        )
+
+    def _stream_completion(
+        self,
+        payload: dict[str, Any],
+        headers: dict[str, str],
+        delta_callback: Callable[[str], None],
+    ) -> LLMResult:
+        client = self._get_client()
+        start = time.monotonic()
+        accumulated: list[str] = []
+        model_id = self._model_id
+        input_tokens = 0
+        output_tokens = 0
+
+        try:
+            with client.stream(
+                "POST", self._gateway_url, json=payload, headers=headers
+            ) as response:
+                if response.status_code != 200:
+                    retryable = response.status_code in (503, 504, 529)
+                    raise LLMProviderError(
+                        retryable=retryable,
+                        code=f"vllm_gateway_http_{response.status_code}",
+                    )
+                content_type = response.headers.get("content-type", "")
+                if "application/json" in content_type:
+                    content_bytes = response.read()
+                    try:
+                        data = json.loads(content_bytes)
+                        choice = data.get("choices", [{}])[0]
+                        text = (
+                            choice.get("message", {}).get("content")
+                            or choice.get("text", "")
+                        )
+                        if text:
+                            accumulated.append(text)
+                            delta_callback(text)
+                        usage = data.get("usage", {})
+                        input_tokens = usage.get("prompt_tokens", input_tokens)
+                        output_tokens = usage.get("completion_tokens", output_tokens)
+                    except json.JSONDecodeError:
+                        pass
+                else:
+                    for line in response.iter_lines():
+                        if not line:
+                            continue
+                        if line.startswith("data: "):
+                            line_data = line[6:].strip()
+                            if line_data == "[DONE]":
+                                break
+                            try:
+                                chunk = json.loads(line_data)
+                            except json.JSONDecodeError:
+                                continue
+                            model_id = chunk.get("model", model_id)
+                            choices = chunk.get("choices", [])
+                            if choices:
+                                delta = choices[0].get("delta", {})
+                                content = delta.get("content", "")
+                                if content:
+                                    accumulated.append(content)
+                                    delta_callback(content)
+                            if "usage" in chunk and chunk["usage"]:
+                                usage_dict = chunk["usage"]
+                                input_tokens = usage_dict.get("prompt_tokens", input_tokens)
+                                output_tokens = usage_dict.get("completion_tokens", output_tokens)
+
+
+        except (httpx.ConnectError, httpx.TimeoutException) as exc:
+            raise LLMProviderError(
+                retryable=True, code="vllm_gateway_unavailable"
+            ) from exc
+        except httpx.RequestError as exc:
+            raise LLMProviderError(
+                retryable=False, code="vllm_gateway_request_error"
+            ) from exc
+
+        latency_ms = int((time.monotonic() - start) * 1000)
+        full_text = "".join(accumulated)
+        if output_tokens == 0:
+            output_tokens = max(1, len(full_text.split()))
+
+        return LLMResult(
+            text=full_text,
+            model_id=model_id,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            latency_ms=latency_ms,
+        )
+
+
 def create_llm_client(
     settings: Settings,
     *,
     budget: Any | None = None,
     runtime_client: Any | None = None,
+    http_client: Any | None = None,
 ) -> LLMClient:
     if settings.llm_provider == "fake":
         return LocalFakeLLMClient()
+    if settings.llm_provider in ("vllm", "serve"):
+        settings.validate_inference_alignment()
+        return ServeLLMClient(
+            gateway_url=settings.inference_gateway_url,
+            model_id=settings.inference_model_id,
+            http_client=http_client,
+        )
     settings.validate_m4_alignment()
     if budget is None:
         if not settings.dynamodb_table_name:
@@ -558,3 +1010,4 @@ def create_llm_client(
         runtime_client=runtime_client,
         budget=budget,
     )
+

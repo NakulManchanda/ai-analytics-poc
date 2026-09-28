@@ -1,0 +1,53 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: inference-gateway
+  namespace: inference-lab
+  labels:
+    app: inference-gateway
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: inference-gateway
+  template:
+    metadata:
+      labels:
+        app: inference-gateway
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/metrics"
+    spec:
+      containers:
+        - name: gateway
+          image: python:3.12.9-slim
+          command:
+            - sh
+            - -c
+            - "pip install --no-cache-dir fastapi uvicorn httpx && uvicorn main:app --host 0.0.0.0 --port 8080 --app-dir /app"
+          workingDir: /app
+          env:
+            - name: DEFAULT_WORKER_URL
+              value: "http://inference-worker-a.inference-lab.svc.cluster.local:8000"
+          ports:
+            - containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1024Mi"

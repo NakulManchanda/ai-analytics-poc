@@ -116,9 +116,8 @@ def test_hami_worker_slices_spec_is_present() -> None:
     assert "worker_b_gpumem" in content
 
 
-def test_issue_120_has_no_gateway_or_future_scope_resources() -> None:
+def test_future_scope_resources_are_not_present() -> None:
     forbidden_path_parts = {
-        "gateway",
         "keda",
         "mooncake",
         "lmcache",
@@ -133,7 +132,7 @@ def test_issue_120_has_no_gateway_or_future_scope_resources() -> None:
         not offending_paths
     ), f"Future-scope paths are not permitted: {offending_paths}"
 
-    forbidden_resource_words = ("gateway", "keda", "mooncake", "lmcache", "openwebui")
+    forbidden_resource_words = ("keda", "mooncake", "lmcache", "openwebui")
     offenders: list[str] = []
     for path, document in _yaml_documents():
         metadata = document.get("metadata", {})
@@ -143,4 +142,18 @@ def test_issue_120_has_no_gateway_or_future_scope_resources() -> None:
         )
         if any(word in identity for word in forbidden_resource_words):
             offenders.append(str(path.relative_to(ROOT)))
-    assert not offenders, f"#120 must not define future-scope resources: {offenders}"
+    assert not offenders, f"Must not define future-scope resources: {offenders}"
+
+
+def test_gateway_manifests_contract() -> None:
+    gateway_deployment = K8S / "gateway" / "gateway.yaml"
+    assert gateway_deployment.is_file(), "gateway.yaml must exist under k8s/gateway"
+
+    gateway_service = K8S / "services" / "gateway.yaml"
+    assert gateway_service.is_file(), "gateway.yaml must exist under k8s/services"
+
+    svc_docs = yaml.safe_load(gateway_service.read_text(encoding="utf-8"))
+    assert svc_docs.get("spec", {}).get("type") == "ClusterIP"
+    ports = svc_docs.get("spec", {}).get("ports", [])
+    assert any(p.get("port") == 8080 for p in ports)
+

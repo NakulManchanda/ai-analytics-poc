@@ -328,10 +328,9 @@ def test_services_are_clusterip_only_and_pods_cannot_bind_host_network_ports() -
             ), f"{path.relative_to(ROOT)} must not expose a NodePort"
 
 
-def test_issue_120_has_no_gateway_or_future_scope_resources() -> None:
-    assert BUNDLE.is_dir(), "#120 must add the transferable infra/inference bundle"
+def test_future_scope_resources_are_not_present() -> None:
+    assert BUNDLE.is_dir(), "infra/inference bundle must exist"
     forbidden_path_parts = {
-        "gateway",
         "keda",
         "mooncake",
         "lmcache",
@@ -346,7 +345,7 @@ def test_issue_120_has_no_gateway_or_future_scope_resources() -> None:
         not offending_paths
     ), f"Future-scope paths are not permitted: {offending_paths}"
 
-    forbidden_resource_words = ("gateway", "keda", "mooncake", "lmcache", "openwebui")
+    forbidden_resource_words = ("keda", "mooncake", "lmcache", "openwebui")
     offenders: list[str] = []
     for path, document in _yaml_documents():
         metadata = document.get("metadata", {})
@@ -356,7 +355,19 @@ def test_issue_120_has_no_gateway_or_future_scope_resources() -> None:
         )
         if any(word in identity for word in forbidden_resource_words):
             offenders.append(str(path.relative_to(ROOT)))
-    assert not offenders, f"#120 must not define future-scope resources: {offenders}"
+    assert not offenders, f"Must not define future-scope resources: {offenders}"
+
+
+def test_gateway_bundle_contract() -> None:
+    gateway_dir = BUNDLE / "gateway"
+    assert gateway_dir.is_dir(), "infra/inference/gateway must exist in #121"
+    assert (gateway_dir / "main.py").is_file(), "gateway/main.py must exist"
+
+    gateway_service = K8S / "services" / "gateway.yaml"
+    assert gateway_service.is_file(), "k8s/services/gateway.yaml must exist"
+    svc_docs = yaml.safe_load(gateway_service.read_text(encoding="utf-8"))
+    assert svc_docs.get("spec", {}).get("type") == "ClusterIP"
+
 
 
 def test_model_credential_secret_name_matches_worker_manifests() -> None:
