@@ -3,6 +3,7 @@ services:
   app:
     environment:
       LLM_PROVIDER: serve
+      VOICE_ENABLED: "false"
       INFERENCE_GATEWAY_URL: http://host.docker.internal:18080/serve
       INFERENCE_MODEL_ID: "${INFERENCE_MODEL_ID:-Qwen/Qwen3-0.6B}"
       DYNAMODB_TABLE_NAME: "${DYNAMODB_TABLE_NAME:-ai-analytics-poc-demo-application-state}"
@@ -19,6 +20,7 @@ services:
   worker:
     environment:
       LLM_PROVIDER: serve
+      VOICE_ENABLED: "false"
       INFERENCE_GATEWAY_URL: http://host.docker.internal:18080/serve
       INFERENCE_MODEL_ID: "${INFERENCE_MODEL_ID:-Qwen/Qwen3-0.6B}"
       DYNAMODB_TABLE_NAME: "${DYNAMODB_TABLE_NAME:-ai-analytics-poc-demo-application-state}"
