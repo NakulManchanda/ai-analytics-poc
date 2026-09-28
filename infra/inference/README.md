@@ -99,6 +99,12 @@ LAMBDA_SSH_USER=ubuntu
 LAMBDA_SSH_KEY_PATH=~/.ssh/lambda_key.pem
 ```
 
+### 1a. vLLM tool-calling flags
+Both `k8s/workers/worker-a.yaml` and `worker-b.yaml` pass `--enable-auto-tool-choice
+--tool-call-parser hermes` to vLLM so the gateway can forward OpenAI-style `tools`/
+`tool_choice` payloads without a 400. This is a manifest-only change in this PR; it takes
+effect on the next fresh `inference-up` deploy, not on an already-running cluster.
+
 ### 2. Validation
 Locally validate all Kubernetes manifests and configuration contracts:
 ```bash

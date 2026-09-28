@@ -71,6 +71,29 @@ def test_worker_a_and_b_have_semantically_identical_serving_configuration() -> N
     assert worker_a == worker_b, "workers may differ only by identity/service name"
 
 
+def test_workers_enable_vllm_tool_calling_with_hermes_parser() -> None:
+    """#115 slice B: the gateway returned 400 on tool calls because the workers were
+    never started with tool-calling enabled. Both workers must carry identical flags."""
+    deployment_docs = _find_kind("Deployment")
+    workers: dict[str, dict[str, Any]] = {}
+    for _path, document in deployment_docs:
+        name = document.get("metadata", {}).get("name", "")
+        if name in {"inference-worker-a", "inference-worker-b"}:
+            workers[name] = document
+
+    assert set(workers) == {"inference-worker-a", "inference-worker-b"}
+    for name, document in workers.items():
+        containers = document.get("spec", {}).get("template", {}).get("spec", {}).get(
+            "containers", []
+        )
+        vllm_containers = [c for c in containers if c.get("name") == "vllm"]
+        assert vllm_containers, f"{name} must define a vllm container"
+        args = vllm_containers[0].get("args", [])
+        assert "--enable-auto-tool-choice" in args, name
+        parser_index = args.index("--tool-call-parser")
+        assert args[parser_index + 1] == "hermes", name
+
+
 def test_services_are_clusterip_only_and_pods_cannot_bind_host_network_ports() -> None:
     documents = _yaml_documents()
     assert documents, "Kubernetes manifests must be parseable YAML documents"

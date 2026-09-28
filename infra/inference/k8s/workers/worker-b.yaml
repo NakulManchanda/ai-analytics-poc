@@ -43,6 +43,9 @@ spec:
             - --block-size
             - "16"
             - --enable-prefix-caching
+            - --enable-auto-tool-choice
+            - --tool-call-parser
+            - hermes
             - --gpu-memory-utilization
             - "0.45"
           env:
