@@ -10,7 +10,7 @@ OBSERVABILITY_PROMETHEUS_PORT ?= 19090
 OBSERVABILITY_BURST_COUNT ?= 10
 OBSERVABILITY_LOG_TAIL ?= 200
 
-.PHONY: help check-bootstrap dev app-serve-dev mcp-dev mcp-smoke dataset-test dataset-smoke smoke test mcp-test infra-test web-test compose-smoke observability-up observability-down observability-smoke observability-dev-up observability-dev-info observability-dev-ask observability-dev-burst observability-dev-metrics observability-dev-logs observability-dev-down local-aws-compose local-aws-refresh local-bedrock-compose bedrock-smoke m5-bedrock-smoke m6-bedrock-smoke dashboard tf-dispatch tf-resume tf-park inference-validate inference-sync inference-config inference-secret inference-bootstrap inference-deploy inference-up inference-tunnel inference-connect inference-smoke inference-warmup inference-capacity inference-restart inference-gateway-restart inference-serve-smoke inference-run inference-pull-evidence inference-teardown
+.PHONY: help check-bootstrap dev app-serve-dev mcp-dev mcp-smoke dataset-test dataset-smoke smoke test mcp-test infra-test web-test compose-smoke observability-up observability-down observability-smoke observability-dev-up observability-dev-info observability-dev-ask observability-dev-burst observability-dev-metrics observability-dev-logs observability-dev-down local-aws-compose local-aws-refresh local-serve-compose local-serve-refresh local-bedrock-compose bedrock-smoke m5-bedrock-smoke m6-bedrock-smoke dashboard tf-dispatch tf-resume tf-park inference-validate inference-sync inference-config inference-secret inference-bootstrap inference-deploy inference-up inference-tunnel inference-connect inference-smoke inference-warmup inference-capacity inference-restart inference-gateway-restart inference-serve-smoke inference-run inference-pull-evidence inference-teardown
 
 
 help: ## Show available commands
@@ -199,6 +199,15 @@ local-aws-compose: ## Start local Compose with opt-in real AWS (Bedrock + Transc
 local-aws-refresh: ## Restart local Compose stack from scratch (down then rebuild/up)
 	docker compose -f docker-compose.yml -f docker-compose.aws.yml down
 	$(MAKE) local-aws-compose
+
+local-serve-compose: ## Start local Compose wired to owned vLLM inference gateway on port 3000
+	DYNAMODB_TABLE_NAME=$(or $(DYNAMODB_TABLE_NAME),ai-analytics-poc-demo-application-state) \
+	WEB_PORT=$(or $(WEB_PORT),3000) \
+	docker compose -f docker-compose.yml -f docker-compose.serve.yml up --build -d
+
+local-serve-refresh: ## Restart local serve Compose stack (down then rebuild/up)
+	docker compose -f docker-compose.yml -f docker-compose.serve.yml down
+	$(MAKE) local-serve-compose
 
 local-bedrock-compose: local-aws-compose ## Deprecated alias for local-aws-compose
 

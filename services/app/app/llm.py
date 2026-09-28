@@ -808,6 +808,15 @@ class ServeLLMClient:
         start = time.monotonic()
         try:
             response = client.post(self._gateway_url, json=payload, headers=headers)
+            if response.status_code == 400 and "tools" in payload:
+                clean_payload = {
+                    k: v
+                    for k, v in payload.items()
+                    if k not in ("tools", "tool_choice")
+                }
+                response = client.post(
+                    self._gateway_url, json=clean_payload, headers=headers
+                )
         except (httpx.ConnectError, httpx.TimeoutException) as exc:
             raise LLMProviderError(
                 retryable=True, code="vllm_gateway_unavailable"
