@@ -20,7 +20,7 @@ echo "== Capturing remote cluster evidence for run: $RUN_ID =="
 ssh_cmd "
   set -eu
   export KUBECONFIG=\"\${KUBECONFIG:-/etc/rancher/k3s/k3s.yaml}\"
-  EVID_DIR=\"$(remote_dir)/evidence/$RUN_ID\"
+  EVID_DIR=$(remote_dir)/evidence/$RUN_ID
   mkdir -p \"\$EVID_DIR/kubectl\" \"\$EVID_DIR/logs\" \"\$EVID_DIR/hardware\" \"\$EVID_DIR/prometheus\"
 
   # 1. Kubernetes resource status
@@ -78,8 +78,20 @@ for required in \
   fi
 done
 
+HAS_CAPACITY_EVIDENCE=0
+for candidate in raw/responses.jsonl raw/capacity_responses.jsonl raw/smoke_responses.jsonl; do
+  if [[ -s "$LOCAL_EVIDENCE_DIR/$candidate" ]]; then
+    HAS_CAPACITY_EVIDENCE=1
+    break
+  fi
+done
+
 if [[ -f "$INFERENCE_ROOT/experiments/evidence.py" ]]; then
-  python3 "$INFERENCE_ROOT/experiments/evidence.py" --run-id "$RUN_ID" --output-dir "$LOCAL_EVIDENCE_DIR"
+  if [[ "$HAS_CAPACITY_EVIDENCE" -eq 1 ]]; then
+    python3 "$INFERENCE_ROOT/experiments/evidence.py" --run-id "$RUN_ID" --output-dir "$LOCAL_EVIDENCE_DIR"
+  else
+    echo "Skipping evidence manifest summarizer: no capacity request-results file (raw/responses.jsonl or fallback) found in $LOCAL_EVIDENCE_DIR; this is expected for a cluster-snapshot-only pull."
+  fi
 fi
 
 echo "Evidence successfully pulled and verified in $LOCAL_EVIDENCE_DIR"

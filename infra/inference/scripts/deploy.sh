@@ -8,32 +8,32 @@ load_local_env; require_connection
 ssh_cmd "
   set -eu
   export KUBECONFIG="${KUBECONFIG:-/etc/rancher/k3s/k3s.yaml}"
-  kubectl apply -f '$(remote_dir)/k8s/namespace.yaml'
-  kubectl apply -R -f '$(remote_dir)/k8s'
-  kubectl apply -f '$(remote_dir)/observability/dcgm/dcgm-exporter.yaml'
+  kubectl apply -f $(remote_dir)/k8s/namespace.yaml
+  kubectl apply -R -f $(remote_dir)/k8s
+  kubectl apply -f $(remote_dir)/observability/dcgm/dcgm-exporter.yaml
   helm repo add prometheus-community https://prometheus-community.github.io/helm-charts >/dev/null 2>&1 || true
   helm repo update prometheus-community >/dev/null 2>&1 || true
   helm upgrade --install prometheus prometheus-community/prometheus \
     --namespace '$INFERENCE_NAMESPACE' \
     --version '25.27.0' \
-    -f '$(remote_dir)/observability/prometheus/values.yaml' \
+    -f $(remote_dir)/observability/prometheus/values.yaml \
     --wait --timeout 10m
   helm repo add grafana https://grafana.github.io/helm-charts >/dev/null 2>&1 || true
   helm repo update grafana >/dev/null 2>&1 || true
   helm upgrade --install grafana grafana/grafana \
     --namespace '$INFERENCE_NAMESPACE' \
     --version '8.5.1' \
-    -f '$(remote_dir)/observability/grafana/values.yaml' \
+    -f $(remote_dir)/observability/grafana/values.yaml \
     --wait --timeout 10m
-  if [[ -d '$(remote_dir)/observability/grafana/dashboards' ]]; then
+  if [[ -d $(remote_dir)/observability/grafana/dashboards ]]; then
     kubectl -n '$INFERENCE_NAMESPACE' create configmap inference-dashboards \
-      --from-file='$(remote_dir)/observability/grafana/dashboards' \
+      --from-file=$(remote_dir)/observability/grafana/dashboards \
       --dry-run=client -o yaml | kubectl apply -f -
     kubectl -n '$INFERENCE_NAMESPACE' label configmap inference-dashboards grafana_dashboard=1 --overwrite
   fi
-  if [[ -d '$(remote_dir)/gateway' ]]; then
+  if [[ -d $(remote_dir)/gateway ]]; then
     kubectl -n '$INFERENCE_NAMESPACE' create configmap inference-gateway-code \
-      --from-file='$(remote_dir)/gateway' \
+      --from-file=$(remote_dir)/gateway \
       --dry-run=client -o yaml | kubectl apply -f -
   fi
 
