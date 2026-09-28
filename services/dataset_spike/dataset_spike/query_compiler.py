@@ -133,7 +133,9 @@ class CompiledQuery:
     output_columns: list[str]
 
 
-def _requires_zone_join(dimensions: list[DimensionName], filters: TaxiFilters | None) -> bool:
+def _requires_zone_join(
+    dimensions: list[DimensionName], filters: TaxiFilters | None
+) -> bool:
     if any(dimension in _ZONE_JOIN_DIMENSIONS for dimension in dimensions):
         return True
     return bool(filters and filters.uses_zone_join())
@@ -264,7 +266,8 @@ def compile_aggregate_query(spec: AggregateQuerySpec) -> CompiledQuery:
         f'{_DIMENSION_EXPRESSIONS[dimension]} AS "{dimension.value}"'
         for dimension in spec.dimensions
     ] + [
-        f'{_MEASURE_EXPRESSIONS[measure]} AS "{measure.value}"' for measure in spec.measures
+        f'{_MEASURE_EXPRESSIONS[measure]} AS "{measure.value}"'
+        for measure in spec.measures
     ]
     output_columns = [dimension.value for dimension in spec.dimensions] + [
         measure.value for measure in spec.measures
@@ -297,8 +300,10 @@ def compile_dimension_values_query(
 ) -> CompiledQuery:
     zone_join = dimension in _ZONE_JOIN_DIMENSIONS
     expr = _DIMENSION_EXPRESSIONS[dimension]
-    where_clauses = ["t.tpep_pickup_datetime >= TIMESTAMP '2024-01-01'",
-                      "t.tpep_pickup_datetime < TIMESTAMP '2024-02-01'"]
+    where_clauses = [
+        "t.tpep_pickup_datetime >= TIMESTAMP '2024-01-01'",
+        "t.tpep_pickup_datetime < TIMESTAMP '2024-02-01'",
+    ]
     parameters: list[object] = []
     if search is not None:
         where_clauses.append(f"lower(CAST({expr} AS VARCHAR)) LIKE lower(?)")
@@ -309,13 +314,15 @@ def compile_dimension_values_query(
             f'SELECT {expr} AS "value", count(*)::BIGINT AS "trip_count"',
             _from_clause(zone_join),
             where_sql,
-            'GROUP BY 1',
+            "GROUP BY 1",
             'ORDER BY "trip_count" DESC, "value" ASC',
             "LIMIT ?",
         )
     )
     parameters.append(limit + 1)
-    return CompiledQuery(sql=sql, parameters=parameters, output_columns=["value", "trip_count"])
+    return CompiledQuery(
+        sql=sql, parameters=parameters, output_columns=["value", "trip_count"]
+    )
 
 
 def compile_compare_segments_query(
@@ -343,8 +350,12 @@ def compile_compare_segments_query(
     from_sql = _from_clause(zone_join)
 
     baseline_where, baseline_params = _compile_filters(baseline_filters, zone_join)
-    comparison_where, comparison_params = _compile_filters(comparison_filters, zone_join)
-    baseline_where_sql = f"WHERE {' AND '.join(baseline_where)}" if baseline_where else ""
+    comparison_where, comparison_params = _compile_filters(
+        comparison_filters, zone_join
+    )
+    baseline_where_sql = (
+        f"WHERE {' AND '.join(baseline_where)}" if baseline_where else ""
+    )
     comparison_where_sql = (
         f"WHERE {' AND '.join(comparison_where)}" if comparison_where else ""
     )

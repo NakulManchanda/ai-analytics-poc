@@ -141,7 +141,9 @@ def test_validation_error_returns_structured_non_retryable_envelope():
 
     async def exercise():
         async with Client(
-            build_mcp(profile_loader=_profile, aggregate_runner=failing_aggregate_runner)
+            build_mcp(
+                profile_loader=_profile, aggregate_runner=failing_aggregate_runner
+            )
         ) as client:
             return await client.call_tool(
                 "aggregate_taxi_data",

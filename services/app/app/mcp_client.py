@@ -403,9 +403,7 @@ def sanitize_governed_query_result(payload: Mapping[str, Any]) -> dict[str, obje
             raise MCPToolError(retryable=False)
         sanitized[key] = values
     try:
-        encoded = json.dumps(
-            sanitized, separators=(",", ":"), allow_nan=False
-        ).encode()
+        encoded = json.dumps(sanitized, separators=(",", ":"), allow_nan=False).encode()
     except (TypeError, ValueError) as error:
         raise MCPToolError(retryable=False) from error
     if len(encoded) > MAX_QUERY_RESULT_BYTES:

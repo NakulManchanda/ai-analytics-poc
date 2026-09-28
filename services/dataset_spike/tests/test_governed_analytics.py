@@ -130,9 +130,7 @@ class TestValidationBeforeExecution:
 
         parquet, zones = write_analytics_fixture(tmp_path)
         with pytest.raises(QueryValidationError):
-            analytics.list_taxi_dimension_values(
-                parquet, zones, dimension="not_real"
-            )
+            analytics.list_taxi_dimension_values(parquet, zones, dimension="not_real")
 
     def test_order_by_key_outside_the_requested_columns_is_rejected(
         self, tmp_path: Path
@@ -196,7 +194,9 @@ class TestDescribeTaxiDataset:
         assert result["max_pickup_datetime"] == "2024-01-07 18:00:00"
         assert result["row_count"] == 5
         assert "payment_type" in result["code_dictionaries"]
-        assert result["code_dictionaries"]["payment_type"]["0"] == "unknown_or_flex_fare"
+        assert (
+            result["code_dictionaries"]["payment_type"]["0"] == "unknown_or_flex_fare"
+        )
         assert "pickup_hour" in result["supported_dimensions"]
         assert "tip_rate" in result["supported_measures"]
         assert result["truncated"] is False
@@ -227,9 +227,7 @@ class TestListTaxiDimensionValues:
         assert "Manhattan" in boroughs
         assert result["truncated"] is False
 
-    def test_search_is_parameterized_and_case_insensitive(
-        self, tmp_path: Path
-    ) -> None:
+    def test_search_is_parameterized_and_case_insensitive(self, tmp_path: Path) -> None:
         from dataset_spike import analytics
         from dataset_spike.query_compiler import compile_dimension_values_query
         from dataset_spike.query_spec import DimensionName
@@ -425,9 +423,7 @@ def write_compare_rank_fixture(tmp_path: Path) -> tuple[Path, Path]:
 
     connection = duckdb.connect()
     connection.execute(
-        "COPY (SELECT * FROM (VALUES "
-        + ", ".join(values)
-        + ") AS trips("
+        "COPY (SELECT * FROM (VALUES " + ", ".join(values) + ") AS trips("
         "tpep_pickup_datetime, tpep_dropoff_datetime, PULocationID, DOLocationID, "
         "payment_type, passenger_count, trip_distance, tip_amount, fare_amount, "
         "total_amount, VendorID, RatecodeID)"
@@ -512,9 +508,7 @@ class TestCompareTaxiSegmentsColumnBudget:
 class TestBucketDimensionsHandleNulls:
     """M4: NULL bucketed values must not silently land in the top bucket."""
 
-    def test_null_passenger_count_is_bucketed_as_unknown(
-        self, tmp_path: Path
-    ) -> None:
+    def test_null_passenger_count_is_bucketed_as_unknown(self, tmp_path: Path) -> None:
         from dataset_spike import analytics  # noqa: F401
 
         parquet = tmp_path / "yellow.parquet"
@@ -602,9 +596,9 @@ class TestAirportTripIsAlwaysBoolean:
             measures=["trip_count"],
             filters={"airport_trip": False},
         )
-        assert filtered_result["row_count"] == 1, (
-            "airport_trip=false must not drop rows whose zone/RatecodeID are NULL"
-        )
+        assert (
+            filtered_result["row_count"] == 1
+        ), "airport_trip=false must not drop rows whose zone/RatecodeID are NULL"
 
 
 class TestAirportTripDimensionIsSanitizerSafe:

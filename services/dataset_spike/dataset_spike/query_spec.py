@@ -225,7 +225,11 @@ def _fail(code: str, message: str) -> None:
 
 
 def validate_limit(limit: object) -> int:
-    if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= MAX_ROWS:
+    if (
+        isinstance(limit, bool)
+        or not isinstance(limit, int)
+        or not 1 <= limit <= MAX_ROWS
+    ):
         _fail("invalid_limit", f"limit must be an integer between 1 and {MAX_ROWS}")
     return limit  # type: ignore[return-value]
 
@@ -284,7 +288,9 @@ def validate_column_budget(
 
 def _validate_iso_timestamp(value: object, field_name: str) -> str:
     if not isinstance(value, str) or not value or len(value) > 32:
-        _fail("invalid_filter_value", f"{field_name} must be an ISO-8601 timestamp string")
+        _fail(
+            "invalid_filter_value", f"{field_name} must be an ISO-8601 timestamp string"
+        )
     import datetime
 
     try:
@@ -295,8 +301,14 @@ def _validate_iso_timestamp(value: object, field_name: str) -> str:
 
 
 def _validate_string(value: object, field_name: str) -> str:
-    if not isinstance(value, str) or not value.strip() or len(value) > MAX_STRING_LENGTH:
-        _fail("invalid_filter_value", f"{field_name} must be a non-empty bounded string")
+    if (
+        not isinstance(value, str)
+        or not value.strip()
+        or len(value) > MAX_STRING_LENGTH
+    ):
+        _fail(
+            "invalid_filter_value", f"{field_name} must be a non-empty bounded string"
+        )
     return value.strip()  # type: ignore[return-value]
 
 
@@ -330,7 +342,10 @@ def validate_filters(payload: object) -> TaxiFilters | None:
 
     pickup_hour_min = payload.get("pickup_hour_min")
     pickup_hour_max = payload.get("pickup_hour_max")
-    for name, value in (("pickup_hour_min", pickup_hour_min), ("pickup_hour_max", pickup_hour_max)):
+    for name, value in (
+        ("pickup_hour_min", pickup_hour_min),
+        ("pickup_hour_max", pickup_hour_max),
+    ):
         if value is not None:
             hour = _validate_int(value, name)
             if not 0 <= hour <= 23:
@@ -455,7 +470,10 @@ def validate_order_by(
     key = payload.get("key")
     direction = payload.get("direction", "desc")
     if not isinstance(key, str) or key not in allowed_keys:
-        _fail("invalid_order_by", "order_by.key must be one of the requested output columns")
+        _fail(
+            "invalid_order_by",
+            "order_by.key must be one of the requested output columns",
+        )
     if direction not in ("asc", "desc"):
         _fail("invalid_order_by", "order_by.direction must be 'asc' or 'desc'")
     return OrderSpec(key=key, direction=direction)

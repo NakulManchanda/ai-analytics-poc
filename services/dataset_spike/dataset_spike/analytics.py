@@ -447,9 +447,7 @@ def describe_taxi_dataset(
         parquet_path,
         zone_csv_path,
         query=(
-            _DESCRIBE_WITH_STATS_QUERY
-            if include_column_stats
-            else _DESCRIBE_BASE_QUERY
+            _DESCRIBE_WITH_STATS_QUERY if include_column_stats else _DESCRIBE_BASE_QUERY
         ),
         query_parameters=[],
         result_limit=1,
@@ -471,9 +469,7 @@ def describe_taxi_dataset(
     stats_row = stats_result["rows"][0] if stats_result["rows"] else []
     stats = dict(zip(stats_columns, stats_row, strict=False))
 
-    columns = [
-        {"name": row[0], "type": row[1]} for row in schema_result["rows"]
-    ]
+    columns = [{"name": row[0], "type": row[1]} for row in schema_result["rows"]]
 
     result: dict[str, object] = {
         "query_class": "describe",
@@ -503,9 +499,7 @@ def describe_taxi_dataset(
         result["invalid_record_summary"] = {
             "negative_fare_count": stats.get("negative_fare_count", 0),
             "negative_total_count": stats.get("negative_total_count", 0),
-            "dropoff_before_pickup_count": stats.get(
-                "dropoff_before_pickup_count", 0
-            ),
+            "dropoff_before_pickup_count": stats.get("dropoff_before_pickup_count", 0),
         }
     return _augment_envelope(result, max_result_bytes)
 
@@ -657,10 +651,11 @@ def compare_taxi_segments(
             baseline_value = joined_row[1 + 2 * index]
             comparison_value = joined_row[2 + 2 * index]
             delta: object = None
-            if isinstance(baseline_value, (int, float)) and not isinstance(
-                baseline_value, bool
-            ) and isinstance(comparison_value, (int, float)) and not isinstance(
-                comparison_value, bool
+            if (
+                isinstance(baseline_value, (int, float))
+                and not isinstance(baseline_value, bool)
+                and isinstance(comparison_value, (int, float))
+                and not isinstance(comparison_value, bool)
             ):
                 delta = round(comparison_value - baseline_value, 4)
             row.extend([baseline_value, comparison_value, delta])
