@@ -135,7 +135,7 @@ def build_run_manifest(
     if pod_a_csv.is_file():
         try:
             for line in pod_a_csv.read_text(encoding="utf-8").strip().splitlines():
-                if "MiB" in line:
+                if "MiB" in line and not line.lower().startswith("name"):
                     parts = [p.strip() for p in line.split(",")]
                     if len(parts) >= 2:
                         gpu = parts[0]
@@ -152,7 +152,7 @@ def build_run_manifest(
     if pod_b_csv.is_file():
         try:
             for line in pod_b_csv.read_text(encoding="utf-8").strip().splitlines():
-                if "MiB" in line:
+                if "MiB" in line and not line.lower().startswith("name"):
                     parts = [p.strip() for p in line.split(",")]
                     if len(parts) >= 2:
                         b_hbm = int(parts[1].replace("MiB", "").strip()) * 1024 * 1024
