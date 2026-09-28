@@ -118,6 +118,142 @@ def build_run_manifest(
         except Exception:
             pass
 
+    # Extract inside-pod measured GPU and visible memory for each worker
+    workers_hardware: dict[str, Any] = {}
+    pod_a_hbm = None
+    pod_a_csv = out_dir / "hardware" / "pod-worker-a-nvidia-smi.csv"
+    if pod_a_csv.is_file():
+        try:
+            for line in pod_a_csv.read_text(encoding="utf-8").strip().splitlines():
+                if "MiB" in line:
+                    parts = [p.strip() for p in line.split(",")]
+                    if len(parts) >= 2:
+                        gpu = parts[0]
+                        pod_a_hbm = int(parts[1].replace("MiB", "").strip()) * 1024 * 1024
+                        workers_hardware["inference-worker-a"] = {
+                            "gpu": parts[0],
+                            "pod_visible_hbm_bytes": pod_a_hbm,
+                        }
+                        break
+        except Exception:
+            pass
+
+    pod_b_csv = out_dir / "hardware" / "pod-worker-b-nvidia-smi.csv"
+    if pod_b_csv.is_file():
+        try:
+            for line in pod_b_csv.read_text(encoding="utf-8").strip().splitlines():
+                if "MiB" in line:
+                    parts = [p.strip() for p in line.split(",")]
+                    if len(parts) >= 2:
+                        b_hbm = int(parts[1].replace("MiB", "").strip()) * 1024 * 1024
+                        workers_hardware["inference-worker-b"] = {
+                            "gpu": parts[0],
+                            "pod_visible_hbm_bytes": b_hbm,
+                        }
+                        break
+        except Exception:
+            pass
+
+    pod_hbm = pod_a_hbm if pod_a_hbm is not None else (hbm // 2)
+
+    # Extract dynamic workload dimensions from executed capacity summary if available
+    cap_summary_path = out_dir / "capacity_summary.json"
+    if cap_summary_path.is_file():
+        try:
+            cap_data = json.loads(cap_summary_path.read_text(encoding="utf-8"))
+            sweep = cap_data.get("live_sweep", [])
+            if sweep:
+                context_lengths = sorted(list(set(s["context_length_target"] for s in sweep)))
+                concurrency = max((s["concurrency"] for s in sweep), default=concurrency)
+        except Exception:
+            pass
+
+    # Extract weight loading duration from worker logs
+    weights_load_durations: dict[str, float] = {}
+    for w_name, log_name in (
+        ("inference-worker-a", "worker-a.log"),
+        ("inference-worker-b", "worker-b.log"),
+    ):
+        log_file = out_dir / "logs" / log_name
+        if log_file.is_file():
+            try:
+                for line in log_file.read_text(encoding="utf-8").splitlines():
+                    if "Loading weights took" in line:
+                        tail = line.split("Loading weights took")[-1]
+                        sec_str = tail.replace("seconds", "").strip()
+                        weights_load_durations[w_name] = float(sec_str)
+            except Exception:
+                pass
+
+    # Extract lifecycle provenance from Kubernetes pod status if available
+    lifecycle_data: dict[str, Any] = {}
+    pods_file = out_dir / "kubectl" / "pods.json"
+    if pods_file.is_file():
+        try:
+            pods_doc = json.loads(pods_file.read_text(encoding="utf-8"))
+            for pod in pods_doc.get("items", []):
+                app_label = pod.get("metadata", {}).get("labels", {}).get("app", "")
+                if app_label in ("inference-worker-a", "inference-worker-b"):
+                    statuses = pod.get("status", {}).get("containerStatuses", [])
+                    conditions = pod.get("status", {}).get("conditions", [])
+                    started_at = (
+                        statuses[0].get("state", {}).get("running", {}).get("startedAt")
+                        if statuses
+                        else None
+                    )
+                    restart_count = statuses[0].get("restartCount", 0) if statuses else 0
+                    pod_uid = pod.get("metadata", {}).get("uid", "")
+                    ready_at = None
+                    for cond in conditions:
+                        if cond.get("type") == "Ready" and cond.get("status") == "True":
+                            ready_at = cond.get("lastTransitionTime")
+                    load_sec = None
+                    if started_at and ready_at:
+                        t_start = datetime.fromisoformat(started_at.replace("Z", "+00:00"))
+                        t_ready = datetime.fromisoformat(ready_at.replace("Z", "+00:00"))
+                        load_sec = (t_ready - t_start).total_seconds()
+                    lifecycle_data[app_label] = {
+                        "pod_uid": pod_uid,
+                        "container_started_at": started_at,
+                        "ready_condition_at": ready_at,
+                        "container_start_to_ready_duration_seconds": load_sec,
+                        "weights_load_duration_seconds": weights_load_durations.get(app_label),
+                        "restart_count": restart_count,
+                    }
+        except Exception:
+            pass
+
+    # Update warmup summary with lifecycle duration and restart count if present
+    warmup_path = out_dir / "warmup_summary.json"
+    if warmup_path.is_file() and lifecycle_data:
+        try:
+            w_doc = json.loads(warmup_path.read_text(encoding="utf-8"))
+            for url, stats in w_doc.items():
+                if isinstance(stats, dict):
+                    if "18001" in url and "inference-worker-a" in lifecycle_data:
+                        stats["container_start_to_ready_duration_seconds"] = lifecycle_data[
+                            "inference-worker-a"
+                        ]["container_start_to_ready_duration_seconds"]
+                        stats["model_load_duration_seconds"] = lifecycle_data[
+                            "inference-worker-a"
+                        ]["container_start_to_ready_duration_seconds"]
+                        stats["restart_count"] = lifecycle_data["inference-worker-a"][
+                            "restart_count"
+                        ]
+                    elif "18002" in url and "inference-worker-b" in lifecycle_data:
+                        stats["container_start_to_ready_duration_seconds"] = lifecycle_data[
+                            "inference-worker-b"
+                        ]["container_start_to_ready_duration_seconds"]
+                        stats["model_load_duration_seconds"] = lifecycle_data[
+                            "inference-worker-b"
+                        ]["container_start_to_ready_duration_seconds"]
+                        stats["restart_count"] = lifecycle_data["inference-worker-b"][
+                            "restart_count"
+                        ]
+            warmup_path.write_text(json.dumps(w_doc, indent=2) + "\n", encoding="utf-8")
+        except Exception:
+            pass
+
     model_name = os.environ.get("INFERENCE_MODEL", "Qwen/Qwen3-0.6B")
     revision = os.environ.get(
         "INFERENCE_MODEL_REVISION", "c1899de289a04d12100db370d81485cdf75e47ca"
@@ -136,7 +272,15 @@ def build_run_manifest(
             request_results = candidate
             break
 
-    return {
+    hardware_payload: dict[str, Any] = {
+        "gpu": gpu,
+        "physical_hbm_bytes": hbm,
+        "pod_visible_hbm_bytes": pod_hbm,
+    }
+    if workers_hardware:
+        hardware_payload["workers"] = workers_hardware
+
+    manifest_payload: dict[str, Any] = {
         "run_id": run_id,
         "timestamp_utc": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "commit_sha": sha,
@@ -156,11 +300,7 @@ def build_run_manifest(
                 "kv_cache_dtype": "auto",
             },
         },
-        "hardware": {
-            "gpu": gpu,
-            "physical_hbm_bytes": hbm,
-            "pod_visible_hbm_bytes": hbm // 2,
-        },
+        "hardware": hardware_payload,
         "workload": {
             "seed": 120,
             "concurrency": concurrency,
@@ -173,6 +313,48 @@ def build_run_manifest(
             "worker_logs": "logs/worker-a.log",
         },
     }
+    if lifecycle_data:
+        manifest_payload["lifecycle"] = lifecycle_data
+    return manifest_payload
+
+
+def validate_evidence_integrity(output_dir: Path, manifest: Mapping[str, Any]) -> None:
+    """Perform semantic and non-empty validation on all pulled evidence artifacts."""
+    evidence = manifest.get("evidence", {})
+    for ev_name, rel_path in evidence.items():
+        full_path = output_dir / rel_path
+        if not full_path.is_file() or full_path.stat().st_size == 0:
+            raise ValueError(
+                f"Required evidence file '{ev_name}' at '{rel_path}' is missing or empty"
+            )
+
+    # Validate Prometheus scrape contents
+    for s_name in ("vllm_metrics", "dcgm_metrics"):
+        rel = evidence.get(s_name)
+        if rel and (output_dir / rel).is_file():
+            text = (output_dir / rel).read_text(encoding="utf-8")
+            if "# HELP" not in text and "# TYPE" not in text:
+                raise ValueError(
+                    f"Scrape '{s_name}' does not contain Prometheus metric definitions"
+                )
+
+    # Validate Kubernetes pods status
+    pods_file = output_dir / "kubectl" / "pods.json"
+    if pods_file.is_file():
+        doc = json.loads(pods_file.read_text(encoding="utf-8"))
+        apps = [
+            p.get("metadata", {}).get("labels", {}).get("app", "")
+            for p in doc.get("items", [])
+        ]
+        if "inference-worker-a" not in apps or "inference-worker-b" not in apps:
+            raise ValueError("kubectl/pods.json must contain both worker pods")
+
+    # Validate worker log
+    w_log = output_dir / "logs" / "worker-a.log"
+    if w_log.is_file():
+        text = w_log.read_text(encoding="utf-8")
+        if "Qwen" not in text:
+            raise ValueError("worker-a.log does not mention model Qwen")
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -183,35 +365,35 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
     manifest = build_run_manifest(args.run_id, args.output_dir)
+
+    validate_evidence_integrity(args.output_dir, manifest)
+
     manifest_path = write_run_manifest(args.output_dir, manifest)
     print(f"Wrote deterministic run manifest to {manifest_path}")
 
     # Ensure capacity summary classification is refreshed with newly pulled evidence
     cap_path = args.output_dir / "capacity_summary.json"
     if cap_path.is_file():
-        try:
-            cap_data = json.loads(cap_path.read_text(encoding="utf-8"))
-            first_lim = cap_data.get("first_limiter", "max_num_seqs_concurrency_limit")
-            ev_paths = {
-                "request_results": manifest["evidence"]["request_results"],
-                "vllm_metrics": manifest["evidence"]["vllm_metrics"],
-                "dcgm_metrics": manifest["evidence"]["dcgm_metrics"],
-                "worker_logs": manifest["evidence"]["worker_logs"],
-            }
-            if all((args.output_dir / p).is_file() for p in ev_paths.values()):
-                from infra.inference.experiments.capacity import classify_capacity_result
+        cap_data = json.loads(cap_path.read_text(encoding="utf-8"))
+        first_lim = cap_data.get("first_limiter", "undetermined")
+        ev_paths = {
+            "request_results": manifest["evidence"]["request_results"],
+            "vllm_metrics": manifest["evidence"]["vllm_metrics"],
+            "dcgm_metrics": manifest["evidence"]["dcgm_metrics"],
+            "worker_logs": manifest["evidence"]["worker_logs"],
+        }
+        from infra.inference.experiments.capacity import classify_capacity_result
 
-                res = classify_capacity_result(
-                    first_limiter=first_lim, evidence_paths=ev_paths
-                )
-                cap_data["classification"] = {
-                    "first_limiter": res.first_limiter,
-                    "classification": res.classification,
-                    "evidence_paths": res.evidence_paths,
-                }
-                cap_path.write_text(json.dumps(cap_data, indent=2) + "\n", encoding="utf-8")
-        except Exception:
-            pass
+        res = classify_capacity_result(
+            first_limiter=first_lim, evidence_paths=ev_paths
+        )
+        cap_data["classification"] = {
+            "first_limiter": res.first_limiter,
+            "classification": res.classification,
+            "evidence_paths": res.evidence_paths,
+        }
+        cap_path.write_text(json.dumps(cap_data, indent=2) + "\n", encoding="utf-8")
+        print(f"Verified and updated capacity summary classification: {res.classification}")
 
     return 0
 

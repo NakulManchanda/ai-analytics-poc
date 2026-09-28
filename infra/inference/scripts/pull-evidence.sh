@@ -35,8 +35,10 @@ ssh_cmd "
 
   # 3. GPU hardware state snapshot
   if command -v nvidia-smi >/dev/null 2>&1; then
-    nvidia-smi --query-gpu=name,memory.total,memory.used,memory.free,utilization.gpu,temperature.gpu --format=csv > \"\$EVID_DIR/hardware/nvidia-smi.csv\" 2>/dev/null || true
+    nvidia-smi --query-gpu=name,memory.total,memory.used,memory.free,utilization.gpu,temperature.gpu --format=csv > "\$EVID_DIR/hardware/nvidia-smi.csv" 2>/dev/null || true
   fi
+  kubectl exec -n '$INFERENCE_NAMESPACE' deployment/inference-worker-a -- nvidia-smi --query-gpu=name,memory.total,memory.used,memory.free --format=csv > "\$EVID_DIR/hardware/pod-worker-a-nvidia-smi.csv" 2>/dev/null || true
+  kubectl exec -n '$INFERENCE_NAMESPACE' deployment/inference-worker-b -- nvidia-smi --query-gpu=name,memory.total,memory.used,memory.free --format=csv > "\$EVID_DIR/hardware/pod-worker-b-nvidia-smi.csv" 2>/dev/null || true
 
   # 4. Scrapes for vLLM, DCGM, and Prometheus
   WORKER_A_IP=\$(kubectl get svc -n '$INFERENCE_NAMESPACE' inference-worker-a -o jsonpath='{.spec.clusterIP}' 2>/dev/null || echo '')
@@ -61,8 +63,20 @@ echo "== Pulling evidence to $LOCAL_EVIDENCE_DIR =="
 rsync -az -e "ssh -i $LAMBDA_SSH_KEY_PATH -o StrictHostKeyChecking=accept-new" \
   "$(ssh_target):$(remote_dir)/evidence/$RUN_ID/" "$LOCAL_EVIDENCE_DIR/"
 
+for required in \
+  "$LOCAL_EVIDENCE_DIR/kubectl/pods.json" \
+  "$LOCAL_EVIDENCE_DIR/logs/worker-a.log" \
+  "$LOCAL_EVIDENCE_DIR/prometheus/vllm-worker-a.prom" \
+  "$LOCAL_EVIDENCE_DIR/prometheus/dcgm.prom" \
+  "$LOCAL_EVIDENCE_DIR/hardware/pod-worker-a-nvidia-smi.csv"; do
+  if [[ ! -s "$required" ]]; then
+    echo "Error: Required evidence artifact $required is missing or empty" >&2
+    exit 1
+  fi
+done
+
 if [[ -f "$INFERENCE_ROOT/experiments/evidence.py" ]]; then
-  python3 "$INFERENCE_ROOT/experiments/evidence.py" --run-id "$RUN_ID" --output-dir "$LOCAL_EVIDENCE_DIR" || true
+  python3 "$INFERENCE_ROOT/experiments/evidence.py" --run-id "$RUN_ID" --output-dir "$LOCAL_EVIDENCE_DIR"
 fi
 
-echo "Evidence successfully pulled to $LOCAL_EVIDENCE_DIR"
+echo "Evidence successfully pulled and verified in $LOCAL_EVIDENCE_DIR"

@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
+import threading
 import time
+import uuid
 from collections.abc import Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -108,6 +111,31 @@ def _fetch_worker_metrics(endpoint: str) -> str:
         return resp.read().decode("utf-8")
 
 
+def _get_exact_token_prompt(
+    url: str, model: str, target_tokens: int, unique_id: str | None = None
+) -> tuple[list[int], str]:
+    """Generate exact token IDs using the worker vocabulary. Fails closed."""
+    prefix = f"Request-{unique_id or '0'}: " if unique_id else ""
+    base_text = prefix + "NYC taxi pickup datetime passenger count trip distance fare tip total "
+    req = Request(
+        f"{url.rstrip('/')}/tokenize",
+        data=json.dumps({"model": model, "prompt": base_text}).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urlopen(req, timeout=10) as resp:  # noqa: S310
+        data = json.loads(resp.read().decode("utf-8"))
+        tokens = data.get("tokens")
+        if not tokens:
+            raise RuntimeError(f"Tokenizer returned empty token sequence from {url}")
+    repeats = (target_tokens // len(tokens)) + 1
+    exact_tokens = (tokens * repeats)[:target_tokens]
+    token_hash = hashlib.sha256(
+        ",".join(str(t) for t in exact_tokens).encode("utf-8")
+    ).hexdigest()[:16]
+    return exact_tokens, token_hash
+
+
 def run_concurrent_load_step(
     url: str,
     model: str,
@@ -115,27 +143,43 @@ def run_concurrent_load_step(
     prompt_tokens_target: int,
     max_tokens: int = 15,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    prompt = ("NYC taxi ride analytics data " * (max(1, prompt_tokens_target // 5)))[
-        : prompt_tokens_target * 4
-    ]
-    payload = json.dumps({
-        "model": model,
-        "prompt": prompt,
-        "max_tokens": max_tokens,
-        "stream": True,
-    }).encode("utf-8")
+    # Fit strictly within max_model_len (8192)
+    if prompt_tokens_target >= 8192:
+        max_tokens = 5
+        actual_prompt_tokens = 8192 - max_tokens
+    else:
+        actual_prompt_tokens = prompt_tokens_target
+
+    # Pre-tokenize distinct unshared payloads for each worker thread to prevent prefix-cache sharing
+    payloads: list[tuple[bytes, str]] = []
+    for _ in range(concurrency):
+        req_uuid = uuid.uuid4().hex[:8]
+        toks, t_hash = _get_exact_token_prompt(
+            url, model, actual_prompt_tokens, unique_id=req_uuid
+        )
+        body = json.dumps({
+            "model": model,
+            "prompt": toks,
+            "max_tokens": max_tokens,
+            "stream": True,
+        }).encode("utf-8")
+        payloads.append((body, t_hash))
+
+    launch_barrier = threading.Barrier(concurrency)
 
     def _single_req(req_idx: int) -> dict[str, Any]:
-        start = time.perf_counter()
+        payload_bytes, prompt_hash = payloads[req_idx]
         req = Request(
             f"{url.rstrip('/')}/v1/completions",
-            data=payload,
+            data=payload_bytes,
             headers={"Content-Type": "application/json"},
             method="POST",
         )
+        launch_barrier.wait()
+        start = time.perf_counter()
         ttft_ms = None
         status = 200
-        tokens = 0
+        output_tokens = 0
         try:
             with urlopen(req, timeout=30) as resp:  # noqa: S310
                 for line in resp:
@@ -143,7 +187,7 @@ def run_concurrent_load_step(
                     if line_str.startswith("data: ") and line_str != "data: [DONE]":
                         if ttft_ms is None:
                             ttft_ms = (time.perf_counter() - start) * 1000.0
-                        tokens += 1
+                        output_tokens += 1
         except HTTPError as exc:
             status = exc.code
         except Exception:
@@ -154,31 +198,99 @@ def run_concurrent_load_step(
             "status": status,
             "ttft_ms": ttft_ms or dur_ms,
             "duration_ms": dur_ms,
-            "tokens": tokens,
+            "tokens": output_tokens,
+            "prompt_hash": prompt_hash,
+            "requested_prompt_tokens": actual_prompt_tokens,
+            "requested_output_tokens": max_tokens,
         }
+
+    peak_waiting = 0.0
+    peak_running = 0.0
+    peak_kv = 0.0
+    timeline: list[dict[str, Any]] = []
+    sample_count = 0
+    sampler_errors = 0
+    stop_event = threading.Event()
+    t_start_sync = time.perf_counter()
+
+    def _sample_metrics():
+        nonlocal peak_waiting, peak_running, peak_kv, sample_count, sampler_errors
+        while not stop_event.is_set():
+            try:
+                m_req = Request(f"{url.rstrip('/')}/metrics", method="GET")
+                with urlopen(m_req, timeout=1) as m_resp:  # noqa: S310
+                    lines = m_resp.read().decode("utf-8").splitlines()
+                cur_w = 0.0
+                cur_r = 0.0
+                cur_kv = 0.0
+                for line in lines:
+                    if line.startswith("vllm:num_requests_waiting"):
+                        cur_w = float(line.split()[-1])
+                    elif line.startswith("vllm:num_requests_running"):
+                        cur_r = float(line.split()[-1])
+                    elif line.startswith("vllm:kv_cache_usage_perc"):
+                        cur_kv = float(line.split()[-1])
+                if cur_w > peak_waiting:
+                    peak_waiting = cur_w
+                if cur_r > peak_running:
+                    peak_running = cur_r
+                if cur_kv > peak_kv:
+                    peak_kv = cur_kv
+                sample_count += 1
+                timeline.append({
+                    "t_ms": round((time.perf_counter() - t_start_sync) * 1000.0, 1),
+                    "running": cur_r,
+                    "waiting": cur_w,
+                    "kv_cache_usage_perc": cur_kv,
+                })
+            except Exception:
+                sampler_errors += 1
+            time.sleep(0.025)
+
+    sampler = threading.Thread(target=_sample_metrics)
+    sampler.start()
 
     t0 = time.perf_counter()
     with ThreadPoolExecutor(max_workers=max(1, concurrency)) as executor:
         results = list(executor.map(_single_req, range(concurrency)))
     total_time_s = time.perf_counter() - t0
 
+    stop_event.set()
+    sampler.join(timeout=2)
+
     ttfts = sorted([r["ttft_ms"] for r in results if r["status"] == 200])
-    total_tokens = sum(r["tokens"] for r in results if r["status"] == 200)
     successes = sum(1 for r in results if r["status"] == 200)
+
+    # Explicit Goodput SLO: HTTP 200 and TTFT <= 1000ms
+    qualifying_slo = [r for r in results if r["status"] == 200 and r["ttft_ms"] <= 1000.0]
+    qualifying_tokens = sum(r["tokens"] for r in qualifying_slo)
+    goodput = qualifying_tokens / total_time_s if total_time_s > 0 else 0.0
 
     p50_ttft = ttfts[len(ttfts) // 2] if ttfts else None
     p95_ttft = ttfts[int(len(ttfts) * 0.95)] if ttfts else None
-    goodput = total_tokens / total_time_s if total_time_s > 0 else 0.0
 
     step_summary = {
         "concurrency": concurrency,
         "context_length_target": prompt_tokens_target,
+        "requested_prompt_tokens": actual_prompt_tokens,
+        "actual_prompt_tokens": actual_prompt_tokens,
+        "requested_output_tokens": max_tokens,
+        "total_context": actual_prompt_tokens + max_tokens,
+        "cache_mode": "unshared_unique_prompts",
+        "sample_count": len(results),
         "success_count": successes,
         "error_count": len(results) - successes,
+        "qualifying_slo_count": len(qualifying_slo),
         "ttft_p50_ms": p50_ttft,
         "ttft_p95_ms": p95_ttft,
         "total_duration_seconds": total_time_s,
         "goodput_tokens_per_sec": goodput,
+        "peak_waiting": peak_waiting,
+        "peak_running": peak_running,
+        "peak_kv_usage": peak_kv,
+        "sampler_sample_count": sample_count,
+        "sampler_errors": sampler_errors,
+        "metric_timeline": timeline[:25],
     }
     return results, step_summary
 
@@ -199,7 +311,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     parser.add_argument(
         "--concurrencies",
-        default="1,2,4",
+        default="1,2,4,8,12,16",
         help="Comma-separated concurrency levels to test",
     )
     parser.add_argument(
@@ -234,7 +346,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     parser.add_argument(
         "--context-lengths",
-        default="512,2048",
+        default="512,2048,8192",
         help="Comma-separated context lengths (e.g. taxi p50, p95, max)",
     )
     parser.add_argument(
@@ -306,7 +418,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     all_raw_responses: list[dict[str, Any]] = []
     first_reachable = next((u for u, m in metrics_summary.items() if m.get("reachable")), None)
 
-    observed_limiter = "concurrency_saturation"
+    observed_limiter = "undetermined"
     if first_reachable:
         concurrencies = [int(x.strip()) for x in args.concurrencies.split(",") if x.strip()]
         print(f"== Running Live Capacity Sweep against {first_reachable} ==")
@@ -325,23 +437,33 @@ def main(argv: Sequence[str] | None = None) -> int:
                     errs = step_summary["error_count"]
                     p50 = step_summary["ttft_p50_ms"]
                     gp = step_summary["goodput_tokens_per_sec"]
+                    pw = step_summary.get("peak_waiting", 0.0)
                     print(
                         f"  [Context {ctx_len} tokens | Concurrency {conc}] "
                         f"success={succ}, errors={errs}, "
-                        f"p50_ttft={p50:.1f}ms, goodput={gp:.1f} tok/s"
+                        f"p50_ttft={p50:.1f}ms, goodput={gp:.1f} tok/s, peak_waiting={pw}"
                     )
-                    if step_summary["error_count"] > 0:
-                        observed_limiter = "kv_cache_capacity"
                 except Exception as exc:
                     print(f"  [Context {ctx_len} tokens | Concurrency {conc}] Error: {exc}")
 
-    # Determine first limiter
-    if any(m.get("kv_cache_usage_perc", 0) or 0 > 0.85 for m in metrics_summary.values()):
+    # Determine first limiter based on observed empirical evidence
+    peak_kv_overall = max(
+        (s.get("peak_kv_usage", 0.0) or 0.0 for s in live_sweep), default=0.0
+    )
+    peak_waiting_overall = max(
+        (s.get("peak_waiting", 0.0) or 0.0 for s in live_sweep), default=0.0
+    )
+    has_errors = any(s.get("error_count", 0) > 0 for s in live_sweep)
+
+    if peak_kv_overall > 0.85 or (has_errors and peak_kv_overall > 0.5):
         observed_limiter = "kv_cache_capacity"
-    elif any(s.get("error_count", 0) > 0 for s in live_sweep):
-        observed_limiter = "kv_cache_capacity"
-    else:
+    elif peak_waiting_overall > 0.0 or any(
+        s.get("concurrency", 0) >= 8 and (s.get("peak_running", 0.0) or 0.0) >= 8.0
+        for s in live_sweep
+    ):
         observed_limiter = "max_num_seqs_concurrency_limit"
+    else:
+        observed_limiter = "undetermined"
 
     print(f"== Observed First Limiter: {observed_limiter} ==")
 
@@ -365,8 +487,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             "dcgm_metrics": "prometheus/dcgm.prom",
             "worker_logs": "logs/worker-a.log",
         }
-        # Check if evidence files exist in output_dir
-        if all((args.output_dir / rel).is_file() for rel in evidence_paths.values()):
+        # Check if evidence files exist and are non-empty in output_dir
+        valid_evidence = all(
+            (args.output_dir / rel).is_file() and (args.output_dir / rel).stat().st_size > 0
+            for rel in evidence_paths.values()
+        )
+        if valid_evidence:
             try:
                 res = classify_capacity_result(
                     first_limiter=observed_limiter, evidence_paths=evidence_paths
@@ -384,9 +510,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         "kv_bytes_per_token": per_token,
         "kv_budget_bytes": budget_bytes,
         "paper_sequence_ceilings": {str(k): v for k, v in ceilings.items()},
+        "configured_ceiling": "max_num_seqs_concurrency_limit",
+        "first_practical_limiter": observed_limiter,
+        "first_limiter": observed_limiter,
         "workers": metrics_summary,
         "live_sweep": live_sweep,
-        "first_limiter": observed_limiter,
         "classification": classification_result,
     }
     if args.output_dir:
