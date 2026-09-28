@@ -549,7 +549,7 @@ class ServeLLMClient:
         gateway_url: str,
         model_id: str,
         *,
-        timeout_seconds: float = 30.0,
+        timeout_seconds: float = 60.0,
         tenant_id: str = "tenant-default",
         priority: str = "interactive",
         http_client: httpx.Client | None = None,

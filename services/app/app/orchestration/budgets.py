@@ -20,7 +20,7 @@ class ExecutionBudgets:
     max_iterations: int = 5
     max_llm_calls: int = 6
     max_tool_calls: int = 5
-    timeout_seconds: float = 30.0
+    timeout_seconds: float = 60.0
     max_input_tokens: int = 20_000
     max_output_tokens: int = 4_000
     max_estimated_cost_usd: float = 0.50

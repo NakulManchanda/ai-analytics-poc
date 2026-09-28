@@ -205,6 +205,11 @@ local-serve-compose: ## Start local Compose wired to owned vLLM inference gatewa
 	WEB_PORT=$(or $(WEB_PORT),3000) \
 	docker compose -f docker-compose.yml -f docker-compose.serve.yml up --build -d
 
+local-serve-app: ## Rebuild and restart only app and worker containers on the serve path
+	docker compose -f docker-compose.yml -f docker-compose.serve.yml build app worker
+	docker compose -f docker-compose.yml -f docker-compose.serve.yml up -d app worker
+	docker compose restart web
+
 local-serve-refresh: ## Restart local serve Compose stack (down then rebuild/up)
 	docker compose -f docker-compose.yml -f docker-compose.serve.yml down
 	$(MAKE) local-serve-compose

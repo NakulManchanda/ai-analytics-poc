@@ -24,7 +24,7 @@ from app.state import InMemoryStateRepository, StateRepository
 logger = logging.getLogger(__name__)
 HEARTBEAT_INTERVAL_SECONDS = 15.0
 POLL_INTERVAL_SECONDS = 0.5
-MAX_STREAM_WAIT_SECONDS = 30.0
+MAX_STREAM_WAIT_SECONDS = 60.0
 
 
 def create_events_router(
