@@ -2,11 +2,10 @@
 
 ## Goal
 
-Give the ReAct agent workload (#115) a governed analytical MCP surface broad enough that ReAct is
-not evaluated against an artificially tiny tool set, without letting any caller- or model-supplied
-SQL, column name, or file path reach DuckDB. This is Slice A only: the governed MCP analytics
-surface. Slices B (honest model calls), C (deterministic/ReAct loop) and D (eval corpus) are
-separate, independent PRs.
+Widen the governed MCP analytics surface (#115) so pre-canned queries cover a much broader set of
+analytical questions, without letting any caller- or model-supplied SQL, column name, or file path
+reach DuckDB. This work is scoped to the governed MCP analytics tools themselves; it does not add a
+ReAct loop, a classifier, or an eval corpus.
 
 ## Starting point
 
@@ -68,7 +67,8 @@ separate, independent PRs.
   `sanitize_governed_query_result`, which allowlist every field (including the new bounded
   `query_class`/`dimensions`/`measures`/`dimension`/`segment_dimension`/`tip_rate_semantics`/
   `airport_trip_rule` metadata) and re-check the byte budget after sanitization. `orchestration/loop.py`
-  and `llm.py` were intentionally not touched — Slice C wires the new tools into the agent loop.
+  and `llm.py` were intentionally not touched — wiring these tools into any future agent loop is
+  out of scope for this work.
 
 ## Verification
 
@@ -116,9 +116,10 @@ without the fix:
 
 ## Limitations / follow-ups for later slices
 
-- Slice B still owns removing the tool-strip retry and keyword fallback in `ServeLLMClient`.
-- Slice C owns wiring these four tools into the ReAct loop, the classifier, and the prefix
-  contract; nothing in `orchestration/` or `llm.py` changed here.
+- Removing the tool-strip retry and keyword fallback in `ServeLLMClient` is a separate, unrelated
+  follow-up.
+- Wiring these tools into an agent loop or any prefix contract is out of scope; nothing in
+  `orchestration/` or `llm.py` changed here.
 - `describe_taxi_dataset`'s null/invalid summary currently covers `passenger_count`, `RatecodeID`,
   `VendorID`, negative fare/total and dropoff-before-pickup counts; it does not enumerate every
   column's null count (the issue asks for "which columns have the most missing values" at the

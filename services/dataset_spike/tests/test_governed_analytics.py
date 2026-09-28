@@ -394,32 +394,37 @@ class TestEnvelopeLimits:
 
 
 def write_compare_rank_fixture(tmp_path: Path) -> tuple[Path, Path]:
-    """Three pickup zones whose baseline/comparison ranks disagree.
+    """A pickup hour whose per-side LIMIT position differs from its rank.
 
-    Zone "Common" has few card (baseline) trips but many cash (comparison)
-    trips, so a per-side LIMIT would rank it out of a card-only top-2 while
-    it ranks in the top of a cash-only top-2. Combined trip_count still puts
-    it first, so a correct single-query comparison must keep it with correct
-    values on both sides.
+    Under the OLD (pre-single-query) compare implementation, each side ran
+    its own ``GROUP BY pickup_hour ... LIMIT`` independently, and with no
+    explicit ``order_by`` the compiler's default tie-breaker ordering is
+    dimension ASC (see ``_order_clause``) -- i.e. purely by hour number, not
+    by trip_count. Hour 3 has the largest baseline count (50) but is the
+    *numerically last* of the three hours present on the baseline side
+    (1, 2, 3), so an ASC-ordered per-side ``LIMIT 2`` cuts it from the
+    baseline side while it survives (trivially, as the smallest present
+    hour) on the comparison side. A correct single combined-query
+    implementation ranks by combined trip_count and keeps hour 3 --
+    which dominates -- with its real (non-NULL) baseline value.
     """
     parquet = tmp_path / "yellow.parquet"
     zones = tmp_path / "zones.csv"
 
-    def rows_for(location_id: int, payment_type: int, count: int) -> list[str]:
+    def rows_for(hour: int, payment_type: int, count: int) -> list[str]:
         return [
-            "(TIMESTAMP '2024-01-01 08:00:00', TIMESTAMP '2024-01-01 08:10:00', "
-            f"{location_id}, 1, {payment_type}, 1.0, 1.0, 0.0, 10.0, 10.0, 1, 1)"
+            f"(TIMESTAMP '2024-01-01 {hour:02d}:00:00', "
+            f"TIMESTAMP '2024-01-01 {hour:02d}:10:00', "
+            f"1, 1, {payment_type}, 1.0, 1.0, 0.0, 10.0, 10.0, 1, 1)"
             for _ in range(count)
         ]
 
-    # location 1 = ZoneA, 2 = ZoneB, 3 = Common
     values: list[str] = []
-    values += rows_for(1, 1, 10)  # ZoneA card (baseline): 10
-    values += rows_for(2, 1, 9)  # ZoneB card (baseline): 9
-    values += rows_for(3, 1, 1)  # Common card (baseline): 1
-    values += rows_for(1, 2, 1)  # ZoneA cash (comparison): 1
-    values += rows_for(2, 2, 1)  # ZoneB cash (comparison): 1
-    values += rows_for(3, 2, 20)  # Common cash (comparison): 20
+    values += rows_for(1, 1, 1)  # hour 1, baseline (payment_type=1): 1
+    values += rows_for(2, 1, 1)  # hour 2, baseline: 1
+    values += rows_for(3, 1, 50)  # hour 3, baseline: 50 (largest, but ASC-last)
+    values += rows_for(3, 2, 50)  # hour 3, comparison (payment_type=2): 50
+    values += rows_for(4, 2, 1)  # hour 4, comparison: 1
 
     connection = duckdb.connect()
     connection.execute(
@@ -432,10 +437,7 @@ def write_compare_rank_fixture(tmp_path: Path) -> tuple[Path, Path]:
     )
     connection.close()
     zones.write_text(
-        "LocationID,Borough,Zone,service_zone\n"
-        "1,Manhattan,ZoneA,Boro Zone\n"
-        "2,Manhattan,ZoneB,Boro Zone\n"
-        "3,Manhattan,Common,Boro Zone\n"
+        "LocationID,Borough,Zone,service_zone\n1,Manhattan,ZoneA,Boro Zone\n"
     )
     return parquet, zones
 
@@ -452,21 +454,95 @@ class TestCompareTaxiSegmentsRankSafety:
         result = analytics.compare_taxi_segments(
             parquet,
             zones,
-            segment_dimension="pickup_zone",
+            segment_dimension="pickup_hour",
             measures=["trip_count"],
             baseline_filters={"payment_type": 1},
             comparison_filters={"payment_type": 2},
             limit=2,
         )
-        rows_by_zone = {row[0]: row for row in result["rows"]}
-        assert "Common" in rows_by_zone, (
-            "Common has combined trip_count 21 (highest) so it must survive "
+        rows_by_hour = {row[0]: row for row in result["rows"]}
+        assert 3 in rows_by_hour, (
+            "hour 3 has combined trip_count 100 (highest) so it must survive "
             f"the combined LIMIT; got rows: {result['rows']}"
         )
-        common_row = rows_by_zone["Common"]
-        assert common_row[1] == 1  # baseline_trip_count, not NULL
-        assert common_row[2] == 20  # comparison_trip_count, not NULL
-        assert common_row[3] == 19  # delta_trip_count
+        hour_row = rows_by_hour[3]
+        assert hour_row[1] == 50  # baseline_trip_count, not NULL
+        assert hour_row[2] == 50  # comparison_trip_count, not NULL
+        assert hour_row[3] == 0  # delta_trip_count
+
+
+def write_compare_null_key_fixture(tmp_path: Path) -> tuple[Path, Path]:
+    """Rows with a NULL RatecodeID on both baseline and comparison sides.
+
+    The FULL OUTER JOIN predicate must treat NULL rate_code as a single
+    matching key across baseline and comparison, not split it into two
+    half-empty rows (NULL = NULL is NULL/false in SQL).
+    """
+    parquet = tmp_path / "yellow.parquet"
+    zones = tmp_path / "zones.csv"
+
+    def rows_for(rate_code: str, payment_type: int, count: int) -> list[str]:
+        return [
+            "(TIMESTAMP '2024-01-01 08:00:00', TIMESTAMP '2024-01-01 08:10:00', "
+            f"1, 1, {payment_type}, 1.0, 1.0, 0.0, 10.0, 10.0, 1, {rate_code})"
+            for _ in range(count)
+        ]
+
+    values: list[str] = []
+    values += rows_for("1", 1, 5)  # RatecodeID=1, baseline (payment_type=1): 5
+    values += rows_for("1", 2, 3)  # RatecodeID=1, comparison (payment_type=2): 3
+    values += rows_for("NULL", 1, 4)  # RatecodeID=NULL, baseline: 4
+    values += rows_for("NULL", 2, 2)  # RatecodeID=NULL, comparison: 2
+
+    connection = duckdb.connect()
+    connection.execute(
+        "COPY (SELECT * FROM (VALUES " + ", ".join(values) + ") AS trips("
+        "tpep_pickup_datetime, tpep_dropoff_datetime, PULocationID, DOLocationID, "
+        "payment_type, passenger_count, trip_distance, tip_amount, fare_amount, "
+        "total_amount, VendorID, RatecodeID)"
+        ") TO ? (FORMAT PARQUET)",
+        [str(parquet)],
+    )
+    connection.close()
+    zones.write_text(
+        "LocationID,Borough,Zone,service_zone\n1,Manhattan,ZoneA,Boro Zone\n"
+    )
+    return parquet, zones
+
+
+class TestCompareTaxiSegmentsNullSafeJoin:
+    """N1: a NULL segment key must merge into one row, not split in two."""
+
+    def test_null_rate_code_merges_into_a_single_row(self, tmp_path: Path) -> None:
+        from dataset_spike import analytics
+
+        parquet, zones = write_compare_null_key_fixture(tmp_path)
+        result = analytics.compare_taxi_segments(
+            parquet,
+            zones,
+            segment_dimension="rate_code",
+            measures=["trip_count"],
+            baseline_filters={"payment_type": 1},
+            comparison_filters={"payment_type": 2},
+            limit=10,
+        )
+        rows_by_key = {row[0]: row for row in result["rows"]}
+        assert len(result["rows"]) == 2, (
+            "expected exactly one merged row per rate_code key (including "
+            f"NULL), got: {result['rows']}"
+        )
+        assert (
+            None in rows_by_key
+        ), f"NULL rate_code key must be present as a single merged row: {result['rows']}"
+        null_row = rows_by_key[None]
+        assert null_row[1] == 4  # baseline_trip_count
+        assert null_row[2] == 2  # comparison_trip_count
+        assert null_row[3] == -2  # delta_trip_count
+
+        normal_row = rows_by_key[1]
+        assert normal_row[1] == 5
+        assert normal_row[2] == 3
+        assert normal_row[3] == -2
 
 
 class TestCompareTaxiSegmentsColumnBudget:

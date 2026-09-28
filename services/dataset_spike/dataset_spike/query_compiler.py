@@ -382,7 +382,8 @@ def compile_compare_segments_query(
     sql = (
         f"WITH baseline AS ({baseline_cte}), comparison AS ({comparison_cte}) "
         f"SELECT {', '.join(select_columns)} "
-        'FROM baseline AS b FULL OUTER JOIN comparison AS c ON b."dim" = c."dim" '
+        "FROM baseline AS b FULL OUTER JOIN comparison AS c "
+        'ON b."dim" IS NOT DISTINCT FROM c."dim" '
         f"{order_sql} LIMIT ?"
     )
     parameters = list(baseline_params) + list(comparison_params) + [limit + 1]
