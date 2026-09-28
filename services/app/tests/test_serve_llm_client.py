@@ -186,6 +186,236 @@ def test_serve_llm_client_stream_answer() -> None:
     assert result.text == "There were 1,000 trips."
 
 
+def test_propose_taxi_query_400_raises_and_sends_exactly_one_request() -> None:
+    """#115 slice B: a 400 must never trigger a silent retry with tools stripped."""
+    call_count = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal call_count
+        call_count += 1
+        return httpx.Response(400, json={"error": "tool calling not enabled"})
+
+    transport = httpx.MockTransport(handler)
+    serve_client = ServeLLMClient(
+        gateway_url="http://localhost:18080/serve",
+        model_id="Qwen/Qwen3-0.6B",
+        http_client=httpx.Client(transport=transport),
+    )
+
+    with pytest.raises(LLMProviderError) as exc_info:
+        serve_client.propose_taxi_query(
+            "What are the top pickup zones?", {"columns": ["pickup_zone"]}
+        )
+    assert exc_info.value.code == "vllm_gateway_http_400"
+    assert exc_info.value.retryable is False
+    assert call_count == 1
+
+
+def test_propose_taxi_query_no_tool_calls_is_a_typed_failure_not_a_keyword_guess() -> (
+    None
+):
+    """No tool_calls in the response must never fall back to keyword-matching the
+    prompt or content; it must raise a typed, non-retryable failure."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": "I would call average_trip_metrics here.",
+                        },
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {"prompt_tokens": 40, "completion_tokens": 8},
+            },
+        )
+
+    transport = httpx.MockTransport(handler)
+    serve_client = ServeLLMClient(
+        gateway_url="http://localhost:18080/serve",
+        model_id="Qwen/Qwen3-0.6B",
+        http_client=httpx.Client(transport=transport),
+    )
+
+    with pytest.raises(LLMProviderError) as exc_info:
+        serve_client.propose_taxi_query(
+            "What is the average fare by borough?", {"columns": ["pickup_zone"]}
+        )
+    assert exc_info.value.code == "no_tool_call"
+    assert exc_info.value.retryable is False
+
+
+def test_propose_taxi_query_malformed_tool_call_arguments_is_invalid_tool_call() -> (
+    None
+):
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "tool_calls": [
+                                {
+                                    "id": "call-1",
+                                    "type": "function",
+                                    "function": {
+                                        "name": "query_taxi_data",
+                                        "arguments": "{not valid json",
+                                    },
+                                }
+                            ],
+                        }
+                    }
+                ],
+                "usage": {"prompt_tokens": 40, "completion_tokens": 8},
+            },
+        )
+
+    transport = httpx.MockTransport(handler)
+    serve_client = ServeLLMClient(
+        gateway_url="http://localhost:18080/serve",
+        model_id="Qwen/Qwen3-0.6B",
+        http_client=httpx.Client(transport=transport),
+    )
+
+    with pytest.raises(LLMProviderError) as exc_info:
+        serve_client.propose_taxi_query("top zones?", {"columns": ["pickup_zone"]})
+    assert exc_info.value.code == "invalid_tool_call"
+    assert exc_info.value.retryable is False
+
+
+def test_propose_taxi_query_disables_thinking_and_records_finish_reason() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        data = json.loads(request.content)
+        assert data["chat_template_kwargs"] == {"enable_thinking": False}
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "tool_calls": [
+                                {
+                                    "id": "call-1",
+                                    "type": "function",
+                                    "function": {
+                                        "name": "query_taxi_data",
+                                        "arguments": json.dumps(
+                                            {"analysis": "top_pickup_zones", "limit": 5}
+                                        ),
+                                    },
+                                }
+                            ]
+                        },
+                        "finish_reason": "tool_calls",
+                    }
+                ],
+                "usage": {"prompt_tokens": 80, "completion_tokens": 15},
+            },
+        )
+
+    transport = httpx.MockTransport(handler)
+    serve_client = ServeLLMClient(
+        gateway_url="http://localhost:18080/serve",
+        model_id="Qwen/Qwen3-0.6B",
+        http_client=httpx.Client(transport=transport),
+    )
+    proposal = serve_client.propose_taxi_query(
+        "top zones?", {"columns": ["pickup_zone"]}
+    )
+    assert proposal.finish_reason == "tool_calls"
+    assert proposal.configured_max_tokens == 512
+
+
+def test_ask_strips_think_block_from_non_streaming_answer() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        data = json.loads(request.content)
+        assert data["chat_template_kwargs"] == {"enable_thinking": False}
+        return httpx.Response(
+            200,
+            json={
+                "model": "Qwen/Qwen3-0.6B",
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": (
+                                "<think>the user wants a summary</think>"
+                                "Manhattan has the most pickups."
+                            ),
+                        },
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {"prompt_tokens": 50, "completion_tokens": 10},
+            },
+        )
+
+    transport = httpx.MockTransport(handler)
+    serve_client = ServeLLMClient(
+        gateway_url="http://localhost:18080/serve",
+        model_id="Qwen/Qwen3-0.6B",
+        http_client=httpx.Client(transport=transport),
+    )
+    result = serve_client.ask("Summarize", conversation_id="conv-1")
+    assert result.text == "Manhattan has the most pickups."
+    assert "<think>" not in result.text
+    assert result.finish_reason == "stop"
+    assert result.visible_answer_tokens is None
+    assert (
+        result.visible_answer_tokens_unavailable_reason
+        == "provider_did_not_report_token_split"
+    )
+
+
+def test_stream_answer_never_delivers_think_tag_split_across_chunks() -> None:
+    """A `<think>` tag split across SSE chunk boundaries must never leak into a
+    delta the stream callback receives, and first_visible_answer_ms must be measured
+    from the first VISIBLE delta, not the reasoning text."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        chunks = [
+            'data: {"choices": [{"delta": {"content": "<thi"}}]}\n\n',
+            'data: {"choices": [{"delta": {"content": "nk>reasoning here"}}]}\n\n',
+            'data: {"choices": [{"delta": {"content": "</thi"}}]}\n\n',
+            'data: {"choices": [{"delta": {"content": "nk>Manhattan wins."}}]}\n\n',
+            'data: {"choices": [{"delta": {}, "finish_reason": "stop"}]}\n\n',
+            "data: [DONE]\n\n",
+        ]
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/event-stream"},
+            content="".join(chunks).encode("utf-8"),
+        )
+
+    transport = httpx.MockTransport(handler)
+    serve_client = ServeLLMClient(
+        gateway_url="http://localhost:18080/serve",
+        model_id="Qwen/Qwen3-0.6B",
+        http_client=httpx.Client(transport=transport),
+    )
+    deltas: list[str] = []
+    result = serve_client.stream_answer_with_query_result(
+        "Summarize trips", {"row_count": 1000}, delta_callback=deltas.append
+    )
+    full_delivered = "".join(deltas)
+    assert "<think>" not in full_delivered
+    assert "</think>" not in full_delivered
+    assert "reasoning here" not in full_delivered
+    assert full_delivered == "Manhattan wins."
+    assert result.text == "Manhattan wins."
+    assert result.finish_reason == "stop"
+    assert result.first_visible_answer_ms is not None
+    assert result.ttft_ms is not None
+    assert result.ttft_ms <= result.first_visible_answer_ms
+
+
 def test_serve_llm_client_error_handling() -> None:
     # 1. 503 Service Unavailable -> retryable
     def handler_503(request: httpx.Request) -> httpx.Response:

@@ -48,6 +48,86 @@ class LLMProviderError(Exception):
         self.code = code
 
 
+_THINK_OPEN = "<think>"
+_THINK_CLOSE = "</think>"
+
+
+def split_thinking(text: str) -> tuple[str, str]:
+    """Split raw model content into (reasoning_text, visible_text) by removing any
+    ``<think>...</think>`` blocks. Used for the non-streaming path; the streaming path
+    uses `ThinkingSplitter` below to handle tags split across chunks."""
+    reasoning_parts: list[str] = []
+    visible_parts: list[str] = []
+    remaining = text
+    while True:
+        start = remaining.find(_THINK_OPEN)
+        if start == -1:
+            visible_parts.append(remaining)
+            break
+        visible_parts.append(remaining[:start])
+        after_open = remaining[start + len(_THINK_OPEN) :]
+        end = after_open.find(_THINK_CLOSE)
+        if end == -1:
+            # Unterminated <think> block: treat the remainder as reasoning.
+            reasoning_parts.append(after_open)
+            remaining = ""
+            break
+        reasoning_parts.append(after_open[:end])
+        remaining = after_open[end + len(_THINK_CLOSE) :]
+    return "".join(reasoning_parts), "".join(visible_parts)
+
+
+class ThinkingSplitter:
+    """Incrementally separates `<think>...</think>` reasoning from visible text across
+    a stream of arbitrarily-sized chunks, holding back just enough trailing text to
+    detect a tag split across a chunk boundary. Visible output from `feed()` is the
+    only text ever safe to hand to a stream callback."""
+
+    def __init__(self) -> None:
+        self._in_think = False
+        self._pending = ""
+        self.reasoning_text = ""
+
+    def feed(self, chunk: str) -> str:
+        if not chunk:
+            return ""
+        self._pending += chunk
+        visible_out: list[str] = []
+        while True:
+            tag = _THINK_CLOSE if self._in_think else _THINK_OPEN
+            idx = self._pending.find(tag)
+            if idx == -1:
+                # Hold back enough trailing characters that a tag split across the
+                # next chunk boundary can still be detected once it arrives.
+                keep = len(tag) - 1
+                if len(self._pending) > keep:
+                    released = self._pending[: len(self._pending) - keep]
+                    if self._in_think:
+                        self.reasoning_text += released
+                    else:
+                        visible_out.append(released)
+                    self._pending = self._pending[len(self._pending) - keep :]
+                break
+            released = self._pending[:idx]
+            if self._in_think:
+                self.reasoning_text += released
+            else:
+                visible_out.append(released)
+            self._pending = self._pending[idx + len(tag) :]
+            self._in_think = not self._in_think
+        return "".join(visible_out)
+
+    def flush(self) -> str:
+        """Call once the stream ends. Returns any trailing visible text that was held
+        back waiting for a possible split tag."""
+        remainder = self._pending
+        self._pending = ""
+        if self._in_think:
+            self.reasoning_text += remainder
+            return ""
+        return remainder
+
+
 @dataclass(frozen=True)
 class LLMResult:
     text: str
@@ -55,6 +135,16 @@ class LLMResult:
     input_tokens: int
     output_tokens: int
     latency_ms: int
+    finish_reason: str | None = None
+    configured_max_tokens: int | None = None
+    # Time to the first token of any kind (reasoning or visible), streaming only.
+    ttft_ms: int | None = None
+    # Time to the first user-visible (non-<think>) delta, streaming only.
+    first_visible_answer_ms: int | None = None
+    reasoning_tokens: int | None = None
+    reasoning_tokens_unavailable_reason: str | None = None
+    visible_answer_tokens: int | None = None
+    visible_answer_tokens_unavailable_reason: str | None = None
 
 
 @dataclass(frozen=True)
@@ -65,6 +155,8 @@ class ToolProposalResult:
     input_tokens: int
     output_tokens: int
     latency_ms: int
+    finish_reason: str | None = None
+    configured_max_tokens: int | None = None
 
 
 class LLMClient(Protocol):
@@ -553,6 +645,7 @@ class ServeLLMClient:
         tenant_id: str = "tenant-default",
         priority: str = "interactive",
         http_client: httpx.Client | None = None,
+        answer_thinking_enabled: bool = False,
     ) -> None:
         self._gateway_url = gateway_url.rstrip("/")
         self._model_id = model_id
@@ -560,6 +653,9 @@ class ServeLLMClient:
         self._tenant_id = tenant_id
         self._priority = priority
         self._http_client = http_client
+        # D2: structured/tool-proposal calls always disable thinking; the final answer
+        # call defaults to disabled too but is configurable via INFERENCE_ANSWER_THINKING.
+        self._answer_thinking_enabled = answer_thinking_enabled
 
     def _get_client(self) -> httpx.Client:
         if self._http_client is None:
@@ -601,6 +697,7 @@ class ServeLLMClient:
             ],
             "max_tokens": 1024,
             "stream": False,
+            "chat_template_kwargs": {"enable_thinking": self._answer_thinking_enabled},
         }
         return self._post_completion(payload, headers)
 
@@ -638,6 +735,7 @@ class ServeLLMClient:
             ],
             "max_tokens": 1024,
             "stream": False,
+            "chat_template_kwargs": {"enable_thinking": self._answer_thinking_enabled},
         }
         return self._post_completion(payload, headers)
 
@@ -703,8 +801,10 @@ class ServeLLMClient:
             "tool_choice": "auto",
             "max_tokens": 512,
             "stream": False,
+            # D2: structured/tool-proposal calls always disable thinking.
+            "chat_template_kwargs": {"enable_thinking": False},
         }
-        return self._post_tool_proposal(payload, headers, fallback_prompt=prompt)
+        return self._post_tool_proposal(payload, headers)
 
     def answer_with_query_result(
         self,
@@ -728,6 +828,7 @@ class ServeLLMClient:
             ],
             "max_tokens": 1024,
             "stream": False,
+            "chat_template_kwargs": {"enable_thinking": self._answer_thinking_enabled},
         }
         return self._post_completion(payload, headers)
 
@@ -754,6 +855,7 @@ class ServeLLMClient:
             ],
             "max_tokens": 1024,
             "stream": True,
+            "chat_template_kwargs": {"enable_thinking": self._answer_thinking_enabled},
         }
         return self._stream_completion(payload, headers, delta_callback)
 
@@ -784,39 +886,65 @@ class ServeLLMClient:
         data = response.json()
         choice = data.get("choices", [{}])[0]
         message = choice.get("message", {})
-        text = message.get("content") or choice.get("text", "")
+        raw_text = message.get("content") or choice.get("text", "")
+        finish_reason = choice.get("finish_reason")
         usage = data.get("usage", {})
         input_tokens = usage.get("prompt_tokens", 0)
         output_tokens = usage.get("completion_tokens", 0)
 
+        separate_reasoning = message.get("reasoning_content")
+        if isinstance(separate_reasoning, str) and separate_reasoning:
+            visible_text = raw_text
+        else:
+            _, visible_text = split_thinking(raw_text)
+
+        reasoning_tokens, reasoning_unavailable = self._extract_reasoning_tokens(usage)
+        visible_tokens = None
+        visible_unavailable = None
+        if reasoning_tokens is not None:
+            visible_tokens = max(0, output_tokens - reasoning_tokens)
+        else:
+            visible_unavailable = "provider_did_not_report_token_split"
+
         return LLMResult(
-            text=text,
+            text=visible_text,
             model_id=data.get("model", self._model_id),
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             latency_ms=latency_ms,
+            finish_reason=finish_reason,
+            configured_max_tokens=payload.get("max_tokens"),
+            reasoning_tokens=reasoning_tokens,
+            reasoning_tokens_unavailable_reason=reasoning_unavailable,
+            visible_answer_tokens=visible_tokens,
+            visible_answer_tokens_unavailable_reason=visible_unavailable,
         )
+
+    @staticmethod
+    def _extract_reasoning_tokens(
+        usage: Mapping[str, Any],
+    ) -> tuple[int | None, str | None]:
+        """Best-effort extraction of a provider-reported reasoning-token count.
+        Never estimates from word counts; returns (None, reason) when unavailable."""
+        details = usage.get("completion_tokens_details")
+        if isinstance(details, Mapping):
+            value = details.get("reasoning_tokens")
+            if isinstance(value, int) and not isinstance(value, bool):
+                return value, None
+        return None, "provider_did_not_report_token_split"
 
     def _post_tool_proposal(
         self,
         payload: dict[str, Any],
         headers: dict[str, str],
-        *,
-        fallback_prompt: str,
     ) -> ToolProposalResult:
+        """Exactly one HTTP request. A non-200 response, a missing tool call, or a
+        malformed tool call each become a typed, non-retryable failure -- never a
+        silent retry or a keyword-guessed tool."""
         client = self._get_client()
         start = time.monotonic()
         try:
             response = client.post(self._gateway_url, json=payload, headers=headers)
-            if response.status_code == 400 and "tools" in payload:
-                clean_payload = {
-                    k: v
-                    for k, v in payload.items()
-                    if k not in ("tools", "tool_choice")
-                }
-                response = client.post(
-                    self._gateway_url, json=clean_payload, headers=headers
-                )
         except (httpx.ConnectError, httpx.TimeoutException) as exc:
             raise LLMProviderError(
                 retryable=True, code="vllm_gateway_unavailable"
@@ -837,58 +965,31 @@ class ServeLLMClient:
         data = response.json()
         choice = data.get("choices", [{}])[0]
         message = choice.get("message", {})
+        finish_reason = choice.get("finish_reason")
         usage = data.get("usage", {})
         input_tokens = usage.get("prompt_tokens", 0)
         output_tokens = usage.get("completion_tokens", 0)
 
-        # 1. Standard OpenAI function / tool_calls structure
         tool_calls = message.get("tool_calls", [])
-        if tool_calls and isinstance(tool_calls, list):
-            call = tool_calls[0]
-            func = call.get("function", {})
-            name = func.get("name", "")
-            raw_args = func.get("arguments", {})
-            if isinstance(raw_args, str):
-                try:
-                    arguments: object = json.loads(raw_args)
-                except json.JSONDecodeError:
-                    arguments = {}
-            else:
-                arguments = raw_args
-            return ToolProposalResult(
-                name=name,
-                arguments=arguments,
-                model_id=data.get("model", self._model_id),
-                input_tokens=input_tokens,
-                output_tokens=output_tokens,
-                latency_ms=latency_ms,
-            )
+        if not tool_calls or not isinstance(tool_calls, list):
+            raise LLMProviderError(retryable=False, code="no_tool_call")
 
-        # 2. Content fallback if returned formatted text
-        content = message.get("content") or choice.get("text", "")
-        name = ""
-        arguments = None
-        if "average_trip_metrics" in content:
-            name = "average_trip_metrics"
-            arguments = {}
-        elif "query_taxi_data" in content:
-            name = "query_taxi_data"
-            arguments = {"analysis": "top_pickup_zones", "limit": 5}
+        call = tool_calls[0]
+        func = call.get("function", {})
+        name = func.get("name", "")
+        raw_args = func.get("arguments", {})
+        if isinstance(raw_args, str):
+            try:
+                arguments: object = json.loads(raw_args)
+            except json.JSONDecodeError as exc:
+                raise LLMProviderError(
+                    retryable=False, code="invalid_tool_call"
+                ) from exc
         else:
-            # Deterministic fallback heuristics based on prompt
-            norm = fallback_prompt.lower()
-            if "fare" in norm and ("borough" in norm or "region" in norm):
-                name = "average_trip_metrics"
-                arguments = {}
-            elif "hour" in norm:
-                name = "query_taxi_data"
-                arguments = {"analysis": "trip_volume_by_hour", "limit": 5}
-            elif "weekday" in norm or "distance" in norm:
-                name = "query_taxi_data"
-                arguments = {"analysis": "average_distance_by_weekday", "limit": 5}
-            else:
-                name = "query_taxi_data"
-                arguments = {"analysis": "top_pickup_zones", "limit": 5}
+            arguments = raw_args
+
+        if not isinstance(name, str) or not name:
+            raise LLMProviderError(retryable=False, code="invalid_tool_call")
 
         return ToolProposalResult(
             name=name,
@@ -897,6 +998,8 @@ class ServeLLMClient:
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             latency_ms=latency_ms,
+            finish_reason=finish_reason,
+            configured_max_tokens=payload.get("max_tokens"),
         )
 
     def _stream_completion(
@@ -911,6 +1014,25 @@ class ServeLLMClient:
         model_id = self._model_id
         input_tokens = 0
         output_tokens = 0
+        finish_reason: str | None = None
+        reasoning_tokens: int | None = None
+        splitter = ThinkingSplitter()
+        ttft_ms: int | None = None
+        first_visible_answer_ms: int | None = None
+
+        def note_ttft() -> None:
+            nonlocal ttft_ms
+            if ttft_ms is None:
+                ttft_ms = int((time.monotonic() - start) * 1000)
+
+        def emit_visible(text: str) -> None:
+            nonlocal first_visible_answer_ms
+            if not text:
+                return
+            if first_visible_answer_ms is None:
+                first_visible_answer_ms = int((time.monotonic() - start) * 1000)
+            accumulated.append(text)
+            delta_callback(text)
 
         try:
             with client.stream(
@@ -928,15 +1050,21 @@ class ServeLLMClient:
                     try:
                         data = json.loads(content_bytes)
                         choice = data.get("choices", [{}])[0]
-                        text = choice.get("message", {}).get("content") or choice.get(
-                            "text", ""
-                        )
-                        if text:
-                            accumulated.append(text)
-                            delta_callback(text)
+                        message = choice.get("message", {})
+                        finish_reason = choice.get("finish_reason")
+                        raw_text = message.get("content") or choice.get("text", "")
+                        separate_reasoning = message.get("reasoning_content")
+                        if raw_text or separate_reasoning:
+                            note_ttft()
+                        if isinstance(separate_reasoning, str) and separate_reasoning:
+                            emit_visible(raw_text)
+                        elif raw_text:
+                            emit_visible(splitter.feed(raw_text))
                         usage = data.get("usage", {})
                         input_tokens = usage.get("prompt_tokens", input_tokens)
                         output_tokens = usage.get("completion_tokens", output_tokens)
+                        rt, _ = self._extract_reasoning_tokens(usage)
+                        reasoning_tokens = rt
                     except json.JSONDecodeError:
                         pass
                 else:
@@ -955,10 +1083,17 @@ class ServeLLMClient:
                             choices = chunk.get("choices", [])
                             if choices:
                                 delta = choices[0].get("delta", {})
+                                choice_finish = choices[0].get("finish_reason")
+                                if choice_finish:
+                                    finish_reason = choice_finish
+                                reasoning_delta = delta.get("reasoning_content")
                                 content = delta.get("content", "")
+                                if reasoning_delta or content:
+                                    note_ttft()
+                                if isinstance(reasoning_delta, str) and reasoning_delta:
+                                    splitter.reasoning_text += reasoning_delta
                                 if content:
-                                    accumulated.append(content)
-                                    delta_callback(content)
+                                    emit_visible(splitter.feed(content))
                             if "usage" in chunk and chunk["usage"]:
                                 usage_dict = chunk["usage"]
                                 input_tokens = usage_dict.get(
@@ -967,6 +1102,11 @@ class ServeLLMClient:
                                 output_tokens = usage_dict.get(
                                     "completion_tokens", output_tokens
                                 )
+                                rt, _ = self._extract_reasoning_tokens(usage_dict)
+                                if rt is not None:
+                                    reasoning_tokens = rt
+                    trailing_visible = splitter.flush()
+                    emit_visible(trailing_visible)
 
         except (httpx.ConnectError, httpx.TimeoutException) as exc:
             raise LLMProviderError(
@@ -982,12 +1122,29 @@ class ServeLLMClient:
         if output_tokens == 0:
             output_tokens = max(1, len(full_text.split()))
 
+        visible_tokens = None
+        visible_unavailable = None
+        if reasoning_tokens is not None:
+            visible_tokens = max(0, output_tokens - reasoning_tokens)
+        else:
+            visible_unavailable = "provider_did_not_report_token_split"
+
         return LLMResult(
             text=full_text,
             model_id=model_id,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             latency_ms=latency_ms,
+            finish_reason=finish_reason,
+            configured_max_tokens=payload.get("max_tokens"),
+            ttft_ms=ttft_ms,
+            first_visible_answer_ms=first_visible_answer_ms,
+            reasoning_tokens=reasoning_tokens,
+            reasoning_tokens_unavailable_reason=(
+                None if reasoning_tokens is not None else "provider_did_not_report_token_split"
+            ),
+            visible_answer_tokens=visible_tokens,
+            visible_answer_tokens_unavailable_reason=visible_unavailable,
         )
 
 
@@ -1006,6 +1163,7 @@ def create_llm_client(
             gateway_url=settings.inference_gateway_url,
             model_id=settings.inference_model_id,
             http_client=http_client,
+            answer_thinking_enabled=settings.inference_answer_thinking,
         )
     settings.validate_m4_alignment()
     if budget is None:
