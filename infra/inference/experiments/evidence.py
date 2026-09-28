@@ -260,26 +260,23 @@ def build_run_manifest(
             w_doc = json.loads(warmup_path.read_text(encoding="utf-8"))
             for url, stats in w_doc.items():
                 if isinstance(stats, dict):
-                    if "18001" in url and "inference-worker-a" in lifecycle_data:
-                        stats["container_start_to_ready_duration_seconds"] = lifecycle_data[
-                            "inference-worker-a"
-                        ]["container_start_to_ready_duration_seconds"]
-                        stats["model_load_duration_seconds"] = lifecycle_data[
-                            "inference-worker-a"
-                        ]["container_start_to_ready_duration_seconds"]
-                        stats["restart_count"] = lifecycle_data["inference-worker-a"][
-                            "restart_count"
-                        ]
-                    elif "18002" in url and "inference-worker-b" in lifecycle_data:
-                        stats["container_start_to_ready_duration_seconds"] = lifecycle_data[
-                            "inference-worker-b"
-                        ]["container_start_to_ready_duration_seconds"]
-                        stats["model_load_duration_seconds"] = lifecycle_data[
-                            "inference-worker-b"
-                        ]["container_start_to_ready_duration_seconds"]
-                        stats["restart_count"] = lifecycle_data["inference-worker-b"][
-                            "restart_count"
-                        ]
+                    worker_key = None
+                    if "18001" in url or "worker-a" in url:
+                        worker_key = "inference-worker-a"
+                    elif "18002" in url or "worker-b" in url:
+                        worker_key = "inference-worker-b"
+
+                    if worker_key and worker_key in lifecycle_data:
+                        ldata = lifecycle_data[worker_key]
+                        stats["container_start_to_ready_duration_seconds"] = ldata.get(
+                            "container_start_to_ready_duration_seconds"
+                        )
+                        stats["weights_load_duration_seconds"] = ldata.get(
+                            "weights_load_duration_seconds"
+                        )
+                        stats["restart_count"] = ldata.get("restart_count", 0)
+                        # Remove misleading model_load_duration_seconds key
+                        stats.pop("model_load_duration_seconds", None)
             warmup_path.write_text(json.dumps(w_doc, indent=2) + "\n", encoding="utf-8")
         except Exception:
             pass

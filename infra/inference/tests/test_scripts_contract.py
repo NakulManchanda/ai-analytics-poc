@@ -19,6 +19,7 @@ LIFECYCLE_SCRIPTS = (
     "deploy.sh",
     "tunnel.sh",
     "smoke.sh",
+    "restart-test.sh",
     "pull-evidence.sh",
     "teardown.sh",
 )
@@ -34,6 +35,7 @@ MAKE_TARGETS = (
     "inference-tunnel",
     "inference-connect",
     "inference-smoke",
+    "inference-restart",
     "inference-warmup",
     "inference-capacity",
     "inference-run",

@@ -170,9 +170,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                                 t_start = datetime.fromisoformat(started_at.replace("Z", "+00:00"))
                                 t_ready = datetime.fromisoformat(ready_at.replace("Z", "+00:00"))
                                 load_sec = (t_ready - t_start).total_seconds()
-                                summary_dict["model_load_duration_seconds"] = load_sec
+                                summary_dict["container_start_to_ready_duration_seconds"] = load_sec
                                 print(
-                                    f"  Container start to Ready condition (model load): "
+                                    f"  Container start to Ready condition: "
                                     f"{load_sec:.1f}s"
                                 )
                 except Exception:

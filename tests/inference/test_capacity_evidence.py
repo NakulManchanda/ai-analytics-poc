@@ -223,3 +223,78 @@ def test_capacity_classification_refuses_undetermined_limiter():
             first_limiter="undetermined",
             evidence_paths=evidence_paths,
         )
+
+
+def test_determine_practical_limiters_differentiates_short_and_long_context():
+    capacity = _capacity_module()
+
+    live_sweep = [
+        # 512 context sweep: reaches max_num_seqs=8 at concurrency 16
+        {
+            "context_length_target": 512,
+            "concurrency": 8,
+            "peak_running": 4.0,
+            "peak_waiting": 0.0,
+            "peak_kv_usage": 0.03,
+            "ttft_p50_ms": 150.0,
+            "error_count": 0,
+        },
+        {
+            "context_length_target": 512,
+            "concurrency": 16,
+            "peak_running": 8.0,
+            "peak_waiting": 6.0,
+            "peak_kv_usage": 0.06,
+            "ttft_p50_ms": 250.0,
+            "error_count": 0,
+        },
+        # 8192 context sweep: queues at concurrency 8 with running=5.0
+        # (batched token / compute limit rather than 8-sequence ceiling)
+        {
+            "context_length_target": 8192,
+            "concurrency": 4,
+            "peak_running": 4.0,
+            "peak_waiting": 0.0,
+            "peak_kv_usage": 0.35,
+            "ttft_p50_ms": 800.0,
+            "error_count": 0,
+        },
+        {
+            "context_length_target": 8192,
+            "concurrency": 8,
+            "peak_running": 5.0,
+            "peak_waiting": 4.0,
+            "peak_kv_usage": 0.46,
+            "ttft_p50_ms": 950.0,
+            "error_count": 0,
+        },
+    ]
+
+    observed, by_ctx = capacity.determine_practical_limiters(live_sweep)
+
+    # 512 context reached running=8.0 before queueing
+    assert by_ctx["512"] == "max_num_seqs_concurrency_limit"
+    # 8192 context queued at running=5.0 (< 8.0)
+    assert by_ctx["8192"] == "scheduler_long_context_batched_tokens_limit"
+    # Overall first limiter occurred at concurrency 8 in 8192
+    assert observed == "scheduler_long_context_batched_tokens_limit"
+
+
+def test_determine_practical_limiters_returns_undetermined_when_no_inflection():
+    capacity = _capacity_module()
+
+    live_sweep = [
+        {
+            "context_length_target": 512,
+            "concurrency": 2,
+            "peak_running": 2.0,
+            "peak_waiting": 0.0,
+            "peak_kv_usage": 0.01,
+            "ttft_p50_ms": 100.0,
+            "error_count": 0,
+        }
+    ]
+
+    observed, by_ctx = capacity.determine_practical_limiters(live_sweep)
+    assert observed == "undetermined"
+    assert by_ctx["512"] == "none_observed"

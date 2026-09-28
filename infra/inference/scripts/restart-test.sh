@@ -26,6 +26,10 @@ OLD_POD_INFO=$(ssh_cmd "
 ")
 OLD_POD_NAME=$(echo "$OLD_POD_INFO" | awk '{print $1}')
 OLD_POD_UID=$(echo "$OLD_POD_INFO" | awk '{print $2}')
+if [[ -z "$OLD_POD_NAME" || -z "$OLD_POD_UID" || "$OLD_POD_NAME" == "unknown" || "$OLD_POD_UID" == "unknown" ]]; then
+  echo "ERROR: Failed to retrieve existing pod identity for $DEPLOYMENT in namespace $INFERENCE_NAMESPACE" >&2
+  exit 1
+fi
 echo "  Old pod name: $OLD_POD_NAME"
 echo "  Old pod UID:  $OLD_POD_UID"
 
@@ -52,6 +56,16 @@ NEW_POD_NAME=$(echo "$NEW_POD_INFO" | awk '{print $1}')
 NEW_POD_UID=$(echo "$NEW_POD_INFO" | awk '{print $2}')
 NEW_STARTED_AT=$(echo "$NEW_POD_INFO" | awk '{print $3}')
 
+if [[ -z "$NEW_POD_NAME" || -z "$NEW_POD_UID" || "$NEW_POD_NAME" == "unknown" || "$NEW_POD_UID" == "unknown" ]]; then
+  echo "ERROR: Failed to retrieve replacement pod identity for $DEPLOYMENT after rollout restart" >&2
+  exit 1
+fi
+
+if [[ "$OLD_POD_UID" == "$NEW_POD_UID" ]]; then
+  echo "ERROR: Pod UID did not change after rollout restart ($OLD_POD_UID == $NEW_POD_UID)" >&2
+  exit 1
+fi
+
 RECOVERY_DURATION=$((T_READY_EPOCH - T_START_EPOCH))
 echo "  New pod name:         $NEW_POD_NAME"
 echo "  New pod UID:          $NEW_POD_UID"
@@ -62,10 +76,12 @@ echo "  Recovery duration:    ${RECOVERY_DURATION}s"
 # 6. Post-restart smoke probe
 echo "  Running post-restart smoke check..."
 SMOKE_RESULT="passed"
-ssh_cmd "
+if ! ssh_cmd "
   WORKER_IP=\$(kubectl get svc -n '$INFERENCE_NAMESPACE' '$DEPLOYMENT' -o jsonpath='{.spec.clusterIP}')
   curl -s --fail --max-time 10 \"http://\$WORKER_IP:8000/v1/models\" >/dev/null || exit 1
-" || SMOKE_RESULT="failed"
+"; then
+  SMOKE_RESULT="failed"
+fi
 
 echo "  Post-restart smoke result: $SMOKE_RESULT"
 
@@ -102,5 +118,10 @@ $SUMMARY_JSON
 REMOTE_EOF
   fi
 "
+
+if [[ "$SMOKE_RESULT" != "passed" ]]; then
+  echo "ERROR: Post-restart smoke check failed for $DEPLOYMENT" >&2
+  exit 1
+fi
 
 echo "== Restart test completed successfully =="
