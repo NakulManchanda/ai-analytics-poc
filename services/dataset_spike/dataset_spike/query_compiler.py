@@ -26,17 +26,24 @@ from dataset_spike.query_spec import (
 
 
 def _bucket_case(column: str, edges: tuple[float, ...]) -> str:
-    branches = []
+    branches = [f"WHEN {column} IS NULL THEN 'unknown'"]
     previous = None
     for edge in edges:
         if previous is None:
             branches.append(f"WHEN {column} < {edge} THEN '<{edge}'")
         else:
-            branches.append(f"WHEN {column} < {edge} THEN '{previous}-{edge}'")
+            branches.append(f"WHEN {column} < {edge} THEN '[{previous},{edge})'")
         previous = edge
     branches.append(f"ELSE '{previous}+'")
     return "CASE " + " ".join(branches) + " END"
 
+
+_AIRPORT_TRIP_BOOL_EXPR = (
+    "coalesce("
+    "pz.Zone IN ('JFK Airport', 'LaGuardia Airport', 'Newark Airport') "
+    "OR dz.Zone IN ('JFK Airport', 'LaGuardia Airport', 'Newark Airport') "
+    "OR t.RatecodeID IN (2, 3), false)"
+)
 
 _DIMENSION_EXPRESSIONS: dict[DimensionName, str] = {
     DimensionName.PICKUP_DATE: "CAST(t.tpep_pickup_datetime AS DATE)::VARCHAR",
@@ -67,9 +74,7 @@ _DIMENSION_EXPRESSIONS: dict[DimensionName, str] = {
         "t.fare_amount", FARE_AMOUNT_BUCKET_EDGES
     ),
     DimensionName.AIRPORT_TRIP: (
-        "(pz.Zone IN ('JFK Airport', 'LaGuardia Airport', 'Newark Airport') "
-        "OR dz.Zone IN ('JFK Airport', 'LaGuardia Airport', 'Newark Airport') "
-        "OR t.RatecodeID IN (2, 3))"
+        f"CASE WHEN {_AIRPORT_TRIP_BOOL_EXPR} THEN 'airport' ELSE 'non_airport' END"
     ),
 }
 
@@ -227,8 +232,7 @@ def _compile_filters(
         clauses.append("t.fare_amount <= ?")
         parameters.append(filters.fare_amount_max)
     if filters.airport_trip is not None:
-        airport_expr = _DIMENSION_EXPRESSIONS[DimensionName.AIRPORT_TRIP]
-        clauses.append(f"{airport_expr} = ?")
+        clauses.append(f"{_AIRPORT_TRIP_BOOL_EXPR} = ?")
         parameters.append(filters.airport_trip)
 
     return clauses, parameters
@@ -321,20 +325,57 @@ def compile_compare_segments_query(
     baseline_filters: TaxiFilters,
     comparison_filters: TaxiFilters,
     limit: int,
-) -> tuple[CompiledQuery, CompiledQuery]:
-    """Two structurally identical queries (baseline, comparison) sharing dimensions/measures."""
-    baseline_spec = AggregateQuerySpec(
-        dimensions=[segment_dimension],
-        measures=measures,
-        filters=baseline_filters,
-        order_by=None,
-        limit=limit,
+) -> CompiledQuery:
+    """One query: FULL OUTER JOIN of per-segment baseline/comparison aggregates.
+
+    Both sides are grouped by the same segment dimension in the same query, so a
+    segment present on both sides is never cut from one side by an independent
+    per-side LIMIT; the combined LIMIT is applied once, after the join, over a
+    single deterministic ORDER BY.
+    """
+    zone_join = _requires_zone_join(
+        [segment_dimension], baseline_filters
+    ) or _requires_zone_join([segment_dimension], comparison_filters)
+    dim_expr = _DIMENSION_EXPRESSIONS[segment_dimension]
+    measure_selects = ", ".join(
+        f'{_MEASURE_EXPRESSIONS[measure]} AS "{measure.value}"' for measure in measures
     )
-    comparison_spec = AggregateQuerySpec(
-        dimensions=[segment_dimension],
-        measures=measures,
-        filters=comparison_filters,
-        order_by=None,
-        limit=limit,
+    from_sql = _from_clause(zone_join)
+
+    baseline_where, baseline_params = _compile_filters(baseline_filters, zone_join)
+    comparison_where, comparison_params = _compile_filters(comparison_filters, zone_join)
+    baseline_where_sql = f"WHERE {' AND '.join(baseline_where)}" if baseline_where else ""
+    comparison_where_sql = (
+        f"WHERE {' AND '.join(comparison_where)}" if comparison_where else ""
     )
-    return compile_aggregate_query(baseline_spec), compile_aggregate_query(comparison_spec)
+
+    baseline_cte = (
+        f'SELECT {dim_expr} AS "dim", {measure_selects} '
+        f"{from_sql} {baseline_where_sql} GROUP BY 1"
+    )
+    comparison_cte = (
+        f'SELECT {dim_expr} AS "dim", {measure_selects} '
+        f"{from_sql} {comparison_where_sql} GROUP BY 1"
+    )
+
+    select_columns = ['coalesce(b."dim", c."dim") AS "dim"']
+    for measure in measures:
+        select_columns.append(f'b."{measure.value}" AS "baseline_{measure.value}"')
+        select_columns.append(f'c."{measure.value}" AS "comparison_{measure.value}"')
+
+    order_measure = measures[0].value
+    order_sql = (
+        f'ORDER BY (coalesce(b."{order_measure}", 0) + coalesce(c."{order_measure}", 0)) '
+        'DESC, "dim" ASC'
+    )
+    sql = (
+        f"WITH baseline AS ({baseline_cte}), comparison AS ({comparison_cte}) "
+        f"SELECT {', '.join(select_columns)} "
+        'FROM baseline AS b FULL OUTER JOIN comparison AS c ON b."dim" = c."dim" '
+        f"{order_sql} LIMIT ?"
+    )
+    parameters = list(baseline_params) + list(comparison_params) + [limit + 1]
+    output_columns = ["dim"]
+    for measure in measures:
+        output_columns += [f"baseline_{measure.value}", f"comparison_{measure.value}"]
+    return CompiledQuery(sql=sql, parameters=parameters, output_columns=output_columns)

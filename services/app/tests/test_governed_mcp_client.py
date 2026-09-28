@@ -102,6 +102,29 @@ class TestSanitizeGovernedQueryResult:
         with pytest.raises(MCPToolError):
             sanitize_governed_query_result(payload)
 
+    def test_accepts_airport_trip_rows_shaped_as_string_labels(self) -> None:
+        # M2 regression: airport_trip must be compiled to a string label
+        # ('airport' / 'non_airport') at the SQL layer, not a Python bool,
+        # or every query using this dimension is rejected here.
+        payload = _valid_governed_query_payload()
+        payload["columns"] = ["airport_trip", "trip_count"]
+        payload["rows"] = [["airport", 3], ["non_airport", 9]]
+        payload["row_count"] = 2
+        payload["dimensions"] = ["airport_trip"]
+        payload["airport_trip_rule"] = "jfk/lga/ewr or ratecode 2/3"
+        sanitized = sanitize_governed_query_result(payload)
+        assert sanitized["rows"] == [["airport", 3], ["non_airport", 9]]
+
+    def test_rejects_a_raw_bool_row_value(self) -> None:
+        # Demonstrates the failure mode M2 fixes: a Python bool in any row
+        # value is rejected by this sanitizer before it ever reaches the LLM.
+        payload = _valid_governed_query_payload()
+        payload["columns"] = ["airport_trip", "trip_count"]
+        payload["rows"] = [[True, 3]]
+        payload["dimensions"] = ["airport_trip"]
+        with pytest.raises(MCPToolError):
+            sanitize_governed_query_result(payload)
+
 
 class TestClientRejectsBadInputBeforeNetworkCalls:
     def test_describe_rejects_non_boolean_include_column_stats(

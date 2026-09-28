@@ -21,11 +21,13 @@ from dataset_spike.query_compiler import (
     compile_dimension_values_query,
 )
 from dataset_spike.query_spec import (
+    MAX_COLUMNS,
     PAYMENT_TYPE_CODES,
     RATE_CODE_CODES,
     VENDOR_CODES,
     DimensionName,
     MeasureName,
+    QueryValidationError,
     build_aggregate_spec,
     validate_dimension,
     validate_filters,
@@ -612,43 +614,31 @@ def compare_taxi_segments(
     validated_baseline = validate_filters(baseline_filters)
     validated_comparison = validate_filters(comparison_filters)
 
-    baseline_compiled, comparison_compiled = compile_compare_segments_query(
+    output_width = 1 + 3 * len(validated_measures)
+    if output_width > MAX_COLUMNS:
+        raise QueryValidationError(
+            "invalid_column_budget",
+            f"comparison output must not exceed {MAX_COLUMNS} columns "
+            "(1 dimension + baseline/comparison/delta per measure)",
+        )
+
+    compiled = compile_compare_segments_query(
         segment_dimension=validated_dimension,
         measures=validated_measures,
         baseline_filters=validated_baseline,
         comparison_filters=validated_comparison,
         limit=validated_limit,
     )
-    baseline_result = _run_governed_query(
+    joined_result = _run_governed_query(
         parquet_path,
         zone_csv_path,
-        query=baseline_compiled.sql,
-        query_parameters=baseline_compiled.parameters,
+        query=compiled.sql,
+        query_parameters=compiled.parameters,
         result_limit=validated_limit,
         max_result_bytes=max_result_bytes,
         timeout_seconds=timeout_seconds,
         query_id_factory=query_id_factory,
     )
-    comparison_result = _run_governed_query(
-        parquet_path,
-        zone_csv_path,
-        query=comparison_compiled.sql,
-        query_parameters=comparison_compiled.parameters,
-        result_limit=validated_limit,
-        max_result_bytes=max_result_bytes,
-        timeout_seconds=timeout_seconds,
-        query_id_factory=query_id_factory,
-    )
-
-    baseline_map = {row[0]: row[1:] for row in baseline_result["rows"]}
-    comparison_map = {row[0]: row[1:] for row in comparison_result["rows"]}
-    all_keys = sorted(set(baseline_map) | set(comparison_map), key=str)
-    truncated = bool(
-        baseline_result["truncated"]
-        or comparison_result["truncated"]
-        or len(all_keys) > validated_limit
-    )
-    limited_keys = all_keys[:validated_limit]
 
     columns: list[str] = [validated_dimension.value]
     for measure in validated_measures:
@@ -659,15 +649,13 @@ def compare_taxi_segments(
         ]
 
     rows: list[list[object]] = []
-    for key in limited_keys:
-        baseline_values = baseline_map.get(key)
-        comparison_values = comparison_map.get(key)
-        row: list[object] = [key]
+    for joined_row in joined_result["rows"]:
+        # joined_row is [dim, baseline_1, comparison_1, baseline_2, comparison_2, ...]
+        dim_key = joined_row[0]
+        row: list[object] = [dim_key]
         for index in range(len(validated_measures)):
-            baseline_value = baseline_values[index] if baseline_values else None
-            comparison_value = (
-                comparison_values[index] if comparison_values else None
-            )
+            baseline_value = joined_row[1 + 2 * index]
+            comparison_value = joined_row[2 + 2 * index]
             delta: object = None
             if isinstance(baseline_value, (int, float)) and not isinstance(
                 baseline_value, bool
@@ -682,12 +670,9 @@ def compare_taxi_segments(
         "columns": columns,
         "rows": rows,
         "row_count": len(rows),
-        "execution_duration_ms": (
-            baseline_result["execution_duration_ms"]
-            + comparison_result["execution_duration_ms"]
-        ),
+        "execution_duration_ms": joined_result["execution_duration_ms"],
         "query_id": (query_id_factory or (lambda: f"query_{uuid.uuid4().hex}"))(),
-        "truncated": truncated,
+        "truncated": bool(joined_result["truncated"]),
         "query_class": "compare_segments",
         "segment_dimension": validated_dimension.value,
         "measures": [measure.value for measure in validated_measures],

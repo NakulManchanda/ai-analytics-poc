@@ -1,4 +1,4 @@
-# Work history 0065 — Governed MCP analytics tools (#115 slice A)
+# Work history 0068 — Governed MCP analytics tools (#115 slice A)
 
 ## Goal
 
@@ -17,8 +17,7 @@ separate, independent PRs.
   `query_taxi_data` (3 fixed analyses) and `average_trip_metrics(region_name?)`.
 - No typed dimension/measure/filter model existed; adding an analytical question meant hand-writing
   a new fixed SQL string.
-- Dataset facts (experiment e1, pinned Jan 2024 TLC yellow) are documented in
-  `.vscode/myfiles/115-react-workload/intent.md` and repeated in the issue: 2,964,624 rows, 18
+- Dataset facts (experiment e1, pinned Jan 2024 TLC yellow taxi trip data): 2,964,624 rows, 18
   pickups outside `[2024-01-01, 2024-02-01)`, ~37k negative fares/totals, 56 dropoff-before-pickup
   rows, and explicit "unknown" codes for `payment_type=0`, `RatecodeID=99`/null, `VendorID=6`.
 
@@ -50,9 +49,12 @@ separate, independent PRs.
   bounded metadata, truncating rows further if needed. `describe_taxi_dataset` issues two governed
   queries (aggregate stats, `DESCRIBE trips`) and merges them in Python; no additional DuckDB
   surface is exposed.
-- **`compare_taxi_segments`**: runs baseline and comparison as two independent, structurally
-  identical governed queries, then aligns them by segment key in Python and computes a per-measure
-  delta — this keeps a single small model from having to reconcile two unrelated result sets itself.
+- **`compare_taxi_segments`**: compiles baseline and comparison into two CTEs of the *same* query,
+  `FULL OUTER JOIN`ed on the segment key with one deterministic `ORDER BY` and a single `LIMIT`
+  applied after the join, then computes a per-measure delta in Python. This was originally two
+  independent, per-side-limited queries reconciled in Python by string-sorted key; that let a
+  segment ranked past the limit on only one side show a false NULL/delta (fixed in review, see
+  PR #137).
 - **MCP tools (`server.py`)**: added `describe_taxi_dataset`, `list_taxi_dimension_values`,
   `aggregate_taxi_data`, `compare_taxi_segments`, each with an injectable runner (for tests) and a
   default pinned runner. A new `_run_governed_analytics_tool` tracing wrapper catches
@@ -70,23 +72,47 @@ separate, independent PRs.
 
 ## Verification
 
-- `make dataset-test` — 41 passed (17 new tests in `services/dataset_spike/tests/test_governed_analytics.py`
+- `make dataset-test` — 47 passed (`services/dataset_spike/tests/test_governed_analytics.py`
   covering: validation-before-execution for unknown dimension/measure/filter/order-by/limit (each
   asserting the runner is never called), no-caller-string-in-SQL, `describe_taxi_dataset` exact
   date range and code dictionaries, null/invalid summaries, dimension-value listing and
   parameterized search, peak-hours aggregation, payment-type + average-tip semantics,
-  `valid_records_only` filtering, the 16-column budget, the byte envelope, and the killable
-  deadline).
-- `make mcp-test` — 20 passed (4 new tests in `services/mcp/tests/test_governed_analytics_tools.py`
-  covering tool wiring/injected runners, the structured error envelope, validation failing before
-  DuckDB, and bounded telemetry attributes; `test_protocol.py` updated for the 7-tool list).
-- `uv run --project services/app pytest services/app/tests -q` — 169 passed (9 new tests in
-  `services/app/tests/test_governed_mcp_client.py` covering both sanitizers and a
-  reject-before-network-call case).
-- `ruff check` clean on `services/dataset_spike`, `services/mcp`, `services/app`.
+  `valid_records_only` filtering, the 16-column budget (both `aggregate_taxi_data` and
+  `compare_taxi_segments`), the byte envelope, the killable deadline, `compare_taxi_segments`
+  rank-safety (a key past a per-side limit still shows correct values on both sides), NULL bucket
+  handling, and `airport_trip` three-valued-to-boolean coalescing).
+- `make mcp-test` — 20 passed (`services/mcp/tests/test_governed_analytics_tools.py` covering tool
+  wiring/injected runners, the structured error envelope, validation failing before DuckDB, and
+  bounded telemetry attributes; `test_protocol.py` updated for the 7-tool list).
+- `uv run --project services/app pytest services/app/tests -q` — 171 passed
+  (`services/app/tests/test_governed_mcp_client.py` covering both sanitizers, a
+  reject-before-network-call case, and the `airport_trip` string-label regression).
 - Not run: a real-dataset sanity script — `data/nyc-yellow-taxi-2024-01/` does not exist in this
   checkout, so the optional live-data check from the issue was skipped. All facts above come from
-  the pinned e1 experiment output already recorded in `.vscode/myfiles/115-react-workload/intent.md`.
+  the pinned e1 experiment output (2,964,624 rows; 18 pickups outside `[2024-01-01, 2024-02-01)`;
+  ~37k negative fares/totals; 56 dropoff-before-pickup rows).
+
+### Independent review fixes (PR #137, must-fix majors)
+
+A fresh read-only review flagged five mergeability blockers, each fixed with a test that fails
+without the fix:
+
+- **`compare_taxi_segments` rank safety**: baseline and comparison are now aggregated in one query
+  (two CTEs, `FULL OUTER JOIN`ed on the segment key, one deterministic `ORDER BY`, one `LIMIT`
+  after the join) instead of two independently limited/sorted queries unioned and re-sorted by
+  `str` in Python — the old approach could silently show a false NULL/delta for a segment ranked
+  past the limit on only one side.
+- **16-column cap for `compare_taxi_segments`**: `1 + 3 * len(measures)` is now validated against
+  `MAX_COLUMNS` before any query runs.
+- **NULL bucket handling**: `_bucket_case` now emits `WHEN col IS NULL THEN 'unknown'` first, and
+  mid-range labels use half-open interval notation (`[a,b)`) instead of ambiguous `a-b`.
+- **`airport_trip` boolean coercion**: every term of the airport-trip expression is wrapped in
+  `coalesce(..., false)` so a NULL zone or NULL `RatecodeID` resolves to `false`, not NULL (this
+  filter previously dropped ~5% of rows silently).
+- **`airport_trip` dimension type**: the dimension now compiles to a `CASE` expression producing
+  the string label `'airport'`/`'non_airport'` instead of a raw boolean, so the app's sanitizer
+  (which rejects Python `bool` in result rows) no longer rejects every query grouped by this
+  dimension.
 
 ## Limitations / follow-ups for later slices
 
