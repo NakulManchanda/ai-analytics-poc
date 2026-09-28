@@ -158,6 +158,8 @@ Retrieve the experiment run artifacts to local canonical storage:
 make inference-pull-evidence RUN_ID=run-20260927-01
 ```
 Evidence lands in `metrics/inference/<run-id>/` including `run-manifest.json`, scrapes, and logs.
+If the pulled run has no capacity request-results file (e.g. a cluster-snapshot-only pull), the
+`run-manifest.json` summarizer step is skipped with a clear message instead of failing.
 
 ### 8. Teardown
 When finished, tear down the remote cluster resources to stop GPU resource usage:

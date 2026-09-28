@@ -22,8 +22,8 @@ fi
 
 SOURCE="$INFERENCE_ROOT/"
 TARGET="$RDIR/"
-ssh_cmd "mkdir -p '$TARGET'"
+ssh_cmd "mkdir -p $TARGET"
 rsync -az --delete -e "ssh -i $LAMBDA_SSH_KEY_PATH -o StrictHostKeyChecking=accept-new" \
   --exclude '.env' --exclude 'credentials' --exclude 'metrics' --exclude 'services/app' \
   --exclude 'services/mcp' --exclude 'web' --exclude '*.pem' --exclude '*.key' \
-  "$SOURCE" "$(ssh_target):\"$TARGET\""
+  "$SOURCE" "$(ssh_target):$TARGET"

@@ -111,7 +111,7 @@ fi
 REMOTE_BASE="$(remote_dir)"
 # Also place on remote host so pull-evidence.sh rsyncs it
 ssh_cmd "
-  LATEST_DIR=\$(ls -td '$REMOTE_BASE'/evidence/* 2>/dev/null | head -n 1 || echo '')
+  LATEST_DIR=\$(ls -td $REMOTE_BASE/evidence/* 2>/dev/null | head -n 1 || echo '')
   if [[ -n \"\$LATEST_DIR\" ]]; then
     cat <<'REMOTE_EOF' > \"\$LATEST_DIR/restart_recovery_summary.json\"
 $SUMMARY_JSON
