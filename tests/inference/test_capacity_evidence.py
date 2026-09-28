@@ -207,3 +207,19 @@ def test_capacity_classification_marks_an_observed_limiter_as_evidenced():
     assert result.first_limiter == "kv_cache"
     assert result.classification == "evidenced"
     assert result.evidence_paths == evidence_paths
+
+
+def test_capacity_classification_refuses_undetermined_limiter():
+    capacity = _capacity_module()
+    evidence_paths = {
+        "request_results": "raw/responses.jsonl",
+        "vllm_metrics": "metrics/vllm.prom",
+        "dcgm_metrics": "metrics/dcgm.prom",
+        "worker_logs": "logs/worker-a.log",
+    }
+
+    with pytest.raises(ValueError, match="undetermined"):
+        capacity.classify_capacity_result(
+            first_limiter="undetermined",
+            evidence_paths=evidence_paths,
+        )

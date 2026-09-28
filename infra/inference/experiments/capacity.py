@@ -98,6 +98,9 @@ def classify_capacity_result(
             f"capacity classification requires evidence ({'; '.join(details)})"
         )
 
+    if first_limiter.lower() == "undetermined":
+        raise ValueError("first_limiter cannot be classified as evidenced when undetermined")
+
     return CapacityResult(
         first_limiter=first_limiter,
         classification="evidenced",
@@ -142,6 +145,7 @@ def run_concurrent_load_step(
     concurrency: int,
     prompt_tokens_target: int,
     max_tokens: int = 15,
+    repetitions: int = 2,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     # Fit strictly within max_model_len (8192)
     if prompt_tokens_target >= 8192:
@@ -149,60 +153,6 @@ def run_concurrent_load_step(
         actual_prompt_tokens = 8192 - max_tokens
     else:
         actual_prompt_tokens = prompt_tokens_target
-
-    # Pre-tokenize distinct unshared payloads for each worker thread to prevent prefix-cache sharing
-    payloads: list[tuple[bytes, str]] = []
-    for _ in range(concurrency):
-        req_uuid = uuid.uuid4().hex[:8]
-        toks, t_hash = _get_exact_token_prompt(
-            url, model, actual_prompt_tokens, unique_id=req_uuid
-        )
-        body = json.dumps({
-            "model": model,
-            "prompt": toks,
-            "max_tokens": max_tokens,
-            "stream": True,
-        }).encode("utf-8")
-        payloads.append((body, t_hash))
-
-    launch_barrier = threading.Barrier(concurrency)
-
-    def _single_req(req_idx: int) -> dict[str, Any]:
-        payload_bytes, prompt_hash = payloads[req_idx]
-        req = Request(
-            f"{url.rstrip('/')}/v1/completions",
-            data=payload_bytes,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        launch_barrier.wait()
-        start = time.perf_counter()
-        ttft_ms = None
-        status = 200
-        output_tokens = 0
-        try:
-            with urlopen(req, timeout=30) as resp:  # noqa: S310
-                for line in resp:
-                    line_str = line.decode("utf-8").strip()
-                    if line_str.startswith("data: ") and line_str != "data: [DONE]":
-                        if ttft_ms is None:
-                            ttft_ms = (time.perf_counter() - start) * 1000.0
-                        output_tokens += 1
-        except HTTPError as exc:
-            status = exc.code
-        except Exception:
-            status = 500
-        dur_ms = (time.perf_counter() - start) * 1000.0
-        return {
-            "req_idx": req_idx,
-            "status": status,
-            "ttft_ms": ttft_ms or dur_ms,
-            "duration_ms": dur_ms,
-            "tokens": output_tokens,
-            "prompt_hash": prompt_hash,
-            "requested_prompt_tokens": actual_prompt_tokens,
-            "requested_output_tokens": max_tokens,
-        }
 
     peak_waiting = 0.0
     peak_running = 0.0
@@ -250,49 +200,133 @@ def run_concurrent_load_step(
     sampler = threading.Thread(target=_sample_metrics)
     sampler.start()
 
+    all_results: list[dict[str, Any]] = []
     t0 = time.perf_counter()
-    with ThreadPoolExecutor(max_workers=max(1, concurrency)) as executor:
-        results = list(executor.map(_single_req, range(concurrency)))
+
+    for rep in range(max(1, repetitions)):
+        payloads: list[tuple[bytes, str]] = []
+        for _ in range(concurrency):
+            req_uuid = uuid.uuid4().hex[:8]
+            toks, t_hash = _get_exact_token_prompt(
+                url, model, actual_prompt_tokens, unique_id=req_uuid
+            )
+            body = json.dumps({
+                "model": model,
+                "prompt": toks,
+                "max_tokens": max_tokens,
+                "stream": True,
+                "stream_options": {"include_usage": True},
+            }).encode("utf-8")
+            payloads.append((body, t_hash))
+
+        launch_barrier = threading.Barrier(concurrency)
+
+        def _single_req(
+            req_idx: int,
+            payload_list: list[tuple[bytes, str]] = payloads,
+            barrier: threading.Barrier = launch_barrier,
+            rep_idx: int = rep,
+        ) -> dict[str, Any]:
+            payload_bytes, prompt_hash = payload_list[req_idx]
+            req = Request(
+                f"{url.rstrip('/')}/v1/completions",
+                data=payload_bytes,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            barrier.wait()
+            start = time.perf_counter()
+            ttft_ms = None
+            status = 200
+            output_tokens = 0
+            fallback_chunks = 0
+            try:
+                with urlopen(req, timeout=30) as resp:  # noqa: S310
+                    for line in resp:
+                        line_str = line.decode("utf-8").strip()
+                        if line_str.startswith("data: ") and line_str != "data: [DONE]":
+                            try:
+                                chunk = json.loads(line_str[6:])
+                                if ttft_ms is None and chunk.get("choices"):
+                                    ttft_ms = (time.perf_counter() - start) * 1000.0
+                                if chunk.get("usage") and "completion_tokens" in chunk["usage"]:
+                                    output_tokens = int(chunk["usage"]["completion_tokens"])
+                                elif output_tokens == 0 and chunk.get("choices"):
+                                    text = chunk["choices"][0].get("text", "")
+                                    if text:
+                                        fallback_chunks += 1
+                            except Exception:
+                                fallback_chunks += 1
+            except HTTPError as exc:
+                status = exc.code
+            except Exception:
+                status = 500
+            if output_tokens == 0:
+                output_tokens = fallback_chunks
+            dur_ms = (time.perf_counter() - start) * 1000.0
+            return {
+                "rep": rep_idx,
+                "req_idx": req_idx,
+                "status": status,
+                "ttft_ms": ttft_ms or dur_ms,
+                "duration_ms": dur_ms,
+                "tokens": output_tokens,
+                "prompt_hash": prompt_hash,
+                "requested_prompt_tokens": actual_prompt_tokens,
+                "requested_output_tokens": max_tokens,
+            }
+
+        with ThreadPoolExecutor(max_workers=max(1, concurrency)) as executor:
+            batch_results = list(executor.map(_single_req, range(concurrency)))
+        all_results.extend(batch_results)
+
     total_time_s = time.perf_counter() - t0
 
     stop_event.set()
     sampler.join(timeout=2)
 
-    ttfts = sorted([r["ttft_ms"] for r in results if r["status"] == 200])
-    successes = sum(1 for r in results if r["status"] == 200)
+    ttfts = sorted([r["ttft_ms"] for r in all_results if r["status"] == 200])
+    successes = sum(1 for r in all_results if r["status"] == 200)
 
-    # Explicit Goodput SLO: HTTP 200 and TTFT <= 1000ms
-    qualifying_slo = [r for r in results if r["status"] == 200 and r["ttft_ms"] <= 1000.0]
+    # Explicit Goodput SLO: HTTP 200, TTFT <= 1000ms, total duration <= 10000ms
+    qualifying_slo = [
+        r
+        for r in all_results
+        if r["status"] == 200 and r["ttft_ms"] <= 1000.0 and r["duration_ms"] <= 10000.0
+    ]
     qualifying_tokens = sum(r["tokens"] for r in qualifying_slo)
-    goodput = qualifying_tokens / total_time_s if total_time_s > 0 else 0.0
+    goodput_tokens = qualifying_tokens / total_time_s if total_time_s > 0 else 0.0
+    goodput_reqs = len(qualifying_slo) / total_time_s if total_time_s > 0 else 0.0
 
     p50_ttft = ttfts[len(ttfts) // 2] if ttfts else None
     p95_ttft = ttfts[int(len(ttfts) * 0.95)] if ttfts else None
 
     step_summary = {
         "concurrency": concurrency,
+        "repetitions": repetitions,
         "context_length_target": prompt_tokens_target,
         "requested_prompt_tokens": actual_prompt_tokens,
         "actual_prompt_tokens": actual_prompt_tokens,
         "requested_output_tokens": max_tokens,
         "total_context": actual_prompt_tokens + max_tokens,
         "cache_mode": "unshared_unique_prompts",
-        "sample_count": len(results),
+        "sample_count": len(all_results),
         "success_count": successes,
-        "error_count": len(results) - successes,
+        "error_count": len(all_results) - successes,
         "qualifying_slo_count": len(qualifying_slo),
         "ttft_p50_ms": p50_ttft,
         "ttft_p95_ms": p95_ttft,
         "total_duration_seconds": total_time_s,
-        "goodput_tokens_per_sec": goodput,
+        "goodput_tokens_per_sec": goodput_tokens,
+        "goodput_requests_per_sec": goodput_reqs,
         "peak_waiting": peak_waiting,
         "peak_running": peak_running,
         "peak_kv_usage": peak_kv,
         "sampler_sample_count": sample_count,
         "sampler_errors": sampler_errors,
-        "metric_timeline": timeline[:25],
+        "metric_timeline": timeline[:50],
     }
-    return results, step_summary
+    return all_results, step_summary
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -313,6 +347,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--concurrencies",
         default="1,2,4,8,12,16",
         help="Comma-separated concurrency levels to test",
+    )
+    parser.add_argument(
+        "--repetitions",
+        type=int,
+        default=2,
+        help="Repetitions per concurrency and context setting (default 2)",
     )
     parser.add_argument(
         "--layers",
@@ -421,7 +461,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     observed_limiter = "undetermined"
     if first_reachable:
         concurrencies = [int(x.strip()) for x in args.concurrencies.split(",") if x.strip()]
-        print(f"== Running Live Capacity Sweep against {first_reachable} ==")
+        print(
+            f"== Running Live Capacity Sweep against {first_reachable} "
+            f"(repetitions={args.repetitions}) =="
+        )
         for ctx_len in context_lengths:
             for conc in concurrencies:
                 try:
@@ -430,6 +473,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                         model=args.model,
                         concurrency=conc,
                         prompt_tokens_target=ctx_len,
+                        repetitions=args.repetitions,
                     )
                     live_sweep.append(step_summary)
                     all_raw_responses.extend(req_results)
@@ -440,23 +484,42 @@ def main(argv: Sequence[str] | None = None) -> int:
                     pw = step_summary.get("peak_waiting", 0.0)
                     print(
                         f"  [Context {ctx_len} tokens | Concurrency {conc}] "
-                        f"success={succ}, errors={errs}, "
-                        f"p50_ttft={p50:.1f}ms, goodput={gp:.1f} tok/s, peak_waiting={pw}"
+                        f"samples={step_summary['sample_count']}, success={succ}, errors={errs}, "
+                        f"p50_ttft={(p50 or 0):.1f}ms, goodput={gp:.1f} tok/s, peak_waiting={pw}"
                     )
                 except Exception as exc:
                     print(f"  [Context {ctx_len} tokens | Concurrency {conc}] Error: {exc}")
 
-    # Determine first limiter based on observed empirical evidence
-    peak_kv_overall = max(
-        (s.get("peak_kv_usage", 0.0) or 0.0 for s in live_sweep), default=0.0
-    )
+    # Determine first practical limiter based on observed empirical evidence
     peak_waiting_overall = max(
         (s.get("peak_waiting", 0.0) or 0.0 for s in live_sweep), default=0.0
     )
-    has_errors = any(s.get("error_count", 0) > 0 for s in live_sweep)
 
-    if peak_kv_overall > 0.85 or (has_errors and peak_kv_overall > 0.5):
+    earliest_kv_conc = min(
+        (s["concurrency"] for s in live_sweep if (s.get("peak_kv_usage", 0.0) or 0.0) > 0.85),
+        default=None,
+    )
+    earliest_queue_conc = min(
+        (s["concurrency"] for s in live_sweep if (s.get("peak_waiting", 0.0) or 0.0) > 0.0),
+        default=None,
+    )
+    earliest_slo_breach_conc = min(
+        (
+            s["concurrency"]
+            for s in live_sweep
+            if ((s.get("ttft_p50_ms") or 0.0) > 1000.0 or s.get("error_count", 0) > 0)
+        ),
+        default=None,
+    )
+
+    if earliest_kv_conc is not None:
         observed_limiter = "kv_cache_capacity"
+    elif earliest_queue_conc is not None and (
+        earliest_slo_breach_conc is None or earliest_queue_conc <= earliest_slo_breach_conc
+    ):
+        observed_limiter = "max_num_seqs_concurrency_limit"
+    elif earliest_slo_breach_conc is not None:
+        observed_limiter = "ttft_slo_breach_compute_contention"
     elif peak_waiting_overall > 0.0 or any(
         s.get("concurrency", 0) >= 8 and (s.get("peak_running", 0.0) or 0.0) >= 8.0
         for s in live_sweep
@@ -465,7 +528,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     else:
         observed_limiter = "undetermined"
 
-    print(f"== Observed First Limiter: {observed_limiter} ==")
+    print("== Configured Ceiling: max_num_seqs=8 ==")
+    print(f"== Observed First Practical Limiter: {observed_limiter} ==")
 
     classification_result = None
     if args.output_dir:
@@ -510,9 +574,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         "kv_bytes_per_token": per_token,
         "kv_budget_bytes": budget_bytes,
         "paper_sequence_ceilings": {str(k): v for k, v in ceilings.items()},
-        "configured_ceiling": "max_num_seqs_concurrency_limit",
+        "configured_ceiling": {"parameter": "max_num_seqs", "value": 8},
         "first_practical_limiter": observed_limiter,
         "first_limiter": observed_limiter,
+        "limiter_basis": "unshared_capacity_sweep",
+        "cache_mode": "unshared_unique_prompts",
+        "slo_criteria": {
+            "max_ttft_ms": 1000.0,
+            "max_duration_ms": 10000.0,
+            "status": 200,
+        },
         "workers": metrics_summary,
         "live_sweep": live_sweep,
         "classification": classification_result,

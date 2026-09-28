@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import subprocess
@@ -80,6 +81,15 @@ def write_run_manifest(output_dir: str | Path, manifest: Mapping[str, Any]) -> P
     return destination
 
 
+def _compute_bundle_digest(bundle_dir: Path) -> str:
+    hasher = hashlib.sha256()
+    for p in sorted(bundle_dir.rglob("*")):
+        if p.is_file() and not p.name.startswith(".") and "__pycache__" not in p.parts:
+            hasher.update(p.relative_to(bundle_dir).as_posix().encode("utf-8"))
+            hasher.update(p.read_bytes())
+    return hasher.hexdigest()
+
+
 def build_run_manifest(
     run_id: str,
     output_dir: str | Path,
@@ -154,7 +164,17 @@ def build_run_manifest(
         except Exception:
             pass
 
-    pod_hbm = pod_a_hbm if pod_a_hbm is not None else (hbm // 2)
+    if (out_dir / "hardware").is_dir() and (
+        pod_a_hbm is None or "inference-worker-b" not in workers_hardware
+    ):
+        raise ValueError(
+            "Hardware evidence directory is present but missing valid inside-pod "
+            "nvidia-smi measurements for both workers"
+        )
+    fallback_hbm = (
+        physical_hbm_bytes // 2 if physical_hbm_bytes else hbm // 2
+    )
+    pod_hbm = pod_a_hbm if pod_a_hbm is not None else fallback_hbm
 
     # Extract dynamic workload dimensions from executed capacity summary if available
     cap_summary_path = out_dir / "capacity_summary.json"
@@ -223,6 +243,16 @@ def build_run_manifest(
         except Exception:
             pass
 
+    # Extract restart recovery summary if present
+    restart_path = out_dir / "restart_recovery_summary.json"
+    if restart_path.is_file():
+        try:
+            lifecycle_data["restart_recovery"] = json.loads(
+                restart_path.read_text(encoding="utf-8")
+            )
+        except Exception:
+            pass
+
     # Update warmup summary with lifecycle duration and restart count if present
     warmup_path = out_dir / "warmup_summary.json"
     if warmup_path.is_file() and lifecycle_data:
@@ -280,10 +310,30 @@ def build_run_manifest(
     if workers_hardware:
         hardware_payload["workers"] = workers_hardware
 
+    git_clean = False
+    try:
+        git_clean = (
+            len(
+                subprocess.check_output(
+                    ["git", "status", "--porcelain"], text=True
+                ).strip()
+            )
+            == 0
+        )
+    except Exception:
+        pass
+
+    bundle_path = Path(__file__).resolve().parent.parent
+    bundle_digest = _compute_bundle_digest(bundle_path)
+
     manifest_payload: dict[str, Any] = {
         "run_id": run_id,
         "timestamp_utc": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "commit_sha": sha,
+        "provenance": {
+            "git_clean": git_clean,
+            "bundle_sha256": bundle_digest,
+        },
         "model": {
             "name": model_name,
             "revision": revision,
@@ -338,23 +388,93 @@ def validate_evidence_integrity(output_dir: Path, manifest: Mapping[str, Any]) -
                     f"Scrape '{s_name}' does not contain Prometheus metric definitions"
                 )
 
-    # Validate Kubernetes pods status
-    pods_file = output_dir / "kubectl" / "pods.json"
-    if pods_file.is_file():
-        doc = json.loads(pods_file.read_text(encoding="utf-8"))
-        apps = [
-            p.get("metadata", {}).get("labels", {}).get("app", "")
-            for p in doc.get("items", [])
-        ]
-        if "inference-worker-a" not in apps or "inference-worker-b" not in apps:
-            raise ValueError("kubectl/pods.json must contain both worker pods")
+    # Validate Prometheus vLLM metrics for worker a and b
+    for p_name in ("prometheus/vllm-worker-a.prom", "prometheus/vllm-worker-b.prom"):
+        p_path = output_dir / p_name
+        if p_path.is_file():
+            p_text = p_path.read_text(encoding="utf-8")
+            if not any(
+                k in p_text
+                for k in (
+                    "vllm:num_requests_running",
+                    "vllm:kv_cache_usage_perc",
+                    "vllm:prompt_tokens_total",
+                    "python_gc_objects_collected_total",
+                )
+            ):
+                raise ValueError(
+                    f"Scrape '{p_name}' does not contain expected vLLM metric families"
+                )
 
-    # Validate worker log
-    w_log = output_dir / "logs" / "worker-a.log"
-    if w_log.is_file():
-        text = w_log.read_text(encoding="utf-8")
-        if "Qwen" not in text:
-            raise ValueError("worker-a.log does not mention model Qwen")
+    # Validate Prometheus DCGM metrics
+    dcgm_path = output_dir / "prometheus" / "dcgm.prom"
+    if dcgm_path.is_file():
+        dcgm_text = dcgm_path.read_text(encoding="utf-8")
+        if "DCGM_FI_DEV_GPU_UTIL" not in dcgm_text and "DCGM_" not in dcgm_text:
+            raise ValueError("dcgm.prom does not contain expected DCGM metric families")
+
+    # Validate Kubernetes resource files
+    for k8s_name in ("pods.json", "deployments.json", "services.json"):
+        k8s_path = output_dir / "kubectl" / k8s_name
+        if k8s_path.is_file():
+            try:
+                k8s_doc = json.loads(k8s_path.read_text(encoding="utf-8"))
+            except Exception as exc:
+                raise ValueError(f"kubectl/{k8s_name} is not valid JSON: {exc}") from exc
+            if k8s_name == "pods.json":
+                apps = [
+                    p.get("metadata", {}).get("labels", {}).get("app", "")
+                    for p in k8s_doc.get("items", [])
+                ]
+                if "inference-worker-a" not in apps or "inference-worker-b" not in apps:
+                    raise ValueError("kubectl/pods.json must contain both worker pods")
+            elif k8s_name == "deployments.json":
+                dep_names = [
+                    d.get("metadata", {}).get("name", "")
+                    for d in k8s_doc.get("items", [])
+                ]
+                if (
+                    "inference-worker-a" not in dep_names
+                    or "inference-worker-b" not in dep_names
+                ):
+                    raise ValueError(
+                        "kubectl/deployments.json must contain both worker deployments"
+                    )
+
+    # Validate inside-pod GPU hardware files for both workers
+    for pod_csv_name in (
+        "hardware/pod-worker-a-nvidia-smi.csv",
+        "hardware/pod-worker-b-nvidia-smi.csv",
+    ):
+        pod_csv = output_dir / pod_csv_name
+        if pod_csv.is_file():
+            csv_text = pod_csv.read_text(encoding="utf-8")
+            if "MiB" not in csv_text:
+                raise ValueError(f"{pod_csv_name} does not contain valid GPU memory info")
+
+    # Validate worker logs
+    for log_name in ("worker-a.log", "worker-b.log"):
+        w_log = output_dir / "logs" / log_name
+        if w_log.is_file():
+            text = w_log.read_text(encoding="utf-8")
+            if "qwen" not in text.lower():
+                deps_file = output_dir / "kubectl" / "deployments.json"
+                if not (
+                    deps_file.is_file()
+                    and "qwen" in deps_file.read_text(encoding="utf-8").lower()
+                ):
+                    raise ValueError(f"logs/{log_name} does not mention model Qwen")
+
+    # Validate capacity summary consistency if present
+    cap_path = output_dir / "capacity_summary.json"
+    if cap_path.is_file():
+        cap_doc = json.loads(cap_path.read_text(encoding="utf-8"))
+        first_limiter = cap_doc.get("first_practical_limiter") or cap_doc.get("first_limiter")
+        if not first_limiter or first_limiter.lower() == "undetermined":
+            raise ValueError(
+                "capacity_summary.json has undetermined first_limiter; "
+                "cannot receive evidenced classification"
+            )
 
 
 def main(argv: Sequence[str] | None = None) -> int:

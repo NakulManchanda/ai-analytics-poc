@@ -29,9 +29,9 @@ ssh_cmd "
   kubectl get svc -n '$INFERENCE_NAMESPACE' -o json > \"\$EVID_DIR/kubectl/services.json\" 2>/dev/null || true
 
   # 2. Worker and observability logs
-  kubectl logs -n '$INFERENCE_NAMESPACE' -l app=inference-worker-a --tail=1000 > \"\$EVID_DIR/logs/worker-a.log\" 2>/dev/null || true
-  kubectl logs -n '$INFERENCE_NAMESPACE' -l app=inference-worker-b --tail=1000 > \"\$EVID_DIR/logs/worker-b.log\" 2>/dev/null || true
-  kubectl logs -n '$INFERENCE_NAMESPACE' -l app=dcgm-exporter --tail=500 > \"\$EVID_DIR/logs/dcgm-exporter.log\" 2>/dev/null || true
+  kubectl logs -n '$INFERENCE_NAMESPACE' -l app=inference-worker-a --tail=20000 > \"\$EVID_DIR/logs/worker-a.log\" 2>/dev/null || true
+  kubectl logs -n '$INFERENCE_NAMESPACE' -l app=inference-worker-b --tail=20000 > \"\$EVID_DIR/logs/worker-b.log\" 2>/dev/null || true
+  kubectl logs -n '$INFERENCE_NAMESPACE' -l app=dcgm-exporter --tail=5000 > \"\$EVID_DIR/logs/dcgm-exporter.log\" 2>/dev/null || true
 
   # 3. GPU hardware state snapshot
   if command -v nvidia-smi >/dev/null 2>&1; then
@@ -66,9 +66,12 @@ rsync -az -e "ssh -i $LAMBDA_SSH_KEY_PATH -o StrictHostKeyChecking=accept-new" \
 for required in \
   "$LOCAL_EVIDENCE_DIR/kubectl/pods.json" \
   "$LOCAL_EVIDENCE_DIR/logs/worker-a.log" \
+  "$LOCAL_EVIDENCE_DIR/logs/worker-b.log" \
   "$LOCAL_EVIDENCE_DIR/prometheus/vllm-worker-a.prom" \
+  "$LOCAL_EVIDENCE_DIR/prometheus/vllm-worker-b.prom" \
   "$LOCAL_EVIDENCE_DIR/prometheus/dcgm.prom" \
-  "$LOCAL_EVIDENCE_DIR/hardware/pod-worker-a-nvidia-smi.csv"; do
+  "$LOCAL_EVIDENCE_DIR/hardware/pod-worker-a-nvidia-smi.csv" \
+  "$LOCAL_EVIDENCE_DIR/hardware/pod-worker-b-nvidia-smi.csv"; do
   if [[ ! -s "$required" ]]; then
     echo "Error: Required evidence artifact $required is missing or empty" >&2
     exit 1

@@ -10,7 +10,7 @@ OBSERVABILITY_PROMETHEUS_PORT ?= 19090
 OBSERVABILITY_BURST_COUNT ?= 10
 OBSERVABILITY_LOG_TAIL ?= 200
 
-.PHONY: help check-bootstrap dev mcp-dev mcp-smoke dataset-test dataset-smoke smoke test mcp-test infra-test web-test compose-smoke observability-up observability-down observability-smoke observability-dev-up observability-dev-info observability-dev-ask observability-dev-burst observability-dev-metrics observability-dev-logs observability-dev-down local-aws-compose local-aws-refresh local-bedrock-compose bedrock-smoke m5-bedrock-smoke m6-bedrock-smoke dashboard tf-dispatch tf-resume tf-park inference-validate inference-sync inference-config inference-secret inference-bootstrap inference-deploy inference-up inference-tunnel inference-connect inference-smoke inference-warmup inference-capacity inference-run inference-pull-evidence inference-teardown
+.PHONY: help check-bootstrap dev mcp-dev mcp-smoke dataset-test dataset-smoke smoke test mcp-test infra-test web-test compose-smoke observability-up observability-down observability-smoke observability-dev-up observability-dev-info observability-dev-ask observability-dev-burst observability-dev-metrics observability-dev-logs observability-dev-down local-aws-compose local-aws-refresh local-bedrock-compose bedrock-smoke m5-bedrock-smoke m6-bedrock-smoke dashboard tf-dispatch tf-resume tf-park inference-validate inference-sync inference-config inference-secret inference-bootstrap inference-deploy inference-up inference-tunnel inference-connect inference-smoke inference-warmup inference-capacity inference-restart inference-run inference-pull-evidence inference-teardown
 
 
 help: ## Show available commands
@@ -74,6 +74,10 @@ inference-warmup: ## Run the issue #120 warmup runner
 inference-capacity: ## Run the issue #120 capacity runner
 	@mkdir -p $(INFERENCE_LOG_DIR) $(INFERENCE_RUN_DIR)/raw
 	@set -o pipefail; python3 infra/inference/experiments/capacity.py --output-dir $(INFERENCE_RUN_DIR) 2>&1 | tee $(INFERENCE_LOG_DIR)/capacity.log
+
+inference-restart: ## Run a deliberate worker restart and recovery test
+	@mkdir -p $(INFERENCE_LOG_DIR) $(INFERENCE_RUN_DIR)
+	@set -o pipefail; bash infra/inference/scripts/restart-test.sh inference-worker-b $(INFERENCE_RUN_DIR) 2>&1 | tee $(INFERENCE_LOG_DIR)/restart-test.log
 
 inference-run: inference-smoke inference-warmup inference-capacity inference-pull-evidence ## Run #120 measurements and pull evidence
 	@python3 infra/inference/experiments/evidence.py --run-id $(INFERENCE_RUN_ID) --output-dir $(INFERENCE_RUN_DIR)
