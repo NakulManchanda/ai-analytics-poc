@@ -27,6 +27,8 @@ def format_cloudwatch_emf(
     input_tokens: int = 0,
     output_tokens: int = 0,
     estimated_cost_usd: float = 0.0,
+    cost_source: str = "bedrock_estimate",
+    llm_calls: list[dict[str, Any]] | None = None,
     timestamp: datetime | None = None,
 ) -> dict[str, Any]:
     """Format run execution metrics into AWS CloudWatch Embedded Metric Format (EMF)."""
@@ -88,6 +90,8 @@ def format_cloudwatch_emf(
         "output_tokens": output_tokens,
         "total_tokens": input_tokens + output_tokens,
         "estimated_cost_usd": estimated_cost_usd,
+        "cost_source": cost_source,
+        "llm_calls": llm_calls or [],
         "timestamp": now.isoformat(),
     }
     if end_to_end_latency_ms is not None:
@@ -116,6 +120,8 @@ def emit_run_metrics(
     input_tokens: int = 0,
     output_tokens: int = 0,
     estimated_cost_usd: float = 0.0,
+    cost_source: str = "bedrock_estimate",
+    llm_calls: list[dict[str, Any]] | None = None,
     metrics_file: str | None = None,
 ) -> dict[str, Any]:
     """Emit EMF to stdout and optionally append to a local JSONL sink."""
@@ -144,6 +150,8 @@ def emit_run_metrics(
         input_tokens=input_tokens,
         output_tokens=output_tokens,
         estimated_cost_usd=estimated_cost_usd,
+        cost_source=cost_source,
+        llm_calls=llm_calls,
     )
 
     # 1. 12-factor stdout log for CloudWatch / container runtime

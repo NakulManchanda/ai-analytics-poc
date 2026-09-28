@@ -362,3 +362,115 @@ def test_parse_query_proposal_average_trip_metrics() -> None:
         "average_trip_metrics",
         {"region_name": "Queens"},
     )
+
+
+def test_orchestration_loop_maps_no_tool_call_to_orchestration_error() -> None:
+    """#115 slice B: the loop must map the typed no_tool_call failure from the LLM
+    client into its existing OrchestrationError path (failure_code == 'no_tool_call'),
+    with no keyword-selected tool ever substituted."""
+
+    class NoToolCallLLMClient(LocalFakeLLMClient):
+        def propose_taxi_query(
+            self, prompt: str, schema: Mapping[str, object]
+        ) -> ToolProposalResult:
+            raise LLMProviderError(retryable=False, code="no_tool_call")
+
+    repo = InMemoryStateRepository()
+    loop = OrchestrationLoop(
+        llm_client=NoToolCallLLMClient(),
+        mcp_client=FakeMCPClient(),  # type: ignore[arg-type]
+        state_repository=repo,
+    )
+
+    with pytest.raises(ValueError):
+        loop.run("Which pickup zones have the most trips?")
+
+    runs = [
+        repo.get_run(rid)
+        for rid in getattr(repo, "_runs", {})  # type: ignore[attr-defined]
+    ]
+    failed_runs = [r for r in runs if r is not None and r.status == "failed"]
+    assert failed_runs
+    assert failed_runs[0].failure_code == "no_tool_call"
+
+
+def test_orchestration_loop_serve_mode_records_served_model_and_self_hosted_cost() -> (
+    None
+):
+    """#115 slice B: serve-mode runs must carry the actual served model id and a
+    non-Bedrock cost, never the Bedrock default model id or Bedrock-rate cost."""
+    import httpx
+    from app.llm import ServeLLMClient
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        import json as _json
+
+        payload = _json.loads(request.content)
+        if "tools" in payload:
+            return httpx.Response(
+                200,
+                json={
+                    "model": "Qwen/Qwen3-0.6B",
+                    "choices": [
+                        {
+                            "message": {
+                                "tool_calls": [
+                                    {
+                                        "id": "call-1",
+                                        "type": "function",
+                                        "function": {
+                                            "name": "query_taxi_data",
+                                            "arguments": _json.dumps(
+                                                {
+                                                    "analysis": "top_pickup_zones",
+                                                    "limit": 5,
+                                                }
+                                            ),
+                                        },
+                                    }
+                                ]
+                            },
+                            "finish_reason": "tool_calls",
+                        }
+                    ],
+                    "usage": {"prompt_tokens": 30, "completion_tokens": 6},
+                },
+            )
+        return httpx.Response(
+            200,
+            json={
+                "model": "Qwen/Qwen3-0.6B",
+                "choices": [
+                    {
+                        "message": {"content": "JFK Airport leads with 1500 trips."},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {"prompt_tokens": 60, "completion_tokens": 12},
+            },
+        )
+
+    transport = httpx.MockTransport(handler)
+    serve_client = ServeLLMClient(
+        gateway_url="http://localhost:18080/serve",
+        model_id="Qwen/Qwen3-0.6B",
+        http_client=httpx.Client(transport=transport),
+    )
+
+    repo = InMemoryStateRepository()
+    loop = OrchestrationLoop(
+        llm_client=serve_client,
+        mcp_client=FakeMCPClient(),  # type: ignore[arg-type]
+        state_repository=repo,
+    )
+
+    result = loop.run("Which pickup zones have the most trips?")
+    assert result.status == "completed"
+    assert result.estimated_cost_usd == 0.0
+
+    run = repo.get_run(result.run_id)
+    assert run is not None
+    assert run.model == "Qwen/Qwen3-0.6B"
+    assert run.model != DEFAULT_MODEL_ID
+    assert run.estimated_cost_usd == 0.0
+    assert run.metadata["cost_source"] == "self_hosted"
