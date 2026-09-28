@@ -160,7 +160,7 @@ Report both:
 | E2 Prefix reuse | Cold/non-reused prefix vs reused shared prefix | Repeated system/tool prefix + multi-step conversations | TTFT, computed prefill tokens, cache hit/reuse, KV usage | Does prefix reuse matter for this app? |
 | E3 Routing headline | least_loaded vs prefix_then_load | Mixed multi-step conversations with contention | TTFT p95/p99, queue wait, reused tokens, deadline success | When should a request follow its KV? |
 | E4 Admission | Naive accept vs should_shed | Interactive + batch + one noisy tenant | Goodput, p99, shed reasons, queue timeout, fairness | Does admission preserve useful work under overload? |
-| E5 Hop | Recompute on destination vs LMCache/Mooncake hop | Cross-worker continuation at 2K/8K/16K/32K prefixes | Hop ms/bytes, TTFT, tokens recomputed, crossover point | When is moving KV cheaper than rebuilding it? |
+| E5 Hop | Recompute on destination vs LMCache/Mooncake hop | Cross-worker continuation at 1K/2K/4K/7K prefixes within the 8,192-token worker context; 16K/32K only after workers are redeployed with a larger `max_model_len`, recorded in the run manifest | Hop ms/bytes, TTFT, tokens recomputed, crossover point | When is moving KV cheaper than rebuilding it? |
 | E6 Dynamo comparison | Our prefix_then_load vs Dynamo KV-aware routing | Same trace and engine/model flags | TTFT/goodput, routing distribution, cache reuse | How much does an engine-informed router improve over our approximation? |
 
 # 9. Throughput, latency, goodput, and orchestration timing
@@ -312,7 +312,52 @@ Show a time-series panel with:
 
 > Total duration plus stage durations: guard, admission, placement, gateway queue, hop (if any), engine queue, TTFT, decode, tool time, and total agent-turn time. Include chosen worker, reason/policy, status code, input/output tokens, and whether SLO was met.
 
-# 15. Final presentation flow
+# 15. Evidence matrix and project-completion acceptance gate
+
+The answers in Section 14 describe the intended architecture. The project is complete only when each question below points to concrete measured evidence. A design statement, response header, empty dashboard, or uncorrelated cumulative counter does not satisfy this gate.
+
+| Question | Required final evidence | Owner |
+|---|---|---|
+| What is the app, and which tokens are shared versus unique? | Exact-token counts for global shared, conversation-shared, and unique regions; a versioned prefix identity; and a growing multi-step taxi-agent trace. Record model, tokenizer, chat-template, and prefix-contract revisions. | #115 |
+| What dies at guardrails versus admit versus place versus queue? | Bounded counters and stable reason taxonomy for every stage plus representative correlated requests showing where execution stopped. | #122 |
+| Where is work prevented from timing out? | One admission rejection where estimated queue plus service time cannot meet the deadline and one actual `timeout_queue` expiry in the gateway queue. Prove that neither request entered vLLM. | #122 |
+| Where is KV protected? | The admission/placement snapshot containing KV headroom, tokens in flight, running/waiting work, queue depth, estimated uncached/reusable tokens, and snapshot age; the resulting decision; and the corresponding worker KV time series. | #122, #123 |
+| Where is interactive traffic prioritized? | Queue-wait and latency distributions by bounded workload class, interactive deadline-goodput, and a batch-starvation check. Derive `class_p99_spread = batch_queue_wait_p99 - interactive_queue_wait_p99`; a favorable spread alone is not success if batch work starves. | #122, #123 |
+| Where is one tenant prevented from owning the GPU? | A noisy synthetic-tenant run showing token/concurrency enforcement, local `429` behavior, admitted/completed/shed work, fairness calculation, and protected interactive goodput. | #122, #123 E4 |
+| Where does a KV hop occur, and what is not copied? | A real compatible-block transfer with source/store and destination provenance, tokens/bytes, duration, result, and destination consumption. State explicitly that model weights, request bodies, generated output, and engine scheduler state are not transferred. | #133, #123 E5 |
+| Where does eviction occur, and what becomes a ghost if invalidation is skipped? | Eviction and metadata-invalidation events plus a stale-metadata/ghost-cache prevention or failure test. | #133 |
+| Where does the engine scheduler sit relative to admit, place, and the gateway queue? | A correlated timeline for guard, admission, placement, gateway-queue entry/release, and worker dispatch beside vLLM engine queue, waiting/running, prefill, decode, and preemption evidence. | #122, #123 |
+| What limited concurrency on this GPU for the real app? | A taxi-agent saturation run at measured application context lengths with a first-limiter classification and the corresponding SLO/goodput point. The earlier synthetic #120 capacity sweep is preliminary evidence, not the final application answer. | #123 E0 |
+| Which four production alerts would be set? | Four concrete PromQL rules and threshold rationales grounded in observed metrics: sustained KV pressure; interactive latency/goodput SLO failure; queue timeout or shed-rate surge; and worker/hop/engine integrity failure. | #123 |
+| If the system scales, should capacity be added to prefill or decode? | Same-window uncached prompt rate, cache hits, prefill time, and TTFT compared with running-slot pressure, generation rate, decode time, ITL, and goodput. Name the hot pool from the measurements. | #123 |
+| What changes at 10x traffic, and which three knobs are the wrong next move? | A measured or trace-driven 10x analysis grounded in the observed bottleneck. Explicitly assess blindly increasing `max_num_seqs`, increasing context allowance, and adding identical replicas without identifying the constrained pool. | #123 |
+| How is throughput measured versus goodput? | Raw requests/s and tokens/s plotted beside good requests/s and good tokens/s under increasing offered load, from the same run, with the frozen TTFT/end-to-end SLO and the goodput formula from Section 9. Must show where throughput keeps rising while goodput flattens or falls (or report that it does not). | #123 |
+| What does a healthy memory curve look like? | A same-window time series of DCGM HBM used/free, vLLM KV cache usage, running/waiting sequences, request rate, preemptions, and hop/eviction events (Section 10), showing KV/HBM rising with prefill/active sequences and releasing on completion/abort/eviction. Flag any flat-at-max or monotonic growth as a finding. | #123 (hop/eviction series from #133) |
+| What is reported for a single orchestration request? | One correlated end-to-end request record with stage durations for guard, admission, placement, gateway queue, hop (if any), engine queue, TTFT, decode, tool time, and total agent-turn time, plus chosen worker, policy/reason, status code, input/output tokens, and SLO outcome. Each field is marked per-request measured or explicitly unavailable, never inferred from aggregate counters. | #122, #123 |
+
+## Final-run evidence rules
+
+- Run the controlled proof only after #115 and #122 are stable. E0-E4 and the E5 recompute control may proceed before #133; the E5 real-hop treatment requires #133.
+- Use the same workload trace, model/revision, tokenizer/template, engine flags, worker allocation, SLOs, and topology for every control/treatment comparison.
+- State whether every reported value is per-request, isolated Prometheus-window, or cumulative-scrape evidence.
+- Never assign an aggregate cache, recomputation, queue, or timing delta to one request without a valid correlation mechanism.
+- Keep request, conversation, tenant, and prefix identifiers in correlated logs or run artifacts rather than unbounded Prometheus labels.
+- Record whether Worker A and Worker B are separate replicas on one physical GPU or separate physical GPUs; do not describe worker movement as GPU-to-GPU movement unless the topology supports that statement.
+- A worker change proves placement only. An independently warmed destination prefix proves destination-local reuse. Claim a KV hop only when real compatible KV blocks become available to the destination with transfer provenance and consumption evidence.
+- The disposable-machine workflow remains unchanged during implementation. Current checkpoints may use `make inference-pull-evidence`; full controlled evidence is collected when the final experiments are ready.
+
+## Completion checklist
+
+- [ ] Every evidence-matrix row links to a concrete committed file, pulled final-run artifact, Prometheus scrape/query, Grafana panel, or notebook cell.
+- [ ] No row is supported only by a planned metric, design statement, response header, or empty dashboard.
+- [ ] Every dashboard panel used in the final explanation has a live underlying metric.
+- [ ] Per-request conclusions use correlated evidence; isolated-window and cumulative values are labeled honestly.
+- [ ] Control and treatment manifests prove matching workload, model, engine, SLO, and topology inputs.
+- [ ] The final proof includes both Worker A and Worker B and discloses same-physical-GPU contention when applicable.
+- [ ] Scaling, alerting, and 10x recommendations cite observed measurements rather than generic guidance.
+- [ ] Negative, neutral, or inconclusive results are reported without being converted into unsupported success claims.
+
+# 16. Final presentation flow
 
 1. 60-90 sec: app and prompt shape - shared vs unique tokens.
 2. 90 sec: capacity math - GPU/HBM, model, KV bytes/token, per-worker budget, max_len vs measured app lengths.
@@ -323,7 +368,7 @@ Show a time-series panel with:
 7. 2 min: Grafana walkthrough - overview -> gateway -> router -> queues -> vLLM -> hop -> GPU.
 8. 60 sec: what actually limited the GPU, four alerts, scale decision, 10x plan and wrong knobs.
 
-# 16. Implementation checklist
+# 17. Implementation checklist
 
 - [ ] Finalize GPU and model; capture nvidia-smi/DCGM evidence.
 - [ ] Compute KV/token, KV/worker, max_len and app-length concurrency.
