@@ -15,6 +15,27 @@ from typing import Any
 
 import duckdb
 
+from dataset_spike.query_compiler import (
+    compile_aggregate_query,
+    compile_compare_segments_query,
+    compile_dimension_values_query,
+)
+from dataset_spike.query_spec import (
+    MAX_COLUMNS,
+    PAYMENT_TYPE_CODES,
+    RATE_CODE_CODES,
+    VENDOR_CODES,
+    DimensionName,
+    MeasureName,
+    QueryValidationError,
+    build_aggregate_spec,
+    validate_dimension,
+    validate_filters,
+    validate_limit,
+    validate_measures,
+    validate_search,
+)
+
 MAX_QUERY_ROWS = 20
 MAX_RESULT_BYTES = 8_192
 DEFAULT_QUERY_TIMEOUT_SECONDS = 30.0
@@ -341,3 +362,316 @@ def profile_dataset(
         timing_ms=round((time.perf_counter() - started) * 1000),
         rss_bytes=_rss_bytes(),
     )
+
+
+# --- Governed analytics tools (issue #115 slice A) --------------------------
+
+_DESCRIBE_BASE_QUERY = """
+    SELECT min(t.tpep_pickup_datetime)::VARCHAR AS min_pickup,
+           max(t.tpep_pickup_datetime)::VARCHAR AS max_pickup,
+           count(*)::BIGINT AS row_count
+    FROM trips AS t
+"""
+_DESCRIBE_WITH_STATS_QUERY = """
+    SELECT min(t.tpep_pickup_datetime)::VARCHAR AS min_pickup,
+           max(t.tpep_pickup_datetime)::VARCHAR AS max_pickup,
+           count(*)::BIGINT AS row_count,
+           sum(CASE WHEN t.passenger_count IS NULL THEN 1 ELSE 0 END)::BIGINT
+               AS null_passenger_count,
+           sum(CASE WHEN t.RatecodeID IS NULL THEN 1 ELSE 0 END)::BIGINT
+               AS null_rate_code,
+           sum(CASE WHEN t.VendorID IS NULL THEN 1 ELSE 0 END)::BIGINT AS null_vendor,
+           sum(CASE WHEN t.fare_amount < 0 THEN 1 ELSE 0 END)::BIGINT
+               AS negative_fare_count,
+           sum(CASE WHEN t.total_amount < 0 THEN 1 ELSE 0 END)::BIGINT
+               AS negative_total_count,
+           sum(CASE WHEN t.tpep_dropoff_datetime < t.tpep_pickup_datetime THEN 1 ELSE 0 END)
+               ::BIGINT AS dropoff_before_pickup_count
+    FROM trips AS t
+"""
+_DESCRIBE_SCHEMA_QUERY = "DESCRIBE trips"
+
+_TIP_MEASURES = frozenset(
+    {
+        MeasureName.TIP_RATE,
+        MeasureName.AVERAGE_TIP,
+        MeasureName.MEDIAN_TIP,
+        MeasureName.TOTAL_TIPS,
+    }
+)
+TIP_RATE_SEMANTICS = (
+    "tip_rate, average_tip, median_tip and total_tips are computed over card "
+    "payments (payment_type = 1) only; TLC does not record cash tips, so cash "
+    "trips are excluded rather than treated as zero"
+)
+AIRPORT_TRIP_RULE = (
+    "airport_trip is true when the pickup or dropoff zone is JFK Airport, "
+    "LaGuardia Airport or Newark Airport, or when RatecodeID is 2 (JFK) or 3 (Newark)"
+)
+VALID_RECORDS_RULE = (
+    "valid_records_only (default true) keeps pickups in "
+    "[2024-01-01, 2024-02-01), fare_amount >= 0, total_amount >= 0 and "
+    "tpep_dropoff_datetime >= tpep_pickup_datetime"
+)
+
+
+def _augment_envelope(
+    result: dict[str, object], max_result_bytes: int, **extra: object
+) -> dict[str, object]:
+    merged = dict(result)
+    merged.update(extra)
+    rows = merged.get("rows")
+    while len(json.dumps(merged, separators=(",", ":")).encode()) > max_result_bytes:
+        if not isinstance(rows, list) or not rows:
+            raise ValueError("max_result_bytes is too small for the result envelope")
+        rows.pop()
+        merged["row_count"] = len(rows)
+        merged["truncated"] = True
+    return merged
+
+
+def describe_taxi_dataset(
+    parquet_path: Path,
+    zone_csv_path: Path,
+    *,
+    include_column_stats: bool = False,
+    max_result_bytes: int = MAX_RESULT_BYTES,
+    timeout_seconds: float = DEFAULT_QUERY_TIMEOUT_SECONDS,
+    query_id_factory: Callable[[], str] | None = None,
+) -> dict[str, object]:
+    """Return exact dataset bounds, schema, null summary and code dictionaries."""
+    if not isinstance(include_column_stats, bool):
+        raise ValueError("include_column_stats must be a boolean")
+
+    stats_result = _run_governed_query(
+        parquet_path,
+        zone_csv_path,
+        query=(
+            _DESCRIBE_WITH_STATS_QUERY if include_column_stats else _DESCRIBE_BASE_QUERY
+        ),
+        query_parameters=[],
+        result_limit=1,
+        max_result_bytes=max_result_bytes,
+        timeout_seconds=timeout_seconds,
+        query_id_factory=query_id_factory,
+    )
+    schema_result = _run_governed_query(
+        parquet_path,
+        zone_csv_path,
+        query=_DESCRIBE_SCHEMA_QUERY,
+        query_parameters=[],
+        result_limit=64,
+        max_result_bytes=max_result_bytes,
+        timeout_seconds=timeout_seconds,
+        query_id_factory=query_id_factory,
+    )
+    stats_columns = stats_result["columns"]
+    stats_row = stats_result["rows"][0] if stats_result["rows"] else []
+    stats = dict(zip(stats_columns, stats_row, strict=False))
+
+    columns = [{"name": row[0], "type": row[1]} for row in schema_result["rows"]]
+
+    result: dict[str, object] = {
+        "query_class": "describe",
+        "row_count": stats.get("row_count", 0),
+        "min_pickup_datetime": stats.get("min_pickup"),
+        "max_pickup_datetime": stats.get("max_pickup"),
+        "columns": columns,
+        "supported_dimensions": [dimension.value for dimension in DimensionName],
+        "supported_measures": [measure.value for measure in MeasureName],
+        "code_dictionaries": {
+            "payment_type": {str(k): v for k, v in PAYMENT_TYPE_CODES.items()},
+            "rate_code": {str(k): v for k, v in RATE_CODE_CODES.items()},
+            "vendor": {str(k): v for k, v in VENDOR_CODES.items()},
+        },
+        "tip_rate_semantics": TIP_RATE_SEMANTICS,
+        "airport_trip_rule": AIRPORT_TRIP_RULE,
+        "valid_records_rule": VALID_RECORDS_RULE,
+        "truncated": False,
+        "query_id": stats_result["query_id"],
+    }
+    if include_column_stats:
+        result["null_summary"] = {
+            "passenger_count": stats.get("null_passenger_count", 0),
+            "rate_code": stats.get("null_rate_code", 0),
+            "vendor": stats.get("null_vendor", 0),
+        }
+        result["invalid_record_summary"] = {
+            "negative_fare_count": stats.get("negative_fare_count", 0),
+            "negative_total_count": stats.get("negative_total_count", 0),
+            "dropoff_before_pickup_count": stats.get("dropoff_before_pickup_count", 0),
+        }
+    return _augment_envelope(result, max_result_bytes)
+
+
+def list_taxi_dimension_values(
+    parquet_path: Path,
+    zone_csv_path: Path,
+    *,
+    dimension: object,
+    search: object = None,
+    limit: object = 20,
+    max_result_bytes: int = MAX_RESULT_BYTES,
+    timeout_seconds: float = DEFAULT_QUERY_TIMEOUT_SECONDS,
+    query_id_factory: Callable[[], str] | None = None,
+) -> dict[str, object]:
+    """List bounded, counted values for one allowlisted dimension."""
+    validated_dimension = validate_dimension(dimension)
+    validated_search = validate_search(search)
+    validated_limit = validate_limit(limit)
+
+    compiled = compile_dimension_values_query(
+        validated_dimension, search=validated_search, limit=validated_limit
+    )
+    result = _run_governed_query(
+        parquet_path,
+        zone_csv_path,
+        query=compiled.sql,
+        query_parameters=compiled.parameters,
+        result_limit=validated_limit,
+        max_result_bytes=max_result_bytes,
+        timeout_seconds=timeout_seconds,
+        query_id_factory=query_id_factory,
+    )
+    return _augment_envelope(
+        result,
+        max_result_bytes,
+        query_class="dimension_values",
+        dimension=validated_dimension.value,
+    )
+
+
+def aggregate_taxi_data(
+    parquet_path: Path,
+    zone_csv_path: Path,
+    *,
+    dimensions: object,
+    measures: object,
+    filters: object = None,
+    order_by: object = None,
+    limit: object = 20,
+    max_result_bytes: int = MAX_RESULT_BYTES,
+    timeout_seconds: float = DEFAULT_QUERY_TIMEOUT_SECONDS,
+    query_id_factory: Callable[[], str] | None = None,
+) -> dict[str, object]:
+    """Run the primary flexible aggregation over the governed taxi surface."""
+    spec = build_aggregate_spec(
+        dimensions=dimensions,
+        measures=measures,
+        filters=filters,
+        order_by=order_by,
+        limit=limit,
+    )
+
+    compiled = compile_aggregate_query(spec)
+    result = _run_governed_query(
+        parquet_path,
+        zone_csv_path,
+        query=compiled.sql,
+        query_parameters=compiled.parameters,
+        result_limit=spec.limit,
+        max_result_bytes=max_result_bytes,
+        timeout_seconds=timeout_seconds,
+        query_id_factory=query_id_factory,
+    )
+    extra: dict[str, object] = {
+        "query_class": "aggregate",
+        "dimensions": [dimension.value for dimension in spec.dimensions],
+        "measures": [measure.value for measure in spec.measures],
+    }
+    if any(measure in _TIP_MEASURES for measure in spec.measures):
+        extra["tip_rate_semantics"] = TIP_RATE_SEMANTICS
+    if DimensionName.AIRPORT_TRIP in spec.dimensions or (
+        spec.filters is not None and spec.filters.airport_trip is not None
+    ):
+        extra["airport_trip_rule"] = AIRPORT_TRIP_RULE
+    return _augment_envelope(result, max_result_bytes, **extra)
+
+
+def compare_taxi_segments(
+    parquet_path: Path,
+    zone_csv_path: Path,
+    *,
+    segment_dimension: object,
+    measures: object,
+    baseline_filters: object,
+    comparison_filters: object,
+    limit: object = 20,
+    max_result_bytes: int = MAX_RESULT_BYTES,
+    timeout_seconds: float = DEFAULT_QUERY_TIMEOUT_SECONDS,
+    query_id_factory: Callable[[], str] | None = None,
+) -> dict[str, object]:
+    """Align baseline vs comparison segments for the same dimension/measures."""
+    validated_dimension = validate_dimension(segment_dimension)
+    validated_measures = validate_measures(measures)
+    validated_limit = validate_limit(limit)
+    validated_baseline = validate_filters(baseline_filters)
+    validated_comparison = validate_filters(comparison_filters)
+
+    output_width = 1 + 3 * len(validated_measures)
+    if output_width > MAX_COLUMNS:
+        raise QueryValidationError(
+            "invalid_column_budget",
+            f"comparison output must not exceed {MAX_COLUMNS} columns "
+            "(1 dimension + baseline/comparison/delta per measure)",
+        )
+
+    compiled = compile_compare_segments_query(
+        segment_dimension=validated_dimension,
+        measures=validated_measures,
+        baseline_filters=validated_baseline,
+        comparison_filters=validated_comparison,
+        limit=validated_limit,
+    )
+    joined_result = _run_governed_query(
+        parquet_path,
+        zone_csv_path,
+        query=compiled.sql,
+        query_parameters=compiled.parameters,
+        result_limit=validated_limit,
+        max_result_bytes=max_result_bytes,
+        timeout_seconds=timeout_seconds,
+        query_id_factory=query_id_factory,
+    )
+
+    columns: list[str] = [validated_dimension.value]
+    for measure in validated_measures:
+        columns += [
+            f"baseline_{measure.value}",
+            f"comparison_{measure.value}",
+            f"delta_{measure.value}",
+        ]
+
+    rows: list[list[object]] = []
+    for joined_row in joined_result["rows"]:
+        # joined_row is [dim, baseline_1, comparison_1, baseline_2, comparison_2, ...]
+        dim_key = joined_row[0]
+        row: list[object] = [dim_key]
+        for index in range(len(validated_measures)):
+            baseline_value = joined_row[1 + 2 * index]
+            comparison_value = joined_row[2 + 2 * index]
+            delta: object = None
+            if (
+                isinstance(baseline_value, (int, float))
+                and not isinstance(baseline_value, bool)
+                and isinstance(comparison_value, (int, float))
+                and not isinstance(comparison_value, bool)
+            ):
+                delta = round(comparison_value - baseline_value, 4)
+            row.extend([baseline_value, comparison_value, delta])
+        rows.append(row)
+
+    result: dict[str, object] = {
+        "columns": columns,
+        "rows": rows,
+        "row_count": len(rows),
+        "execution_duration_ms": joined_result["execution_duration_ms"],
+        "query_id": (query_id_factory or (lambda: f"query_{uuid.uuid4().hex}"))(),
+        "truncated": bool(joined_result["truncated"]),
+        "query_class": "compare_segments",
+        "segment_dimension": validated_dimension.value,
+        "measures": [measure.value for measure in validated_measures],
+    }
+    if any(measure in _TIP_MEASURES for measure in validated_measures):
+        result["tip_rate_semantics"] = TIP_RATE_SEMANTICS
+    return _augment_envelope(result, max_result_bytes)

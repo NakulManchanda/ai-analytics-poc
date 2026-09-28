@@ -136,6 +136,10 @@ def test_dataset_contract_exposes_fixed_schema_and_profile_over_mcp():
         "get_dataset_profile",
         "query_taxi_data",
         "average_trip_metrics",
+        "describe_taxi_dataset",
+        "list_taxi_dimension_values",
+        "aggregate_taxi_data",
+        "compare_taxi_segments",
     ]
     average_tool = next(tool for tool in tools if tool.name == "average_trip_metrics")
     assert average_tool.inputSchema["type"] == "object"
