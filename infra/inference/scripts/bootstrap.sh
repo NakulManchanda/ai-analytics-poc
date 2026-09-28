@@ -15,6 +15,7 @@ ssh_cmd "
   fi
 
   export KUBECONFIG='/etc/rancher/k3s/k3s.yaml'
+  mkdir -p ~/.kube && cp -f /etc/rancher/k3s/k3s.yaml ~/.kube/config 2>/dev/null && chmod 600 ~/.kube/config 2>/dev/null || true
   kubectl wait --for=condition=Ready node --all --timeout=60s
 
   if ! command -v helm >/dev/null 2>&1; then

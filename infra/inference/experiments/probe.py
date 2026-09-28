@@ -85,7 +85,7 @@ def probe_worker(
     ):
         raise ValueError("max_tokens must be a positive integer")
 
-    _json_response(_endpoint(base_url, "/health"))
+    _request(_endpoint(base_url, "/health"))
     advertised_models = _json_response(_endpoint(base_url, "/v1/models")).get("data")
     if not isinstance(advertised_models, list) or model not in {
         entry.get("id") for entry in advertised_models if isinstance(entry, Mapping)

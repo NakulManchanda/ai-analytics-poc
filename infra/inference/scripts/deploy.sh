@@ -7,6 +7,7 @@ load_local_env; require_connection
 
 ssh_cmd "
   set -eu
+  export KUBECONFIG="${KUBECONFIG:-/etc/rancher/k3s/k3s.yaml}"
   kubectl apply -f '$(remote_dir)/k8s/namespace.yaml'
   kubectl apply -R -f '$(remote_dir)/k8s'
   kubectl apply -f '$(remote_dir)/observability/dcgm/dcgm-exporter.yaml'

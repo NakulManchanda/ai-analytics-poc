@@ -28,23 +28,30 @@ check-bootstrap: ## Verify the tracked canonical requirements source
 			|| { echo "Canonical requirements source must be tracked"; exit 1; }; \
 	fi
 
+INFERENCE_LOG_DIR ?= .vscode/myfiles/120-inference-cluster/logs
+
 inference-validate: ## Validate the isolated Lambda inference bundle locally
-	bash infra/inference/scripts/validate.sh
+	@mkdir -p $(INFERENCE_LOG_DIR)
+	@set -o pipefail; bash infra/inference/scripts/validate.sh 2>&1 | tee $(INFERENCE_LOG_DIR)/validate.log
 
 inference-sync: ## Sync only the isolated inference bundle to Lambda
-	bash infra/inference/scripts/sync.sh
+	@mkdir -p $(INFERENCE_LOG_DIR)
+	@set -o pipefail; bash infra/inference/scripts/sync.sh 2>&1 | tee $(INFERENCE_LOG_DIR)/sync.log
 
 inference-config: ## Apply only safe, allowlisted inference configuration remotely
-	bash infra/inference/scripts/config.sh
+	@mkdir -p $(INFERENCE_LOG_DIR)
+	@set -o pipefail; bash infra/inference/scripts/config.sh 2>&1 | tee $(INFERENCE_LOG_DIR)/config.log
 
 inference-secret: ## Stream the optional Hugging Face token into the cluster secret
 	bash infra/inference/scripts/secret.sh
 
 inference-bootstrap: ## Bootstrap pinned k3s, Helm, and HAMi on Lambda
-	bash infra/inference/scripts/bootstrap.sh
+	@mkdir -p $(INFERENCE_LOG_DIR)
+	@set -o pipefail; bash infra/inference/scripts/bootstrap.sh 2>&1 | tee $(INFERENCE_LOG_DIR)/bootstrap.log
 
 inference-deploy: ## Deploy workers and #120 observability configuration
-	bash infra/inference/scripts/deploy.sh
+	@mkdir -p $(INFERENCE_LOG_DIR)
+	@set -o pipefail; bash infra/inference/scripts/deploy.sh 2>&1 | tee $(INFERENCE_LOG_DIR)/deploy.log
 
 inference-up: inference-sync inference-bootstrap inference-config inference-deploy ## Provision the #120 cluster lab
 
@@ -54,21 +61,26 @@ inference-tunnel: ## Open loopback-only SSH forwards to workers and Grafana
 inference-connect: inference-sync inference-tunnel ## Sync then open the safe SSH tunnel
 
 inference-smoke: ## Smoke each worker through the SSH tunnel
-	bash infra/inference/scripts/smoke.sh
+	@mkdir -p $(INFERENCE_LOG_DIR)
+	@set -o pipefail; bash infra/inference/scripts/smoke.sh 2>&1 | tee $(INFERENCE_LOG_DIR)/smoke.log
 
 inference-warmup: ## Run the issue #120 warmup runner
-	python3 infra/inference/experiments/warmup.py
+	@mkdir -p $(INFERENCE_LOG_DIR)
+	@set -o pipefail; python3 infra/inference/experiments/warmup.py 2>&1 | tee $(INFERENCE_LOG_DIR)/warmup.log
 
 inference-capacity: ## Run the issue #120 capacity runner
-	python3 infra/inference/experiments/capacity.py
+	@mkdir -p $(INFERENCE_LOG_DIR)
+	@set -o pipefail; python3 infra/inference/experiments/capacity.py 2>&1 | tee $(INFERENCE_LOG_DIR)/capacity.log
 
 inference-run: inference-smoke inference-warmup inference-capacity inference-pull-evidence ## Run #120 measurements and pull evidence
 
 inference-pull-evidence: ## Pull run evidence into metrics/inference
-	bash infra/inference/scripts/pull-evidence.sh
+	@mkdir -p $(INFERENCE_LOG_DIR)
+	@set -o pipefail; bash infra/inference/scripts/pull-evidence.sh 2>&1 | tee $(INFERENCE_LOG_DIR)/pull-evidence.log
 
 inference-teardown: ## Remove only issue-owned inference resources
-	bash infra/inference/scripts/teardown.sh
+	@mkdir -p $(INFERENCE_LOG_DIR)
+	@set -o pipefail; bash infra/inference/scripts/teardown.sh 2>&1 | tee $(INFERENCE_LOG_DIR)/teardown.log
 
 dev: ## Run the AI application locally on port 8080
 	uv run --project services/app uvicorn app.main:app --host 0.0.0.0 --port $(APP_HOST_PORT) --reload
