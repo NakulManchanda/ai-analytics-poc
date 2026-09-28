@@ -8,6 +8,10 @@ from fastapi.testclient import TestClient
 
 
 class ContractLLMClient:
+    @property
+    def model_id(self) -> str:
+        return "amazon.nova-micro-v1:0"
+
     def propose_taxi_query(
         self, _prompt: str, _schema: dict[str, object]
     ) -> ToolProposalResult:

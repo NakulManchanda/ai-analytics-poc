@@ -32,6 +32,10 @@ class MockLLM(LLMClient):
         self.propose_called = False
         self.answer_called = False
 
+    @property
+    def model_id(self) -> str:
+        return "mock-llm"
+
     def propose_taxi_query(
         self, prompt: str, schema_context: dict[str, Any]
     ) -> ToolProposalResult:

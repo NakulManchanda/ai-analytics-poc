@@ -48,6 +48,9 @@ class Settings:
     global_bedrock_monthly_limit_usd: str = "5.00"
     inference_gateway_url: str = DEFAULT_INFERENCE_GATEWAY_URL
     inference_model_id: str = DEFAULT_INFERENCE_MODEL_ID
+    # D2: Qwen3 thinking is off for structured calls unconditionally; the final answer
+    # call is off by default too, behind this flag, so #123 can compare on/off.
+    inference_answer_thinking: bool = False
 
     @classmethod
     def from_environment(cls) -> "Settings":
@@ -66,6 +69,10 @@ class Settings:
             inference_model_id=os.getenv(
                 "INFERENCE_MODEL_ID", DEFAULT_INFERENCE_MODEL_ID
             ),
+            inference_answer_thinking=os.getenv(
+                "INFERENCE_ANSWER_THINKING", "false"
+            ).lower()
+            in ("true", "1", "yes"),
         )
 
     def validate_m4_alignment(self) -> None:

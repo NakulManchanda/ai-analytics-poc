@@ -19,6 +19,10 @@ class FakeLLMClient:
         self.proposal_prompts: list[str] = []
         self.answer_prompts: list[str] = []
 
+    @property
+    def model_id(self) -> str:
+        return "amazon.nova-micro-v1:0"
+
     def ask(self, prompt: str) -> LLMResult:
         self.answer_prompts.append(prompt)
         return LLMResult(

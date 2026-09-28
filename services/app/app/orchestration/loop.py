@@ -21,7 +21,7 @@ from app.events import (
     context_reduced_payload,
     terminal_run_payload,
 )
-from app.llm import LLMClient, LLMProviderError, ToolProposalResult
+from app.llm import LLMClient, LLMProviderError, ServeLLMClient, ToolProposalResult
 from app.mcp_client import (
     ALLOWED_ANALYSES,
     DatasetProfileMCPClient,
@@ -107,6 +107,41 @@ class LLMCall:
     input_tokens: int
     output_tokens: int
     latency_ms: int
+    finish_reason: str | None = None
+    configured_max_tokens: int | None = None
+    ttft_ms: int | None = None
+    first_visible_answer_ms: int | None = None
+    reasoning_tokens: int | None = None
+    reasoning_tokens_unavailable_reason: str | None = None
+    visible_answer_tokens: int | None = None
+    visible_answer_tokens_unavailable_reason: str | None = None
+    cost_usd: float = 0.0
+    cost_source: str = "bedrock_estimate"
+    # Set when this call represents a failed provider call (e.g. no_tool_call,
+    # invalid_tool_call) recorded for telemetry rather than a successful result.
+    error_code: str | None = None
+
+    def to_metadata(self) -> dict[str, Any]:
+        return {
+            "llm_call_id": self.llm_call_id,
+            "model_id": self.model_id,
+            "input_tokens": self.input_tokens,
+            "output_tokens": self.output_tokens,
+            "latency_ms": self.latency_ms,
+            "finish_reason": self.finish_reason,
+            "configured_max_tokens": self.configured_max_tokens,
+            "ttft_ms": self.ttft_ms,
+            "first_visible_answer_ms": self.first_visible_answer_ms,
+            "reasoning_tokens": self.reasoning_tokens,
+            "reasoning_tokens_unavailable_reason": self.reasoning_tokens_unavailable_reason,
+            "visible_answer_tokens": self.visible_answer_tokens,
+            "visible_answer_tokens_unavailable_reason": (
+                self.visible_answer_tokens_unavailable_reason
+            ),
+            "cost_usd": self.cost_usd,
+            "cost_source": self.cost_source,
+            "error_code": self.error_code,
+        }
 
 
 @dataclass(frozen=True)
@@ -215,6 +250,16 @@ class OrchestrationLoop:
             return self._llm_client_factory()
         raise LLMConfigurationError("No LLM client or factory configured")
 
+    def _configured_model_id(self) -> str:
+        """Best-effort model id for the initial Run/span, before the guarded
+        execute() path constructs (and validates) the real client. Any
+        construction failure here is deferred to execute(), which already
+        turns it into a proper OrchestrationError; this is display-only."""
+        try:
+            return self._get_llm_client().model_id
+        except Exception:
+            return DEFAULT_MODEL_ID
+
     def _get_mcp_client(self) -> DatasetProfileMCPClient:
         if self._mcp_client is not None:
             return self._mcp_client
@@ -267,7 +312,7 @@ class OrchestrationLoop:
             conversation_id=conv_id,
             message_id=user_msg_id,
             status="in_progress",
-            model=DEFAULT_MODEL_ID,
+            model=self._configured_model_id(),
             prompt_version="m9.v1",
         )
         self._repo.create_run(run)
@@ -323,7 +368,7 @@ class OrchestrationLoop:
                     "ai.run_id": submission.run_id,
                     "ai.conversation_id": submission.conversation_id,
                     "ai.turn_type": "text",
-                    "gen_ai.request.model": DEFAULT_MODEL_ID,
+                    "gen_ai.request.model": self._configured_model_id(),
                 }
             )
             result = self.execute(submission, budgets=budgets)
@@ -520,12 +565,43 @@ class OrchestrationLoop:
             if self.is_cancelled(run_id):
                 raise RunCancelledError(partial_text=partial_text)
 
+        # Whether the active LLM client is the owned, self-hosted vLLM gateway (serve
+        # mode). Determined below once the client is obtained; defaults to False so the
+        # exception paths below always have a well-defined value, even if client
+        # construction itself fails.
+        is_self_hosted = False
+        configured_model_id = DEFAULT_MODEL_ID
+
+        def call_cost(input_tokens: int, output_tokens: int) -> tuple[float, str]:
+            # Serve mode runs on an owned, self-hosted vLLM gateway: it has no
+            # per-token billing, so it is never charged at the Bedrock rate.
+            if is_self_hosted:
+                return 0.0, "self_hosted"
+            return estimate_cost(input_tokens, output_tokens), "bedrock_estimate"
+
+        def current_model_id() -> str:
+            if llm_calls:
+                return llm_calls[-1].model_id
+            # Even before any call has completed (or if the only call fails
+            # before producing an LLMCall), report the client's actually
+            # configured model id rather than the Bedrock default -- this
+            # matters most in serve mode, where the default would otherwise
+            # mislabel a self-hosted failure as a Bedrock one.
+            return configured_model_id
+
+        def current_cost_source() -> str:
+            if llm_calls:
+                return llm_calls[-1].cost_source
+            return "self_hosted" if is_self_hosted else "bedrock_estimate"
+
         try:
             check_cancellation()
             proposal_call_id = self._llm_call_id_factory()
             try:
                 llm = self._get_llm_client()
                 mcp = self._get_mcp_client()
+                is_self_hosted = isinstance(llm, ServeLLMClient)
+                configured_model_id = llm.model_id
             except LLMConfigurationError as err:
                 raise OrchestrationError(
                     "llm_configuration_error", False, proposal_call_id, str(err)
@@ -566,13 +642,36 @@ class OrchestrationLoop:
                         "llm_configuration_error", False, llm_call_id, str(err)
                     ) from err
                 except LLMProviderError as err:
+                    if err.model_id is not None:
+                        # The provider returned a response (e.g. no_tool_call,
+                        # invalid_tool_call) before failing our validation, so
+                        # real telemetry exists -- record it as a failed call
+                        # instead of discarding it.
+                        fail_cost, fail_cost_source = call_cost(
+                            err.input_tokens or 0, err.output_tokens or 0
+                        )
+                        llm_calls.append(
+                            LLMCall(
+                                llm_call_id=llm_call_id,
+                                model_id=err.model_id,
+                                input_tokens=err.input_tokens or 0,
+                                output_tokens=err.output_tokens or 0,
+                                latency_ms=err.latency_ms or 0,
+                                finish_reason=err.finish_reason,
+                                cost_usd=fail_cost,
+                                cost_source=fail_cost_source,
+                                error_code=err.code,
+                            )
+                        )
                     raise OrchestrationError(
                         err.code, err.retryable, llm_call_id, str(err)
                     ) from err
                 call_latency_ms = int((self._monotonic() - call_start) * 1000)
                 proposal_latency_ms = call_latency_ms
 
-                cost = estimate_cost(proposal.input_tokens, proposal.output_tokens)
+                cost, cost_source = call_cost(
+                    proposal.input_tokens, proposal.output_tokens
+                )
                 tracker.record_llm_call(
                     proposal.input_tokens,
                     proposal.output_tokens,
@@ -585,6 +684,10 @@ class OrchestrationLoop:
                         input_tokens=proposal.input_tokens,
                         output_tokens=proposal.output_tokens,
                         latency_ms=proposal.latency_ms,
+                        finish_reason=proposal.finish_reason,
+                        configured_max_tokens=proposal.configured_max_tokens,
+                        cost_usd=cost,
+                        cost_source=cost_source,
                     )
                 )
                 emit(
@@ -611,6 +714,7 @@ class OrchestrationLoop:
                     input_summary=f"prompt: {prompt[:80]}",
                     output_summary=f"tool: {proposal.name}",
                     duration_ms=call_latency_ms,
+                    metadata=llm_calls[-1].to_metadata(),
                 )
                 self._repo.add_run_step(proposal_step)
                 steps.append(proposal_step)
@@ -867,7 +971,7 @@ class OrchestrationLoop:
                     except Exception as err:
                         logger.warning(f"Failed to synthesize audio: {err}")
 
-                ans_cost = estimate_cost(
+                ans_cost, ans_cost_source = call_cost(
                     answer_result.input_tokens, answer_result.output_tokens
                 )
                 tracker.record_llm_call(
@@ -882,6 +986,20 @@ class OrchestrationLoop:
                         input_tokens=answer_result.input_tokens,
                         output_tokens=answer_result.output_tokens,
                         latency_ms=answer_result.latency_ms,
+                        finish_reason=answer_result.finish_reason,
+                        configured_max_tokens=answer_result.configured_max_tokens,
+                        ttft_ms=answer_result.ttft_ms,
+                        first_visible_answer_ms=answer_result.first_visible_answer_ms,
+                        reasoning_tokens=answer_result.reasoning_tokens,
+                        reasoning_tokens_unavailable_reason=(
+                            answer_result.reasoning_tokens_unavailable_reason
+                        ),
+                        visible_answer_tokens=answer_result.visible_answer_tokens,
+                        visible_answer_tokens_unavailable_reason=(
+                            answer_result.visible_answer_tokens_unavailable_reason
+                        ),
+                        cost_usd=ans_cost,
+                        cost_source=ans_cost_source,
                     )
                 )
                 emit(
@@ -908,6 +1026,7 @@ class OrchestrationLoop:
                     input_summary=f"query_id={query_id_val}",
                     output_summary=f"answer: {answer_result.text[:80]}",
                     duration_ms=ans_latency_ms,
+                    metadata=llm_calls[-1].to_metadata(),
                 )
                 self._repo.add_run_step(answer_step)
                 steps.append(answer_step)
@@ -932,14 +1051,18 @@ class OrchestrationLoop:
                     conversation_id=conv_id,
                     message_id=user_msg_id,
                     status="completed",
-                    model=DEFAULT_MODEL_ID,
+                    model=current_model_id(),
                     prompt_version="m9.v1",
                     started_at=run.started_at,
                     completed_at=utcnow_isoformat(),
                     input_tokens=tracker.input_tokens,
                     output_tokens=tracker.output_tokens,
                     estimated_cost_usd=tracker.estimated_cost_usd,
-                    metadata={"telemetry": run_telemetry},
+                    metadata={
+                        "telemetry": run_telemetry,
+                        "cost_source": current_cost_source(),
+                        "llm_calls": [call.to_metadata() for call in llm_calls],
+                    },
                 )
                 self._repo.update_run(completed_run)
 
@@ -958,13 +1081,15 @@ class OrchestrationLoop:
                     run_id=run_id,
                     conversation_id=conv_id,
                     milestone="v3.1",
-                    model=DEFAULT_MODEL_ID,
+                    model=current_model_id(),
                     turn_type="text",
                     status="completed",
                     telemetry=run_telemetry,
                     input_tokens=tracker.input_tokens,
                     output_tokens=tracker.output_tokens,
                     estimated_cost_usd=tracker.estimated_cost_usd,
+                    cost_source=current_cost_source(),
+                    llm_calls=[call.to_metadata() for call in llm_calls],
                 )
 
                 return LoopResult(
@@ -1007,7 +1132,7 @@ class OrchestrationLoop:
                 conversation_id=conv_id,
                 message_id=user_msg_id,
                 status="cancelled",
-                model=DEFAULT_MODEL_ID,
+                model=current_model_id(),
                 prompt_version="m9.v1",
                 started_at=run.started_at,
                 completed_at=utcnow_isoformat(),
@@ -1019,6 +1144,8 @@ class OrchestrationLoop:
                     "reason": err.reason,
                     "partial_text": err.partial_text,
                     "telemetry": run_telemetry,
+                    "cost_source": current_cost_source(),
+                    "llm_calls": [call.to_metadata() for call in llm_calls],
                 },
             )
             self._repo.update_run(cancelled_run)
@@ -1039,13 +1166,15 @@ class OrchestrationLoop:
                 run_id=run_id,
                 conversation_id=conv_id,
                 milestone="v3.1",
-                model=DEFAULT_MODEL_ID,
+                model=current_model_id(),
                 turn_type="text",
                 status="cancelled",
                 telemetry=run_telemetry,
                 input_tokens=tracker.input_tokens,
                 output_tokens=tracker.output_tokens,
                 estimated_cost_usd=tracker.estimated_cost_usd,
+                cost_source=current_cost_source(),
+                llm_calls=[call.to_metadata() for call in llm_calls],
             )
 
             return LoopResult(
@@ -1075,7 +1204,7 @@ class OrchestrationLoop:
                 conversation_id=conv_id,
                 message_id=user_msg_id,
                 status="budget_exceeded",
-                model=DEFAULT_MODEL_ID,
+                model=current_model_id(),
                 prompt_version="m9.v1",
                 started_at=run.started_at,
                 completed_at=utcnow_isoformat(),
@@ -1087,6 +1216,8 @@ class OrchestrationLoop:
                     "reason": err.reason,
                     "details": err.details,
                     "telemetry": run_telemetry,
+                    "cost_source": current_cost_source(),
+                    "llm_calls": [call.to_metadata() for call in llm_calls],
                 },
             )
             self._repo.update_run(exceeded_run)
@@ -1107,13 +1238,15 @@ class OrchestrationLoop:
                 run_id=run_id,
                 conversation_id=conv_id,
                 milestone="v3.1",
-                model=DEFAULT_MODEL_ID,
+                model=current_model_id(),
                 turn_type="text",
                 status="budget_exceeded",
                 telemetry=run_telemetry,
                 input_tokens=tracker.input_tokens,
                 output_tokens=tracker.output_tokens,
                 estimated_cost_usd=tracker.estimated_cost_usd,
+                cost_source=current_cost_source(),
+                llm_calls=[call.to_metadata() for call in llm_calls],
             )
 
             return LoopResult(
@@ -1141,7 +1274,7 @@ class OrchestrationLoop:
                 conversation_id=conv_id,
                 message_id=user_msg_id,
                 status="failed",
-                model=DEFAULT_MODEL_ID,
+                model=current_model_id(),
                 prompt_version="m9.v1",
                 started_at=run.started_at,
                 completed_at=utcnow_isoformat(),
@@ -1153,6 +1286,8 @@ class OrchestrationLoop:
                     "error": str(err),
                     "retryable": err.retryable,
                     "telemetry": run_telemetry,
+                    "cost_source": current_cost_source(),
+                    "llm_calls": [call.to_metadata() for call in llm_calls],
                 },
             )
             self._repo.update_run(failed_run)
@@ -1174,12 +1309,14 @@ class OrchestrationLoop:
                 run_id=run_id,
                 conversation_id=conv_id,
                 milestone="v3.1",
-                model=DEFAULT_MODEL_ID,
+                model=current_model_id(),
                 turn_type="text",
                 status="failed",
                 telemetry=run_telemetry,
                 input_tokens=tracker.input_tokens,
                 output_tokens=tracker.output_tokens,
                 estimated_cost_usd=tracker.estimated_cost_usd,
+                cost_source=current_cost_source(),
+                llm_calls=[call.to_metadata() for call in llm_calls],
             )
             raise

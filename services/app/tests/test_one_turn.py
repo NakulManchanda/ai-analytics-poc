@@ -14,6 +14,10 @@ class FakeOneTurnLLM:
             "arguments": {"analysis": "top_pickup_zones", "limit": 5},
         }
 
+    @property
+    def model_id(self) -> str:
+        return "amazon.nova-micro-v1:0"
+
     def propose_taxi_query(
         self, prompt: str, _schema: dict[str, object]
     ) -> ToolProposalResult:
