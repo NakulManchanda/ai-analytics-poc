@@ -62,17 +62,10 @@ echo "  Recovery duration:    ${RECOVERY_DURATION}s"
 # 6. Post-restart smoke probe
 echo "  Running post-restart smoke check..."
 SMOKE_RESULT="passed"
-if [[ "$DEPLOYMENT" == "inference-worker-a" ]]; then
-  PORT=18001
-else
-  PORT=18002
-fi
-
-python3 "$INFERENCE_ROOT/experiments/probe.py" \
-  --base-url "http://127.0.0.1:$PORT" \
-  --model "$MODEL" \
-  --prompt "Post restart smoke verification." \
-  --max-tokens 5 || SMOKE_RESULT="failed"
+ssh_cmd "
+  WORKER_IP=\$(kubectl get svc -n '$INFERENCE_NAMESPACE' '$DEPLOYMENT' -o jsonpath='{.spec.clusterIP}')
+  curl -s --fail --max-time 10 \"http://\$WORKER_IP:8000/v1/models\" >/dev/null || exit 1
+" || SMOKE_RESULT="failed"
 
 echo "  Post-restart smoke result: $SMOKE_RESULT"
 
@@ -99,9 +92,10 @@ if [[ -n "$OUTPUT_DIR" ]]; then
   echo "Wrote restart recovery summary to $OUTPUT_DIR/restart_recovery_summary.json"
 fi
 
+REMOTE_BASE="$(remote_dir)"
 # Also place on remote host so pull-evidence.sh rsyncs it
 ssh_cmd "
-  LATEST_DIR=\$(ls -td \$(remote_dir)/evidence/* 2>/dev/null | head -n 1 || echo '')
+  LATEST_DIR=\$(ls -td '$REMOTE_BASE'/evidence/* 2>/dev/null | head -n 1 || echo '')
   if [[ -n \"\$LATEST_DIR\" ]]; then
     cat <<'REMOTE_EOF' > \"\$LATEST_DIR/restart_recovery_summary.json\"
 $SUMMARY_JSON
