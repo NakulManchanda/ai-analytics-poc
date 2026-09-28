@@ -10,7 +10,7 @@ OBSERVABILITY_PROMETHEUS_PORT ?= 19090
 OBSERVABILITY_BURST_COUNT ?= 10
 OBSERVABILITY_LOG_TAIL ?= 200
 
-.PHONY: help check-bootstrap dev mcp-dev mcp-smoke dataset-test dataset-smoke smoke test mcp-test infra-test web-test compose-smoke observability-up observability-down observability-smoke observability-dev-up observability-dev-info observability-dev-ask observability-dev-burst observability-dev-metrics observability-dev-logs observability-dev-down local-aws-compose local-aws-refresh local-bedrock-compose bedrock-smoke m5-bedrock-smoke m6-bedrock-smoke dashboard tf-dispatch tf-resume tf-park inference-validate inference-sync inference-config inference-secret inference-bootstrap inference-deploy inference-up inference-tunnel inference-connect inference-smoke inference-warmup inference-capacity inference-restart inference-run inference-pull-evidence inference-teardown
+.PHONY: help check-bootstrap dev app-serve-dev mcp-dev mcp-smoke dataset-test dataset-smoke smoke test mcp-test infra-test web-test compose-smoke observability-up observability-down observability-smoke observability-dev-up observability-dev-info observability-dev-ask observability-dev-burst observability-dev-metrics observability-dev-logs observability-dev-down local-aws-compose local-aws-refresh local-bedrock-compose bedrock-smoke m5-bedrock-smoke m6-bedrock-smoke dashboard tf-dispatch tf-resume tf-park inference-validate inference-sync inference-config inference-secret inference-bootstrap inference-deploy inference-up inference-tunnel inference-connect inference-smoke inference-warmup inference-capacity inference-restart inference-gateway-restart inference-serve-smoke inference-run inference-pull-evidence inference-teardown
 
 
 help: ## Show available commands
@@ -79,6 +79,13 @@ inference-restart: ## Run a deliberate worker restart and recovery test
 	@mkdir -p $(INFERENCE_LOG_DIR) $(INFERENCE_RUN_DIR)
 	@set -o pipefail; bash infra/inference/scripts/restart-test.sh inference-worker-b $(INFERENCE_RUN_DIR) 2>&1 | tee $(INFERENCE_LOG_DIR)/restart-test.log
 
+inference-gateway-restart: ## Restart the remote inference gateway pod and wait for rollout
+	@mkdir -p $(INFERENCE_LOG_DIR)
+	@set -o pipefail; bash infra/inference/scripts/gateway-restart.sh 2>&1 | tee $(INFERENCE_LOG_DIR)/gateway-restart.log
+
+inference-serve-smoke: ## Smoke check the end-to-end serve path through gateway to vLLM worker
+	uv run --project services/app python scripts/smoke/17_inference_serve.py
+
 inference-run: inference-smoke inference-warmup inference-capacity inference-pull-evidence ## Run #120 measurements and pull evidence
 	@python3 infra/inference/experiments/evidence.py --run-id $(INFERENCE_RUN_ID) --output-dir $(INFERENCE_RUN_DIR)
 
@@ -91,6 +98,10 @@ inference-teardown: ## Remove only issue-owned inference resources
 	@set -o pipefail; bash infra/inference/scripts/teardown.sh 2>&1 | tee $(INFERENCE_LOG_DIR)/teardown.log
 
 dev: ## Run the AI application locally on port 8080
+	uv run --project services/app uvicorn app.main:app --host 0.0.0.0 --port $(APP_HOST_PORT) --reload
+
+app-serve-dev: ## Run the AI application locally wired to the serve path (vLLM gateway)
+	LLM_PROVIDER=serve INFERENCE_GATEWAY_URL=http://localhost:18080/serve INFERENCE_MODEL_ID=Qwen/Qwen3-0.6B \
 	uv run --project services/app uvicorn app.main:app --host 0.0.0.0 --port $(APP_HOST_PORT) --reload
 
 mcp-dev: ## Run the MCP service locally on port 8001
