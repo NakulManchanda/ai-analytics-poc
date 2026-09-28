@@ -8,6 +8,10 @@ M4_BEDROCK_MODEL_ARN = (
 )
 
 
+DEFAULT_INFERENCE_MODEL_ID = "Qwen/Qwen3-0.6B"
+DEFAULT_INFERENCE_GATEWAY_URL = "http://127.0.0.1:18080/serve"
+
+
 @dataclass(frozen=True)
 class VoiceSettings:
     """Configuration for voice output (TTS) synthesis."""
@@ -32,7 +36,7 @@ class VoiceSettings:
 
 
 class LLMConfigurationError(ValueError):
-    """Raised when M4 configuration does not match its deployed IAM allowlist."""
+    """Raised when LLM configuration does not match its required provider environment."""
 
 
 @dataclass(frozen=True)
@@ -42,6 +46,8 @@ class Settings:
     aws_region: str = M4_AWS_REGION
     dynamodb_table_name: str | None = None
     global_bedrock_monthly_limit_usd: str = "5.00"
+    inference_gateway_url: str = DEFAULT_INFERENCE_GATEWAY_URL
+    inference_model_id: str = DEFAULT_INFERENCE_MODEL_ID
 
     @classmethod
     def from_environment(cls) -> "Settings":
@@ -52,6 +58,13 @@ class Settings:
             dynamodb_table_name=os.getenv("DYNAMODB_TABLE_NAME"),
             global_bedrock_monthly_limit_usd=os.getenv(
                 "GLOBAL_BEDROCK_MONTHLY_LIMIT_USD", "5.00"
+            ),
+            inference_gateway_url=os.getenv(
+                "INFERENCE_GATEWAY_URL",
+                os.getenv("SERVE_URL", DEFAULT_INFERENCE_GATEWAY_URL),
+            ),
+            inference_model_id=os.getenv(
+                "INFERENCE_MODEL_ID", DEFAULT_INFERENCE_MODEL_ID
             ),
         )
 
@@ -65,3 +78,17 @@ class Settings:
             raise LLMConfigurationError(
                 "M4 requires the us-east-1 IAM-allowlisted amazon.nova-micro-v1:0 model"
             )
+
+    def validate_inference_alignment(self) -> None:
+        if self.llm_provider not in ("vllm", "serve"):
+            raise LLMConfigurationError(
+                f"Inference cluster requires LLM_PROVIDER=vllm or serve (got {self.llm_provider!r})"
+            )
+        if not self.inference_gateway_url.startswith(("http://", "https://")):
+            raise LLMConfigurationError(
+                "INFERENCE_GATEWAY_URL must be a valid HTTP(S) URL, "
+                f"got {self.inference_gateway_url!r}"
+            )
+
+        if not self.inference_model_id:
+            raise LLMConfigurationError("INFERENCE_MODEL_ID must be specified")

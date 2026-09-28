@@ -124,3 +124,9 @@ This slice intentionally preserves CloudWatch EMF/JSONL metrics and does not yet
 instrument the worker, Redis propagation, MCP, DuckDB, Bedrock child spans,
 generic HTTP RED metrics, logs, Langfuse, Grafana/Prometheus, or AWS trace
 export.
+
+## Inference Track
+
+- **#120 — Real-GPU vLLM Cluster Foundation**: Merged via PR #131 (`7c2c26c`). Created isolated `infra/inference/` bundle on Lambda with two symmetric `Qwen/Qwen3-0.6B` workers, HAMi 50/50 GPU slicing (20 GiB per worker), ClusterIP isolation, Prometheus/Grafana/DCGM observability, fail-closed restart recovery, and empirical capacity sweeps under `metrics/inference/run-20260927_215112/`.
+- **#121 — Owned Serve Path Wiring & Prefix Contract**: Active in draft PR on `feat/121-serve-path`. Implemented `ServeLLMClient` in `services/app/app/llm.py` forwarding model calls through gateway `/serve`, established Prefix Token Contract (`prefix.py`, `docs/prefix-contract.md`), request correlation headers (`x-prefix-id`, `x-agent-step`, etc.), thin remote gateway service (`infra/inference/gateway/`), K8s manifests, and comprehensive anti-bypass/MCP isolation tests.
+
