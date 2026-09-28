@@ -49,24 +49,43 @@ Connect the taxi analytics application to our owned inference cluster (`/serve`)
 - `infra/inference/tests/test_manifests_contract.py`
 - `tests/inference/test_cluster_bundle_contract.py`
 - `tests/inference/test_serve_path_contract.py`
+- `infra/inference/scripts/gateway-restart.sh`
+- `scripts/smoke/17_inference_serve.py`
+- `Makefile` (targets: `inference-gateway-restart`, `inference-serve-smoke`, `app-serve-dev`)
 - `docs/work-history/0064-serve-path-wiring.md`
 
 ## Verification
 
-- `source services/app/.venv/bin/activate && uv run --project services/app ruff check services/app infra/inference tests/inference` — 0 errors, clean lint.
-- `source services/app/.venv/bin/activate && uv run --project services/app pytest services/app/tests/test_prefix_contract.py services/app/tests/test_serve_llm_client.py services/app/tests/test_gateway_bypass.py tests/inference infra/inference/tests` — all 64 tests passed.
-- Existing core app tests verified: `test_ask.py`, `test_main.py`, `test_orchestration_loop.py` — all 31 passed.
+- `source services/app/.venv/bin/activate && uv run --project services/app black --check services/app tests scripts` — clean formatting across all files.
+- `source services/app/.venv/bin/activate && uv run --project services/app ruff check services/app infra/inference tests/inference scripts` — 0 errors, clean lint.
+- Full test suite: `uv run --project services/app pytest services/app/tests tests/inference` — all 194 passed.
 - Anti-bypass and MCP isolation verified: `test_gateway_bypass.py` proves every agent model step traverses `/serve`, MCP calls remain direct, and Bedrock fails closed in vLLM configuration.
+- Repeatable Make Targets:
+  - `make inference-serve-smoke` — executed end-to-end against remote cluster:
+    - Gateway Health: 200 OK
+    - Direct Ask: 63 prompt tokens, 495 completion tokens, 183.8 tokens/s
+    - Streaming SSE: TTFT 181.6ms, 143 tokens, 133.5 tokens/s
+  - `make inference-gateway-restart` — executed rolling restart of `deployment/inference-gateway` on Lambda, verified immediate zero-reload recovery.
+- Empirical Benchmark Results (Captured against Lambda A100 GPU cluster):
+  - Direct Worker A (`:18001`): p50 = 477.79ms, p95 = 590.77ms
+  - Remote Gateway (`:18080`): p50 = 511.46ms, p95 = 627.77ms
+  - Gateway Routing Overhead: +33.67ms p50 delta (+47.23ms mean delta)
+  - Streaming TTFT via Gateway: p50 = 279.49ms (min = 240.32ms, max = 320.98ms)
+  - Multi-step Turn: Step 1 (Proposal) = 1,413.31ms (303 tokens), Step 2 (DuckDB query) = 14ms, Step 3 (Streamed answer) = 1,280.79ms (TTFT = 166.31ms, 213 tokens)
 
 ## PR and merge state
 
 - Branch: `feat/121-serve-path`
 - Worktree: `.worktrees/121-serve-path`
 - Issue: #121
-- Pull request: In progress (Draft PR opened as mini-milestone 1)
+- Pull request: [PR #132](https://github.com/NakulManchanda/ai-analytics-poc/pull/132) — `feat(inference): route taxi-agent model calls through owned serve path (#121)`
+- GitHub Actions exact-head CI passed cleanly.
+- Ready for merge.
 
 ## Lessons
 
 - Establishing the Prefix Token Contract early creates a clean boundary for future KV caching and prefix-affinity routing without modifying the core agent orchestration logic.
 - Supporting both SSE event streams and JSON responses in the client streaming handler makes the adapter resilient to mock environments and intermediate proxy buffering.
 - Explicit correlation headers (`x-prefix-id`, `x-agent-step`, `x-request-id`) enable tracing the journey of a single turn across multiple distributed inference steps without putting unbounded prompt text into log or metric labels.
+- A thin stateless gateway introduces negligible overhead (~33ms p50) while ensuring consistent header instrumentation and fail-closed security.
+
