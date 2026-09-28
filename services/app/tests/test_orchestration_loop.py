@@ -474,3 +474,64 @@ def test_orchestration_loop_serve_mode_records_served_model_and_self_hosted_cost
     assert run.model != DEFAULT_MODEL_ID
     assert run.estimated_cost_usd == 0.0
     assert run.metadata["cost_source"] == "self_hosted"
+
+
+def test_orchestration_loop_serve_mode_no_tool_call_keeps_served_model_and_finish_reason() -> (
+    None
+):
+    """#138 review major: a no_tool_call failure in serve mode must not fall back
+    to the Bedrock default model id, and must preserve the failed call's
+    finish_reason/usage telemetry instead of discarding it."""
+    import httpx
+    from app.llm import ServeLLMClient
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "model": "Qwen/Qwen3-0.6B",
+                "choices": [
+                    {
+                        "message": {"role": "assistant", "content": "no tool used"},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {"prompt_tokens": 30, "completion_tokens": 6},
+            },
+        )
+
+    transport = httpx.MockTransport(handler)
+    serve_client = ServeLLMClient(
+        gateway_url="http://localhost:18080/serve",
+        model_id="Qwen/Qwen3-0.6B",
+        http_client=httpx.Client(transport=transport),
+    )
+
+    repo = InMemoryStateRepository()
+    loop = OrchestrationLoop(
+        llm_client=serve_client,
+        mcp_client=FakeMCPClient(),  # type: ignore[arg-type]
+        state_repository=repo,
+    )
+
+    with pytest.raises(ValueError):
+        loop.run("Which pickup zones have the most trips?")
+
+    runs = [
+        repo.get_run(rid)
+        for rid in getattr(repo, "_runs", {})  # type: ignore[attr-defined]
+    ]
+    failed_runs = [r for r in runs if r is not None and r.status == "failed"]
+    assert failed_runs
+    failed_run = failed_runs[0]
+    assert failed_run.failure_code == "no_tool_call"
+    # The served model id must be preserved, not the Bedrock default.
+    assert failed_run.model == "Qwen/Qwen3-0.6B"
+    assert failed_run.model != DEFAULT_MODEL_ID
+    llm_calls = failed_run.metadata["llm_calls"]
+    assert llm_calls
+    assert llm_calls[0]["model_id"] == "Qwen/Qwen3-0.6B"
+    assert llm_calls[0]["finish_reason"] == "stop"
+    assert llm_calls[0]["error_code"] == "no_tool_call"
+    assert llm_calls[0]["input_tokens"] == 30
+    assert llm_calls[0]["output_tokens"] == 6

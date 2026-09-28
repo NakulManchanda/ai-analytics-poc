@@ -42,6 +42,10 @@ class FakeGovernedQueryLLM:
         self.proposal_inputs: list[tuple[str, dict[str, object]]] = []
         self.answer_inputs: list[tuple[str, dict[str, object]]] = []
 
+    @property
+    def model_id(self) -> str:
+        return "amazon.nova-micro-v1:0"
+
     def propose_taxi_query(
         self, prompt: str, schema: dict[str, object]
     ) -> ToolProposalResult:

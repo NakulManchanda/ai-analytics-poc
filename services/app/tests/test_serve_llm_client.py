@@ -446,3 +446,85 @@ def test_serve_llm_client_error_handling() -> None:
         serve_client_conn.ask("test")
     assert exc_info.value.retryable is True
     assert exc_info.value.code == "vllm_gateway_unavailable"
+
+
+def test_stream_answer_json_response_does_not_truncate_trailing_text() -> None:
+    """#138 review major: when the gateway returns a plain JSON body (not SSE) for
+    a streaming call, any text the ThinkingSplitter is still holding back (up to
+    len(tag)-1 trailing characters) must be flushed, not silently dropped."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={"content-type": "application/json"},
+            json={
+                "model": "Qwen/Qwen3-0.6B",
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": "The answer is 42 trips.",
+                        },
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {"prompt_tokens": 40, "completion_tokens": 8},
+            },
+        )
+
+    transport = httpx.MockTransport(handler)
+    serve_client = ServeLLMClient(
+        gateway_url="http://localhost:18080/serve",
+        model_id="Qwen/Qwen3-0.6B",
+        http_client=httpx.Client(transport=transport),
+    )
+    deltas: list[str] = []
+    result = serve_client.stream_answer_with_query_result(
+        "Summarize trips", {"row_count": 1000}, delta_callback=deltas.append
+    )
+    full_delivered = "".join(deltas)
+    assert full_delivered == "The answer is 42 trips."
+    assert result.text == "The answer is 42 trips."
+    assert result.finish_reason == "stop"
+    # Non-streaming-shaped-as-stream: the full body was already read before any
+    # delta was emitted, so there is no genuine time-to-first-token to report.
+    assert result.ttft_ms is None
+    assert result.ttft_unavailable_reason == "non_streaming_json_response"
+
+
+def test_propose_taxi_query_no_tool_call_carries_telemetry_for_failed_call() -> None:
+    """#138 review major: a no_tool_call failure must still carry the served
+    model id, usage, latency, and finish_reason so callers can record a failed
+    LLMCall instead of losing all telemetry on failure."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "model": "Qwen/Qwen3-0.6B",
+                "choices": [
+                    {
+                        "message": {"role": "assistant", "content": "no tool used"},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {"prompt_tokens": 40, "completion_tokens": 8},
+            },
+        )
+
+    transport = httpx.MockTransport(handler)
+    serve_client = ServeLLMClient(
+        gateway_url="http://localhost:18080/serve",
+        model_id="Qwen/Qwen3-0.6B",
+        http_client=httpx.Client(transport=transport),
+    )
+
+    with pytest.raises(LLMProviderError) as exc_info:
+        serve_client.propose_taxi_query("top zones?", {"columns": ["pickup_zone"]})
+    err = exc_info.value
+    assert err.code == "no_tool_call"
+    assert err.model_id == "Qwen/Qwen3-0.6B"
+    assert err.input_tokens == 40
+    assert err.output_tokens == 8
+    assert err.finish_reason == "stop"
+    assert err.latency_ms is not None

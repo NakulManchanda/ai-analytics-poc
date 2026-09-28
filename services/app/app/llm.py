@@ -42,10 +42,27 @@ BEDROCK_RUNTIME_CONFIG = Config(retries={"total_max_attempts": 1})
 
 
 class LLMProviderError(Exception):
-    def __init__(self, retryable: bool, code: str = "llm_provider_error") -> None:
+    def __init__(
+        self,
+        retryable: bool,
+        code: str = "llm_provider_error",
+        *,
+        model_id: str | None = None,
+        input_tokens: int | None = None,
+        output_tokens: int | None = None,
+        latency_ms: int | None = None,
+        finish_reason: str | None = None,
+    ) -> None:
         super().__init__()
         self.retryable = retryable
         self.code = code
+        # Telemetry from the failed call, when available, so callers can
+        # still record an honest failed LLMCall instead of losing it.
+        self.model_id = model_id
+        self.input_tokens = input_tokens
+        self.output_tokens = output_tokens
+        self.latency_ms = latency_ms
+        self.finish_reason = finish_reason
 
 
 _THINK_OPEN = "<think>"
@@ -139,6 +156,7 @@ class LLMResult:
     configured_max_tokens: int | None = None
     # Time to the first token of any kind (reasoning or visible), streaming only.
     ttft_ms: int | None = None
+    ttft_unavailable_reason: str | None = None
     # Time to the first user-visible (non-<think>) delta, streaming only.
     first_visible_answer_ms: int | None = None
     reasoning_tokens: int | None = None
@@ -160,6 +178,13 @@ class ToolProposalResult:
 
 
 class LLMClient(Protocol):
+    @property
+    def model_id(self) -> str:
+        """The model id this client is actually configured to call, so callers
+        can record it (e.g. in the initial Run and OTel span) without guessing
+        or falling back to an unrelated provider default."""
+        ...
+
     def ask(self, prompt: str) -> LLMResult: ...
 
     def propose_dataset_profile(self, prompt: str) -> ToolProposalResult: ...
@@ -179,6 +204,10 @@ class LLMClient(Protocol):
 
 class LocalFakeLLMClient:
     """Deterministic local-only client used by the Compose M5 smoke path."""
+
+    @property
+    def model_id(self) -> str:
+        return DEFAULT_MODEL_ID
 
     def ask(self, prompt: str) -> LLMResult:
         return self._result(prompt, "Local fake answer.")
@@ -298,6 +327,10 @@ class BedrockLLMClient:
         self._region_name = region_name
         self._runtime_client = runtime_client
         self._budget = budget
+
+    @property
+    def model_id(self) -> str:
+        return self._model_id
 
     def ask(self, prompt: str) -> LLMResult:
         response = self._converse(
@@ -657,6 +690,10 @@ class ServeLLMClient:
         # call defaults to disabled too but is configurable via INFERENCE_ANSWER_THINKING.
         self._answer_thinking_enabled = answer_thinking_enabled
 
+    @property
+    def model_id(self) -> str:
+        return self._model_id
+
     def _get_client(self) -> httpx.Client:
         if self._http_client is None:
             self._http_client = httpx.Client(timeout=self._timeout_seconds)
@@ -970,9 +1007,19 @@ class ServeLLMClient:
         input_tokens = usage.get("prompt_tokens", 0)
         output_tokens = usage.get("completion_tokens", 0)
 
+        served_model_id = data.get("model", self._model_id)
+
         tool_calls = message.get("tool_calls", [])
         if not tool_calls or not isinstance(tool_calls, list):
-            raise LLMProviderError(retryable=False, code="no_tool_call")
+            raise LLMProviderError(
+                retryable=False,
+                code="no_tool_call",
+                model_id=served_model_id,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                latency_ms=latency_ms,
+                finish_reason=finish_reason,
+            )
 
         call = tool_calls[0]
         func = call.get("function", {})
@@ -983,18 +1030,32 @@ class ServeLLMClient:
                 arguments: object = json.loads(raw_args)
             except json.JSONDecodeError as exc:
                 raise LLMProviderError(
-                    retryable=False, code="invalid_tool_call"
+                    retryable=False,
+                    code="invalid_tool_call",
+                    model_id=served_model_id,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    latency_ms=latency_ms,
+                    finish_reason=finish_reason,
                 ) from exc
         else:
             arguments = raw_args
 
         if not isinstance(name, str) or not name:
-            raise LLMProviderError(retryable=False, code="invalid_tool_call")
+            raise LLMProviderError(
+                retryable=False,
+                code="invalid_tool_call",
+                model_id=served_model_id,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                latency_ms=latency_ms,
+                finish_reason=finish_reason,
+            )
 
         return ToolProposalResult(
             name=name,
             arguments=arguments,
-            model_id=data.get("model", self._model_id),
+            model_id=served_model_id,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             latency_ms=latency_ms,
@@ -1018,6 +1079,7 @@ class ServeLLMClient:
         reasoning_tokens: int | None = None
         splitter = ThinkingSplitter()
         ttft_ms: int | None = None
+        ttft_unavailable_reason: str | None = None
         first_visible_answer_ms: int | None = None
 
         def note_ttft() -> None:
@@ -1054,17 +1116,23 @@ class ServeLLMClient:
                         finish_reason = choice.get("finish_reason")
                         raw_text = message.get("content") or choice.get("text", "")
                         separate_reasoning = message.get("reasoning_content")
-                        if raw_text or separate_reasoning:
-                            note_ttft()
-                        if isinstance(separate_reasoning, str) and separate_reasoning:
-                            emit_visible(raw_text)
-                        elif raw_text:
-                            emit_visible(splitter.feed(raw_text))
+                        # The full response body has already been read at this
+                        # point (this is a JSON-shaped, not SSE-shaped, gateway
+                        # response), so there is no genuine time-to-first-token
+                        # to report. Leave ttft_ms unset with an explicit
+                        # reason rather than mislabeling full latency as TTFT.
+                        ttft_unavailable_reason = "non_streaming_json_response"
                         usage = data.get("usage", {})
                         input_tokens = usage.get("prompt_tokens", input_tokens)
                         output_tokens = usage.get("completion_tokens", output_tokens)
                         rt, _ = self._extract_reasoning_tokens(usage)
                         reasoning_tokens = rt
+                        if isinstance(separate_reasoning, str) and separate_reasoning:
+                            emit_visible(raw_text)
+                        elif raw_text:
+                            emit_visible(splitter.feed(raw_text))
+                        trailing_visible = splitter.flush()
+                        emit_visible(trailing_visible)
                     except json.JSONDecodeError:
                         pass
                 else:
@@ -1138,10 +1206,13 @@ class ServeLLMClient:
             finish_reason=finish_reason,
             configured_max_tokens=payload.get("max_tokens"),
             ttft_ms=ttft_ms,
+            ttft_unavailable_reason=ttft_unavailable_reason,
             first_visible_answer_ms=first_visible_answer_ms,
             reasoning_tokens=reasoning_tokens,
             reasoning_tokens_unavailable_reason=(
-                None if reasoning_tokens is not None else "provider_did_not_report_token_split"
+                None
+                if reasoning_tokens is not None
+                else "provider_did_not_report_token_split"
             ),
             visible_answer_tokens=visible_tokens,
             visible_answer_tokens_unavailable_reason=visible_unavailable,
@@ -1169,8 +1240,7 @@ def create_llm_client(
     if budget is None:
         if not settings.dynamodb_table_name:
             raise ValueError(
-                "LLM_PROVIDER=bedrock requires DYNAMODB_TABLE_NAME for the shared "
-                "Bedrock allowance"
+                "LLM_PROVIDER=bedrock requires DYNAMODB_TABLE_NAME for the shared Bedrock allowance"
             )
         budget = DynamoDBBedrockBudget(
             settings.dynamodb_table_name,

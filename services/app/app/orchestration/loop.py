@@ -117,6 +117,9 @@ class LLMCall:
     visible_answer_tokens_unavailable_reason: str | None = None
     cost_usd: float = 0.0
     cost_source: str = "bedrock_estimate"
+    # Set when this call represents a failed provider call (e.g. no_tool_call,
+    # invalid_tool_call) recorded for telemetry rather than a successful result.
+    error_code: str | None = None
 
     def to_metadata(self) -> dict[str, Any]:
         return {
@@ -137,6 +140,7 @@ class LLMCall:
             ),
             "cost_usd": self.cost_usd,
             "cost_source": self.cost_source,
+            "error_code": self.error_code,
         }
 
 
@@ -246,6 +250,16 @@ class OrchestrationLoop:
             return self._llm_client_factory()
         raise LLMConfigurationError("No LLM client or factory configured")
 
+    def _configured_model_id(self) -> str:
+        """Best-effort model id for the initial Run/span, before the guarded
+        execute() path constructs (and validates) the real client. Any
+        construction failure here is deferred to execute(), which already
+        turns it into a proper OrchestrationError; this is display-only."""
+        try:
+            return self._get_llm_client().model_id
+        except Exception:
+            return DEFAULT_MODEL_ID
+
     def _get_mcp_client(self) -> DatasetProfileMCPClient:
         if self._mcp_client is not None:
             return self._mcp_client
@@ -298,7 +312,7 @@ class OrchestrationLoop:
             conversation_id=conv_id,
             message_id=user_msg_id,
             status="in_progress",
-            model=DEFAULT_MODEL_ID,
+            model=self._configured_model_id(),
             prompt_version="m9.v1",
         )
         self._repo.create_run(run)
@@ -354,7 +368,7 @@ class OrchestrationLoop:
                     "ai.run_id": submission.run_id,
                     "ai.conversation_id": submission.conversation_id,
                     "ai.turn_type": "text",
-                    "gen_ai.request.model": DEFAULT_MODEL_ID,
+                    "gen_ai.request.model": self._configured_model_id(),
                 }
             )
             result = self.execute(submission, budgets=budgets)
@@ -556,6 +570,7 @@ class OrchestrationLoop:
         # exception paths below always have a well-defined value, even if client
         # construction itself fails.
         is_self_hosted = False
+        configured_model_id = DEFAULT_MODEL_ID
 
         def call_cost(input_tokens: int, output_tokens: int) -> tuple[float, str]:
             # Serve mode runs on an owned, self-hosted vLLM gateway: it has no
@@ -567,7 +582,12 @@ class OrchestrationLoop:
         def current_model_id() -> str:
             if llm_calls:
                 return llm_calls[-1].model_id
-            return DEFAULT_MODEL_ID
+            # Even before any call has completed (or if the only call fails
+            # before producing an LLMCall), report the client's actually
+            # configured model id rather than the Bedrock default -- this
+            # matters most in serve mode, where the default would otherwise
+            # mislabel a self-hosted failure as a Bedrock one.
+            return configured_model_id
 
         def current_cost_source() -> str:
             if llm_calls:
@@ -581,6 +601,7 @@ class OrchestrationLoop:
                 llm = self._get_llm_client()
                 mcp = self._get_mcp_client()
                 is_self_hosted = isinstance(llm, ServeLLMClient)
+                configured_model_id = llm.model_id
             except LLMConfigurationError as err:
                 raise OrchestrationError(
                     "llm_configuration_error", False, proposal_call_id, str(err)
@@ -621,6 +642,27 @@ class OrchestrationLoop:
                         "llm_configuration_error", False, llm_call_id, str(err)
                     ) from err
                 except LLMProviderError as err:
+                    if err.model_id is not None:
+                        # The provider returned a response (e.g. no_tool_call,
+                        # invalid_tool_call) before failing our validation, so
+                        # real telemetry exists -- record it as a failed call
+                        # instead of discarding it.
+                        fail_cost, fail_cost_source = call_cost(
+                            err.input_tokens or 0, err.output_tokens or 0
+                        )
+                        llm_calls.append(
+                            LLMCall(
+                                llm_call_id=llm_call_id,
+                                model_id=err.model_id,
+                                input_tokens=err.input_tokens or 0,
+                                output_tokens=err.output_tokens or 0,
+                                latency_ms=err.latency_ms or 0,
+                                finish_reason=err.finish_reason,
+                                cost_usd=fail_cost,
+                                cost_source=fail_cost_source,
+                                error_code=err.code,
+                            )
+                        )
                     raise OrchestrationError(
                         err.code, err.retryable, llm_call_id, str(err)
                     ) from err
