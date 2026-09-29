@@ -5,9 +5,45 @@ NYC Taxi Analytics Agent on a GPU-Aware Inference Cluster**
 
 **Primary thesis: prove that admission, placement, queueing, prefix/KV locality, and hop decisions improve a real multi-step agent workload under constrained GPU memory.**
 
+## Current status (2026-09-29)
+
+The application workload is intentionally re-scoped from an open-ended ReAct agent to a
+**replayable, honest traffic generator** for #122/#123's control-plane and KV experiments — see
+`#115`'s re-scope comment and `.vscode/myfiles/115-react-workload/decisions.md` D11-D19. Merged:
+governed multi-tool MCP analytics (#137), honest per-call telemetry with no silent tool-call
+fallback and worker tool-calling flags (#138), and generated per-worker Grafana dashboards for
+KV/prefix-cache/prefill/decode (#136). In review: a real growing-conversation prefix contract,
+tool-result history, and a pre-canned query catalogue (#140, "slice C'"). Not started: the
+scenario generator/replayer (slice D'), and the fresh-Lambda bring-up. Section 5 below (prefix
+design) and the ReAct references elsewhere in this document describe the ORIGINAL agent-loop
+concept; the actually-implemented mechanism is deterministic tool dispatch plus a fixed
+question->tool catalogue, not a model-driven ReAct loop — see the note in Section 5.
+
+## Next-session priorities (in order)
+
+1. **Land #140** (slice C': real prefix contract, tool-result history, catalogue, 6-tool
+   dispatch). CI + one independent adversarial review are the merge gate (not waived for this
+   slice — see `next_session.md` Opus checkpoints 2-3). Remove its worktree after merge.
+2. **Fresh Lambda bring-up.** Create `infra/inference/.env` for the new host; `make
+   inference-up`; `make inference-tunnel`; smoke both workers. Gate before any measurement: both
+   workers healthy, the tool-proposal call returns real `tool_calls` (not a 400), thinking is
+   off, and `/tokenize` responds (needed for #140's exact token counts).
+3. **Slice D'** (scenario generator + replayer + before/after metrics snapshots) — needs #140
+   merged and, ideally, live workers to validate the generated traffic against.
+4. **#135 presentation walkthrough skeleton** — unblocked now that dashboards (#136) are merged;
+   fill rows in as #122/#123 land.
+5. **#122** (GPU-aware guard/admission/placement/queue control plane) — the next real milestone
+   once #115 (A/B/C'/D') is stable, per the original issue sequence #115 -> #122 -> #133 -> #123.
+6. **#139** (configurable agent strategy / CrewAI) — planning-only until #115's groundwork is
+   done; implementation was explicitly queued behind #140 to avoid touching `llm.py`/`loop.py`
+   twice at once.
+
 # 1. Project thesis and success criteria
 
-- Application: NYC Taxi Analytics agent. A user question triggers a ReAct-style loop: model -> DuckDB/MCP tool -> observation -> model -> final answer.
+- Application: NYC Taxi Analytics agent. A user question triggers a bounded tool-call loop:
+  model or catalogue selects one governed tool -> DuckDB/MCP -> observation -> model generates the
+  final answer from real conversation history (see Section 5 note; the original ReAct-style
+  multi-step loop was dropped from the current milestone, see Current status above).
 - Serving shape: shared system/tool prefix, conversation-specific growing prefix, unique newest suffix, repeated inference steps inside one user turn.
 - Control-plane ownership: guard -> admit/shed -> place -> gateway queue -> hop check -> vLLM. vLLM still owns engine waiting/running/preemption/chunked prefill/continuous batching.
 - Primary experiment: least-loaded routing vs prefix/KV-aware routing under the same traffic trace.
@@ -99,8 +135,14 @@ This is the target layout, not permission to pre-build future issues. #120 creat
 | Prompt region | Reuse scope | Examples | Why it matters |
 |---|---|---|---|
 | Global shared prefix | Across users | System prompt, taxi dataset rules, tool/MCP schemas | Good candidate for prefix cache reuse across many turns. |
-| Conversation prefix | Within one conversation | Prior user messages, tool calls, DuckDB observations | Becomes increasingly valuable on later ReAct steps. |
+| Conversation prefix | Within one conversation | Prior user messages, tool calls, DuckDB observations | Becomes increasingly valuable on later turns. |
 | Unique suffix | Per inference step | Newest question, newest tool result, latest reasoning/answer suffix | Must be prefetched/decoded anew. |
+
+**Note (2026-09-29):** the conversation-prefix region above described the intended shape all
+along, but was not actually sent to the model until #115 slice C' (real conversation history via
+`render_conversation_prompt`, tool results persisted as `role="tool"` messages). "Later ReAct
+steps" now means "later turns in a scripted/catalogue-driven conversation," not a model-driven
+multi-step investigation loop — see Current status above.
 
 **Routing implication:** workers are not interchangeable if their KV caches contain different useful prefixes. Placement should trade cache locality against queue/decode pressure rather than blindly choose the least-loaded worker.
 
