@@ -201,7 +201,9 @@ def test_orchestration_loop_timeout_deadline_exceeded() -> None:
         budgets=budgets,
     )
 
-    result = loop.run("Which pickup zones have the most trips?")
+    # Non-catalogued phrasing: a catalogue hit would skip propose_taxi_query entirely
+    # (and its artificial sleep), so this prompt must not match any query_catalogue entry.
+    result = loop.run("Give me a slow deliberately-uncatalogued timeout probe question")
     assert result.status == "budget_exceeded"
     assert result.failure_code == "budget_exceeded"
 
