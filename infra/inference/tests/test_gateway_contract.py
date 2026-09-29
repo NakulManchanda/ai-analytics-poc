@@ -77,3 +77,37 @@ def test_gateway_serve_worker_unavailable(client: TestClient) -> None:
         assert response.status_code == 503
         assert "Worker unavailable" in response.json()["detail"]
         assert response.headers["x-request-id"] == "req-fail"
+
+
+def test_gateway_tokenize_forwarding(client: TestClient) -> None:
+    """D17: the gateway proxies /tokenize to the worker so the app can get exact
+    token counts without a local tokenizer dependency."""
+    mock_upstream_response = httpx.Response(
+        200,
+        json={"count": 4, "tokens": [1, 2, 3, 4], "max_model_len": 4096},
+    )
+
+    with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_post.return_value = mock_upstream_response
+
+        response = client.post(
+            "/tokenize",
+            json={"model": "Qwen/Qwen3-0.6B", "prompt": "Hello there"},
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {"count": 4, "tokens": [1, 2, 3, 4], "max_model_len": 4096}
+    called_url = mock_post.call_args.args[0]
+    assert called_url.endswith("/tokenize")
+
+
+def test_gateway_tokenize_worker_unavailable(client: TestClient) -> None:
+    with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_post.side_effect = httpx.ConnectError("refused")
+
+        response = client.post(
+            "/tokenize",
+            json={"model": "Qwen/Qwen3-0.6B", "prompt": "Hello there"},
+        )
+
+    assert response.status_code == 503

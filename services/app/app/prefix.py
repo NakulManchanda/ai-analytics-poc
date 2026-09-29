@@ -15,6 +15,8 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
+import httpx
+
 # Standard globally shared system instructions for NYC taxi analytics
 DEFAULT_SYSTEM_PROMPT = (
     "You are the NYC Taxi Analytics AI Assistant. You have access to governed "
@@ -185,6 +187,113 @@ def build_query_answer_partition(
         conversation_shared="\n".join(conv_parts),
         unique_suffix=unique_suffix,
     )
+
+
+@dataclass(frozen=True)
+class ExactTokenCounts:
+    """Exact per-region token counts from vLLM's `/tokenize` endpoint (D17).
+
+    Never estimated: when not in serve mode, or the call fails/times out for
+    any reason, all three counts stay `None` and `token_count_unavailable_reason`
+    is set. This is a distinct field from `estimate_tokens()`'s word-count
+    heuristic, which keeps its existing behavior for its existing callers.
+    """
+
+    global_shared_tokens: int | None = None
+    conversation_shared_tokens: int | None = None
+    unique_suffix_tokens: int | None = None
+    token_count_unavailable_reason: str | None = None
+
+
+def _derive_tokenize_url(gateway_url: str) -> str:
+    """Sibling `/tokenize` route for a serve-mode gateway URL such as
+    `http://host:port/serve` or `http://host:port/v1/chat/completions`."""
+    base = gateway_url.rstrip("/")
+    for suffix in ("/v1/chat/completions", "/serve"):
+        if base.endswith(suffix):
+            base = base[: -len(suffix)]
+            break
+    return f"{base}/tokenize"
+
+
+def count_prefix_tokens_exact(
+    partition: PrefixPartition,
+    *,
+    model_id: str,
+    gateway_url: str | None,
+    is_serve_mode: bool = True,
+    http_client: Any | None = None,
+    timeout_seconds: float = 5.0,
+) -> ExactTokenCounts:
+    """Exact global/conversation/unique token counts via vLLM's OpenAI-compatible
+    `/tokenize` endpoint, reached through the owned inference gateway (D17).
+
+    Serve mode only, and never a fallback to `estimate_tokens()`: any failure
+    (not serve mode, no gateway URL, connection error, timeout, non-200, or a
+    malformed response) returns all-`None` counts with a reason instead.
+    """
+    if not is_serve_mode or not gateway_url:
+        return ExactTokenCounts(token_count_unavailable_reason="not_serve_mode")
+
+    tokenize_url = _derive_tokenize_url(gateway_url)
+    client = http_client
+    owns_client = False
+    if client is None:
+        client = httpx.Client(timeout=timeout_seconds)
+        owns_client = True
+    try:
+        counts: dict[str, int] = {}
+        regions = (
+            ("global_shared_tokens", partition.global_shared),
+            ("conversation_shared_tokens", partition.conversation_shared),
+            ("unique_suffix_tokens", partition.unique_suffix),
+        )
+        for field_name, text in regions:
+            if not text:
+                counts[field_name] = 0
+                continue
+            try:
+                response = client.post(
+                    tokenize_url, json={"model": model_id, "prompt": text}
+                )
+            except (httpx.ConnectError, httpx.TimeoutException) as exc:
+                return ExactTokenCounts(
+                    token_count_unavailable_reason=f"tokenize_call_failed: {exc}"
+                )
+            except httpx.RequestError as exc:
+                return ExactTokenCounts(
+                    token_count_unavailable_reason=f"tokenize_call_failed: {exc}"
+                )
+            if response.status_code != 200:
+                return ExactTokenCounts(
+                    token_count_unavailable_reason=(
+                        f"tokenize_http_{response.status_code}"
+                    )
+                )
+            try:
+                data = response.json()
+            except ValueError:
+                return ExactTokenCounts(
+                    token_count_unavailable_reason="tokenize_response_malformed"
+                )
+            count = data.get("count")
+            tokens = data.get("tokens")
+            if isinstance(count, int) and not isinstance(count, bool):
+                counts[field_name] = count
+            elif isinstance(tokens, list):
+                counts[field_name] = len(tokens)
+            else:
+                return ExactTokenCounts(
+                    token_count_unavailable_reason="tokenize_response_malformed"
+                )
+        return ExactTokenCounts(
+            global_shared_tokens=counts["global_shared_tokens"],
+            conversation_shared_tokens=counts["conversation_shared_tokens"],
+            unique_suffix_tokens=counts["unique_suffix_tokens"],
+        )
+    finally:
+        if owns_client:
+            client.close()
 
 
 def build_dataset_profile_partition(

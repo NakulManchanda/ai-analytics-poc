@@ -30,6 +30,38 @@ async def health() -> dict[str, str]:
     return {"status": "ok", "service": "inference-gateway"}
 
 
+@app.api_route("/tokenize", methods=["POST"])
+async def tokenize(request: Request) -> Response:
+    """Minimal pass-through to the vLLM worker's OpenAI-compatible /tokenize
+    endpoint (D17): exact token region counts for the rendered prefix, with
+    no local tokenizer dependency in the app."""
+    body = await request.json()
+    target_url = f"{DEFAULT_WORKER_URL}/tokenize"
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        try:
+            upstream_resp = await client.post(
+                target_url,
+                json=body,
+                headers={"content-type": "application/json"},
+            )
+        except httpx.ConnectError as exc:
+            raise HTTPException(
+                status_code=503,
+                detail=f"Worker unavailable at {DEFAULT_WORKER_URL}: {exc}",
+            ) from exc
+        except httpx.RequestError as exc:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Error proxying to worker: {exc}",
+            ) from exc
+    content = (
+        upstream_resp.json()
+        if upstream_resp.status_code == 200
+        else {"error": upstream_resp.text}
+    )
+    return JSONResponse(status_code=upstream_resp.status_code, content=content)
+
+
 @app.api_route("/serve", methods=["POST"])
 @app.api_route("/v1/chat/completions", methods=["POST"])
 async def serve_completion(
