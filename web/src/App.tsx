@@ -552,9 +552,37 @@ export default function App() {
               </div>
             )}
 
-            {/* Sample Questions Pills */}
+            {/* Sample Questions Pills, grouped by topic */}
             <div className="sample-questions-box">
-              <span className="sample-label">Sample Questions:</span>
+              <span className="sample-label">Dataset:</span>
+              <div className="sample-chips">
+                <button
+                  type="button"
+                  className="sample-chip"
+                  onClick={() => setPrompt("What date range, row count, and columns does this taxi dataset cover?")}
+                  title="Dataset profile: date range, row count, schema, null summary"
+                >
+                  🗒️ Dataset Profile
+                </button>
+                <button
+                  type="button"
+                  className="sample-chip"
+                  onClick={() => setPrompt("What payment types, rate codes, and vendors appear in the data, and what do the codes mean?")}
+                  title="Code dictionaries for payment_type, RatecodeID, VendorID"
+                >
+                  🔑 Code Dictionary
+                </button>
+                <button
+                  type="button"
+                  className="sample-chip"
+                  onClick={() => setPrompt("List the pickup boroughs present in the dataset")}
+                  title="Bounded dimension-value lookup"
+                >
+                  🏙️ List Boroughs
+                </button>
+              </div>
+
+              <span className="sample-label">Time &amp; Location:</span>
               <div className="sample-chips">
                 <button
                   type="button"
@@ -575,6 +603,34 @@ export default function App() {
                 <button
                   type="button"
                   className="sample-chip"
+                  onClick={() => setPrompt("Compare weekday and weekend trip volume by hour")}
+                  title="Weekday vs weekend demand by hour"
+                >
+                  📅 Weekday vs Weekend
+                </button>
+                <button
+                  type="button"
+                  className="sample-chip"
+                  onClick={() => setPrompt("How do airport trips compare with non-airport trips on fare and duration?")}
+                  title="Airport vs non-airport trip comparison"
+                >
+                  ✈️ Airport vs Non-Airport
+                </button>
+                <button
+                  type="button"
+                  className="sample-chip"
+                  onClick={() => setPrompt("Which pickup zone has the longest average trip duration?")}
+                  title="Aggregate by zone, order by duration"
+                >
+                  🕒 Longest Trips by Zone
+                </button>
+              </div>
+
+              <span className="sample-label">Fares &amp; Payments:</span>
+              <div className="sample-chips">
+                <button
+                  type="button"
+                  className="sample-chip"
                   onClick={() => setPrompt("Compare average trip distance and fare amount across major pickup boroughs")}
                   title="Borough-level distance and fare analytics"
                 >
@@ -587,6 +643,74 @@ export default function App() {
                   title="Payment method analysis and tipping behavior"
                 >
                   💳 Payment & Tip Breakdown
+                </button>
+                <button
+                  type="button"
+                  className="sample-chip"
+                  onClick={() => setPrompt("What is the average tip rate for credit card payments by pickup borough?")}
+                  title="Card-only tip rate by borough (cash tips are not recorded)"
+                >
+                  💰 Tip Rate by Borough
+                </button>
+                <button
+                  type="button"
+                  className="sample-chip"
+                  onClick={() => setPrompt("Which fare amount bucket has the most trips, and what is the median trip distance in that bucket?")}
+                  title="Fare-bucket distribution and matching distance"
+                >
+                  💵 Fare Buckets
+                </button>
+                <button
+                  type="button"
+                  className="sample-chip"
+                  onClick={() => setPrompt("What is the average fare and trip count by trip distance bucket?")}
+                  title="Distance-bucket fare analysis"
+                >
+                  📏 Fare by Distance Bucket
+                </button>
+              </div>
+
+              <span className="sample-label">Comparisons &amp; Follow-ups:</span>
+              <div className="sample-chips">
+                <button
+                  type="button"
+                  className="sample-chip"
+                  onClick={() => setPrompt("Compare Manhattan and Queens on trip count, average fare, and average tip")}
+                  title="Segment comparison: Manhattan vs Queens"
+                >
+                  🔀 Manhattan vs Queens
+                </button>
+                <button
+                  type="button"
+                  className="sample-chip"
+                  onClick={() => setPrompt("Compare morning rush hour (7-10am) and evening rush hour (4-7pm) trip duration by borough")}
+                  title="Rush-hour duration comparison by borough"
+                >
+                  🚦 Morning vs Evening Rush
+                </button>
+                <button
+                  type="button"
+                  className="sample-chip"
+                  onClick={() => setPrompt("Which borough contributed most to the busiest pickup hour, and which zones inside it dominate?")}
+                  title="Drilldown: busiest hour → borough → zones"
+                >
+                  🔎 Drill Into Busiest Hour
+                </button>
+                <button
+                  type="button"
+                  className="sample-chip"
+                  onClick={() => setPrompt("Compare the first and last complete weeks of the dataset on trip count and average fare")}
+                  title="Period-over-period comparison within the pinned dataset"
+                >
+                  📈 First vs Last Week
+                </button>
+                <button
+                  type="button"
+                  className="sample-chip"
+                  onClick={() => setPrompt("Compare pickup and dropoff borough distributions")}
+                  title="Pickup vs dropoff borough distribution"
+                >
+                  🔁 Pickup vs Dropoff Boroughs
                 </button>
               </div>
             </div>
