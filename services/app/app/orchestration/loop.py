@@ -30,6 +30,7 @@ from app.mcp_client import (
     sanitize_query_result,
 )
 from app.metrics import emit_run_metrics
+from app.query_catalogue import lookup as catalogue_lookup
 from app.orchestration.budgets import (
     BudgetExceededError,
     BudgetTracker,
@@ -55,6 +56,54 @@ from app.state import (
 logger = logging.getLogger(__name__)
 EXPECTED_TOOL_NAME = "query_taxi_data"
 AVERAGE_METRICS_TOOL_NAME = "average_trip_metrics"
+# Extended governed tools reachable only via the fixed query catalogue (D19),
+# never via the model tool-proposal path today. Their result envelopes carry
+# extra descriptive fields (query_class, dimensions, code_dictionaries, ...)
+# on top of the base bounded shape, so they do not fit the strict
+# row/column-only schema `sanitize_query_result` enforces for
+# query_taxi_data/average_trip_metrics/compare_taxi_segments. They get a
+# lighter, local bounds check instead of being forced through that schema.
+EXTENDED_GOVERNED_TOOL_NAMES = frozenset(
+    {"describe_taxi_dataset", "list_taxi_dimension_values", "aggregate_taxi_data"}
+)
+MAX_EXTENDED_RESULT_BYTES = 8_192
+
+
+def sanitize_extended_governed_result(payload: Any) -> dict[str, object]:
+    """Bounds-check the result of an extended governed tool (describe/list/
+    aggregate) without forcing it through the row/column-only schema used by
+    the original three tools. The dataset_spike layer already enforces the
+    row/column/byte caps; this is a defense-in-depth check on the app side
+    that the app never forwards something unbounded or malformed to the
+    model. A structured `{"error": {...}}` validation envelope (per slice A)
+    is treated as a non-retryable tool failure."""
+    if not isinstance(payload, Mapping):
+        raise MCPToolError(retryable=False, message="Malformed tool result")
+    error = payload.get("error")
+    if isinstance(error, Mapping):
+        message = error.get("message")
+        raise MCPToolError(
+            retryable=False,
+            message=str(message) if message is not None else "Tool validation error",
+        )
+    row_count = payload.get("row_count")
+    query_id = payload.get("query_id")
+    truncated = payload.get("truncated")
+    if (
+        isinstance(row_count, bool)
+        or not isinstance(row_count, int)
+        or not isinstance(query_id, str)
+        or not query_id
+        or not isinstance(truncated, bool)
+    ):
+        raise MCPToolError(retryable=False, message="Malformed tool result")
+    try:
+        encoded = json.dumps(dict(payload), separators=(",", ":"), allow_nan=False)
+    except (TypeError, ValueError) as error:
+        raise MCPToolError(retryable=False, message="Unserializable tool result") from error
+    if len(encoded.encode("utf-8")) > MAX_EXTENDED_RESULT_BYTES:
+        raise MCPToolError(retryable=False, message="Tool result too large")
+    return dict(payload)
 
 
 class RunCancelledError(Exception):
@@ -120,6 +169,10 @@ class LLMCall:
     # Set when this call represents a failed provider call (e.g. no_tool_call,
     # invalid_tool_call) recorded for telemetry rather than a successful result.
     error_code: str | None = None
+    # D19: "catalogue" when the tool proposal step was answered from the fixed
+    # query catalogue (skipping the model call), "model" otherwise. Only set
+    # meaningfully on the proposal LLMCall; unused ("model") on the answer call.
+    tool_source: str = "model"
 
     def to_metadata(self) -> dict[str, Any]:
         return {
@@ -141,6 +194,7 @@ class LLMCall:
             "cost_usd": self.cost_usd,
             "cost_source": self.cost_source,
             "error_code": self.error_code,
+            "tool_source": self.tool_source,
         }
 
 
@@ -166,10 +220,122 @@ class OrchestrationError(ValueError):
         self.message = message
 
 
+def _is_str_list(value: object) -> bool:
+    return isinstance(value, list) and all(isinstance(v, str) for v in value)
+
+
+def _parse_describe_taxi_dataset(arguments: object) -> dict[str, object] | None:
+    args = arguments if arguments is not None else {}
+    if not isinstance(args, Mapping) or set(args) - {"include_column_stats"}:
+        return None
+    include_column_stats = args.get("include_column_stats", False)
+    if not isinstance(include_column_stats, bool):
+        return None
+    return {"include_column_stats": include_column_stats}
+
+
+def _parse_list_taxi_dimension_values(arguments: object) -> dict[str, object] | None:
+    if not isinstance(arguments, Mapping) or set(arguments) - {
+        "dimension",
+        "search",
+        "limit",
+    }:
+        return None
+    dimension = arguments.get("dimension")
+    search = arguments.get("search")
+    limit = arguments.get("limit", 20)
+    if not isinstance(dimension, str) or not dimension:
+        return None
+    if search is not None and not isinstance(search, str):
+        return None
+    if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 20:
+        return None
+    return {"dimension": dimension, "search": search, "limit": limit}
+
+
+def _parse_aggregate_taxi_data(arguments: object) -> dict[str, object] | None:
+    if not isinstance(arguments, Mapping) or set(arguments) - {
+        "dimensions",
+        "measures",
+        "filters",
+        "order_by",
+        "limit",
+    }:
+        return None
+    dimensions = arguments.get("dimensions")
+    measures = arguments.get("measures")
+    filters = arguments.get("filters")
+    order_by = arguments.get("order_by")
+    limit = arguments.get("limit", 20)
+    if not _is_str_list(dimensions) or not dimensions:
+        return None
+    if not _is_str_list(measures) or not measures:
+        return None
+    if filters is not None and not isinstance(filters, Mapping):
+        return None
+    if order_by is not None and not isinstance(order_by, Mapping):
+        return None
+    if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 20:
+        return None
+    return {
+        "dimensions": dimensions,
+        "measures": measures,
+        "filters": dict(filters) if filters is not None else None,
+        "order_by": dict(order_by) if order_by is not None else None,
+        "limit": limit,
+    }
+
+
+def _parse_compare_taxi_segments(arguments: object) -> dict[str, object] | None:
+    if not isinstance(arguments, Mapping) or set(arguments) - {
+        "segment_dimension",
+        "measures",
+        "baseline_filters",
+        "comparison_filters",
+        "limit",
+    }:
+        return None
+    segment_dimension = arguments.get("segment_dimension")
+    measures = arguments.get("measures")
+    baseline_filters = arguments.get("baseline_filters")
+    comparison_filters = arguments.get("comparison_filters")
+    limit = arguments.get("limit", 20)
+    if not isinstance(segment_dimension, str) or not segment_dimension:
+        return None
+    if not _is_str_list(measures) or not measures:
+        return None
+    if not isinstance(baseline_filters, Mapping) or not isinstance(
+        comparison_filters, Mapping
+    ):
+        return None
+    if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 20:
+        return None
+    return {
+        "segment_dimension": segment_dimension,
+        "measures": measures,
+        "baseline_filters": dict(baseline_filters),
+        "comparison_filters": dict(comparison_filters),
+        "limit": limit,
+    }
+
+
+_EXTENDED_TOOL_PARSERS: dict[str, Callable[[object], dict[str, object] | None]] = {
+    "describe_taxi_dataset": _parse_describe_taxi_dataset,
+    "list_taxi_dimension_values": _parse_list_taxi_dimension_values,
+    "aggregate_taxi_data": _parse_aggregate_taxi_data,
+    "compare_taxi_segments": _parse_compare_taxi_segments,
+}
+
+
 def parse_query_proposal(
     proposal: ToolProposalResult,
 ) -> tuple[str, dict[str, object]] | None:
     arguments = proposal.arguments
+    if proposal.name in _EXTENDED_TOOL_PARSERS:
+        parsed = _EXTENDED_TOOL_PARSERS[proposal.name](arguments)
+        if parsed is None:
+            return None
+        return proposal.name, parsed
     if proposal.name == AVERAGE_METRICS_TOOL_NAME:
         if arguments is None:
             arguments = {}
@@ -628,120 +794,154 @@ class OrchestrationLoop:
                         "mcp_tool_error", err.retryable, proposal_call_id, str(err)
                     ) from err
 
-                # Step B: LLM Propose Taxi Query
+                # Step B: catalogue lookup (D19), else LLM Propose Taxi Query
                 check_cancellation()
-                llm_call_id = proposal_call_id
-                emit("llm.started", {"llm_call_id": llm_call_id, "phase": "proposal"})
-                call_start = self._monotonic()
-                try:
-                    proposal = self._run_with_cancellation(
-                        llm.propose_taxi_query, prompt, schema, run_id=run_id
-                    )
-                except LLMConfigurationError as err:
-                    raise OrchestrationError(
-                        "llm_configuration_error", False, llm_call_id, str(err)
-                    ) from err
-                except LLMProviderError as err:
-                    if err.model_id is not None:
-                        # The provider returned a response (e.g. no_tool_call,
-                        # invalid_tool_call) before failing our validation, so
-                        # real telemetry exists -- record it as a failed call
-                        # instead of discarding it.
-                        fail_cost, fail_cost_source = call_cost(
-                            err.input_tokens or 0, err.output_tokens or 0
-                        )
-                        llm_calls.append(
-                            LLMCall(
-                                llm_call_id=llm_call_id,
-                                model_id=err.model_id,
-                                input_tokens=err.input_tokens or 0,
-                                output_tokens=err.output_tokens or 0,
-                                latency_ms=err.latency_ms or 0,
-                                finish_reason=err.finish_reason,
-                                cost_usd=fail_cost,
-                                cost_source=fail_cost_source,
-                                error_code=err.code,
-                            )
-                        )
-                    raise OrchestrationError(
-                        err.code, err.retryable, llm_call_id, str(err)
-                    ) from err
-                call_latency_ms = int((self._monotonic() - call_start) * 1000)
-                proposal_latency_ms = call_latency_ms
-
-                cost, cost_source = call_cost(
-                    proposal.input_tokens, proposal.output_tokens
-                )
-                tracker.record_llm_call(
-                    proposal.input_tokens,
-                    proposal.output_tokens,
-                    cost,
-                )
-                llm_calls.append(
-                    LLMCall(
-                        llm_call_id=llm_call_id,
-                        model_id=proposal.model_id,
-                        input_tokens=proposal.input_tokens,
-                        output_tokens=proposal.output_tokens,
-                        latency_ms=proposal.latency_ms,
-                        finish_reason=proposal.finish_reason,
-                        configured_max_tokens=proposal.configured_max_tokens,
-                        cost_usd=cost,
-                        cost_source=cost_source,
-                    )
-                )
-                emit(
-                    "llm.completed",
-                    {
-                        "llm_call_id": llm_call_id,
-                        "phase": "proposal",
-                        "latency_ms": call_latency_ms,
-                        "tokens": {
-                            "input": proposal.input_tokens,
-                            "output": proposal.output_tokens,
-                        },
-                    },
-                    llm_call_id=llm_call_id,
-                )
-
-                proposal_step = RunStep(
-                    step_id=generate_step_id(),
-                    run_id=run_id,
-                    sequence=step_seq,
-                    step_type="llm_proposal",
-                    status="completed",
-                    llm_call_id=llm_call_id,
-                    input_summary=f"prompt: {prompt[:80]}",
-                    output_summary=f"tool: {proposal.name}",
-                    duration_ms=call_latency_ms,
-                    metadata=llm_calls[-1].to_metadata(),
-                )
-                self._repo.add_run_step(proposal_step)
-                steps.append(proposal_step)
-                step_seq += 1
-
-                # Step C: Validate proposal & Check Repeated Calls
-                query_request = parse_query_proposal(proposal)
-                if query_request is None:
-                    invalid_step = RunStep(
+                catalogue_entry = catalogue_lookup(prompt)
+                if catalogue_entry is not None:
+                    llm_call_id = None
+                    tool_name, tool_arguments = catalogue_entry
+                    proposal_step = RunStep(
                         step_id=generate_step_id(),
                         run_id=run_id,
                         sequence=step_seq,
-                        step_type="validation_error",
-                        status="failed",
-                        input_summary=f"arguments: {proposal.arguments}",
-                        output_summary="invalid tool arguments",
+                        step_type="llm_proposal",
+                        status="completed",
+                        input_summary=f"prompt: {prompt[:80]}",
+                        output_summary=f"tool: {tool_name}",
+                        duration_ms=0,
+                        metadata={"tool_source": "catalogue", "tool_name": tool_name},
                     )
-                    self._repo.add_run_step(invalid_step)
-                    steps.append(invalid_step)
-                    raise OrchestrationError(
-                        "tool_validation_error",
-                        False,
-                        llm_call_id,
-                        f"Invalid tool proposal: {proposal.arguments}",
+                    self._repo.add_run_step(proposal_step)
+                    steps.append(proposal_step)
+                    step_seq += 1
+                else:
+                    llm_call_id = proposal_call_id
+                    emit(
+                        "llm.started",
+                        {"llm_call_id": llm_call_id, "phase": "proposal"},
+                    )
+                    call_start = self._monotonic()
+                    try:
+                        proposal_kwargs: dict[str, Any] = (
+                            {"conversation_id": conv_id, "repo": self._repo}
+                            if is_self_hosted
+                            else {}
+                        )
+                        proposal = self._run_with_cancellation(
+                            llm.propose_taxi_query,
+                            prompt,
+                            schema,
+                            run_id=run_id,
+                            **proposal_kwargs,
+                        )
+                    except LLMConfigurationError as err:
+                        raise OrchestrationError(
+                            "llm_configuration_error", False, llm_call_id, str(err)
+                        ) from err
+                    except LLMProviderError as err:
+                        if err.model_id is not None:
+                            # The provider returned a response (e.g. no_tool_call,
+                            # invalid_tool_call) before failing our validation, so
+                            # real telemetry exists -- record it as a failed call
+                            # instead of discarding it.
+                            fail_cost, fail_cost_source = call_cost(
+                                err.input_tokens or 0, err.output_tokens or 0
+                            )
+                            llm_calls.append(
+                                LLMCall(
+                                    llm_call_id=llm_call_id,
+                                    model_id=err.model_id,
+                                    input_tokens=err.input_tokens or 0,
+                                    output_tokens=err.output_tokens or 0,
+                                    latency_ms=err.latency_ms or 0,
+                                    finish_reason=err.finish_reason,
+                                    cost_usd=fail_cost,
+                                    cost_source=fail_cost_source,
+                                    error_code=err.code,
+                                    tool_source="model",
+                                )
+                            )
+                        raise OrchestrationError(
+                            err.code, err.retryable, llm_call_id, str(err)
+                        ) from err
+                    call_latency_ms = int((self._monotonic() - call_start) * 1000)
+                    proposal_latency_ms = call_latency_ms
+
+                    cost, cost_source = call_cost(
+                        proposal.input_tokens, proposal.output_tokens
+                    )
+                    tracker.record_llm_call(
+                        proposal.input_tokens,
+                        proposal.output_tokens,
+                        cost,
+                    )
+                    llm_calls.append(
+                        LLMCall(
+                            llm_call_id=llm_call_id,
+                            model_id=proposal.model_id,
+                            input_tokens=proposal.input_tokens,
+                            output_tokens=proposal.output_tokens,
+                            latency_ms=proposal.latency_ms,
+                            finish_reason=proposal.finish_reason,
+                            configured_max_tokens=proposal.configured_max_tokens,
+                            cost_usd=cost,
+                            cost_source=cost_source,
+                            tool_source="model",
+                        )
+                    )
+                    emit(
+                        "llm.completed",
+                        {
+                            "llm_call_id": llm_call_id,
+                            "phase": "proposal",
+                            "latency_ms": call_latency_ms,
+                            "tokens": {
+                                "input": proposal.input_tokens,
+                                "output": proposal.output_tokens,
+                            },
+                        },
+                        llm_call_id=llm_call_id,
                     )
 
-                tool_name, tool_arguments = query_request
+                    proposal_step = RunStep(
+                        step_id=generate_step_id(),
+                        run_id=run_id,
+                        sequence=step_seq,
+                        step_type="llm_proposal",
+                        status="completed",
+                        llm_call_id=llm_call_id,
+                        input_summary=f"prompt: {prompt[:80]}",
+                        output_summary=f"tool: {proposal.name}",
+                        duration_ms=call_latency_ms,
+                        metadata=llm_calls[-1].to_metadata(),
+                    )
+                    self._repo.add_run_step(proposal_step)
+                    steps.append(proposal_step)
+                    step_seq += 1
+
+                    # Step C: Validate proposal & Check Repeated Calls
+                    query_request = parse_query_proposal(proposal)
+                    if query_request is None:
+                        invalid_step = RunStep(
+                            step_id=generate_step_id(),
+                            run_id=run_id,
+                            sequence=step_seq,
+                            step_type="validation_error",
+                            status="failed",
+                            input_summary=f"arguments: {proposal.arguments}",
+                            output_summary="invalid tool arguments",
+                        )
+                        self._repo.add_run_step(invalid_step)
+                        steps.append(invalid_step)
+                        raise OrchestrationError(
+                            "tool_validation_error",
+                            False,
+                            llm_call_id,
+                            f"Invalid tool proposal: {proposal.arguments}",
+                        )
+
+                    tool_name, tool_arguments = query_request
+
                 emit(
                     "tool.requested",
                     {"tool_name": tool_name, **tool_arguments},
@@ -761,7 +961,7 @@ class OrchestrationLoop:
                 last_tool_call_id = tool_call_id
                 emit(
                     "tool.started",
-                    {"tool_call_id": tool_call_id, "tool_name": proposal.name},
+                    {"tool_call_id": tool_call_id, "tool_name": tool_name},
                 )
                 tool_start = self._monotonic()
                 try:
@@ -771,14 +971,44 @@ class OrchestrationLoop:
                             region_name=tool_arguments.get("region_name"),
                             run_id=run_id,
                         )
-                    else:
+                        query_result = sanitize_query_result(raw_query_result)
+                    elif tool_name == EXPECTED_TOOL_NAME:
                         raw_query_result = self._run_with_cancellation(
                             mcp.query_taxi_data,
                             analysis=str(tool_arguments["analysis"]),
                             limit=int(tool_arguments["limit"]),
                             run_id=run_id,
                         )
-                    query_result = sanitize_query_result(raw_query_result)
+                        query_result = sanitize_query_result(raw_query_result)
+                    elif tool_name == "compare_taxi_segments":
+                        raw_query_result = self._run_with_cancellation(
+                            mcp.compare_taxi_segments,
+                            run_id=run_id,
+                            **tool_arguments,
+                        )
+                        # compare_taxi_segments' envelope is exactly the
+                        # row/column shape sanitize_query_result enforces.
+                        query_result = sanitize_query_result(raw_query_result)
+                    elif tool_name in EXTENDED_GOVERNED_TOOL_NAMES:
+                        # Catalogue-only governed tools (D19): describe/list/
+                        # aggregate carry extra descriptive fields
+                        # (query_class, dimensions, code_dictionaries, ...) on
+                        # top of the base bounded shape, so they get the
+                        # lighter extended sanitizer instead of being forced
+                        # through the row/column-only schema.
+                        raw_query_result = self._run_with_cancellation(
+                            getattr(mcp, tool_name),
+                            run_id=run_id,
+                            **tool_arguments,
+                        )
+                        query_result = sanitize_extended_governed_result(
+                            raw_query_result
+                        )
+                    else:
+                        raise MCPToolError(
+                            retryable=False,
+                            message=f"Unknown governed tool '{tool_name}'",
+                        )
                 except MCPToolError as err:
                     fail_duration_ms = int((self._monotonic() - tool_start) * 1000)
                     error_msg = err.message or str(err)
@@ -786,7 +1016,7 @@ class OrchestrationLoop:
                         "tool.failed",
                         {
                             "tool_call_id": tool_call_id,
-                            "tool_name": proposal.name,
+                            "tool_name": tool_name,
                             "error": error_msg,
                             "duration_ms": fail_duration_ms,
                         },
@@ -798,7 +1028,7 @@ class OrchestrationLoop:
                         sequence=step_seq,
                         step_type="tool_call",
                         status="failed",
-                        tool_name=proposal.name,
+                        tool_name=tool_name,
                         tool_call_id=tool_call_id,
                         input_summary=json.dumps(tool_arguments, sort_keys=True),
                         output_summary=f"error: {error_msg}",
@@ -839,7 +1069,7 @@ class OrchestrationLoop:
                     sequence=step_seq,
                     step_type="tool_call",
                     status="completed",
-                    tool_name=proposal.name,
+                    tool_name=tool_name,
                     tool_call_id=tool_call_id,
                     query_id=query_id_val,
                     input_summary=json.dumps(tool_arguments, sort_keys=True),
@@ -851,6 +1081,25 @@ class OrchestrationLoop:
                 self._repo.add_run_step(tool_step)
                 steps.append(tool_step)
                 step_seq += 1
+
+                # Persist the tool observation as a durable conversation message so
+                # the prefix renderer can reconstruct the real growing prefix from
+                # stored history (D18). Additive only: existing user/assistant
+                # message handling is untouched.
+                tool_msg_id = generate_message_id()
+                self._repo.add_message(
+                    Message(
+                        message_id=tool_msg_id,
+                        conversation_id=conv_id,
+                        sequence=next_seq,
+                        role="tool",
+                        content=json.dumps(
+                            query_result, separators=(",", ":"), sort_keys=True
+                        ),
+                        metadata={"tool_name": tool_name, "query_id": query_id_val},
+                    )
+                )
+                next_seq += 1
 
                 # Step E: Reduce context and Answer
                 check_cancellation()
@@ -919,17 +1168,23 @@ class OrchestrationLoop:
                     stream_answer = getattr(
                         llm, "stream_answer_with_query_result", None
                     )
+                    answer_kwargs: dict[str, Any] = (
+                        {"conversation_id": conv_id, "repo": self._repo}
+                        if is_self_hosted
+                        else {}
+                    )
                     if callable(stream_answer):
                         final_answer_stream_started = True
                         answer_result = stream_answer(
                             prompt,
                             query_result,
                             publish_answer_delta,
+                            **answer_kwargs,
                         )
                     else:
                         final_answer_stream_started = False
                         answer_result = llm.answer_with_query_result(
-                            prompt, query_result
+                            prompt, query_result, **answer_kwargs
                         )
                 except LLMConfigurationError as err:
                     raise OrchestrationError(
