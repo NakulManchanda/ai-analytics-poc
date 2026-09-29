@@ -167,7 +167,7 @@ def test_ask_supplies_schema_and_runs_one_validated_governed_query() -> None:
     )
 
     response = client.post(
-        "/api/ask", json={"prompt": "Which pickup zones have the most trips?"}
+        "/api/ask", json={"prompt": "What are the top pickup zones by ride count?"}
     )
 
     assert response.status_code == 200
@@ -202,12 +202,12 @@ def test_ask_supplies_schema_and_runs_one_validated_governed_query() -> None:
         "latency_ms": 28,
     }
     assert llm_client.proposal_inputs == [
-        ("Which pickup zones have the most trips?", SCHEMA)
+        ("What are the top pickup zones by ride count?", SCHEMA)
     ]
     assert mcp_client.schema_reads == 1
     assert mcp_client.query_requests == [("top_pickup_zones", 5)]
     assert llm_client.answer_inputs == [
-        ("Which pickup zones have the most trips?", QUERY_RESULT)
+        ("What are the top pickup zones by ride count?", QUERY_RESULT)
     ]
 
 

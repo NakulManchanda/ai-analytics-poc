@@ -97,10 +97,14 @@ def test_v11_local_api_smoke_recovers_two_turn_conversation_and_sse_contract() -
     assert second["run_id"] != first["run_id"]
     assert conversation_response.status_code == 200
     conversation = conversation_response.json()
+    # user -> tool (persisted governed tool observation, D18) -> assistant,
+    # repeated per turn.
     assert [message["role"] for message in conversation["messages"]] == [
         "user",
+        "tool",
         "assistant",
         "user",
+        "tool",
         "assistant",
     ]
     assert [run["run_id"] for run in conversation["runs"]] == [
@@ -125,8 +129,10 @@ def test_v11_local_api_smoke_recovers_two_turn_conversation_and_sse_contract() -
     assert context_payload["query_id"] == "qry_v11_integration"
     assert context_payload["row_count"] == 1
     working_context = context_payload["working_context"]
-    assert working_context["stored_message_count"] == 3
-    assert working_context["included_message_count"] == 3
+    # turn 1: user + tool (D18) + assistant (3), turn 2 so far: user + tool (2)
+    # = 5 stored messages by the time turn 2's context is reduced.
+    assert working_context["stored_message_count"] == 5
+    assert working_context["included_message_count"] == 5
     assert working_context["recent_tool_observations"] == [
         {
             "query_id": "qry_v11_integration",

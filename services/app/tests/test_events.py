@@ -256,7 +256,7 @@ def test_reconstructed_failed_terminal_event_matches_live_contract() -> None:
     )
 
     with pytest.raises(ValueError):
-        loop.run("Which pickup zones have the most trips?")
+        loop.run("What are the top pickup zones by ride count?")
 
     run_id = next(iter(repo._runs))
     live_payload = next(
@@ -289,7 +289,7 @@ def test_orchestration_loop_emits_full_event_sequence() -> None:
         voice_settings=VoiceSettings(enabled=False),
     )
 
-    result = loop.run("Which pickup zones have the most trips?")
+    result = loop.run("What are the top pickup zones by ride count?")
     assert result.status == "completed"
 
     events = publisher.get_events_for_run(result.run_id)
@@ -343,7 +343,7 @@ def test_orchestration_loop_emits_provider_deltas_and_truthful_ttft() -> None:
         monotonic_factory=lambda: next(monotonic_values),
     )
 
-    result = loop.run("Which pickup zones have the most trips?")
+    result = loop.run("What are the top pickup zones by ride count?")
 
     events = publisher.get_events_for_run(result.run_id)
     answer_events = [
