@@ -119,12 +119,44 @@ async def tokenize(request: Request) -> Response:
     return JSONResponse(status_code=upstream_resp.status_code, content=content)
 
 
+class _OverflowStatus(ValueError):
+    def __init__(self, status: int) -> None:
+        super().__init__(f"overflow status {status}")
+        self.status = status
+
+
+def _fallback_failure(exc: Exception) -> str:
+    """Bounded classification of an overflow failure (label for overflow_error_total)."""
+    if isinstance(exc, httpx.TimeoutException):
+        return "fallback_timeout"
+    if isinstance(exc, _OverflowStatus) and exc.status >= 500:
+        return "fallback_5xx"
+    return "fallback_error"
+
+
 async def _overflow(
-    cfg: OverflowConfig, reason: str, body: dict, headers: dict, log_fields: dict
+    cfg: OverflowConfig,
+    reason: str,
+    body: dict,
+    headers: dict,
+    log_fields: dict,
+    on_done,
+    remaining_s: float | None = None,
 ) -> Response | None:
     """ONE attempt at the configured destination (model rewritten). None -> caller returns
-    the original local error. Never logs the API key or exception text (may echo the URL)."""
+    the original local error. ``on_done(status)`` runs once when the client-visible response
+    is complete (after the stream ends for streaming). ``remaining_s`` is the request's
+    remaining x-deadline-ms budget. Never logs the API key or exception text."""
     dest = {"overflow_provider": cfg.provider, "overflow_model": cfg.model}
+    if remaining_s is not None and remaining_s <= 0:
+        metrics.OVERFLOW_ERROR.labels("no_time_remaining").inc()
+        log.info(
+            json.dumps(
+                {**log_fields, "stage": "overflow", "reason": reason, **dest}
+                | {"outcome": "skipped", "skip": "no_time_remaining"}
+            )
+        )
+        return None
     out_headers = {
         **headers,
         "x-orchestration-stage": "overflow",
@@ -133,51 +165,70 @@ async def _overflow(
         "x-overflow-reason": reason,
     }
     payload = {**body, "model": cfg.model}
-    client = httpx.AsyncClient(timeout=cfg.timeout_s)
+    timeout = cfg.timeout_s if remaining_s is None else min(cfg.timeout_s, remaining_s)
+    client = httpx.AsyncClient(timeout=timeout)
     cm = None
+
+    def record(outcome: str, exc: Exception | None = None) -> None:
+        metrics.OVERFLOW.labels(reason, cfg.provider, cfg.model, outcome).inc()
+        fields = {**log_fields, "stage": "overflow", "reason": reason, **dest, "outcome": outcome}
+        if exc is not None:
+            metrics.OVERFLOW_ERROR.labels(_fallback_failure(exc)).inc()
+            fields["error_type"] = type(exc).__name__
+        log.info(json.dumps(fields))
+
     try:
         if body.get("stream"):
             cm = client.stream("POST", cfg.url, json=payload, headers=cfg.headers())
             upstream = await cm.__aenter__()
             if upstream.status_code != 200:
-                raise ValueError(f"overflow status {upstream.status_code}")
+                raise _OverflowStatus(upstream.status_code)
         else:
             upstream = await client.post(cfg.url, json=payload, headers=cfg.headers())
             if upstream.status_code != 200:
-                raise ValueError(f"overflow status {upstream.status_code}")
+                raise _OverflowStatus(upstream.status_code)
             content = upstream.json()
     except (httpx.HTTPError, ValueError) as exc:
         if cm is not None:
             with contextlib.suppress(Exception):
                 await cm.__aexit__(None, None, None)
         await client.aclose()
-        metrics.OVERFLOW.labels(reason, cfg.provider, cfg.model, "error").inc()
-        metrics.OVERFLOW_ERROR.labels(reason).inc()
-        log.info(
-            json.dumps(
-                {**log_fields, "stage": "overflow", "reason": reason, **dest, "outcome": "error"}
-                | {"error_type": type(exc).__name__}
-            )
-        )
+        record("error", exc)
         return None
-    metrics.OVERFLOW.labels(reason, cfg.provider, cfg.model, "ok").inc()
-    log.info(
-        json.dumps({**log_fields, "stage": "overflow", "reason": reason, **dest, "outcome": "ok"})
-    )
     if cm is None:
         await client.aclose()
+        record("ok")
+        on_done(200)
         return JSONResponse(content=content, headers=out_headers)
 
     async def gen():
+        status = 499  # client went away unless the stream completes or fails below
         try:
             async for line in upstream.aiter_lines():
                 if line:
                     yield f"{line}\n\n"
+            status = 200
+            record("ok")
+        except httpx.HTTPError as exc:
+            status = 502
+            record("error", exc)
+            yield f"data: {json.dumps({'error': 'overflow_stream_error'})}\n\n"
         finally:
-            await cm.__aexit__(None, None, None)
+            with contextlib.suppress(Exception):
+                await cm.__aexit__(None, None, None)
             await client.aclose()
+            on_done(status)
 
-    return StreamingResponse(gen(), media_type="text/event-stream", headers=out_headers)
+    async def cleanup() -> None:  # safety net if the generator never started
+        on_done(499)
+        await client.aclose()
+
+    return StreamingResponse(
+        gen(),
+        media_type="text/event-stream",
+        headers=out_headers,
+        background=BackgroundTask(cleanup),
+    )
 
 
 def _ms(seconds: float) -> int:
@@ -209,6 +260,8 @@ async def serve_completion(
         body = await request.json()
     except ValueError:
         body = None
+    started = time.monotonic()
+    deadline_ms = _int_or_none(x_deadline_ms)
     klass = "batch" if x_request_priority == "batch" else "interactive"
     correlation_headers = {
         "x-request-id": x_request_id or "req-untracked",
@@ -234,18 +287,30 @@ async def serve_completion(
     async def try_overflow(
         code: int, reason: str, source: str, never_overflow: bool = False
     ) -> Response | None:
-        """Overflow a local 503/529 if eligible and configured; the local slot is already
-        released (or is released here) and the request never bounces back to local."""
+        """Overflow a local 503/529 if eligible and configured; the request never bounces
+        back to local. On success the tenant tokens stay charged and the concurrency lease is
+        held until the overflow response completes; on None the caller does its normal
+        accounting (refund + final status)."""
         if not OVERFLOW_CFG.active or not isinstance(
             decide(code, reason, never_overflow, source), Overflow
         ):
             return None
-        resp = await _overflow(OVERFLOW_CFG, reason, body, correlation_headers, log_fields)
-        if resp is not None:
+        remaining = None if deadline_ms is None else started + deadline_ms / 1000 - time.monotonic()
+
+        done = False
+
+        def once(status: int) -> None:
+            nonlocal done
+            if done:
+                return
+            done = True
             if lease is not None:
-                lease.release(refund=True)  # nothing was served locally
-            metrics.REQUESTS.labels("200", klass).inc()
-        return resp
+                lease.release()  # overflow consumed tokens: no refund
+            metrics.REQUESTS.labels(str(status), klass).inc()
+
+        return await _overflow(
+            OVERFLOW_CFG, reason, body, correlation_headers, log_fields, once, remaining
+        )
 
     def reject(
         status: int,
@@ -371,7 +436,6 @@ async def serve_completion(
     )
     log.info(json.dumps({**log_fields, "stage": "place", **vars(decision)}))
 
-    deadline_ms = _int_or_none(x_deadline_ms)
     deadline_at = now + deadline_ms / 1000 if deadline_ms is not None else None
     queue_enter = time.time()
     try:
@@ -419,20 +483,30 @@ async def serve_completion(
 
     proxy_start = time.perf_counter()
 
-    released = False
+    freed = finished = False
 
-    def release(status: int) -> None:
-        nonlocal released
-        if released:  # idempotent: also called from the response background task
+    def free_worker() -> None:  # worker-side resources; idempotent
+        nonlocal freed
+        if freed:
             return
-        released = True
-        lease.release(refund=status >= 500)  # worker failure: tokens weren't served
+        freed = True
         metrics.STAGE_DURATION.labels("proxy", klass).observe(time.perf_counter() - proxy_start)
         snap.inflight -= 1
         snap.inflight_tokens -= est_tokens
         ticket.release()
         log.info(json.dumps({**log_fields, "stage": "queue", "queue_release": time.time()}))
+
+    def finish(status: int) -> None:  # final client status + tenant lease; idempotent
+        nonlocal finished
+        if finished:
+            return
+        finished = True
+        lease.release(refund=status >= 500)  # worker failure: tokens weren't served
         metrics.REQUESTS.labels(str(status), klass).inc()
+
+    def release(status: int) -> None:
+        free_worker()
+        finish(status)
 
     client = httpx.AsyncClient(timeout=60.0)
 
@@ -449,10 +523,11 @@ async def serve_completion(
             upstream_resp = await cm.__aenter__()
         except httpx.RequestError as exc:
             code = 503 if isinstance(exc, httpx.ConnectError) else 502
-            release(code)
+            free_worker()
             await client.aclose()
             if resp := await try_overflow(code, "worker_unavailable", "upstream"):
                 return resp
+            finish(code)
             raise HTTPException(
                 status_code=code,
                 detail=f"Worker unavailable at {snap.worker.url}: {exc}",
@@ -460,13 +535,14 @@ async def serve_completion(
             ) from exc
         if upstream_resp.status_code in (503, 529):
             err = (await upstream_resp.aread()).decode("utf-8", errors="replace")
-            release(upstream_resp.status_code)
+            free_worker()
             await cm.__aexit__(None, None, None)
             await client.aclose()
             if resp := await try_overflow(
                 upstream_resp.status_code, "worker_overloaded", "upstream"
             ):
                 return resp
+            finish(upstream_resp.status_code)
             return JSONResponse(
                 status_code=upstream_resp.status_code,
                 content={"error": err},
@@ -506,9 +582,10 @@ async def serve_completion(
             headers={"content-type": "application/json"},
         )
     except httpx.ConnectError as exc:
-        release(503)
+        free_worker()
         if resp := await try_overflow(503, "worker_unavailable", "upstream"):
             return resp
+        finish(503)
         raise HTTPException(
             status_code=503,
             detail=f"Worker unavailable at {snap.worker.url}: {exc}",
@@ -524,11 +601,12 @@ async def serve_completion(
     finally:
         await client.aclose()
 
-    release(upstream_resp.status_code)
+    free_worker()
     if upstream_resp.status_code in (503, 529) and (
         resp := await try_overflow(upstream_resp.status_code, "worker_overloaded", "upstream")
     ):
         return resp
+    finish(upstream_resp.status_code)
     content = (
         upstream_resp.json() if upstream_resp.status_code == 200 else {"error": upstream_resp.text}
     )
