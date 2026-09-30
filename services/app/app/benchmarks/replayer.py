@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import time
 import uuid
+from dataclasses import dataclass, field
 from typing import Any
 
 import httpx
@@ -25,6 +27,8 @@ GATEWAY_DECISION_HEADERS = (
     "x-overflow",
     "x-overflow-reason",
     "x-guard-decision",
+    "x-policy-override-applied",
+    "x-admission-mode",
 )
 
 
@@ -70,6 +74,9 @@ class TurnResult(BaseModel):
     workload_class: str | None = None
     tenant_id: str | None = None
     deadline_ms: int | None = None
+    # Experiment controls sent with this request (gateway_chat only).
+    policy_override: str | None = None
+    admission_mode: str | None = None
     # Raw gateway decision headers; None when headers are not visible (app_runs).
     gateway_headers: dict[str, str] | None = None
 
@@ -79,6 +86,31 @@ def _defaults(conv: ScenarioConversation, turn: ScenarioTurn) -> dict[str, Any]:
         "workload_class": turn.workload_class or conv.workload_class,
         "tenant_id": turn.tenant_id or conv.tenant_id,
     }
+
+
+@dataclass
+class _GatewayConv:
+    """Per-conversation prompt state for gateway_chat when a system_prefix is configured."""
+
+    prefix: str | None = None
+    history: list[dict[str, str]] = field(default_factory=list)
+
+    @property
+    def prefix_tokens(self) -> int | None:
+        """Estimated tokens of the system-prefix region only (gateway guard's ~4 chars/token)."""
+        return (
+            len(json.dumps([{"role": "system", "content": self.prefix}])) // 4
+            if self.prefix
+            else None
+        )
+
+    @property
+    def prefix_id(self) -> str | None:
+        return (
+            hashlib.sha256(self.prefix.encode()).hexdigest()[:16]
+            if self.prefix
+            else None
+        )
 
 
 class ConversationResult(BaseModel):
@@ -106,6 +138,10 @@ class ReplaySummary(BaseModel):
     turn_results: list[TurnResult] = Field(default_factory=list)
 
 
+class ControlNotApplied(RuntimeError):
+    """The gateway did not echo a requested experiment control (ALLOW_EXPERIMENT_CONTROLS off?)."""
+
+
 class ScenarioReplayer:
     def __init__(
         self,
@@ -122,6 +158,18 @@ class ScenarioReplayer:
         self.timeout = timeout
         self.use_sse = use_sse
         self.gateway_stream = gateway_stream
+        self._gw_convs: dict[str, _GatewayConv] = {}
+        self._control_checked = False
+        # Explicit observations per requested control: [echo matched, echo missing/mismatched].
+        self.control_observations: dict[str, list[int]] = {
+            name: [0, 0]
+            for name, want in (
+                ("policy_override", config.policy_override),
+                ("admission_mode", config.admission_mode),
+            )
+            if want is not None
+        }
+        self._abort: str | None = None
 
     async def run(self) -> ReplaySummary:
         start_time = time.perf_counter()
@@ -139,6 +187,8 @@ class ScenarioReplayer:
         finally:
             if owns_client:
                 await client.aclose()
+        if self._abort:
+            raise ControlNotApplied(self._abort)
 
         elapsed_total = max(time.perf_counter() - start_time, 0.001)
 
@@ -196,6 +246,10 @@ class ScenarioReplayer:
             conv_id = (
                 conv_label if self.config.target_endpoint_type == "gateway_chat" else ""
             )
+            if self.config.target_endpoint_type == "gateway_chat":
+                self._gw_convs[conv_id] = _GatewayConv(
+                    conv.system_prefix or self.config.system_prefix
+                )
             conv_start = time.perf_counter()
             results: list[TurnResult] = []
             all_success = True
@@ -230,6 +284,17 @@ class ScenarioReplayer:
         client: httpx.AsyncClient,
     ) -> TurnResult:
         started_at = time.time()
+        if (
+            self._abort
+        ):  # first response showed a requested control was ignored: stop sending
+            return TurnResult(
+                conversation_id=conversation_id,
+                turn_index=turn_index,
+                prompt=turn.question,
+                status="aborted",
+                client_duration_ms=0.0,
+                error=self._abort,
+            )
         if self.config.target_endpoint_type == "gateway_chat":
             result = await self._execute_gateway_turn(
                 conversation_id, turn_index, turn, client
@@ -243,7 +308,38 @@ class ScenarioReplayer:
         result.workload_class = turn.workload_class or "interactive"
         result.tenant_id = turn.tenant_id
         result.deadline_ms = turn.deadline_ms
+        if self.config.target_endpoint_type == "gateway_chat":
+            result.policy_override = self.config.policy_override
+            result.admission_mode = self.config.admission_mode
+            self._verify_controls(result)
         return result
+
+    def _verify_controls(self, result: TurnResult) -> None:
+        """A requested control must be echoed by the gateway, else the turn is not evidence."""
+        seen = result.gateway_headers
+        if seen is None:
+            return
+        cfg = self.config
+        missing = []
+        for name, hdr in (
+            ("policy_override", "x-policy-override-applied"),
+            ("admission_mode", "x-admission-mode"),
+        ):
+            want = getattr(cfg, name)
+            if want is None:
+                continue
+            ok = seen.get(hdr) == want
+            self.control_observations[name][0 if ok else 1] += 1
+            if not ok:
+                missing.append(f"{hdr}={want!r} (got {seen.get(hdr)!r})")
+        if missing:
+            msg = "requested experiment control not applied by gateway: " + ", ".join(
+                missing
+            )
+            if not self._control_checked:
+                self._abort = msg + " (is ALLOW_EXPERIMENT_CONTROLS=1 on the gateway?)"
+            result.status, result.error = "control_not_applied", msg
+        self._control_checked = True
 
     async def _execute_app_turn(
         self,
@@ -511,10 +607,29 @@ class ScenarioReplayer:
             f"{self.config.name}-{conversation_id}-{turn_index}-{uuid.uuid4().hex[:8]}"
         )
         url = f"{self.target_base_url}/v1/chat/completions"
+        # Without a system_prefix the bare question is sent (legacy behaviour). With one, the
+        # prompt is [shared system prefix, prior turns, question] so later turns extend the
+        # earlier prompt (growing conversation) and share a stable prefix across conversations.
+        state = self._gw_convs.get(conversation_id) or _GatewayConv()
+        user_msg = {"role": "user", "content": turn.question}
+        messages = (
+            [{"role": "system", "content": state.prefix}, *state.history, user_msg]
+            if state.prefix
+            else [user_msg]
+        )
+        reply: list[str] = []
+
+        def remember() -> None:
+            if state.prefix:
+                state.history += [
+                    user_msg,
+                    {"role": "assistant", "content": "".join(reply)},
+                ]
+
         payload = {
             "model": "Qwen/Qwen3-0.6B",
-            "messages": [{"role": "user", "content": turn.question}],
-            "max_tokens": 512,
+            "messages": messages,
+            "max_tokens": self.config.max_tokens,
             "temperature": 0.0,
         }
         if self.gateway_stream:
@@ -529,7 +644,11 @@ class ScenarioReplayer:
             ("x-request-priority", turn.workload_class),
             ("x-tenant-id", turn.tenant_id),
             ("x-deadline-ms", turn.deadline_ms),
-            ("x-prefix-id", turn.prefix_id),
+            ("x-prefix-id", turn.prefix_id or state.prefix_id),
+            # Size of the region x-prefix-id names; only known for the default system-only id.
+            ("x-prefix-tokens", None if turn.prefix_id else state.prefix_tokens),
+            ("x-placement-policy-override", self.config.policy_override),
+            ("x-admission-mode", self.config.admission_mode),
         ):
             if value is not None:
                 headers[name] = str(value)
@@ -564,6 +683,9 @@ class ScenarioReplayer:
                         )
                     data = json.loads(body)
                     usage = data.get("usage") or {}
+                    for choice in data.get("choices") or []:
+                        reply.append((choice.get("message") or {}).get("content") or "")
+                    remember()
                     return TurnResult(
                         conversation_id=conversation_id,
                         turn_index=turn_index,
@@ -601,10 +723,13 @@ class ScenarioReplayer:
                     run_id = run_id or chunk.get("id")
                     usage = chunk.get("usage") or usage
                     for choice in chunk.get("choices") or []:
-                        if (choice.get("delta") or {}).get("content"):
+                        if piece := (choice.get("delta") or {}).get("content"):
+                            reply.append(piece)
                             if ttft is None:
                                 ttft = (time.perf_counter() - t_start) * 1000.0
                 duration_ms = (time.perf_counter() - t_start) * 1000.0
+                if done and not error:
+                    remember()
                 return TurnResult(
                     conversation_id=conversation_id,
                     turn_index=turn_index,

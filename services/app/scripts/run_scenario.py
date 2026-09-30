@@ -14,9 +14,11 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import httpx
 from app.benchmarks.goodput import (
     Slos,
     is_good,
+    placement_reasons_by_turn,
     summarize_turns,
     sweep_row,
     sweep_to_csv,
@@ -26,7 +28,11 @@ from app.benchmarks.metrics_scraper import (
     PrometheusMetricSnapshot,
     compute_metrics_delta,
 )
-from app.benchmarks.replayer import ReplaySummary, ScenarioReplayer
+from app.benchmarks.replayer import (
+    ControlNotApplied,
+    ReplaySummary,
+    ScenarioReplayer,
+)
 from app.scenarios.loader import load_scenario
 from app.scenarios.models import ScenarioConfig
 
@@ -45,6 +51,50 @@ EVIDENCE_SCOPE = (
     "(prometheus_window) are isolated-window aggregates only and MUST NOT be "
     "attributed to individual requests."
 )
+
+
+def _verified(observed: dict[str, list[int]], name: str) -> bool | None:
+    """None = not requested; True only with >= 1 matched echo and no mismatch."""
+    if name not in observed:
+        return None
+    ok, bad = observed[name]
+    return ok > 0 and bad == 0
+
+
+GATEWAY_MODEL = "Qwen/Qwen3-0.6B"  # matches the replayer's request model
+
+
+async def system_prefix_record(
+    prefix: str | None, tokenize_url: str, model: str, client: httpx.AsyncClient | None
+) -> dict[str, Any] | None:
+    """Prefix size for the manifest: chars/4 ESTIMATE always; EXACT count from the
+    gateway's /tokenize passthrough when reachable (raw text, no chat template), else
+    exact_tokens=null with a reason. Never fails the run."""
+    if not prefix:
+        return None
+    rec: dict[str, Any] = {
+        "prefix_chars": len(prefix),
+        "estimated_tokens_chars_div_4": len(prefix) // 4,
+        "estimate_method": "estimate: len(text)//4 (gateway guard heuristic)",
+        "exact_tokens": None,
+        "exact_method": "exact: /tokenize count of the raw prefix text (no chat template)",
+        "exact_unavailable_reason": None,
+        "tokenize_url": tokenize_url,
+    }
+    try:
+        resp = await client.post(tokenize_url, json={"model": model, "prompt": prefix})
+        if resp.status_code != 200:
+            rec["exact_unavailable_reason"] = f"tokenize_http_{resp.status_code}"
+            return rec
+        data = resp.json()
+        count = data.get("count") if isinstance(data, dict) else None
+        if isinstance(count, int) and not isinstance(count, bool):
+            rec["exact_tokens"] = count
+        else:
+            rec["exact_unavailable_reason"] = "tokenize_response_malformed"
+    except (httpx.HTTPError, ValueError) as exc:
+        rec["exact_unavailable_reason"] = f"tokenize_call_failed: {type(exc).__name__}"
+    return rec
 
 
 def _tok(value: int | None) -> str:
@@ -143,6 +193,21 @@ def generate_markdown_report(
             lines.append("| **Warning** | Counter reset detected during burst! |")
         lines.append("")
 
+    reasons = placement_reasons_by_turn(summary.turn_results)
+    if reasons:
+        lines.extend(
+            [
+                "## Placement reasons by turn",
+                "",
+                "| Turn | x-placement-reason counts |",
+                "|---|---|",
+            ]
+        )
+        for turn, counts in reasons.items():
+            cells = ", ".join(f"{r}: {n}" for r, n in counts.items())
+            lines.append(f"| {turn.removeprefix('turn_')} | {cells} |")
+        lines.append("")
+
     lines.extend(
         [
             "## 4. Turn Details",
@@ -176,6 +241,11 @@ async def async_main(args: argparse.Namespace) -> int:
             "the strategy configured by its AGENT_STRATEGY env var at boot).",
             config.strategy,
         )
+    # Test-only gateway controls; the gateway ignores them unless ALLOW_EXPERIMENT_CONTROLS=1.
+    if getattr(args, "policy_override", None) is not None:
+        config.policy_override = args.policy_override
+    if getattr(args, "admission_mode", None) is not None:
+        config.admission_mode = args.admission_mode
     endpoint_type = getattr(args, "endpoint_type", None)
     if endpoint_type is not None:
         config.target_endpoint_type = endpoint_type
@@ -185,6 +255,16 @@ async def async_main(args: argparse.Namespace) -> int:
         or ":18002" in args.target_url
     ):
         config.target_endpoint_type = "gateway_chat"
+
+    if (config.policy_override or config.admission_mode) and (
+        config.target_endpoint_type != "gateway_chat"
+    ):
+        logger.error(
+            "policy_override/admission_mode need target_endpoint_type gateway_chat "
+            "(got %s): the control could never be verified",
+            config.target_endpoint_type,
+        )
+        return 2
 
     # Re-validate scenario configuration after applying CLI overrides
     config = ScenarioConfig.model_validate(config.model_dump())
@@ -212,6 +292,7 @@ async def async_main(args: argparse.Namespace) -> int:
     all_turns: list[dict[str, Any]] = []
     summary: ReplaySummary | None = None
     any_failed = False
+    observed: dict[str, list[int]] = {}
     metrics_delta: MetricsDelta | None = None
 
     for level in levels:
@@ -240,8 +321,15 @@ async def async_main(args: argparse.Namespace) -> int:
             use_sse=not args.no_sse,
             gateway_stream=getattr(args, "gateway_stream", True),
         )
-        summary = await replayer.run()
+        try:
+            summary = await replayer.run()
+        except ControlNotApplied as exc:
+            logger.error("Aborting run, no evidence written: %s", exc)
+            return 2
         any_failed = any_failed or summary.failed_turns > 0
+        for name, (ok, bad) in replayer.control_observations.items():
+            tot = observed.setdefault(name, [0, 0])
+            tot[0], tot[1] = tot[0] + ok, tot[1] + bad
         logger.info(
             "Replay finished: %d/%d turns succeeded in %.2fs (%.2f req/s)",
             summary.successful_turns,
@@ -335,6 +423,19 @@ async def async_main(args: argparse.Namespace) -> int:
     )
     _write_json(run_dir / "sweep.json", sweep_rows)
     (run_dir / "sweep.csv").write_text(sweep_to_csv(sweep_rows), encoding="utf-8")
+    prefix_record = None
+    if config.target_endpoint_type == "gateway_chat" and config.system_prefix:
+        tokenize_url = (
+            getattr(args, "tokenize_url", None)
+            or os.environ.get("TOKENIZE_URL")
+            or f"{args.target_url.rstrip('/')}/tokenize"
+        )
+        async with httpx.AsyncClient(timeout=5.0) as tok_client:
+            prefix_record = await system_prefix_record(
+                config.system_prefix, tokenize_url, GATEWAY_MODEL, tok_client
+            )
+    unverified = sum(t["status"] == "control_not_applied" for t in all_turns)
+    any_failed = any_failed or any(ok == 0 for ok, _ in observed.values())
     scenario_json = json.dumps(config.model_dump(), sort_keys=True)
     _write_json(
         run_dir / "manifest.json",
@@ -344,6 +445,18 @@ async def async_main(args: argparse.Namespace) -> int:
                 "sha256": hashlib.sha256(scenario_json.encode()).hexdigest(),
             },
             "policy_under_test": getattr(args, "label", None),
+            "policy_override_requested": config.policy_override,
+            "policy_override_verified": _verified(observed, "policy_override"),
+            "admission_mode_requested": config.admission_mode,
+            "admission_mode_verified": _verified(observed, "admission_mode"),
+            # matched / mismatched gateway echoes per requested control; verified needs >= 1
+            # matched and 0 mismatched, so a run with no observable response is not verified.
+            "control_observations": {
+                k: {"matched": ok, "mismatched": bad}
+                for k, (ok, bad) in observed.items()
+            },
+            "control_unverified_turns": unverified,
+            "system_prefix": prefix_record,
             "slos": slos.model_dump(),
             "topology": getattr(args, "topology", None)
             or os.environ.get("INFERENCE_TOPOLOGY")
@@ -429,6 +542,24 @@ def main() -> int:
     )
     parser.add_argument(
         "--label", default=None, help="Policy under test (informational)"
+    )
+    parser.add_argument(
+        "--policy-override",
+        choices=["round_robin", "least_loaded", "p2c", "prefix_then_load"],
+        default=None,
+        help="Send x-placement-policy-override (gateway needs ALLOW_EXPERIMENT_CONTROLS=1)",
+    )
+    parser.add_argument(
+        "--admission-mode",
+        choices=["on", "off"],
+        default=None,
+        help="Send x-admission-mode (gateway needs ALLOW_EXPERIMENT_CONTROLS=1)",
+    )
+    parser.add_argument(
+        "--tokenize-url",
+        default=None,
+        help="Gateway /tokenize URL for the exact prefix token count "
+        "(env TOKENIZE_URL; default <target-url>/tokenize)",
     )
     parser.add_argument(
         "--ttft-slo-ms",

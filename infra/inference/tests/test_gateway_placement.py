@@ -367,3 +367,57 @@ def test_worker_warm_gauge_healthy_but_not_warm() -> None:
     assert get("worker_warm", {"worker": "warm_w"}) == 1
     assert get("worker_warm", {"worker": "cold_w"}) == 0
     assert get("worker_health", {"worker": "cold_w", "state": "healthy"}) == 1
+
+
+def _belief_after(client, reg, headers, content="x" * 400):
+    with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as post:
+        post.side_effect = _ok
+        r = client.post(
+            "/serve",
+            json={"messages": [{"role": "user", "content": content}]},
+            headers={"x-prefix-id": "sys1", **headers},
+        )
+    return r, max(
+        (s.prefixes["sys1"] for s in reg.snapshots.values() if "sys1" in s.prefixes),
+        key=lambda b: b.observed_at,
+    )
+
+
+def test_prefix_tokens_header_bounds_reusable_belief(gw) -> None:
+    client, reg = gw
+    # two conversations, same system-only id, very different totals: belief stays the system size
+    _, b1 = _belief_after(client, reg, {"x-prefix-tokens": "50"}, "a" * 4000)
+    assert b1.tokens == 50
+    _, b2 = _belief_after(client, reg, {"x-prefix-tokens": "50"}, "b" * 12000)
+    assert b2.tokens == 50  # not the ~3000-token total
+
+
+def test_prefix_tokens_clamped_and_legacy_path(gw) -> None:
+    client, reg = gw
+    _, b = _belief_after(client, reg, {"x-prefix-tokens": "999999"}, "a" * 400)
+    assert 0 < b.tokens <= 110  # clamped to the ~100-token estimate
+    _, b = _belief_after(client, reg, {"x-prefix-tokens": "-5"})
+    assert b.tokens > 50  # negative -> invalid -> legacy
+    _, b = _belief_after(client, reg, {"x-prefix-tokens": "junk"})
+    assert b.tokens > 50  # invalid -> legacy: whole prompt estimate
+    _, b = _belief_after(client, reg, {})
+    assert b.tokens > 50  # absent -> legacy (over-counts prompts with a per-turn suffix)
+
+
+@pytest.mark.parametrize(
+    "belief,est,reason",
+    [
+        (900, 1000, "prefix_affinity"),
+        (800, 1000, "prefix_affinity"),  # boundary: exactly 0.8 is sticky
+        (799, 1000, "prefix_overlap_low"),
+        (100, 1000, "prefix_overlap_low"),  # small system prefix vs large current prefill
+        (5000, 1000, "prefix_affinity"),  # overlap bounded to [0, 1]
+    ],
+)
+def test_overlap_is_fraction_of_current_prefill(belief, est, reason) -> None:
+    ws = two()
+    _with_prefix(ws, "worker_a", tokens=belief)
+    d = pick(PlacementRequest("p1", est), ws, policy="prefix_then_load", rng=random.Random(1))
+    assert d.placement_reason == reason
+    if reason == "prefix_affinity":
+        assert d.chosen_worker == "worker_a"

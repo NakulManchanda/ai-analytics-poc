@@ -1,0 +1,457 @@
+{
+  "name": "e4_admission_overload",
+  "description": "E4: overload with tight-deadline interactive tenant_interactive, one noisy tenant_noisy (12 concurrent conversations) and long-context batch tenant_batch; run with --admission-mode on vs off. Gateway needs ALLOW_EXPERIMENT_CONTROLS=1 and TENANT_ALLOWLIST=tenant_interactive,tenant_noisy,tenant_batch.",
+  "concurrency": 22,
+  "strategy": "manual",
+  "target_endpoint_type": "gateway_chat",
+  "system_prefix": "You are the NYC Taxi Analytics AI Assistant. You have access to governed read-only analytics tools over the NYC yellow taxi dataset. Always base answers strictly on governed query observations and dataset profiles. Dataset constraints: All queries run against the pinned NYC Taxi trip dataset. Analyses are pre-governed: 'top_pickup_zones', 'trip_volume_by_hour', 'average_distance_by_weekday', and 'average_trip_metrics'. Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier. ",
+  "conversations": [
+    {
+      "conversation_id_prefix": "e4_interactive_01",
+      "tenant_id": "tenant_interactive",
+      "workload_class": "interactive",
+      "turns": [
+        {
+          "question": "Which pickup zones have the most trips?",
+          "expected_tool": "query_taxi_data",
+          "delay_seconds": 0.0,
+          "deadline_ms": 1500
+        },
+        {
+          "question": "What are the peak hours and busiest times for taxi rides in NYC?",
+          "expected_tool": "query_taxi_data",
+          "delay_seconds": 0.0,
+          "deadline_ms": 1500
+        }
+      ]
+    },
+    {
+      "conversation_id_prefix": "e4_interactive_02",
+      "tenant_id": "tenant_interactive",
+      "workload_class": "interactive",
+      "turns": [
+        {
+          "question": "What are the peak hours and busiest times for taxi rides in NYC?",
+          "expected_tool": "query_taxi_data",
+          "delay_seconds": 0.0,
+          "deadline_ms": 1500
+        },
+        {
+          "question": "Compare weekday and weekend trip volume by hour",
+          "expected_tool": "aggregate_taxi_data",
+          "delay_seconds": 0.0,
+          "deadline_ms": 1500
+        }
+      ]
+    },
+    {
+      "conversation_id_prefix": "e4_interactive_03",
+      "tenant_id": "tenant_interactive",
+      "workload_class": "interactive",
+      "turns": [
+        {
+          "question": "Compare weekday and weekend trip volume by hour",
+          "expected_tool": "aggregate_taxi_data",
+          "delay_seconds": 0.0,
+          "deadline_ms": 1500
+        },
+        {
+          "question": "How do airport trips compare with non-airport trips on fare and duration?",
+          "expected_tool": "compare_taxi_segments",
+          "delay_seconds": 0.0,
+          "deadline_ms": 1500
+        }
+      ]
+    },
+    {
+      "conversation_id_prefix": "e4_interactive_04",
+      "tenant_id": "tenant_interactive",
+      "workload_class": "interactive",
+      "turns": [
+        {
+          "question": "How do airport trips compare with non-airport trips on fare and duration?",
+          "expected_tool": "compare_taxi_segments",
+          "delay_seconds": 0.0,
+          "deadline_ms": 1500
+        },
+        {
+          "question": "Which pickup zone has the longest average trip duration?",
+          "expected_tool": "aggregate_taxi_data",
+          "delay_seconds": 0.0,
+          "deadline_ms": 1500
+        }
+      ]
+    },
+    {
+      "conversation_id_prefix": "e4_interactive_05",
+      "tenant_id": "tenant_interactive",
+      "workload_class": "interactive",
+      "turns": [
+        {
+          "question": "Which pickup zone has the longest average trip duration?",
+          "expected_tool": "aggregate_taxi_data",
+          "delay_seconds": 0.0,
+          "deadline_ms": 1500
+        },
+        {
+          "question": "Compare average trip distance and fare amount across major pickup boroughs",
+          "expected_tool": "average_trip_metrics",
+          "delay_seconds": 0.0,
+          "deadline_ms": 1500
+        }
+      ]
+    },
+    {
+      "conversation_id_prefix": "e4_interactive_06",
+      "tenant_id": "tenant_interactive",
+      "workload_class": "interactive",
+      "turns": [
+        {
+          "question": "Compare average trip distance and fare amount across major pickup boroughs",
+          "expected_tool": "average_trip_metrics",
+          "delay_seconds": 0.0,
+          "deadline_ms": 1500
+        },
+        {
+          "question": "What is the breakdown of credit card vs cash payment types and average tips?",
+          "expected_tool": "aggregate_taxi_data",
+          "delay_seconds": 0.0,
+          "deadline_ms": 1500
+        }
+      ]
+    },
+    {
+      "conversation_id_prefix": "e4_noisy_01",
+      "tenant_id": "tenant_noisy",
+      "workload_class": "interactive",
+      "turns": [
+        {
+          "question": "Which pickup zones have the most trips?",
+          "expected_tool": "query_taxi_data",
+          "delay_seconds": 0.0,
+          "deadline_ms": 2000
+        },
+        {
+          "question": "What are the peak hours and busiest times for taxi rides in NYC?",
+          "expected_tool": "query_taxi_data",
+          "delay_seconds": 0.0,
+          "deadline_ms": 2000
+        }
+      ]
+    },
+    {
+      "conversation_id_prefix": "e4_noisy_02",
+      "tenant_id": "tenant_noisy",
+      "workload_class": "interactive",
+      "turns": [
+        {
+          "question": "What are the peak hours and busiest times for taxi rides in NYC?",
+          "expected_tool": "query_taxi_data",
+          "delay_seconds": 0.0,
+          "deadline_ms": 2000
+        },
+        {
+          "question": "Compare weekday and weekend trip volume by hour",
+          "expected_tool": "aggregate_taxi_data",
+          "delay_seconds": 0.0,
+          "deadline_ms": 2000
+        }
+      ]
+    },
+    {
+      "conversation_id_prefix": "e4_noisy_03",
+      "tenant_id": "tenant_noisy",
+      "workload_class": "interactive",
+      "turns": [
+        {
+          "question": "Compare weekday and weekend trip volume by hour",
+          "expected_tool": "aggregate_taxi_data",
+          "delay_seconds": 0.0,
+          "deadline_ms": 2000
+        },
+        {
+          "question": "How do airport trips compare with non-airport trips on fare and duration?",
+          "expected_tool": "compare_taxi_segments",
+          "delay_seconds": 0.0,
+          "deadline_ms": 2000
+        }
+      ]
+    },
+    {
+      "conversation_id_prefix": "e4_noisy_04",
+      "tenant_id": "tenant_noisy",
+      "workload_class": "interactive",
+      "turns": [
+        {
+          "question": "How do airport trips compare with non-airport trips on fare and duration?",
+          "expected_tool": "compare_taxi_segments",
+          "delay_seconds": 0.0,
+          "deadline_ms": 2000
+        },
+        {
+          "question": "Which pickup zone has the longest average trip duration?",
+          "expected_tool": "aggregate_taxi_data",
+          "delay_seconds": 0.0,
+          "deadline_ms": 2000
+        }
+      ]
+    },
+    {
+      "conversation_id_prefix": "e4_noisy_05",
+      "tenant_id": "tenant_noisy",
+      "workload_class": "interactive",
+      "turns": [
+        {
+          "question": "Which pickup zone has the longest average trip duration?",
+          "expected_tool": "aggregate_taxi_data",
+          "delay_seconds": 0.0,
+          "deadline_ms": 2000
+        },
+        {
+          "question": "Compare average trip distance and fare amount across major pickup boroughs",
+          "expected_tool": "average_trip_metrics",
+          "delay_seconds": 0.0,
+          "deadline_ms": 2000
+        }
+      ]
+    },
+    {
+      "conversation_id_prefix": "e4_noisy_06",
+      "tenant_id": "tenant_noisy",
+      "workload_class": "interactive",
+      "turns": [
+        {
+          "question": "Compare average trip distance and fare amount across major pickup boroughs",
+          "expected_tool": "average_trip_metrics",
+          "delay_seconds": 0.0,
+          "deadline_ms": 2000
+        },
+        {
+          "question": "What is the breakdown of credit card vs cash payment types and average tips?",
+          "expected_tool": "aggregate_taxi_data",
+          "delay_seconds": 0.0,
+          "deadline_ms": 2000
+        }
+      ]
+    },
+    {
+      "conversation_id_prefix": "e4_noisy_07",
+      "tenant_id": "tenant_noisy",
+      "workload_class": "interactive",
+      "turns": [
+        {
+          "question": "What is the breakdown of credit card vs cash payment types and average tips?",
+          "expected_tool": "aggregate_taxi_data",
+          "delay_seconds": 0.0,
+          "deadline_ms": 2000
+        },
+        {
+          "question": "What is the average tip rate for credit card payments by pickup borough?",
+          "expected_tool": "aggregate_taxi_data",
+          "delay_seconds": 0.0,
+          "deadline_ms": 2000
+        }
+      ]
+    },
+    {
+      "conversation_id_prefix": "e4_noisy_08",
+      "tenant_id": "tenant_noisy",
+      "workload_class": "interactive",
+      "turns": [
+        {
+          "question": "What is the average tip rate for credit card payments by pickup borough?",
+          "expected_tool": "aggregate_taxi_data",
+          "delay_seconds": 0.0,
+          "deadline_ms": 2000
+        },
+        {
+          "question": "What is the average fare and trip count by trip distance bucket?",
+          "expected_tool": "aggregate_taxi_data",
+          "delay_seconds": 0.0,
+          "deadline_ms": 2000
+        }
+      ]
+    },
+    {
+      "conversation_id_prefix": "e4_noisy_09",
+      "tenant_id": "tenant_noisy",
+      "workload_class": "interactive",
+      "turns": [
+        {
+          "question": "What is the average fare and trip count by trip distance bucket?",
+          "expected_tool": "aggregate_taxi_data",
+          "delay_seconds": 0.0,
+          "deadline_ms": 2000
+        },
+        {
+          "question": "Compare Manhattan and Queens on trip count, average fare, and average tip",
+          "expected_tool": "compare_taxi_segments",
+          "delay_seconds": 0.0,
+          "deadline_ms": 2000
+        }
+      ]
+    },
+    {
+      "conversation_id_prefix": "e4_noisy_10",
+      "tenant_id": "tenant_noisy",
+      "workload_class": "interactive",
+      "turns": [
+        {
+          "question": "Compare Manhattan and Queens on trip count, average fare, and average tip",
+          "expected_tool": "compare_taxi_segments",
+          "delay_seconds": 0.0,
+          "deadline_ms": 2000
+        },
+        {
+          "question": "Compare morning rush hour (7-10am) and evening rush hour (4-7pm) trip duration by borough",
+          "expected_tool": "compare_taxi_segments",
+          "delay_seconds": 0.0,
+          "deadline_ms": 2000
+        }
+      ]
+    },
+    {
+      "conversation_id_prefix": "e4_noisy_11",
+      "tenant_id": "tenant_noisy",
+      "workload_class": "interactive",
+      "turns": [
+        {
+          "question": "Compare morning rush hour (7-10am) and evening rush hour (4-7pm) trip duration by borough",
+          "expected_tool": "compare_taxi_segments",
+          "delay_seconds": 0.0,
+          "deadline_ms": 2000
+        },
+        {
+          "question": "Compare pickup and dropoff borough distributions",
+          "expected_tool": "aggregate_taxi_data",
+          "delay_seconds": 0.0,
+          "deadline_ms": 2000
+        }
+      ]
+    },
+    {
+      "conversation_id_prefix": "e4_noisy_12",
+      "tenant_id": "tenant_noisy",
+      "workload_class": "interactive",
+      "turns": [
+        {
+          "question": "Compare pickup and dropoff borough distributions",
+          "expected_tool": "aggregate_taxi_data",
+          "delay_seconds": 0.0,
+          "deadline_ms": 2000
+        },
+        {
+          "question": "Which pickup zones have the most trips?",
+          "expected_tool": "query_taxi_data",
+          "delay_seconds": 0.0,
+          "deadline_ms": 2000
+        }
+      ]
+    },
+    {
+      "conversation_id_prefix": "e4_batch_01",
+      "tenant_id": "tenant_batch",
+      "workload_class": "batch",
+      "system_prefix": "You are the NYC Taxi Analytics AI Assistant. You have access to governed read-only analytics tools over the NYC yellow taxi dataset. Always base answers strictly on governed query observations and dataset profiles. Dataset constraints: All queries run against the pinned NYC Taxi trip dataset. Analyses are pre-governed: 'top_pickup_zones', 'trip_volume_by_hour', 'average_distance_by_weekday', and 'average_trip_metrics'. Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier. ",
+      "turns": [
+        {
+          "question": "Which pickup zones have the most trips?",
+          "expected_tool": "query_taxi_data",
+          "delay_seconds": 0.0,
+          "deadline_ms": 30000
+        },
+        {
+          "question": "What are the peak hours and busiest times for taxi rides in NYC?",
+          "expected_tool": "query_taxi_data",
+          "delay_seconds": 0.0,
+          "deadline_ms": 30000
+        },
+        {
+          "question": "Compare weekday and weekend trip volume by hour",
+          "expected_tool": "aggregate_taxi_data",
+          "delay_seconds": 0.0,
+          "deadline_ms": 30000
+        }
+      ]
+    },
+    {
+      "conversation_id_prefix": "e4_batch_02",
+      "tenant_id": "tenant_batch",
+      "workload_class": "batch",
+      "system_prefix": "You are the NYC Taxi Analytics AI Assistant. You have access to governed read-only analytics tools over the NYC yellow taxi dataset. Always base answers strictly on governed query observations and dataset profiles. Dataset constraints: All queries run against the pinned NYC Taxi trip dataset. Analyses are pre-governed: 'top_pickup_zones', 'trip_volume_by_hour', 'average_distance_by_weekday', and 'average_trip_metrics'. Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier. ",
+      "turns": [
+        {
+          "question": "What are the peak hours and busiest times for taxi rides in NYC?",
+          "expected_tool": "query_taxi_data",
+          "delay_seconds": 0.0,
+          "deadline_ms": 30000
+        },
+        {
+          "question": "Compare weekday and weekend trip volume by hour",
+          "expected_tool": "aggregate_taxi_data",
+          "delay_seconds": 0.0,
+          "deadline_ms": 30000
+        },
+        {
+          "question": "How do airport trips compare with non-airport trips on fare and duration?",
+          "expected_tool": "compare_taxi_segments",
+          "delay_seconds": 0.0,
+          "deadline_ms": 30000
+        }
+      ]
+    },
+    {
+      "conversation_id_prefix": "e4_batch_03",
+      "tenant_id": "tenant_batch",
+      "workload_class": "batch",
+      "system_prefix": "You are the NYC Taxi Analytics AI Assistant. You have access to governed read-only analytics tools over the NYC yellow taxi dataset. Always base answers strictly on governed query observations and dataset profiles. Dataset constraints: All queries run against the pinned NYC Taxi trip dataset. Analyses are pre-governed: 'top_pickup_zones', 'trip_volume_by_hour', 'average_distance_by_weekday', and 'average_trip_metrics'. Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier. ",
+      "turns": [
+        {
+          "question": "Compare weekday and weekend trip volume by hour",
+          "expected_tool": "aggregate_taxi_data",
+          "delay_seconds": 0.0,
+          "deadline_ms": 30000
+        },
+        {
+          "question": "How do airport trips compare with non-airport trips on fare and duration?",
+          "expected_tool": "compare_taxi_segments",
+          "delay_seconds": 0.0,
+          "deadline_ms": 30000
+        },
+        {
+          "question": "Which pickup zone has the longest average trip duration?",
+          "expected_tool": "aggregate_taxi_data",
+          "delay_seconds": 0.0,
+          "deadline_ms": 30000
+        }
+      ]
+    },
+    {
+      "conversation_id_prefix": "e4_batch_04",
+      "tenant_id": "tenant_batch",
+      "workload_class": "batch",
+      "system_prefix": "You are the NYC Taxi Analytics AI Assistant. You have access to governed read-only analytics tools over the NYC yellow taxi dataset. Always base answers strictly on governed query observations and dataset profiles. Dataset constraints: All queries run against the pinned NYC Taxi trip dataset. Analyses are pre-governed: 'top_pickup_zones', 'trip_volume_by_hour', 'average_distance_by_weekday', and 'average_trip_metrics'. Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier.  Tools available through the governed MCP boundary: describe_taxi_dataset, list_taxi_dimension_values, query_taxi_data, aggregate_taxi_data, compare_taxi_segments. Each tool is read-only, bounded by row limits, and returns columns, rows, and the SQL-free analysis identifier. ",
+      "turns": [
+        {
+          "question": "How do airport trips compare with non-airport trips on fare and duration?",
+          "expected_tool": "compare_taxi_segments",
+          "delay_seconds": 0.0,
+          "deadline_ms": 30000
+        },
+        {
+          "question": "Which pickup zone has the longest average trip duration?",
+          "expected_tool": "aggregate_taxi_data",
+          "delay_seconds": 0.0,
+          "deadline_ms": 30000
+        },
+        {
+          "question": "Compare average trip distance and fare amount across major pickup boroughs",
+          "expected_tool": "average_trip_metrics",
+          "delay_seconds": 0.0,
+          "deadline_ms": 30000
+        }
+      ]
+    }
+  ],
+  "max_tokens": 128
+}

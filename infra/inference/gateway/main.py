@@ -251,6 +251,26 @@ def _ms(seconds: float) -> int:
     return round(seconds * 1000)
 
 
+class _NoLease:  # x-tenant-quota-mode: off (experiments only): nothing acquired, nothing to free
+    def release(self, refund: bool = False) -> None:
+        return None
+
+
+def _experiment_controls(policy: str | None, admission: str | None, quota_mode: str | None):
+    """Test-only overrides (#123): honored only with ALLOW_EXPERIMENT_CONTROLS=1, else ignored
+    entirely (production traffic can never steer placement or skip admission). Returns
+    (policy, admission_off, quota_off) or None when a value is invalid (caller answers 400)."""
+    if os.getenv("ALLOW_EXPERIMENT_CONTROLS") != "1":
+        return None, False, False
+    if (
+        (policy is not None and policy not in placement.POLICIES)
+        or (admission is not None and admission not in ("on", "off"))
+        or (quota_mode is not None and quota_mode not in ("on", "off"))
+    ):
+        return None
+    return policy, admission == "off", quota_mode == "off"
+
+
 def _int_or_none(value: str | None) -> int | None:
     try:
         return int(value) if value is not None and int(value) >= 0 else None
@@ -271,6 +291,10 @@ async def serve_completion(
     x_estimated_prompt_tokens: str | None = Header(None),
     x_deadline_ms: str | None = Header(None),
     x_force_worker: str | None = Header(None),
+    x_prefix_tokens: str | None = Header(None),
+    x_placement_policy_override: str | None = Header(None),
+    x_admission_mode: str | None = Header(None),
+    x_tenant_quota_mode: str | None = Header(None),
 ) -> Response:
     try:
         body = await request.json()
@@ -306,6 +330,20 @@ async def serve_completion(
         if not ttft_seen:
             ttft_seen = True
             metrics.TTFT.labels(klass).observe(time.monotonic() - started)
+
+    controls = _experiment_controls(
+        x_placement_policy_override, x_admission_mode, x_tenant_quota_mode
+    )
+    invalid_controls = controls is None
+    policy_override, admission_off, quota_off = controls or (None, False, False)
+    if policy_override:
+        correlation_headers["x-policy-override-applied"] = policy_override
+        log_fields["policy_override"] = policy_override
+    if os.getenv("ALLOW_EXPERIMENT_CONTROLS") == "1" and x_admission_mode in ("on", "off"):
+        correlation_headers["x-admission-mode"] = x_admission_mode
+        log_fields["admission_mode"] = x_admission_mode
+    if quota_off:
+        log_fields["tenant_quota_mode"] = "off"
 
     async def try_overflow(
         code: int, reason: str, source: str, never_overflow: bool = False
@@ -371,6 +409,14 @@ async def serve_completion(
             headers=headers,
         )
 
+    if invalid_controls:  # bounded reason: never echo the header values back
+        return reject(
+            400,
+            "invalid_experiment_control",
+            "unsupported experiment control header value",
+            "guard",
+        )
+
     with metrics.timed("guard", klass):
         verdict = guard_mod.inspect(body, estimated_tokens_header=x_estimated_prompt_tokens)
     if not verdict.ok:
@@ -389,14 +435,19 @@ async def serve_completion(
     est_tokens = guard_mod.estimate_prompt_tokens(body, x_estimated_prompt_tokens)
     now = time.monotonic()
     with metrics.timed("admit", klass):
-        result = quota.acquire(x_tenant_id, est_tokens, now)
+        # Experiment controls skip only what they name; guard always ran, quota stays on by default.
+        result = None if quota_off else quota.acquire(x_tenant_id, est_tokens, now)
         if not isinstance(result, Shed):
-            lease = result
-            result = should_shed(
-                AdmitRequest(est_tokens, _int_or_none(x_deadline_ms), klass),
-                list(registry.snapshots.values()),
-                now=now,
-                cfg=ADMIT_CFG,
+            lease = _NoLease() if quota_off else result
+            result = (
+                None
+                if admission_off
+                else should_shed(
+                    AdmitRequest(est_tokens, _int_or_none(x_deadline_ms), klass),
+                    list(registry.snapshots.values()),
+                    now=now,
+                    cfg=ADMIT_CFG,
+                )
             )
     if isinstance(result, Shed):
         metrics.ADMIT.labels("shed", result.reason, klass).inc()
@@ -426,18 +477,24 @@ async def serve_completion(
                 **log_fields,
                 "stage": "admit",
                 "decision": "accept",
-                "admission_inputs": result.inputs,
+                "admission_inputs": result.inputs if result else {"skipped": "admission_off"},
             }
         )
     )
 
     for w in registry.snapshots.values():
         w.queued = queues.depth(w.id)  # gateway queue depth participates in the load score
+    # x-prefix-tokens sizes the region x-prefix-id names (e.g. system prefix only). Absent or
+    # invalid = legacy: the whole prompt is believed reusable, which over-counts prompts that
+    # carry a per-turn suffix or divergent history.
+    prefix_tokens = _int_or_none(x_prefix_tokens)
+    if prefix_tokens is not None:
+        prefix_tokens = min(prefix_tokens, est_tokens)
     with metrics.timed("place", klass):
         decision = placement.pick(
             placement.PlacementRequest(x_prefix_id, est_tokens, klass, x_force_worker),
             list(registry.snapshots.values()),
-            policy=PLACEMENT_POLICY,
+            policy=policy_override or PLACEMENT_POLICY,
             stale_after=SNAPSHOT_STALE_S,
             rr_index=registry.next_rr(),
             allow_forced=os.getenv("ALLOW_FORCED_PLACEMENT") == "1",
@@ -454,7 +511,9 @@ async def serve_completion(
     if decision.fallback:
         metrics.STALE_FALLBACK.inc()
     snap = registry.snapshots[decision.chosen_worker]
-    registry.record_prefix(decision.chosen_worker, x_prefix_id, est_tokens)
+    registry.record_prefix(
+        decision.chosen_worker, x_prefix_id, est_tokens if prefix_tokens is None else prefix_tokens
+    )
     correlation_headers.update(
         {
             "x-orchestration-stage": "worker_dispatch",

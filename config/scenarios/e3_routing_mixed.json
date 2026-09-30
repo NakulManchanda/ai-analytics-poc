@@ -1,0 +1,256 @@
+{
+  "name": "e3_routing_mixed",
+  "description": "E3 headline: 10 multi-step taxi conversations (3-5 turns) sharing the app's real global prefix (system prompt + taxi rules + dataset schema, used once) with growing history; run under least_loaded vs prefix_then_load via --policy-override. Gateway needs ALLOW_EXPERIMENT_CONTROLS=1. The prefix is small relative to history, so prefix_then_load is expected to spill to load-based placement after the first turns (overlap < 0.8): a finding, not tuned away. max_tokens 128 keeps the worst case within 8192.",
+  "concurrency": 8,
+  "strategy": "manual",
+  "target_endpoint_type": "gateway_chat",
+  "system_prefix": "You are the NYC Taxi Analytics AI Assistant. You have access to governed read-only analytics tools over the NYC yellow taxi dataset. Always base answers strictly on governed query observations and dataset profiles.\nDataset constraints: All queries run against the pinned NYC Taxi trip dataset. Analyses are pre-governed: 'top_pickup_zones', 'trip_volume_by_hour', 'average_distance_by_weekday', and 'average_trip_metrics'.\nAvailable Dataset Schema: {\"columns\":[\"VendorID\",\"tpep_pickup_datetime\",\"tpep_dropoff_datetime\",\"passenger_count\",\"trip_distance\",\"RatecodeID\",\"store_and_forward_flag\",\"PULocationID\",\"DOLocationID\",\"payment_type\",\"fare_amount\",\"extra\",\"mta_tax\",\"tip_amount\",\"tolls_amount\",\"improvement_surcharge\",\"total_amount\",\"congestion_surcharge\",\"Airport_fee\"],\"dataset\":\"nyc-yellow-taxi\",\"month\":\"2024-01\"}\nChoose exactly ONE governed analysis that answers the question. Do not make multiple tool calls. To compare all boroughs across NYC, call average_trip_metrics with region_name omitted.",
+  "conversations": [
+    {
+      "conversation_id_prefix": "e3_taxi_01",
+      "turns": [
+        {
+          "question": "Which pickup zones have the most trips?",
+          "expected_tool": "query_taxi_data",
+          "delay_seconds": 0.0
+        },
+        {
+          "question": "What are the peak hours and busiest times for taxi rides in NYC?",
+          "expected_tool": "query_taxi_data",
+          "delay_seconds": 0.0
+        },
+        {
+          "question": "Compare weekday and weekend trip volume by hour",
+          "expected_tool": "aggregate_taxi_data",
+          "delay_seconds": 0.0
+        }
+      ]
+    },
+    {
+      "conversation_id_prefix": "e3_taxi_02",
+      "turns": [
+        {
+          "question": "What are the peak hours and busiest times for taxi rides in NYC?",
+          "expected_tool": "query_taxi_data",
+          "delay_seconds": 0.0
+        },
+        {
+          "question": "Compare weekday and weekend trip volume by hour",
+          "expected_tool": "aggregate_taxi_data",
+          "delay_seconds": 0.0
+        },
+        {
+          "question": "How do airport trips compare with non-airport trips on fare and duration?",
+          "expected_tool": "compare_taxi_segments",
+          "delay_seconds": 0.0
+        },
+        {
+          "question": "Which pickup zone has the longest average trip duration?",
+          "expected_tool": "aggregate_taxi_data",
+          "delay_seconds": 0.0
+        }
+      ]
+    },
+    {
+      "conversation_id_prefix": "e3_taxi_03",
+      "turns": [
+        {
+          "question": "Compare weekday and weekend trip volume by hour",
+          "expected_tool": "aggregate_taxi_data",
+          "delay_seconds": 0.0
+        },
+        {
+          "question": "How do airport trips compare with non-airport trips on fare and duration?",
+          "expected_tool": "compare_taxi_segments",
+          "delay_seconds": 0.0
+        },
+        {
+          "question": "Which pickup zone has the longest average trip duration?",
+          "expected_tool": "aggregate_taxi_data",
+          "delay_seconds": 0.0
+        },
+        {
+          "question": "Compare average trip distance and fare amount across major pickup boroughs",
+          "expected_tool": "average_trip_metrics",
+          "delay_seconds": 0.0
+        },
+        {
+          "question": "What is the breakdown of credit card vs cash payment types and average tips?",
+          "expected_tool": "aggregate_taxi_data",
+          "delay_seconds": 0.0
+        }
+      ]
+    },
+    {
+      "conversation_id_prefix": "e3_taxi_04",
+      "turns": [
+        {
+          "question": "How do airport trips compare with non-airport trips on fare and duration?",
+          "expected_tool": "compare_taxi_segments",
+          "delay_seconds": 0.0
+        },
+        {
+          "question": "Which pickup zone has the longest average trip duration?",
+          "expected_tool": "aggregate_taxi_data",
+          "delay_seconds": 0.0
+        },
+        {
+          "question": "Compare average trip distance and fare amount across major pickup boroughs",
+          "expected_tool": "average_trip_metrics",
+          "delay_seconds": 0.0
+        }
+      ]
+    },
+    {
+      "conversation_id_prefix": "e3_taxi_05",
+      "turns": [
+        {
+          "question": "Which pickup zone has the longest average trip duration?",
+          "expected_tool": "aggregate_taxi_data",
+          "delay_seconds": 0.0
+        },
+        {
+          "question": "Compare average trip distance and fare amount across major pickup boroughs",
+          "expected_tool": "average_trip_metrics",
+          "delay_seconds": 0.0
+        },
+        {
+          "question": "What is the breakdown of credit card vs cash payment types and average tips?",
+          "expected_tool": "aggregate_taxi_data",
+          "delay_seconds": 0.0
+        },
+        {
+          "question": "What is the average tip rate for credit card payments by pickup borough?",
+          "expected_tool": "aggregate_taxi_data",
+          "delay_seconds": 0.0
+        }
+      ]
+    },
+    {
+      "conversation_id_prefix": "e3_taxi_06",
+      "turns": [
+        {
+          "question": "Compare average trip distance and fare amount across major pickup boroughs",
+          "expected_tool": "average_trip_metrics",
+          "delay_seconds": 0.0
+        },
+        {
+          "question": "What is the breakdown of credit card vs cash payment types and average tips?",
+          "expected_tool": "aggregate_taxi_data",
+          "delay_seconds": 0.0
+        },
+        {
+          "question": "What is the average tip rate for credit card payments by pickup borough?",
+          "expected_tool": "aggregate_taxi_data",
+          "delay_seconds": 0.0
+        },
+        {
+          "question": "What is the average fare and trip count by trip distance bucket?",
+          "expected_tool": "aggregate_taxi_data",
+          "delay_seconds": 0.0
+        },
+        {
+          "question": "Compare Manhattan and Queens on trip count, average fare, and average tip",
+          "expected_tool": "compare_taxi_segments",
+          "delay_seconds": 0.0
+        }
+      ]
+    },
+    {
+      "conversation_id_prefix": "e3_taxi_07",
+      "turns": [
+        {
+          "question": "What is the breakdown of credit card vs cash payment types and average tips?",
+          "expected_tool": "aggregate_taxi_data",
+          "delay_seconds": 0.0
+        },
+        {
+          "question": "What is the average tip rate for credit card payments by pickup borough?",
+          "expected_tool": "aggregate_taxi_data",
+          "delay_seconds": 0.0
+        },
+        {
+          "question": "What is the average fare and trip count by trip distance bucket?",
+          "expected_tool": "aggregate_taxi_data",
+          "delay_seconds": 0.0
+        }
+      ]
+    },
+    {
+      "conversation_id_prefix": "e3_taxi_08",
+      "turns": [
+        {
+          "question": "What is the average tip rate for credit card payments by pickup borough?",
+          "expected_tool": "aggregate_taxi_data",
+          "delay_seconds": 0.0
+        },
+        {
+          "question": "What is the average fare and trip count by trip distance bucket?",
+          "expected_tool": "aggregate_taxi_data",
+          "delay_seconds": 0.0
+        },
+        {
+          "question": "Compare Manhattan and Queens on trip count, average fare, and average tip",
+          "expected_tool": "compare_taxi_segments",
+          "delay_seconds": 0.0
+        },
+        {
+          "question": "Compare morning rush hour (7-10am) and evening rush hour (4-7pm) trip duration by borough",
+          "expected_tool": "compare_taxi_segments",
+          "delay_seconds": 0.0
+        }
+      ]
+    },
+    {
+      "conversation_id_prefix": "e3_taxi_09",
+      "turns": [
+        {
+          "question": "What is the average fare and trip count by trip distance bucket?",
+          "expected_tool": "aggregate_taxi_data",
+          "delay_seconds": 0.0
+        },
+        {
+          "question": "Compare Manhattan and Queens on trip count, average fare, and average tip",
+          "expected_tool": "compare_taxi_segments",
+          "delay_seconds": 0.0
+        },
+        {
+          "question": "Compare morning rush hour (7-10am) and evening rush hour (4-7pm) trip duration by borough",
+          "expected_tool": "compare_taxi_segments",
+          "delay_seconds": 0.0
+        },
+        {
+          "question": "Compare pickup and dropoff borough distributions",
+          "expected_tool": "aggregate_taxi_data",
+          "delay_seconds": 0.0
+        },
+        {
+          "question": "Which pickup zones have the most trips?",
+          "expected_tool": "query_taxi_data",
+          "delay_seconds": 0.0
+        }
+      ]
+    },
+    {
+      "conversation_id_prefix": "e3_taxi_10",
+      "turns": [
+        {
+          "question": "Compare Manhattan and Queens on trip count, average fare, and average tip",
+          "expected_tool": "compare_taxi_segments",
+          "delay_seconds": 0.0
+        },
+        {
+          "question": "Compare morning rush hour (7-10am) and evening rush hour (4-7pm) trip duration by borough",
+          "expected_tool": "compare_taxi_segments",
+          "delay_seconds": 0.0
+        },
+        {
+          "question": "Compare pickup and dropoff borough distributions",
+          "expected_tool": "aggregate_taxi_data",
+          "delay_seconds": 0.0
+        }
+      ]
+    }
+  ],
+  "max_tokens": 128
+}

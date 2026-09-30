@@ -235,7 +235,11 @@ async def test_async_main_writes_run_directory_with_sweep(tmp_path: Path, monkey
             return httpx.Response(200, text="vllm:prefix_cache_hits_total 1.0\n")
         return httpx.Response(
             200,
-            headers={"x-place-decision": "w1"},
+            headers={
+                "x-place-decision": "w1",
+                "x-policy-override-applied": "p2c",
+                "x-admission-mode": "off",
+            },
             json={"id": "i", "usage": {"prompt_tokens": 1, "completion_tokens": 4}},
         )
 
@@ -264,6 +268,8 @@ async def test_async_main_writes_run_directory_with_sweep(tmp_path: Path, monkey
         e2e_slo_ms = 3500.0
         topology = None
         engine_flags = "--max-num-seqs 8"
+        policy_override = "p2c"
+        admission_mode = "off"
 
     assert await async_main(Args()) == 0
     runs = [p for p in (tmp_path / "evidence").iterdir() if p.is_dir()]
@@ -273,6 +279,17 @@ async def test_async_main_writes_run_directory_with_sweep(tmp_path: Path, monkey
     assert manifest["scenario"]["name"] == "gw"
     assert len(manifest["scenario"]["sha256"]) == 64
     assert manifest["policy_under_test"] == "least_loaded"
+    assert (
+        manifest["policy_override_requested"],
+        manifest["admission_mode_requested"],
+    ) == (
+        "p2c",
+        "off",
+    )
+    assert manifest["policy_override_verified"] is True
+    assert manifest["admission_mode_verified"] is True
+    assert manifest["control_unverified_turns"] == 0
+    assert manifest["control_observations"]["policy_override"]["matched"] > 0
     assert manifest["slos"]["interactive_ttft_slo_ms"] == 100.0
     assert "A100" in manifest["topology"]
     assert manifest["model_revision"] == "rev123"
@@ -374,3 +391,255 @@ def test_markdown_and_json_render_unavailable_tokens_as_na():
     dumped = summary.model_dump()
     assert dumped["total_prompt_tokens"] is None
     assert dumped["tokens_unmeasured_turns"] == 1
+
+
+@pytest.mark.anyio
+async def test_controls_ignored_by_gateway_abort_run_without_evidence(
+    tmp_path: Path, monkeypatch
+):
+    """Gateway with ALLOW_EXPERIMENT_CONTROLS off: no applied headers -> run must not look OK."""
+    import httpx
+
+    scen_file = tmp_path / "gw.json"
+    scen_file.write_text(
+        json.dumps(
+            {
+                "name": "gw",
+                "description": "d",
+                "target_endpoint_type": "gateway_chat",
+                "conversations": [{"turns": [{"question": "q"}, {"question": "q2"}]}],
+            }
+        )
+    )
+    original = httpx.AsyncClient
+
+    def factory(*a, **kw):
+        kw["transport"] = httpx.MockTransport(
+            lambda r: httpx.Response(
+                200, headers={"x-place-decision": "w1"}, json={"id": "i"}
+            )
+        )
+        return original(*a, **kw)
+
+    monkeypatch.setattr(httpx, "AsyncClient", factory)
+
+    class Args:
+        scenario = str(scen_file)
+        target_url = "http://gw:18080"
+        metrics_url = None
+        concurrency = None
+        strategy = None
+        endpoint_type = None
+        timeout = 10.0
+        no_sse = False
+        output_dir = str(tmp_path / "evidence")
+        policy_override = "least_loaded"
+        admission_mode = None
+
+    assert await async_main(Args()) != 0
+    assert not (tmp_path / "evidence").exists() or not any(
+        (tmp_path / "evidence").iterdir()
+    )
+
+
+def _controls_args(tmp_path: Path, scen: dict):
+    scen_file = tmp_path / "s.json"
+    scen_file.write_text(json.dumps(scen))
+
+    class Args:
+        scenario = str(scen_file)
+        target_url = "http://gw:18080"
+        metrics_url = None
+        concurrency = None
+        strategy = None
+        endpoint_type = None
+        timeout = 10.0
+        no_sse = False
+        output_dir = str(tmp_path / "evidence")
+        policy_override = "p2c"
+        admission_mode = None
+
+    return Args
+
+
+@pytest.mark.anyio
+async def test_controls_with_app_runs_fail_fast(tmp_path: Path):
+    args = _controls_args(
+        tmp_path,
+        {
+            "name": "app",
+            "description": "d",
+            "target_endpoint_type": "app_runs",
+            "conversations": [{"turns": [{"question": "q"}]}],
+        },
+    )
+    args.target_url = "http://app:8080"
+    assert await async_main(args) == 2
+    assert not (tmp_path / "evidence").exists()
+
+
+@pytest.mark.anyio
+async def test_connection_failure_never_reports_control_verified(
+    tmp_path: Path, monkeypatch
+):
+    import httpx
+
+    original = httpx.AsyncClient
+
+    def refuse(request):
+        raise httpx.ConnectError("down")
+
+    def factory(*a, **kw):
+        kw["transport"] = httpx.MockTransport(refuse)
+        return original(*a, **kw)
+
+    monkeypatch.setattr(httpx, "AsyncClient", factory)
+    args = _controls_args(
+        tmp_path,
+        {
+            "name": "gw",
+            "description": "d",
+            "target_endpoint_type": "gateway_chat",
+            "conversations": [{"turns": [{"question": "q"}]}],
+        },
+    )
+    assert await async_main(args) == 1
+    manifest = json.loads(
+        next((tmp_path / "evidence").glob("*/manifest.json")).read_text()
+    )
+    assert manifest["policy_override_verified"] is False
+    assert manifest["control_observations"]["policy_override"] == {
+        "matched": 0,
+        "mismatched": 0,
+    }
+
+
+def test_markdown_report_includes_placement_reason_by_turn():
+    summary = ReplaySummary(
+        scenario_name="s",
+        total_conversations=1,
+        total_turns=2,
+        successful_turns=2,
+        failed_turns=0,
+        duration_seconds=1.0,
+        requests_per_second=2.0,
+        latency_ms={},
+        ttft_ms={},
+        turn_results=[
+            TurnResult(
+                conversation_id="c",
+                turn_index=i,
+                prompt="p",
+                status="completed",
+                client_duration_ms=1.0,
+                gateway_headers={"x-placement-reason": r},
+            )
+            for i, r in enumerate(["prefix_affinity", "prefix_overlap_low"])
+        ],
+    )
+    md = generate_markdown_report(summary, None, "http://gw", None, "manual", "t")
+    assert "Placement reasons by turn" in md
+    assert "| 1 | prefix_affinity: 1 |" in md
+    assert "| 2 | prefix_overlap_low: 1 |" in md
+
+
+@pytest.mark.anyio
+async def test_system_prefix_record_exact_count_and_failure():
+    import httpx
+
+    from services.app.scripts.run_scenario import system_prefix_record
+
+    seen = []
+
+    def ok(request):
+        seen.append((str(request.url), json.loads(request.content)))
+        return httpx.Response(200, json={"count": 77, "tokens": []})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(ok)) as client:
+        rec = await system_prefix_record(
+            "abcdefgh" * 10, "http://gw/tokenize", "m", client
+        )
+    assert seen == [("http://gw/tokenize", {"model": "m", "prompt": "abcdefgh" * 10})]
+    assert rec["prefix_chars"] == 80 and rec["estimated_tokens_chars_div_4"] == 20
+    assert rec["exact_tokens"] == 77 and rec["exact_unavailable_reason"] is None
+    assert "estimate" in rec["estimate_method"] and "exact" in rec["exact_method"]
+
+    def boom(request):
+        raise httpx.ConnectError("nope")
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(boom)) as client:
+        rec = await system_prefix_record("abcd", "http://gw/tokenize", "m", client)
+    assert (
+        rec["exact_tokens"] is None
+        and "tokenize_call_failed" in rec["exact_unavailable_reason"]
+    )
+    assert rec["estimated_tokens_chars_div_4"] == 1
+
+    def bad(request):
+        return httpx.Response(500, text="x")
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(bad)) as client:
+        rec = await system_prefix_record("abcd", "http://gw/tokenize", "m", client)
+    assert rec["exact_unavailable_reason"] == "tokenize_http_500"
+    assert await system_prefix_record(None, "u", "m", None) is None
+
+
+@pytest.mark.anyio
+async def test_manifest_records_system_prefix_estimate_and_exact(
+    tmp_path: Path, monkeypatch
+):
+    import httpx
+
+    scen = tmp_path / "s.json"
+    scen.write_text(
+        json.dumps(
+            {
+                "name": "gw",
+                "description": "d",
+                "target_endpoint_type": "gateway_chat",
+                "system_prefix": "x" * 40,
+                "conversations": [{"turns": [{"question": "q"}]}],
+            }
+        )
+    )
+
+    def handler(request):
+        if request.url.path == "/tokenize":
+            return httpx.Response(200, json={"count": 9})
+        return httpx.Response(200, json={"id": "i"})
+
+    original = httpx.AsyncClient
+
+    def factory(*a, **kw):
+        kw["transport"] = httpx.MockTransport(handler)
+        return original(*a, **kw)
+
+    monkeypatch.setattr(httpx, "AsyncClient", factory)
+
+    class Args:
+        scenario = str(scen)
+        target_url = "http://gw:18080"
+        metrics_url = None
+        concurrency = None
+        strategy = None
+        endpoint_type = None
+        timeout = 10.0
+        no_sse = False
+        output_dir = str(tmp_path / "evidence")
+        tokenize_url = None  # default: derived from the gateway base URL
+
+    assert await async_main(Args()) == 0
+    manifest = json.loads(
+        next((tmp_path / "evidence").glob("*/manifest.json")).read_text()
+    )
+    sp = manifest["system_prefix"]
+    assert (
+        sp["prefix_chars"],
+        sp["estimated_tokens_chars_div_4"],
+        sp["exact_tokens"],
+    ) == (
+        40,
+        10,
+        9,
+    )
+    assert sp["tokenize_url"] == "http://gw:18080/tokenize"

@@ -122,6 +122,8 @@ The scenario runner (`services/app/scripts/run_scenario.py`) executes declarativ
 2. `config/scenarios/growing_multi_turn.json`: 5 sequential turns testing conversational history prefix retention.
 3. `config/scenarios/concurrent_contention.json`: 4 concurrent multi-turn conversations competing for engine slots.
 4. `config/scenarios/strategy_comparison.json`: Comparative sequence across agent strategies.
+5. `config/scenarios/e3_routing_mixed.json`: 10 multi-turn taxi conversations sharing the app's real system prefix (E3 headline, gateway_chat). `e3_routing_large_prefix.json` is the synthetic large-prefix variant.
+6. `config/scenarios/e4_admission_overload.json`: interactive, noisy-tenant and batch long-context traffic (E4, gateway_chat).
 
 ### Running a Scenario via Make Targets:
 ```bash
@@ -146,12 +148,38 @@ uv run --project services/app python services/app/scripts/run_scenario.py \
   --output-dir metrics/evidence
 ```
 
+### Running E3/E4 Controlled Runs (test-only gateway controls)
+
+E3 (`e3_routing_mixed`) and E4 (`e4_admission_overload`) replay the *same* trace under two settings, chosen per run by the replayer instead of redeploying. The gateway honors the control headers `x-placement-policy-override` (`round_robin|least_loaded|p2c|prefix_then_load`), `x-admission-mode` (`on|off`) and `x-tenant-quota-mode` (`on|off`) **only** when it runs with `ALLOW_EXPERIMENT_CONTROLS=1`; otherwise they are ignored. With controls enabled, an invalid value returns `400 invalid_experiment_control`. Applied overrides are echoed as `x-policy-override-applied` / `x-admission-mode` response headers, recorded per request by the replayer, and written to the run manifest and the gateway decision log.
+
+- **Test-only.** The shipped manifest sets `ALLOW_EXPERIMENT_CONTROLS=0`. Enable it only for the duration of an experiment (`kubectl set env deploy/... ALLOW_EXPERIMENT_CONTROLS=1`, or edit the manifest), and turn it back off afterwards. Never trust these headers from production traffic.
+- `x-admission-mode: off` skips only `should_shed` (capacity/deadline). The guard and the tenant quota still run, so E4's noisy tenant still exercises fairness; add `x-tenant-quota-mode: off` (not sent by the replayer) to disable that too. The forced-worker header keeps precedence over a policy override.
+- **E4 tenants.** Set `TENANT_ALLOWLIST=tenant_interactive,tenant_noisy,tenant_batch` (unknown tenants share one `other` bucket). `TENANT_MAX_CONCURRENCY` (default 4) and `TENANT_TOKEN_BUDGET` control how hard `tenant_noisy` (12 conversations) is limited. Tune the admission thresholds (`MAX_DECODE_SLOTS`, `KV_FREE_MIN`, `PREFILL_TOKENS_PER_S`, `QUEUE_WAIT_PER_WAITING_S`; see `AdmitConfig.from_env`) so the trace actually overloads the two workers.
+- **Verified controls.** When a control is requested, the replayer requires the gateway to echo it (`x-policy-override-applied`, `x-admission-mode`). If the first response does not (typically `ALLOW_EXPERIMENT_CONTROLS` is off), the run aborts with exit code 2 and writes no evidence; a later missing/mismatched echo marks that turn `control_not_applied` (failed, not good). The manifest records `*_requested`, `*_verified` (true only with at least one matched echo and no mismatch; false if none was ever observed, e.g. every request failed before headers) and `control_observations` / `control_unverified_turns`. Controls with an `app_runs` scenario exit 2 immediately, since they can never be verified.
+- **What E3 measures.** Shared *system-prefix* affinity only. The replayer sends `x-prefix-id` = hash of the system prefix and `x-prefix-tokens` = estimated tokens of that region; the gateway stores that (clamped to the prompt estimate) as the reusable belief. The overlap gate compares believed-reusable tokens with the current prompt's estimated tokens and requires >= 0.8 (`STICKY_OVERLAP`, a code constant). Without `x-prefix-tokens` the gateway keeps the legacy behavior, which counts the whole prompt as reusable and over-counts prompts with per-turn suffixes or divergent history.
+- **Headline vs synthetic E3.** `e3_routing_mixed` is the **headline trace used for the E3 answer**: its `system_prefix` is the app's real global prefix (system prompt + taxi rules + dataset schema, once; `app.benchmarks.canonical_prefix`, guarded by a drift test), about 270 estimated tokens. Worst-case per-turn overlap (chars/4 estimate, replies at `max_tokens` 128) is turn 1 ~0.90, turn 2 ~0.59, turn 3 ~0.44, turn 4 ~0.35, turn 5 ~0.29, so `prefix_then_load` is expected to stick on turn 1 and spill to load-based placement (`prefix_overlap_low`) afterwards. **That is a finding, not a bug**, and the workload is deliberately not tuned to the gate. `e3_routing_large_prefix` is a separate **synthetic prefix-size treatment** (same conversations, prefix padded to ~6k tokens by repetition; overlap >= 0.8 on every turn) that shows affinity when the prefix dominates; use `make replay-e3-large-prefix-least-loaded` / `replay-e3-large-prefix-prefix-then-load`. History-aware prefix identity (system + prior completed turns, per `docs/prefix-contract.md`) is the follow-up that would keep affinity across growing conversations; it is not measured here.
+- **Evidence of the crossover.** Per-request `gateway_headers` include `x-placement-reason`; `summary.json` has `placement_reason_by_turn` and the Markdown report a "Placement reasons by turn" table. The manifest's `system_prefix` records `prefix_chars`, the chars/4 *estimate* and, when `/tokenize` is reachable (`--tokenize-url` / `TOKENIZE_URL`, default `<target-url>/tokenize`), the *exact* token count of the raw prefix text (else `exact_tokens: null` plus a reason). Only the scenario-level `system_prefix` is recorded.
+- **Context budget.** Workers run `--max-model-len 8192` and vLLM rejects prompt + `max_tokens` above it, so each gateway scenario sets `max_tokens` (default 512; 128 in E3/E4) and a test asserts that, per turn, system prefix + sum of prior (question + max_tokens) + current question + max_tokens <= 8192 - 256 for E3 (both variants) and E4 (gateway chars/4 estimate, approximate; the margin absorbs the error).
+- **Prompts.** A scenario/conversation `system_prefix` makes `gateway_chat` send `[system prefix, prior turns (incl. streamed replies), question]` with a stable `x-prefix-id` (SHA-256 prefix of the shared prefix). Without it the bare question is sent as before.
+
+```bash
+make replay-e3-least-loaded        # same E3 trace, --policy-override least_loaded, --label e3-least_loaded
+make replay-e3-prefix-then-load    # same E3 trace, --policy-override prefix_then_load
+make replay-e3-large-prefix-least-loaded / replay-e3-large-prefix-prefix-then-load  # SYNTHETIC large-prefix treatment
+make replay-e4-admission-on        # E4 trace with --admission-mode on
+make replay-e4-admission-off       # E4 trace with --admission-mode off
+# all take TARGET_URL=... METRICS_URL=... REPLAYER_FLAGS="--sweep-concurrency 4,8,16"
+```
+
+Compare `summary.json` goodput (`by_worker`, `by_tenant`, `by_workload_class`) between the paired runs; `manifest.json` records `policy_override`, `admission_mode` and `policy_under_test` (the label).
+
 ### Scenario CLI Parameters:
 - `--scenario`: Scenario name (without `.json`) or path to custom JSON scenario.
 - `--target-url`: Target server (`http://localhost:18080` for Gateway, `http://localhost:8000` for App).
 - `--metrics-url`: Prometheus metrics endpoint (`http://localhost:18001/metrics` for Worker A).
 - `--concurrency`: Override concurrency semaphore limit.
 - `--endpoint-type`: `gateway_chat` (direct OpenAI `/v1/chat/completions`) or `app_runs` (FastAPI `/api/runs` with SSE).
+- `--policy-override` / `--admission-mode`: send the test-only gateway control headers (gateway needs `ALLOW_EXPERIMENT_CONTROLS=1`).
 - `--no-sse`: Fall back to conversation polling instead of SSE event streaming.
 - `--output-dir`: Destination directory for timestamped JSON results and Markdown reports.
 

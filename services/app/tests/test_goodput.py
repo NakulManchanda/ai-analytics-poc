@@ -138,3 +138,25 @@ def test_all_unmeasured_sweep_row_and_csv_are_na_not_zero():
     out = list(csv.DictReader(io.StringIO(sweep_to_csv([row]))))[0]
     assert out["tokens_per_s"] == "n/a" and out["good_tokens_per_s"] == "n/a"
     assert out["tokens_measured"] == "0"
+
+
+def test_placement_reasons_by_turn_shows_affinity_to_spill_crossover():
+    from app.benchmarks.goodput import placement_reasons_by_turn
+
+    def t(idx, reason):
+        return _t(turn_index=idx, gateway_headers={"x-placement-reason": reason})
+
+    turns = [
+        t(0, "prefix_affinity"),
+        t(0, "no_prefix_known"),
+        t(1, "prefix_overlap_low"),
+        t(1, "prefix_overlap_low"),
+        _t(turn_index=1, gateway_headers=None),  # no headers: not counted
+    ]
+    assert placement_reasons_by_turn(turns) == {
+        "turn_1": {"no_prefix_known": 1, "prefix_affinity": 1},
+        "turn_2": {"prefix_overlap_low": 2},
+    }
+    assert summarize_turns(turns, 1.0, Slos())["placement_reason_by_turn"] == (
+        placement_reasons_by_turn(turns)
+    )

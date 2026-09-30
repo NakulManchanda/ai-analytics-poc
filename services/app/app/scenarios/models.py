@@ -27,6 +27,13 @@ class ScenarioTurn(BaseModel):
     prefix_id: str | None = Field(default=None, description="Sent as x-prefix-id")
 
 
+PolicyOverride = Literal["round_robin", "least_loaded", "p2c", "prefix_then_load"]
+_PREFIX_DESC = (
+    "gateway_chat only: shared system prefix. When set, every turn sends [system prefix, prior "
+    "turns, question] and a stable x-prefix-id derived from the prefix"
+)
+
+
 class ScenarioConversation(BaseModel):
     """A sequential series of turns belonging to a distinct conversation."""
 
@@ -41,6 +48,9 @@ class ScenarioConversation(BaseModel):
     )
     tenant_id: str | None = Field(
         default=None, description="Default tenant for turns that omit it"
+    )
+    system_prefix: str | None = Field(
+        default=None, description=_PREFIX_DESC + " (per conversation)"
     )
 
 
@@ -57,6 +67,20 @@ class ScenarioConfig(BaseModel):
     )
     target_endpoint_type: Literal["app_runs", "gateway_chat"] = Field(
         default="app_runs", description="Target endpoint type"
+    )
+    system_prefix: str | None = Field(default=None, description=_PREFIX_DESC)
+    max_tokens: int = Field(
+        default=512,
+        gt=0,
+        description="gateway_chat: generation cap per turn (prompt + max_tokens must fit the "
+        "worker's max-model-len)",
+    )
+    policy_override: PolicyOverride | None = Field(
+        default=None,
+        description="gateway_chat: x-placement-policy-override (test-only control)",
+    )
+    admission_mode: Literal["on", "off"] | None = Field(
+        default=None, description="gateway_chat: x-admission-mode (test-only control)"
     )
     conversations: list[ScenarioConversation] = Field(
         ..., min_length=1, description="List of conversations to execute"
