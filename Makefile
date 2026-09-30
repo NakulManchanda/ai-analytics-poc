@@ -10,7 +10,7 @@ OBSERVABILITY_PROMETHEUS_PORT ?= 19090
 OBSERVABILITY_BURST_COUNT ?= 10
 OBSERVABILITY_LOG_TAIL ?= 200
 
-.PHONY: help check-bootstrap dev app-serve-dev mcp-dev mcp-smoke dataset-test dataset-smoke smoke test mcp-test infra-test web-test compose-smoke observability-up observability-down observability-smoke observability-dev-up observability-dev-info observability-dev-ask observability-dev-burst observability-dev-metrics observability-dev-logs observability-dev-down local-aws-compose local-aws-refresh local-serve-compose local-serve-refresh local-bedrock-compose bedrock-smoke m5-bedrock-smoke m6-bedrock-smoke dashboard tf-dispatch tf-resume tf-park inference-validate inference-sync inference-config inference-secret inference-bootstrap inference-deploy inference-up inference-tunnel inference-connect inference-smoke inference-warmup inference-capacity inference-restart inference-gateway-restart inference-serve-smoke inference-run inference-pull-evidence inference-teardown replay-fanout replay-multi-turn replay-compare-strategies
+.PHONY: help check-bootstrap dev app-serve-dev mcp-dev mcp-smoke dataset-test dataset-smoke smoke test mcp-test infra-test web-test compose-smoke observability-up observability-down observability-smoke observability-dev-up observability-dev-info observability-dev-ask observability-dev-burst observability-dev-metrics observability-dev-logs observability-dev-down local-aws-compose local-aws-refresh local-serve-compose local-serve-refresh local-bedrock-compose bedrock-smoke m5-bedrock-smoke m6-bedrock-smoke dashboard tf-dispatch tf-resume tf-park inference-validate inference-sync inference-config inference-secret inference-bootstrap inference-deploy inference-up inference-tunnel inference-connect inference-smoke inference-warmup inference-capacity inference-restart inference-gateway-restart inference-serve-smoke inference-run inference-pull-evidence inference-teardown replay-fanout replay-multi-turn replay-compare-strategies replay-strategy-manual replay-strategy-crewai
 
 
 help: ## Show available commands
@@ -274,6 +274,13 @@ replay-fanout: ## Replay shared_prefix_fanout scenario (usage: make replay-fanou
 replay-multi-turn: ## Replay growing_multi_turn scenario (usage: make replay-multi-turn [TARGET_URL=...] [METRICS_URL=...])
 	uv run --project services/app python services/app/scripts/run_scenario.py --scenario growing_multi_turn --target-url $(TARGET_URL) $(if $(METRICS_URL),--metrics-url $(METRICS_URL)) $(REPLAYER_FLAGS)
 
-replay-compare-strategies: ## Replay comparative scenario across manual and crewai strategies
+replay-compare-strategies: ## Replay comparative scenario (note: restart app with AGENT_STRATEGY=crewai between manual and crewai runs)
+	@echo "==> [1/2] Replaying strategy_comparison (strategy=manual). Target app should have AGENT_STRATEGY=manual"
 	uv run --project services/app python services/app/scripts/run_scenario.py --scenario strategy_comparison --strategy manual --target-url $(TARGET_URL) $(if $(METRICS_URL),--metrics-url $(METRICS_URL)) $(REPLAYER_FLAGS)
+	@echo "==> [2/2] Note: The app selects strategy via AGENT_STRATEGY env var at boot. To complete comparison against crewai, restart app with AGENT_STRATEGY=crewai and run 'make replay-strategy-crewai'"
+
+replay-strategy-manual: ## Replay strategy_comparison with manual strategy (app booted with AGENT_STRATEGY=manual)
+	uv run --project services/app python services/app/scripts/run_scenario.py --scenario strategy_comparison --strategy manual --target-url $(TARGET_URL) $(if $(METRICS_URL),--metrics-url $(METRICS_URL)) $(REPLAYER_FLAGS)
+
+replay-strategy-crewai: ## Replay strategy_comparison with crewai strategy (app booted with AGENT_STRATEGY=crewai)
 	uv run --project services/app python services/app/scripts/run_scenario.py --scenario strategy_comparison --strategy crewai --target-url $(TARGET_URL) $(if $(METRICS_URL),--metrics-url $(METRICS_URL)) $(REPLAYER_FLAGS)

@@ -28,9 +28,9 @@ vllm:time_to_first_token_seconds_sum 2.5
 # HELP vllm:request_queue_time_seconds Histogram of queue time.
 vllm:request_queue_time_seconds_count 10.0
 vllm:request_queue_time_seconds_sum 0.5
-# HELP vllm:gpu_cache_usage_factor GPU KV-cache usage.
-# TYPE vllm:gpu_cache_usage_factor gauge
-vllm:gpu_cache_usage_factor 0.25
+# HELP vllm:kv_cache_usage_perc KV-cache usage. 1 means 100 percent usage.
+# TYPE vllm:kv_cache_usage_perc gauge
+vllm:kv_cache_usage_perc 0.25
 vllm:avg_prompt_throughput_tok_per_s 1500.0
 vllm:avg_generation_throughput_tok_per_s 250.0
 """
@@ -44,9 +44,21 @@ vllm:time_to_first_token_seconds_count 15.0
 vllm:time_to_first_token_seconds_sum 3.5
 vllm:request_queue_time_seconds_count 15.0
 vllm:request_queue_time_seconds_sum 0.75
-vllm:gpu_cache_usage_factor 0.45
+vllm:kv_cache_usage_perc 0.45
 vllm:avg_prompt_throughput_tok_per_s 1800.0
 vllm:avg_generation_throughput_tok_per_s 300.0
+"""
+
+SAMPLE_METRICS_NO_GAUGES = """
+vllm:prefix_cache_hits_total{model_name="Qwen/Qwen3-0.6B"} 180.0
+vllm:prefix_cache_queries_total{model_name="Qwen/Qwen3-0.6B"} 300.0
+vllm:prompt_tokens_total 7500.0
+vllm:generation_tokens_total 1500.0
+vllm:time_to_first_token_seconds_count 15.0
+vllm:time_to_first_token_seconds_sum 3.5
+vllm:request_queue_time_seconds_count 15.0
+vllm:request_queue_time_seconds_sum 0.75
+vllm:gpu_cache_usage_factor 0.50
 """
 
 SAMPLE_METRICS_RESET = """
@@ -72,7 +84,7 @@ def test_snapshot_from_text():
     assert snapshot.timestamp == 1000.0
     assert snapshot.get_sum("vllm:prefix_cache_hits_total") == 100.0
     assert snapshot.get_sum("vllm:prefix_cache_queries_total") == 200.0
-    assert snapshot.get_first_value("vllm:gpu_cache_usage_factor") == 0.25
+    assert snapshot.get_first_value("vllm:kv_cache_usage_perc") == 0.25
     assert snapshot.has_metric("vllm:prompt_tokens_total")
     # Alternate naming
     assert snapshot.get_sum("vllm_prefix_cache_hits_total") == 100.0
@@ -101,6 +113,23 @@ def test_compute_metrics_delta_normal():
     assert delta.gpu_cache_usage_post == 0.45
     assert delta.avg_prompt_throughput == 1800.0
     assert delta.avg_generation_throughput == 300.0
+
+
+def test_compute_metrics_delta_derived_throughput():
+    snap_before = PrometheusMetricSnapshot.from_text(
+        SAMPLE_METRICS_V1, timestamp=1000.0
+    )
+    snap_after = PrometheusMetricSnapshot.from_text(
+        SAMPLE_METRICS_NO_GAUGES, timestamp=1010.0
+    )
+
+    delta = compute_metrics_delta(snap_before, snap_after)
+    assert delta.duration_seconds == 10.0
+    # Fallback to gpu_cache_usage_factor when kv_cache_usage_perc absent
+    assert delta.gpu_cache_usage_post == 0.50
+    # Derived from tokens / duration (2500 / 10 = 250.0; 500 / 10 = 50.0)
+    assert delta.avg_prompt_throughput == 250.0
+    assert delta.avg_generation_throughput == 50.0
 
 
 def test_compute_metrics_delta_reset():

@@ -169,10 +169,21 @@ def compute_metrics_delta(
     queue_sum = deltas.get("vllm:request_queue_time_seconds_sum", 0.0)
     avg_queue = (queue_sum / queue_count) if queue_count > 0 else None
 
-    # Gauges snapshot from after
-    gpu_cache_usage = after.get_first_value("vllm:gpu_cache_usage_factor")
+    # Gauges snapshot from after (prefer vllm:kv_cache_usage_perc, fallback to gpu_cache_usage_factor)
+    gpu_cache_usage = after.get_first_value("vllm:kv_cache_usage_perc")
+    if gpu_cache_usage is None:
+        gpu_cache_usage = after.get_first_value("vllm:gpu_cache_usage_factor")
+
+    # Throughput: read gauge if emitted by vllm, otherwise derive from token deltas over duration
     avg_prompt_tp = after.get_first_value("vllm:avg_prompt_throughput_tok_per_s")
+    if avg_prompt_tp is None and duration > 0:
+        p_tokens = deltas.get("vllm:prompt_tokens_total", 0.0)
+        avg_prompt_tp = round(p_tokens / duration, 2)
+
     avg_gen_tp = after.get_first_value("vllm:avg_generation_throughput_tok_per_s")
+    if avg_gen_tp is None and duration > 0:
+        g_tokens = deltas.get("vllm:generation_tokens_total", 0.0)
+        avg_gen_tp = round(g_tokens / duration, 2)
 
     return MetricsDelta(
         duration_seconds=duration,

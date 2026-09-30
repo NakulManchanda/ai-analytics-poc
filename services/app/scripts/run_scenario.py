@@ -138,6 +138,10 @@ async def async_main(args: argparse.Namespace) -> int:
         config.concurrency = args.concurrency
     if args.strategy is not None:
         config.strategy = args.strategy
+        logger.info(
+            "Scenario reporting strategy set to '%s'. (Note: Target application executes the strategy configured by its AGENT_STRATEGY env var at boot).",
+            config.strategy,
+        )
 
     logger.info(
         "Loaded scenario '%s' (%d convs, %d turns, concurrency=%d, strategy=%s)",
