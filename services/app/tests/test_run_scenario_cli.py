@@ -643,3 +643,84 @@ async def test_manifest_records_system_prefix_estimate_and_exact(
         9,
     )
     assert sp["tokenize_url"] == "http://gw:18080/tokenize"
+
+
+def _plain_router_scenario(tmp_path: Path) -> Path:
+    f = tmp_path / "dyn.json"
+    f.write_text(
+        json.dumps(
+            {
+                "name": "dyn",
+                "description": "d",
+                "target_endpoint_type": "gateway_chat",
+                "conversations": [{"turns": [{"question": "q"}, {"question": "q2"}]}],
+            }
+        )
+    )
+    return f
+
+
+@pytest.mark.anyio
+async def test_router_label_non_gateway_rejects_controls(tmp_path: Path):
+    args = _controls_args(
+        tmp_path,
+        {
+            "name": "dyn",
+            "description": "d",
+            "target_endpoint_type": "gateway_chat",
+            "conversations": [{"turns": [{"question": "q"}]}],
+        },
+    )
+    args.router_label = "dynamo-kv"
+    assert await async_main(args) == 2
+    assert not (tmp_path / "evidence").exists()
+
+
+@pytest.mark.anyio
+async def test_non_gateway_arm_tolerates_missing_decision_headers(
+    tmp_path: Path, monkeypatch
+):
+    import httpx
+
+    scen_file = _plain_router_scenario(tmp_path)
+    original = httpx.AsyncClient
+
+    def factory(*a, **kw):
+        sse = (
+            'data: {"choices":[{"delta":{"content":"hi"}}]}\n\n'
+            'data: {"choices":[],"usage":{"prompt_tokens":5,"completion_tokens":1}}\n\n'
+            "data: [DONE]\n\n"
+        )
+        kw["transport"] = httpx.MockTransport(
+            lambda r: httpx.Response(
+                200, headers={"content-type": "text/event-stream"}, content=sse
+            )
+        )
+        return original(*a, **kw)
+
+    monkeypatch.setattr(httpx, "AsyncClient", factory)
+
+    class Args:
+        scenario = str(scen_file)
+        target_url = "http://dynamo:8000"
+        metrics_url = None
+        concurrency = None
+        strategy = None
+        endpoint_type = None
+        timeout = 10.0
+        no_sse = False
+        output_dir = str(tmp_path / "evidence")
+        policy_override = None
+        admission_mode = None
+        router_label = "dynamo-kv"
+        label = "kv-aware"
+
+    assert await async_main(Args()) == 0
+    manifest = json.loads(
+        next((tmp_path / "evidence").rglob("manifest.json")).read_text()
+    )
+    assert manifest["router_label"] == "dynamo-kv"
+    assert manifest["gateway_decision_headers_expected"] is False
+    assert manifest["turns_with_decision_headers"] == 0
+    assert manifest["policy_override_verified"] is None
+    assert manifest["admission_mode_verified"] is None

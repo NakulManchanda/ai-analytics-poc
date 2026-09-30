@@ -42,6 +42,16 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+GATEWAY_ROUTER_LABEL = (
+    "gateway"  # our FastAPI-side gateway; any other label is a comparison arm
+)
+
+
+def is_our_gateway(router_label: str | None) -> bool:
+    """None (legacy runs) means our gateway; any other label (e.g. dynamo-kv) is not."""
+    return router_label in (None, GATEWAY_ROUTER_LABEL)
+
+
 DEFAULT_TOPOLOGY = "two vLLM replicas/HAMi slices on one physical A100"
 WINDOW_NOTE = (
     "Prometheus deltas are isolated-window aggregates; do not attribute to requests."
@@ -256,6 +266,16 @@ async def async_main(args: argparse.Namespace) -> int:
     ):
         config.target_endpoint_type = "gateway_chat"
 
+    router_label = getattr(args, "router_label", None)
+    if (config.policy_override or config.admission_mode) and not is_our_gateway(
+        router_label
+    ):
+        logger.error(
+            "policy_override/admission_mode are gateway-only test controls but "
+            "--router-label=%r is not our gateway: they can never be applied or verified",
+            router_label,
+        )
+        return 2
     if (config.policy_override or config.admission_mode) and (
         config.target_endpoint_type != "gateway_chat"
     ):
@@ -445,6 +465,14 @@ async def async_main(args: argparse.Namespace) -> int:
                 "sha256": hashlib.sha256(scenario_json.encode()).hexdigest(),
             },
             "policy_under_test": getattr(args, "label", None),
+            "router_label": router_label or GATEWAY_ROUTER_LABEL,
+            # Non-gateway arms (e.g. Dynamo) do not emit x-place-decision etc.; routing
+            # distribution must then come from window-level worker metrics, not headers.
+            "gateway_decision_headers_expected": is_our_gateway(router_label),
+            "turns_with_decision_headers": sum(
+                bool((t.get("gateway_headers") or {}).get("x-place-decision"))
+                for t in all_turns
+            ),
             "policy_override_requested": config.policy_override,
             "policy_override_verified": _verified(observed, "policy_override"),
             "admission_mode_requested": config.admission_mode,
@@ -542,6 +570,13 @@ def main() -> int:
     )
     parser.add_argument(
         "--label", default=None, help="Policy under test (informational)"
+    )
+    parser.add_argument(
+        "--router-label",
+        default=None,
+        help="Router arm under test: 'gateway' (default, our gateway) or any other label "
+        "such as dynamo-kv. Non-gateway arms tolerate missing x-place-decision headers "
+        "and reject --policy-override/--admission-mode.",
     )
     parser.add_argument(
         "--policy-override",
