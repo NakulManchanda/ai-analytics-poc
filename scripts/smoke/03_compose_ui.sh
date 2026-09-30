@@ -41,11 +41,13 @@ payload = json.loads(os.environ["ASK_JSON"])
 assert "has the most pickups with" in payload["answer"]
 assert isinstance(payload["tool_call_id"], str) and payload["tool_call_id"]
 assert isinstance(payload["query_id"], str) and payload["query_id"]
-# Contract change (#115c catalogue): a catalogue-hit prompt skips the proposal
-# LLM call entirely, so a run can be 1 call (catalogue hit, answer-only) or 2
-# calls (proposal + answer). Assert on tool_source instead of a fixed count.
-assert len(payload["llm_calls"]) >= 1
-assert payload.get("tool_source") in {"catalogue", "model"}
+# Contract change (#115c catalogue): a catalogue-hit prompt skips the
+# proposal LLM call entirely, so a run can be 1 call (catalogue hit,
+# answer-only) or 2 calls (proposal + answer). `tool_source` distinguishing
+# the two is internal RunStep/LLMCall metadata, not part of the AskResponse
+# HTTP schema (see services/app/app/routers/ask.py), so this smoke only
+# checks the resulting call-count range rather than the unexposed field.
+assert 1 <= len(payload["llm_calls"]) <= 2
 assert payload["usage"]["total_tokens"] > 0
 PY
     echo "Compose UI smoke passed"
