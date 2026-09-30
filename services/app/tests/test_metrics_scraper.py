@@ -71,12 +71,15 @@ vllm:generation_tokens_total 100.0
 
 def test_parse_labels():
     labels = parse_labels(
-        'model_name="Qwen/Qwen3-0.6B",worker_id="0",quote="hello \\"world\\"",path="a\\\\nb"'
+        'model_name="Qwen/Qwen3-0.6B",worker_id="0",quote="hello \\"world\\"",'
+        'path="a\\\\nb",tab="a\\tb",cr="a\\rb"'
     )
     assert labels["model_name"] == "Qwen/Qwen3-0.6B"
     assert labels["worker_id"] == "0"
     assert labels["quote"] == 'hello "world"'
     assert labels["path"] == "a\\nb"
+    assert labels["tab"] == "a\tb"
+    assert labels["cr"] == "a\rb"
 
 
 def test_snapshot_from_text():

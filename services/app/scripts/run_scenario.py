@@ -19,6 +19,7 @@ from app.benchmarks.metrics_scraper import (
 )
 from app.benchmarks.replayer import ReplaySummary, ScenarioReplayer
 from app.scenarios.loader import load_scenario
+from app.scenarios.models import ScenarioConfig
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s"
@@ -148,6 +149,9 @@ async def async_main(args: argparse.Namespace) -> int:
         config.target_endpoint_type = endpoint_type
     elif ":18080" in args.target_url or ":18001" in args.target_url or ":18002" in args.target_url:
         config.target_endpoint_type = "gateway_chat"
+
+    # Re-validate scenario configuration after applying CLI overrides
+    config = ScenarioConfig.model_validate(config.model_dump())
 
     logger.info(
         "Loaded scenario '%s' (%d convs, %d turns, concurrency=%d, strategy=%s)",

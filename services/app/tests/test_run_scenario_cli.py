@@ -167,3 +167,41 @@ async def test_async_main_e2e(tmp_path: Path, monkeypatch):
         assert data["metrics_delta"] is not None
         # pre and post had same values -> delta=0
         assert data["metrics_delta"]["prefix_cache_hit_rate_pct"] == 0.0
+
+
+@pytest.mark.anyio
+async def test_async_main_invalid_concurrency_fails_fast(tmp_path: Path):
+    from pydantic import ValidationError
+
+    scen_file = tmp_path / "dummy_invalid.json"
+    scen_file.write_text(
+        json.dumps(
+            {
+                "name": "dummy_inv",
+                "description": "Dummy scenario",
+                "concurrency": 2,
+                "strategy": "manual",
+                "target_endpoint_type": "app_runs",
+                "conversations": [
+                    {
+                        "conversation_id_prefix": "c1",
+                        "turns": [{"question": "Which pickup zones have the most trips?"}],
+                    }
+                ],
+            }
+        )
+    )
+
+    class MockInvalidArgs:
+        scenario = str(scen_file)
+        target_url = "http://test:8080"
+        metrics_url = None
+        concurrency = 0  # Invalid concurrency should fail validation
+        strategy = None
+        endpoint_type = None
+        timeout = 10.0
+        no_sse = False
+        output_dir = str(tmp_path / "evidence")
+
+    with pytest.raises(ValidationError):
+        await async_main(MockInvalidArgs())
