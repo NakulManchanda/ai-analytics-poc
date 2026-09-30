@@ -492,9 +492,7 @@ async def serve_completion(
         prefix_tokens = min(prefix_tokens, est_tokens)
     with metrics.timed("place", klass):
         decision = placement.pick(
-            placement.PlacementRequest(
-                x_prefix_id, est_tokens, klass, x_force_worker, prefix_tokens
-            ),
+            placement.PlacementRequest(x_prefix_id, est_tokens, klass, x_force_worker),
             list(registry.snapshots.values()),
             policy=policy_override or PLACEMENT_POLICY,
             stale_after=SNAPSHOT_STALE_S,

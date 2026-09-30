@@ -69,6 +69,12 @@ class ScenarioConfig(BaseModel):
         default="app_runs", description="Target endpoint type"
     )
     system_prefix: str | None = Field(default=None, description=_PREFIX_DESC)
+    max_tokens: int = Field(
+        default=512,
+        gt=0,
+        description="gateway_chat: generation cap per turn (prompt + max_tokens must fit the "
+        "worker's max-model-len)",
+    )
     policy_override: PolicyOverride | None = Field(
         default=None,
         description="gateway_chat: x-placement-policy-override (test-only control)",

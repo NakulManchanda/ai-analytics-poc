@@ -289,6 +289,7 @@ async def test_async_main_writes_run_directory_with_sweep(tmp_path: Path, monkey
     assert manifest["policy_override_verified"] is True
     assert manifest["admission_mode_verified"] is True
     assert manifest["control_unverified_turns"] == 0
+    assert manifest["control_observations"]["policy_override"]["matched"] > 0
     assert manifest["slos"]["interactive_ttft_slo_ms"] == 100.0
     assert "A100" in manifest["topology"]
     assert manifest["model_revision"] == "rev123"
@@ -439,3 +440,75 @@ async def test_controls_ignored_by_gateway_abort_run_without_evidence(
     assert not (tmp_path / "evidence").exists() or not any(
         (tmp_path / "evidence").iterdir()
     )
+
+
+def _controls_args(tmp_path: Path, scen: dict):
+    scen_file = tmp_path / "s.json"
+    scen_file.write_text(json.dumps(scen))
+
+    class Args:
+        scenario = str(scen_file)
+        target_url = "http://gw:18080"
+        metrics_url = None
+        concurrency = None
+        strategy = None
+        endpoint_type = None
+        timeout = 10.0
+        no_sse = False
+        output_dir = str(tmp_path / "evidence")
+        policy_override = "p2c"
+        admission_mode = None
+
+    return Args
+
+
+@pytest.mark.anyio
+async def test_controls_with_app_runs_fail_fast(tmp_path: Path):
+    args = _controls_args(
+        tmp_path,
+        {
+            "name": "app",
+            "description": "d",
+            "target_endpoint_type": "app_runs",
+            "conversations": [{"turns": [{"question": "q"}]}],
+        },
+    )
+    args.target_url = "http://app:8080"
+    assert await async_main(args) == 2
+    assert not (tmp_path / "evidence").exists()
+
+
+@pytest.mark.anyio
+async def test_connection_failure_never_reports_control_verified(
+    tmp_path: Path, monkeypatch
+):
+    import httpx
+
+    original = httpx.AsyncClient
+
+    def refuse(request):
+        raise httpx.ConnectError("down")
+
+    def factory(*a, **kw):
+        kw["transport"] = httpx.MockTransport(refuse)
+        return original(*a, **kw)
+
+    monkeypatch.setattr(httpx, "AsyncClient", factory)
+    args = _controls_args(
+        tmp_path,
+        {
+            "name": "gw",
+            "description": "d",
+            "target_endpoint_type": "gateway_chat",
+            "conversations": [{"turns": [{"question": "q"}]}],
+        },
+    )
+    assert await async_main(args) == 1
+    manifest = json.loads(
+        next((tmp_path / "evidence").glob("*/manifest.json")).read_text()
+    )
+    assert manifest["policy_override_verified"] is False
+    assert manifest["control_observations"]["policy_override"] == {
+        "matched": 0,
+        "mismatched": 0,
+    }

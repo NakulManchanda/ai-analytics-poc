@@ -842,3 +842,33 @@ async def test_control_lost_mid_run_marks_only_that_turn_failed():
         ).run()
     assert [t.status for t in s.turn_results] == ["completed", "control_not_applied"]
     assert s.failed_turns == 1
+
+
+@pytest.mark.anyio
+async def test_connection_failure_before_headers_leaves_control_unobserved():
+    cfg = _ctl_cfg(policy_override="p2c")
+
+    async def handler(request):
+        raise httpx.ConnectError("down")
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        rp = ScenarioReplayer(cfg, "http://gw", client=client, gateway_stream=False)
+        s = await rp.run()
+    assert s.failed_turns == 1
+    assert rp.control_observations == {"policy_override": [0, 0]}  # never verified
+
+
+@pytest.mark.anyio
+async def test_gateway_sends_scenario_max_tokens():
+    seen = []
+
+    async def handler(request):
+        seen.append(json.loads(request.content)["max_tokens"])
+        return httpx.Response(200, json={"id": "x"})
+
+    for cfg in (_gw_cfg(), _gw_cfg().model_copy(update={"max_tokens": 128})):
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            await ScenarioReplayer(
+                cfg, "http://gw", client=client, gateway_stream=False
+            ).run()
+    assert seen == [512, 128]

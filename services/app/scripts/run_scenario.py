@@ -51,6 +51,14 @@ EVIDENCE_SCOPE = (
 )
 
 
+def _verified(observed: dict[str, list[int]], name: str) -> bool | None:
+    """None = not requested; True only with >= 1 matched echo and no mismatch."""
+    if name not in observed:
+        return None
+    ok, bad = observed[name]
+    return ok > 0 and bad == 0
+
+
 def _tok(value: int | None) -> str:
     return "n/a" if value is None else str(value)
 
@@ -195,6 +203,16 @@ async def async_main(args: argparse.Namespace) -> int:
     ):
         config.target_endpoint_type = "gateway_chat"
 
+    if (config.policy_override or config.admission_mode) and (
+        config.target_endpoint_type != "gateway_chat"
+    ):
+        logger.error(
+            "policy_override/admission_mode need target_endpoint_type gateway_chat "
+            "(got %s): the control could never be verified",
+            config.target_endpoint_type,
+        )
+        return 2
+
     # Re-validate scenario configuration after applying CLI overrides
     config = ScenarioConfig.model_validate(config.model_dump())
 
@@ -221,6 +239,7 @@ async def async_main(args: argparse.Namespace) -> int:
     all_turns: list[dict[str, Any]] = []
     summary: ReplaySummary | None = None
     any_failed = False
+    observed: dict[str, list[int]] = {}
     metrics_delta: MetricsDelta | None = None
 
     for level in levels:
@@ -255,6 +274,9 @@ async def async_main(args: argparse.Namespace) -> int:
             logger.error("Aborting run, no evidence written: %s", exc)
             return 2
         any_failed = any_failed or summary.failed_turns > 0
+        for name, (ok, bad) in replayer.control_observations.items():
+            tot = observed.setdefault(name, [0, 0])
+            tot[0], tot[1] = tot[0] + ok, tot[1] + bad
         logger.info(
             "Replay finished: %d/%d turns succeeded in %.2fs (%.2f req/s)",
             summary.successful_turns,
@@ -349,6 +371,7 @@ async def async_main(args: argparse.Namespace) -> int:
     _write_json(run_dir / "sweep.json", sweep_rows)
     (run_dir / "sweep.csv").write_text(sweep_to_csv(sweep_rows), encoding="utf-8")
     unverified = sum(t["status"] == "control_not_applied" for t in all_turns)
+    any_failed = any_failed or any(ok == 0 for ok, _ in observed.values())
     scenario_json = json.dumps(config.model_dump(), sort_keys=True)
     _write_json(
         run_dir / "manifest.json",
@@ -359,13 +382,15 @@ async def async_main(args: argparse.Namespace) -> int:
             },
             "policy_under_test": getattr(args, "label", None),
             "policy_override_requested": config.policy_override,
-            "policy_override_verified": (
-                None if config.policy_override is None else unverified == 0
-            ),
+            "policy_override_verified": _verified(observed, "policy_override"),
             "admission_mode_requested": config.admission_mode,
-            "admission_mode_verified": (
-                None if config.admission_mode is None else unverified == 0
-            ),
+            "admission_mode_verified": _verified(observed, "admission_mode"),
+            # matched / mismatched gateway echoes per requested control; verified needs >= 1
+            # matched and 0 mismatched, so a run with no observable response is not verified.
+            "control_observations": {
+                k: {"matched": ok, "mismatched": bad}
+                for k, (ok, bad) in observed.items()
+            },
             "control_unverified_turns": unverified,
             "slos": slos.model_dump(),
             "topology": getattr(args, "topology", None)

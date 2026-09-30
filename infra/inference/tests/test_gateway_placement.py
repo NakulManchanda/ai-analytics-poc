@@ -404,12 +404,20 @@ def test_prefix_tokens_clamped_and_legacy_path(gw) -> None:
     assert b.tokens > 50  # absent -> legacy (over-counts prompts with a per-turn suffix)
 
 
-def test_prefix_affinity_uses_prefix_region_for_overlap(gw, monkeypatch) -> None:
-    client, reg = gw
-    monkeypatch.setattr(gateway_main, "PLACEMENT_POLICY", "prefix_then_load")
-    r1, _ = _belief_after(client, reg, {"x-prefix-tokens": "100"}, "s" * 400)
-    owner = r1.headers["x-place-decision"]
-    # much longer prompt (history grew) but same system region: still sticky
-    r2, _ = _belief_after(client, reg, {"x-prefix-tokens": "100"}, "s" * 4000)
-    assert r2.headers["x-place-decision"] == owner
-    assert r2.headers["x-placement-reason"] == "prefix_affinity"
+@pytest.mark.parametrize(
+    "belief,est,reason",
+    [
+        (900, 1000, "prefix_affinity"),
+        (800, 1000, "prefix_affinity"),  # boundary: exactly 0.8 is sticky
+        (799, 1000, "prefix_overlap_low"),
+        (100, 1000, "prefix_overlap_low"),  # small system prefix vs large current prefill
+        (5000, 1000, "prefix_affinity"),  # overlap bounded to [0, 1]
+    ],
+)
+def test_overlap_is_fraction_of_current_prefill(belief, est, reason) -> None:
+    ws = two()
+    _with_prefix(ws, "worker_a", tokens=belief)
+    d = pick(PlacementRequest("p1", est), ws, policy="prefix_then_load", rng=random.Random(1))
+    assert d.placement_reason == reason
+    if reason == "prefix_affinity":
+        assert d.chosen_worker == "worker_a"

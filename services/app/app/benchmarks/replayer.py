@@ -160,6 +160,15 @@ class ScenarioReplayer:
         self.gateway_stream = gateway_stream
         self._gw_convs: dict[str, _GatewayConv] = {}
         self._control_checked = False
+        # Explicit observations per requested control: [echo matched, echo missing/mismatched].
+        self.control_observations: dict[str, list[int]] = {
+            name: [0, 0]
+            for name, want in (
+                ("policy_override", config.policy_override),
+                ("admission_mode", config.admission_mode),
+            )
+            if want is not None
+        }
         self._abort: str | None = None
 
     async def run(self) -> ReplaySummary:
@@ -311,14 +320,18 @@ class ScenarioReplayer:
         if seen is None:
             return
         cfg = self.config
-        missing = [
-            f"{hdr}={want!r} (got {seen.get(hdr)!r})"
-            for hdr, want in (
-                ("x-policy-override-applied", cfg.policy_override),
-                ("x-admission-mode", cfg.admission_mode),
-            )
-            if want is not None and seen.get(hdr) != want
-        ]
+        missing = []
+        for name, hdr in (
+            ("policy_override", "x-policy-override-applied"),
+            ("admission_mode", "x-admission-mode"),
+        ):
+            want = getattr(cfg, name)
+            if want is None:
+                continue
+            ok = seen.get(hdr) == want
+            self.control_observations[name][0 if ok else 1] += 1
+            if not ok:
+                missing.append(f"{hdr}={want!r} (got {seen.get(hdr)!r})")
         if missing:
             msg = "requested experiment control not applied by gateway: " + ", ".join(
                 missing
@@ -616,7 +629,7 @@ class ScenarioReplayer:
         payload = {
             "model": "Qwen/Qwen3-0.6B",
             "messages": messages,
-            "max_tokens": 512,
+            "max_tokens": self.config.max_tokens,
             "temperature": 0.0,
         }
         if self.gateway_stream:

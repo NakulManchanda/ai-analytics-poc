@@ -125,3 +125,60 @@ def test_e3_e4_scenarios_are_gateway_scenarios_with_documented_tenants():
     tight = max(t.deadline_ms for c in by_tenant["tenant_interactive"] for t in c.turns)
     loose = min(t.deadline_ms for c in by_tenant["tenant_batch"] for t in c.turns)
     assert tight < loose
+
+
+def test_e3_shared_prefix_keeps_overlap_above_gate_on_every_turn():
+    """System-only prefix belief: overlap = system tokens / current prefill (gateway 0.8 gate).
+
+    Worst case: every reply hits the scenario max_tokens (actual replies are shorter, so
+    overlaps are higher)."""
+    import json
+
+    cfg = load_scenario("e3_routing_mixed", scenarios_dir=Path("config/scenarios"))
+    prefix_tokens = (
+        len(json.dumps([{"role": "system", "content": cfg.system_prefix}])) // 4
+    )
+    q_tokens = max(len(t.question) for c in cfg.conversations for t in c.turns) // 4 + 8
+
+    def overlap(turn: int) -> float:  # 1-based turn number
+        return prefix_tokens / (
+            prefix_tokens + turn * q_tokens + (turn - 1) * cfg.max_tokens
+        )
+
+    max_turns = max(len(c.turns) for c in cfg.conversations)
+    assert all(overlap(t) >= 0.8 for t in range(1, max_turns + 1))
+
+
+def test_gateway_scenarios_fit_worker_context_window():
+    """Worst case per turn (all replies hit max_tokens) must fit --max-model-len 8192.
+
+    Uses the gateway's chars/4 estimate, which is approximate, hence the margin."""
+    import json
+
+    window, margin = 8192, 256
+    for name in ("e3_routing_mixed", "e4_admission_overload"):
+        cfg = load_scenario(name, scenarios_dir=Path("config/scenarios"))
+        for conv in cfg.conversations:
+            prefix = conv.system_prefix or cfg.system_prefix
+            ptok = len(json.dumps([{"role": "system", "content": prefix}])) // 4
+            prior = 0
+            for turn in conv.turns:
+                q = len(turn.question) // 4 + 8
+                worst = ptok + prior + q + cfg.max_tokens
+                assert worst <= window - margin, (
+                    name,
+                    conv.conversation_id_prefix,
+                    worst,
+                )
+                prior += q + cfg.max_tokens
+
+
+def test_max_tokens_default_and_bounds():
+    base = dict(
+        name="n",
+        description="d",
+        conversations=[ScenarioConversation(turns=[ScenarioTurn(question="q")])],
+    )
+    assert ScenarioConfig(**base).max_tokens == 512
+    with pytest.raises(ValidationError):
+        ScenarioConfig(**base, max_tokens=0)
