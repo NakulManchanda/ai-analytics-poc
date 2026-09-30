@@ -143,8 +143,9 @@ async def async_main(args: argparse.Namespace) -> int:
             "the strategy configured by its AGENT_STRATEGY env var at boot).",
             config.strategy,
         )
-    if args.endpoint_type is not None:
-        config.target_endpoint_type = args.endpoint_type
+    endpoint_type = getattr(args, "endpoint_type", None)
+    if endpoint_type is not None:
+        config.target_endpoint_type = endpoint_type
     elif ":18080" in args.target_url or ":18001" in args.target_url or ":18002" in args.target_url:
         config.target_endpoint_type = "gateway_chat"
 

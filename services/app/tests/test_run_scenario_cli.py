@@ -150,6 +150,7 @@ async def test_async_main_e2e(tmp_path: Path, monkeypatch):
         metrics_url = "http://test:18001/metrics"
         concurrency = None
         strategy = None
+        endpoint_type = None
         timeout = 10.0
         no_sse = False
         output_dir = str(tmp_path / "evidence")
