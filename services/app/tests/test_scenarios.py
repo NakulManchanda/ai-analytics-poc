@@ -64,6 +64,7 @@ def test_load_all_canned_scenarios():
         ("strategy_comparison", 1, 3),
         ("concurrent_contention", 4, 12),
         ("e3_routing_mixed", 10, 39),
+        ("e3_routing_large_prefix", 10, 39),
         ("e4_admission_overload", 22, 48),
     ]
 
@@ -127,26 +128,52 @@ def test_e3_e4_scenarios_are_gateway_scenarios_with_documented_tenants():
     assert tight < loose
 
 
-def test_e3_shared_prefix_keeps_overlap_above_gate_on_every_turn():
-    """System-only prefix belief: overlap = system tokens / current prefill (gateway 0.8 gate).
-
-    Worst case: every reply hits the scenario max_tokens (actual replies are shorter, so
-    overlaps are higher)."""
+def _overlap_by_turn(name: str) -> list[float]:
+    """Worst-case overlap per turn (gateway chars/4 estimate; every reply hits max_tokens):
+    system-prefix tokens / current prefill tokens, the quantity the 0.8 gate compares.
+    """
     import json
 
+    cfg = load_scenario(name, scenarios_dir=Path("config/scenarios"))
+    ptok = len(json.dumps([{"role": "system", "content": cfg.system_prefix}])) // 4
+    q = max(len(t.question) for c in cfg.conversations for t in c.turns) // 4 + 8
+    turns = max(len(c.turns) for c in cfg.conversations)
+    return [
+        ptok / (ptok + n * q + (n - 1) * cfg.max_tokens) for n in range(1, turns + 1)
+    ]
+
+
+def test_e3_headline_overlap_transition_is_not_tuned_to_the_gate():
+    """Representative (small) prefix: affinity on turn 1, spill to load-based from turn 2.
+
+    That transition is the E3 finding; the prefix must not be padded to hide it."""
+    ov = _overlap_by_turn("e3_routing_mixed")
+    assert ov[0] >= 0.8  # turn 1 sticky (prefix known from earlier conversations)
+    assert all(o < 0.8 for o in ov[1:]), ov  # turns 2..5 spill (prefix_overlap_low)
+
+
+def test_e3_headline_prefix_is_the_apps_canonical_prefix():
+    """Drift guard: the scenario prefix is exactly the app's global prompt prefix, unpadded."""
+    from app.benchmarks.canonical_prefix import canonical_system_prefix
+
     cfg = load_scenario("e3_routing_mixed", scenarios_dir=Path("config/scenarios"))
-    prefix_tokens = (
-        len(json.dumps([{"role": "system", "content": cfg.system_prefix}])) // 4
+    assert cfg.system_prefix == canonical_system_prefix()
+    assert all(c.system_prefix is None for c in cfg.conversations)
+    assert (
+        cfg.system_prefix.count("Dataset constraints:") == 1
+    )  # used once, not repeated
+
+
+def test_e3_large_prefix_is_explicitly_synthetic_and_keeps_affinity():
+    cfg = load_scenario(
+        "e3_routing_large_prefix", scenarios_dir=Path("config/scenarios")
     )
-    q_tokens = max(len(t.question) for c in cfg.conversations for t in c.turns) // 4 + 8
-
-    def overlap(turn: int) -> float:  # 1-based turn number
-        return prefix_tokens / (
-            prefix_tokens + turn * q_tokens + (turn - 1) * cfg.max_tokens
-        )
-
-    max_turns = max(len(c.turns) for c in cfg.conversations)
-    assert all(overlap(t) >= 0.8 for t in range(1, max_turns + 1))
+    assert "SYNTHETIC" in cfg.description and "e3_routing_mixed" in cfg.description
+    assert all(o >= 0.8 for o in _overlap_by_turn("e3_routing_large_prefix"))
+    headline = load_scenario("e3_routing_mixed", scenarios_dir=Path("config/scenarios"))
+    assert (
+        cfg.conversations == headline.conversations
+    )  # same trace, only the prefix differs
 
 
 def test_gateway_scenarios_fit_worker_context_window():
@@ -156,7 +183,11 @@ def test_gateway_scenarios_fit_worker_context_window():
     import json
 
     window, margin = 8192, 256
-    for name in ("e3_routing_mixed", "e4_admission_overload"):
+    for name in (
+        "e3_routing_mixed",
+        "e3_routing_large_prefix",
+        "e4_admission_overload",
+    ):
         cfg = load_scenario(name, scenarios_dir=Path("config/scenarios"))
         for conv in cfg.conversations:
             prefix = conv.system_prefix or cfg.system_prefix

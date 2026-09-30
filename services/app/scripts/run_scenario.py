@@ -14,9 +14,11 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import httpx
 from app.benchmarks.goodput import (
     Slos,
     is_good,
+    placement_reasons_by_turn,
     summarize_turns,
     sweep_row,
     sweep_to_csv,
@@ -57,6 +59,42 @@ def _verified(observed: dict[str, list[int]], name: str) -> bool | None:
         return None
     ok, bad = observed[name]
     return ok > 0 and bad == 0
+
+
+GATEWAY_MODEL = "Qwen/Qwen3-0.6B"  # matches the replayer's request model
+
+
+async def system_prefix_record(
+    prefix: str | None, tokenize_url: str, model: str, client: httpx.AsyncClient | None
+) -> dict[str, Any] | None:
+    """Prefix size for the manifest: chars/4 ESTIMATE always; EXACT count from the
+    gateway's /tokenize passthrough when reachable (raw text, no chat template), else
+    exact_tokens=null with a reason. Never fails the run."""
+    if not prefix:
+        return None
+    rec: dict[str, Any] = {
+        "prefix_chars": len(prefix),
+        "estimated_tokens_chars_div_4": len(prefix) // 4,
+        "estimate_method": "estimate: len(text)//4 (gateway guard heuristic)",
+        "exact_tokens": None,
+        "exact_method": "exact: /tokenize count of the raw prefix text (no chat template)",
+        "exact_unavailable_reason": None,
+        "tokenize_url": tokenize_url,
+    }
+    try:
+        resp = await client.post(tokenize_url, json={"model": model, "prompt": prefix})
+        if resp.status_code != 200:
+            rec["exact_unavailable_reason"] = f"tokenize_http_{resp.status_code}"
+            return rec
+        data = resp.json()
+        count = data.get("count") if isinstance(data, dict) else None
+        if isinstance(count, int) and not isinstance(count, bool):
+            rec["exact_tokens"] = count
+        else:
+            rec["exact_unavailable_reason"] = "tokenize_response_malformed"
+    except (httpx.HTTPError, ValueError) as exc:
+        rec["exact_unavailable_reason"] = f"tokenize_call_failed: {type(exc).__name__}"
+    return rec
 
 
 def _tok(value: int | None) -> str:
@@ -153,6 +191,21 @@ def generate_markdown_report(
             )
         if metrics_delta.counter_reset_detected:
             lines.append("| **Warning** | Counter reset detected during burst! |")
+        lines.append("")
+
+    reasons = placement_reasons_by_turn(summary.turn_results)
+    if reasons:
+        lines.extend(
+            [
+                "## Placement reasons by turn",
+                "",
+                "| Turn | x-placement-reason counts |",
+                "|---|---|",
+            ]
+        )
+        for turn, counts in reasons.items():
+            cells = ", ".join(f"{r}: {n}" for r, n in counts.items())
+            lines.append(f"| {turn.removeprefix('turn_')} | {cells} |")
         lines.append("")
 
     lines.extend(
@@ -370,6 +423,17 @@ async def async_main(args: argparse.Namespace) -> int:
     )
     _write_json(run_dir / "sweep.json", sweep_rows)
     (run_dir / "sweep.csv").write_text(sweep_to_csv(sweep_rows), encoding="utf-8")
+    prefix_record = None
+    if config.target_endpoint_type == "gateway_chat" and config.system_prefix:
+        tokenize_url = (
+            getattr(args, "tokenize_url", None)
+            or os.environ.get("TOKENIZE_URL")
+            or f"{args.target_url.rstrip('/')}/tokenize"
+        )
+        async with httpx.AsyncClient(timeout=5.0) as tok_client:
+            prefix_record = await system_prefix_record(
+                config.system_prefix, tokenize_url, GATEWAY_MODEL, tok_client
+            )
     unverified = sum(t["status"] == "control_not_applied" for t in all_turns)
     any_failed = any_failed or any(ok == 0 for ok, _ in observed.values())
     scenario_json = json.dumps(config.model_dump(), sort_keys=True)
@@ -392,6 +456,7 @@ async def async_main(args: argparse.Namespace) -> int:
                 for k, (ok, bad) in observed.items()
             },
             "control_unverified_turns": unverified,
+            "system_prefix": prefix_record,
             "slos": slos.model_dump(),
             "topology": getattr(args, "topology", None)
             or os.environ.get("INFERENCE_TOPOLOGY")
@@ -489,6 +554,12 @@ def main() -> int:
         choices=["on", "off"],
         default=None,
         help="Send x-admission-mode (gateway needs ALLOW_EXPERIMENT_CONTROLS=1)",
+    )
+    parser.add_argument(
+        "--tokenize-url",
+        default=None,
+        help="Gateway /tokenize URL for the exact prefix token count "
+        "(env TOKENIZE_URL; default <target-url>/tokenize)",
     )
     parser.add_argument(
         "--ttft-slo-ms",

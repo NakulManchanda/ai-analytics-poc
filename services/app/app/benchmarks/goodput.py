@@ -78,6 +78,15 @@ def _group(turns: list[TurnResult], key, slos: Slos) -> dict[str, dict[str, Any]
     }
 
 
+def placement_reasons_by_turn(turns: list[TurnResult]) -> dict[str, dict[str, int]]:
+    """x-placement-reason counts per (1-based) turn (shows the affinity -> spill crossover)."""
+    out: dict[str, Counter] = {}
+    for t in turns:
+        if reason := (t.gateway_headers or {}).get("x-placement-reason"):
+            out.setdefault(f"turn_{t.turn_index + 1}", Counter())[reason] += 1
+    return {k: dict(sorted(v.items())) for k, v in sorted(out.items())}
+
+
 def summarize_turns(
     turns: list[TurnResult], duration_s: float, slos: Slos
 ) -> dict[str, Any]:
@@ -114,6 +123,7 @@ def summarize_turns(
             turns, lambda t: hdr(t, "x-placement-policy"), slos
         ),
         "decisions": {h: c for h, c in decisions.items() if c},
+        "placement_reason_by_turn": placement_reasons_by_turn(turns),
     }
 
 
