@@ -68,3 +68,4 @@ Monotonically numbered log of every post-bootstrap task. Each entry records the 
 - [0062 — Inference Lambda deployment boundary](0062-inference-lambda-boundary.md) — [PR #130](https://github.com/NakulManchanda/ai-analytics-poc/pull/130), Merged
 - [0063 — Isolated Lambda inference cluster bundle](0063-lambda-inference-cluster.md) — [PR #131](https://github.com/NakulManchanda/ai-analytics-poc/pull/131), Open draft
 - [0072 — Replayer and scenario loader review follow-ups](0072-replayer-review-followups.md) — #142 review fixes
+- [0073 — Control plane Slice 1: placement foundation](0073-control-plane-placement-foundation.md) — #122

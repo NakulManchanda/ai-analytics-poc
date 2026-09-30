@@ -25,11 +25,17 @@ spec:
           command:
             - sh
             - -c
-            - "pip install --no-cache-dir fastapi uvicorn httpx && uvicorn main:app --host 0.0.0.0 --port 8080 --app-dir /app"
+            - "pip install --no-cache-dir fastapi uvicorn httpx prometheus-client && uvicorn main:app --host 0.0.0.0 --port 8080 --app-dir /app"
           workingDir: /app
           env:
             - name: DEFAULT_WORKER_URL
               value: "http://inference-worker-a.inference-lab.svc.cluster.local:8000"
+            - name: WORKER_A_URL
+              value: "http://inference-worker-a.inference-lab.svc.cluster.local:8000"
+            - name: WORKER_B_URL
+              value: "http://inference-worker-b.inference-lab.svc.cluster.local:8000"
+            - name: PLACEMENT_POLICY
+              value: "prefix_then_load"
           ports:
             - containerPort: 8080
           readinessProbe:
