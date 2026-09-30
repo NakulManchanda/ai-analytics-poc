@@ -171,7 +171,7 @@ make replay-e4-admission-off       # E4 trace with --admission-mode off
 # all take TARGET_URL=... METRICS_URL=... REPLAYER_FLAGS="--sweep-concurrency 4,8,16"
 ```
 
-Compare `summary.json` goodput (`by_worker`, `by_tenant`, `by_workload_class`) between the paired runs; `manifest.json` records `policy_override`, `admission_mode` and `policy_under_test` (the label).
+Compare `summary.json` goodput (`by_worker`, `by_tenant`, `by_workload_class`) between the paired runs; `manifest.json` records `policy_override`, `admission_mode` and `policy_under_test` (the label). `manifest.scenario.sha256` hashes the source scenario before CLI overrides and excludes `policy_override`/`admission_mode`, so paired runs of one trace share it; the arm-specific settings and their hash are in `manifest.execution` (`sha256`). `--require-parity` and `python -m app.benchmarks.parity` reject `unknown` comparison metadata (see `docs/inference-e6-dynamo-comparison.md`).
 
 ### Scenario CLI Parameters:
 - `--scenario`: Scenario name (without `.json`) or path to custom JSON scenario.

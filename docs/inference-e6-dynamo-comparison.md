@@ -18,7 +18,11 @@ below; otherwise re-run them in the same session.
 ## Identical inputs
 
 - Scenarios: `e3_routing_mixed` (headline) and `e3_routing_large_prefix` (synthetic
-  large-prefix variant). Same scenario file hash (`manifest.scenario.sha256` must match).
+  large-prefix variant). Same workload hash: `manifest.scenario.sha256` hashes the SOURCE scenario before CLI
+  overrides and without the execution-only fields (`policy_override`, `admission_mode`), so it
+  is equal across arms A/B/C. Arm-specific settings (policy/admission override, `router_label`,
+  `gateway_stream`, strategy, endpoint type, treatment label) live in `manifest.execution`
+  with its own `execution.sha256`, which is expected to differ between arms.
 - Concurrency levels and seeds: same `--sweep-concurrency` list and repeat count for all
   arms (at least 3 repeats per level; the replayer is deterministic given the file, so
   variation comes from the system, which is what repeats measure).
@@ -30,6 +34,23 @@ below; otherwise re-run them in the same session.
 - Dynamo KV block size must equal the vLLM block size; record both.
 
 Reject an arm-C run as evidence if any of the above differs from arms A/B.
+
+### Parity gate (required)
+
+`unknown` is not a value. Every arm must record concrete `model_revision`,
+`tokenizer_revision`, `chat_template_revision`, `engine_flags`, `topology`, `vllm_version`,
+`kv_block_size`, `max_tokens`, SLOs and scenario hash; Dynamo arms also need a concrete
+`dynamo_version` and numeric `dynamo_kv_block_size` equal to `kv_block_size`. Gateway arms
+record `--dynamo-version n/a --dynamo-kv-block-size n/a` explicitly. Set them with flags or env
+(`MODEL_REVISION`, `TOKENIZER_REVISION`, `CHAT_TEMPLATE_REVISION`, `ENGINE_FLAGS`,
+`VLLM_VERSION`, `DYNAMO_VERSION`, `KV_BLOCK_SIZE`, `DYNAMO_KV_BLOCK_SIZE`).
+
+1. Pass `--require-parity` to every run: it exits 2 before any request, writing no evidence,
+   if a field is missing or `unknown`.
+2. After the runs, check the set:
+   `uv run --project services/app python -m app.benchmarks.parity <A>/manifest.json
+   <B>/manifest.json <C>/manifest.json`. Exit 1 and a `PARITY FAIL` line for any incomplete arm or any cross-arm
+   difference. A failed check voids the comparison.
 
 ## Isolation and warm state
 
