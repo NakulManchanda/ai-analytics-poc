@@ -193,8 +193,30 @@ distinguishes worker A from worker B in these series, because Prometheus scrapes
 two static-config targets rather than via per-pod service discovery (see
 `observability/prometheus/values.yaml`). Kube-state and cAdvisor panels are split by `pod` instead.
 
-Dashboards for the future gateway/router/KV-hop metrics (`orch_*`, KEDA, Mooncake) are **not**
-included here; they land with issues #122/#133 once those services exist.
+#123 slice B adds gateway-backed dashboards (Prometheus scrapes the gateway `/metrics` as job
+`inference-gateway`, `inference-gateway.inference-lab:8080`): **Overview** (`overview.json`, with a
+goodput *proxy* = share of `200`s, not SLO-aware; true goodput comes from the replayer artifacts),
+**Gateway & Admission**, **Router & Placement**, **Queues** (incl. p99 batch-minus-interactive
+spread), **Overflow**, **Memory Proof** (DCGM framebuffer with KV usage, running/waiting,
+request rate, preemptions, prefix hit ratio on one time axis), and a text-only **KV Hop stub**
+(real hop metrics land with #133).
+
+#### Alerts (#123 slice B)
+Five rules live in `observability/prometheus/alerts.yaml` (standard rule-group format) and are
+loaded by `deploy.sh` via `--set-file`; Alertmanager stays disabled, so they show in the Prometheus
+UI only. Four are the required production alerts, plus one supplemental engine alert:
+- `InferenceKVPressureSustained`: KV usage > 85% for 5m; above this vLLM starts queueing/preempting.
+- `GatewayInteractiveTTFTSLOBreach` (the TTFT SLO alert): p99 of
+  `gateway_ttft_seconds{class="interactive"}` > 0.1s for 5m. The histogram is observed in the
+  gateway at the first streamed chunk with non-empty content (role-only deltas, keepalives, errors
+  and `[DONE]` are ignored), local or overflow. Non-streaming requests are not measured, so this
+  alert covers streaming traffic only. It includes gateway queue time.
+- `GatewayQueueShedSurge`: `orch_shed_total` + `timeout_queue` rejects > 0.5/s for 5m.
+- `InferenceWorkerIntegrity` (worker/target integrity): worker not healthy, snapshot age > 15s
+  (gateway stale threshold is 5s), preemptions > 0.1/s, any gateway/worker scrape target `up == 0`,
+  gateway `up` series absent, or fewer than 2 workers up, for 2m.
+- `InferenceEngineTTFTHigh` (supplemental): engine-side p95 `vllm:time_to_first_token_seconds` >
+  0.1s for 5m. Mixes classes and excludes gateway queue time, so it is not the SLO alert.
 
 Contract tests for the generator live in `tests/test_dashboards_contract.py` and run with the
 rest of the inference test suite:

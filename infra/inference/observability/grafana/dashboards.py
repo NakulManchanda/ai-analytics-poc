@@ -6,8 +6,10 @@ Mirrors the style of the class reference generator
 metric name used here is one this lab actually exposes today (see
 ``infra/inference/tests/fixtures/vllm-worker-b.prom`` and ``dcgm.prom``), plus the
 standard kube-state-metrics / node-exporter / cAdvisor names already used by the
-committed ``cluster.json``. No ``orch_*``, KEDA, HAMi allocator, or Mooncake panels
-are included: this lab does not run a gateway, router, autoscaler, or KV-hop layer.
+committed ``cluster.json``. Since #123 slice B the gateway's own ``/metrics`` (scraped as
+job ``inference-gateway``, see ``infra/inference/gateway/metrics.py``) backs the ``orch_*``
+dashboards. No KEDA, HAMi allocator, or Mooncake/KV-hop panels are included: the real hop
+metrics arrive with #133 (``kv_hop_stub`` is a text-only placeholder).
 
 Worker-distinguishing label: Prometheus scrapes the two workers as two separate
 ``static_configs`` targets (see ``infra/inference/observability/prometheus/values.yaml``):
@@ -63,6 +65,26 @@ METRIC_NAMES = {
         "vllm:num_requests_waiting",
         "vllm:e2e_request_latency_seconds",
         "vllm:request_success_total",
+    ),
+    "gateway": (
+        "gateway_requests_total",
+        "gateway_request_duration_seconds",
+        "gateway_ttft_seconds",
+        "worker_warm",
+        "guard_reject_total",
+        "orch_pick_total",
+        "placement_error_total",
+        "worker_health",
+        "worker_snapshot_age_seconds",
+        "stale_snapshot_fallback_total",
+        "orch_admit_total",
+        "orch_shed_total",
+        "orch_tenant_total",
+        "orch_replica_queue_depth",
+        "orch_queue_wait_seconds",
+        "queue_error_total",
+        "orch_overflow_total",
+        "overflow_error_total",
     ),
     "dcgm": (
         "DCGM_FI_DEV_GPU_UTIL",
@@ -815,12 +837,360 @@ def cluster() -> dict:
     )
 
 
+def _grid(uid: str, title: str, tags: list[str], note: str, specs: list[tuple]) -> dict:
+    """Build a dashboard: a note row then panels auto-flowed two per row.
+
+    Each spec is ``(title, expr, legend, opts)``; ``opts`` are `_panel` kwargs (``w``,
+    ``h``, ``unit``, ``kind``, ``extra``, ``thresholds``) and a ``w`` of 24 forces a row.
+    """
+    panels = [_text_panel(1, "How to read this", note, x=0, y=0)]
+    x, y = 0, 3
+    for pid, (ptitle, expr, legend, opts) in enumerate(specs, start=2):
+        w = opts.get("w", 12)
+        if x + w > 24:
+            x, y = 0, y + 8
+        panels.append(
+            _panel(pid, ptitle, expr, legend=legend, x=x, y=y, **{"h": 8, **opts})
+        )
+        x += w
+    return _dash(uid, title, panels, ["inference-lab", *tags])
+
+
+def _q(quantile: str, metric: str, by: str, sel: str = "") -> str:
+    keys = f"le, {by}" if by else "le"
+    return f"histogram_quantile({quantile}, sum by ({keys}) (rate({metric}_bucket{sel}[5m])))"
+
+
+def _rate_by(metric: str, by: str) -> str:
+    return f"sum by ({by}) (rate({metric}[5m]))"
+
+
+REQ_OK = 'sum(rate(gateway_requests_total{status="200"}[5m]))'
+REQ_ALL = "sum(rate(gateway_requests_total[5m]))"
+
+
+def overview() -> dict:
+    return _grid(
+        "inference-overview",
+        "Inference Lab / Overview",
+        ["gateway", "overview"],
+        (
+            "Gateway-side view of every request. **Goodput proxy** = share of requests "
+            "that ended `200`; it is NOT SLO-aware (a slow 200 still counts). True goodput "
+            "(TTFT/E2E within SLO) comes from the replayer artifacts (#123 slice A)."
+        ),
+        [
+            (
+                "Requests/s by status",
+                _rate_by("gateway_requests_total", "status"),
+                "{{status}}",
+                {},
+            ),
+            (
+                "Success ratio (status 200)",
+                f"{REQ_OK} / clamp_min({REQ_ALL}, 1e-9)",
+                "success",
+                {"kind": "stat", "unit": "percentunit", "w": 6},
+            ),
+            (
+                "Goodput proxy: 200 req/s (not SLO-aware)",
+                REQ_OK,
+                "200 req/s",
+                {"kind": "stat", "w": 6},
+            ),
+            (
+                "Error taxonomy: non-200 req/s by status and class",
+                _rate_by('gateway_requests_total{status!="200"}', "status, class"),
+                "{{status}} {{class}}",
+                {"kind": "stat"},
+            ),
+            (
+                "Gateway TTFT p50/p95/p99 by class (SLO 0.1s)",
+                _q("0.50", "gateway_ttft_seconds", "class"),
+                "p50 {{class}}",
+                {
+                    "unit": "s",
+                    "extra": [
+                        (_q("0.95", "gateway_ttft_seconds", "class"), "p95 {{class}}"),
+                        (_q("0.99", "gateway_ttft_seconds", "class"), "p99 {{class}}"),
+                    ],
+                },
+            ),
+            (
+                "Gateway stage duration p95",
+                _q("0.95", "gateway_request_duration_seconds", "stage"),
+                "{{stage}}",
+                {"unit": "s"},
+            ),
+            (
+                "Sheds/s by reason",
+                _rate_by("orch_shed_total", "reason"),
+                "{{reason}}",
+                {},
+            ),
+            (
+                "Overflow/s by outcome",
+                _rate_by("orch_overflow_total", "outcome"),
+                "{{outcome}}",
+                {},
+            ),
+        ],
+    )
+
+
+def gateway_admission() -> dict:
+    return _grid(
+        "inference-gateway-admission",
+        "Inference Lab / Gateway & Admission",
+        ["gateway", "admission"],
+        (
+            "Admission decisions and sheds (`orch_shed_total` carries the HTTP `code`), guard "
+            "rejections, per-tenant outcomes, and queue-timeout rejections. `timeout_queue` "
+            "means a request waited past its queue budget or remaining deadline."
+        ),
+        [
+            (
+                "Admit decisions/s",
+                _rate_by("orch_admit_total", "decision, reason, class"),
+                "{{decision}} {{reason}} {{class}}",
+                {},
+            ),
+            (
+                "Sheds/s by reason and code",
+                _rate_by("orch_shed_total", "reason, code"),
+                "{{reason}} {{code}}",
+                {},
+            ),
+            (
+                "Guard rejects/s",
+                _rate_by("guard_reject_total", "reason"),
+                "{{reason}}",
+                {},
+            ),
+            (
+                "Tenant outcomes/s",
+                _rate_by("orch_tenant_total", "tenant, outcome"),
+                "{{tenant}} {{outcome}}",
+                {},
+            ),
+            (
+                "timeout_queue rejects/s by class",
+                _rate_by('queue_error_total{reason="timeout_queue"}', "class"),
+                "{{class}}",
+                {"w": 24},
+            ),
+        ],
+    )
+
+
+def router_placement() -> dict:
+    return _grid(
+        "inference-router-placement",
+        "Inference Lab / Router & Placement",
+        ["gateway", "router"],
+        (
+            "Placement picks by policy/worker/reason, placement errors, worker health "
+            "(1 = worker currently in that state), snapshot age, and placements forced onto "
+            "stale snapshots."
+        ),
+        [
+            (
+                "Picks/s by policy, worker, reason",
+                _rate_by("orch_pick_total", "policy, worker, reason"),
+                "{{policy}} {{worker}} {{reason}}",
+                {},
+            ),
+            (
+                "Placement errors/s",
+                _rate_by("placement_error_total", "reason"),
+                "{{reason}}",
+                {},
+            ),
+            (
+                "Worker health (1 = in state)",
+                "worker_health",
+                "{{worker}} {{state}}",
+                {},
+            ),
+            ("Worker warm (0 = healthy but cold)", "worker_warm", "{{worker}}", {}),
+            (
+                "Snapshot age",
+                "worker_snapshot_age_seconds",
+                "{{worker}}",
+                {"unit": "s"},
+            ),
+            (
+                "Stale-snapshot fallbacks/s",
+                "sum(rate(stale_snapshot_fallback_total[5m]))",
+                "fallbacks",
+                {"w": 24},
+            ),
+        ],
+    )
+
+
+def queues() -> dict:
+    wait = "orch_queue_wait_seconds"
+
+    def p99(klass: str) -> str:
+        return _q("0.99", wait, "", f'{{class="{klass}"}}')
+
+    return _grid(
+        "inference-queues",
+        "Inference Lab / Queues",
+        ["gateway", "queues"],
+        (
+            "Per-worker gateway queues. The spread panel is p99 wait of `batch` minus "
+            "`interactive`: it grows when batch work queues while interactive stays fast "
+            "(class isolation working) and collapses toward 0 when both wait alike."
+        ),
+        [
+            (
+                "Queue depth by worker and class",
+                "orch_replica_queue_depth",
+                "{{worker}} {{class}}",
+                {},
+            ),
+            (
+                "Queue wait p50/p95/p99 by class",
+                _q("0.50", wait, "class"),
+                "p50 {{class}}",
+                {
+                    "unit": "s",
+                    "extra": [
+                        (_q("0.95", wait, "class"), "p95 {{class}}"),
+                        (_q("0.99", wait, "class"), "p99 {{class}}"),
+                    ],
+                },
+            ),
+            (
+                "p99 wait spread: batch minus interactive",
+                f'{p99("batch")} - {p99("interactive")}',
+                "batch - interactive",
+                {"unit": "s"},
+            ),
+            (
+                "Queue rejects/s by reason and class",
+                _rate_by("queue_error_total", "reason, class"),
+                "{{reason}} {{class}}",
+                {},
+            ),
+        ],
+    )
+
+
+def overflow() -> dict:
+    return _grid(
+        "inference-overflow",
+        "Inference Lab / Overflow",
+        ["gateway", "overflow"],
+        (
+            "Overflow to the external provider (off by default). `reason` is the original "
+            "local shed reason; `outcome` is what the overflow attempt did."
+        ),
+        [
+            (
+                "Overflow attempts/s",
+                _rate_by("orch_overflow_total", "reason, provider, model, outcome"),
+                "{{reason}} {{provider}} {{model}} {{outcome}}",
+                {},
+            ),
+            (
+                "Overflow errors/s",
+                _rate_by("overflow_error_total", "reason"),
+                "{{reason}}",
+                {},
+            ),
+        ],
+    )
+
+
+def memory_proof() -> dict:
+    return _grid(
+        "inference-memory-proof",
+        "Inference Lab / Memory Proof",
+        ["vllm", "dcgm", "memory"],
+        (
+            "Shared time axis (crosshair is linked): GPU framebuffer (DCGM, device-wide) "
+            "next to vLLM KV usage, running/waiting requests, request rate, preemptions, and "
+            "prefix-cache hit ratio. Use it to show KV pressure driving queueing and "
+            "preemption, not just slot limits."
+        ),
+        [
+            (
+                "DCGM framebuffer used/free",
+                "DCGM_FI_DEV_FB_USED * 1024 * 1024",
+                "used {{instance}}",
+                {
+                    "unit": "decbytes",
+                    "extra": [
+                        ("DCGM_FI_DEV_FB_FREE * 1024 * 1024", "free {{instance}}")
+                    ],
+                },
+            ),
+            (
+                "KV cache usage %",
+                "vllm:kv_cache_usage_perc",
+                "{{instance}}",
+                {"unit": "percentunit"},
+            ),
+            (
+                "Running vs waiting requests",
+                "vllm:num_requests_running",
+                "running {{instance}}",
+                {"extra": [("vllm:num_requests_waiting", "waiting {{instance}}")]},
+            ),
+            (
+                "Request rate (completed/s)",
+                _rate_by("vllm:request_success_total", "instance"),
+                "{{instance}}",
+                {},
+            ),
+            (
+                "Preemptions/s",
+                _rate_by("vllm:num_preemptions_total", "instance"),
+                "{{instance}}",
+                {},
+            ),
+            (
+                "Prefix cache hit ratio",
+                (
+                    "sum by (instance) (rate(vllm:prefix_cache_hits_total[5m])) / "
+                    "clamp_min(sum by (instance) (rate(vllm:prefix_cache_queries_total[5m])), 1e-9)"
+                ),
+                "{{instance}}",
+                {"unit": "percentunit"},
+            ),
+        ],
+    )
+
+
+def kv_hop_stub() -> dict:
+    body = (
+        "Placeholder. Real KV-transfer/hop metrics (Mooncake/LMCache-style) arrive with "
+        "**#133**; no hop metrics are exported today, so no panels are drawn here."
+    )
+    return _dash(
+        "inference-kv-hop",
+        "Inference Lab / KV Hop (stub)",
+        [_text_panel(1, "KV hop metrics: not yet available", body, x=0, y=0)],
+        ["inference-lab", "kv-hop", "stub"],
+    )
+
+
 DASHBOARDS = {
     "kv_prefix_cache": kv_prefix_cache,
     "prefill_decode": prefill_decode,
     "scheduler_concurrency": scheduler_concurrency,
     "gpu_slices": gpu_slices,
     "cluster": cluster,
+    "overview": overview,
+    "gateway_admission": gateway_admission,
+    "router_placement": router_placement,
+    "queues": queues,
+    "overflow": overflow,
+    "memory_proof": memory_proof,
+    "kv_hop_stub": kv_hop_stub,
 }
 
 

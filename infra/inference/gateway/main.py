@@ -142,11 +142,13 @@ async def _overflow(
     log_fields: dict,
     on_done,
     remaining_s: float | None = None,
+    on_first=lambda: None,
 ) -> Response | None:
     """ONE attempt at the configured destination (model rewritten). None -> caller returns
     the original local error. ``on_done(status)`` runs once when the client-visible response
     is complete (after the stream ends for streaming). ``remaining_s`` is the request's
-    remaining x-deadline-ms budget. Never logs the API key or exception text."""
+    remaining x-deadline-ms budget. ``on_first()`` marks the first generated token (TTFT).
+    Never logs the API key or exception text."""
     dest = {"overflow_provider": cfg.provider, "overflow_model": cfg.model}
     if remaining_s is not None and remaining_s <= 0:
         metrics.OVERFLOW_ERROR.labels("no_time_remaining").inc()
@@ -206,6 +208,8 @@ async def _overflow(
         try:
             async for line in upstream.aiter_lines():
                 if line:
+                    if _has_content(line):
+                        on_first()
                     yield f"{line}\n\n"
             status = 200
             record("ok")
@@ -229,6 +233,18 @@ async def _overflow(
         headers=out_headers,
         background=BackgroundTask(cleanup),
     )
+
+
+def _has_content(line: str) -> bool:
+    """True for an SSE ``data:`` record carrying a non-empty generated token (chat delta content
+    or completions text). Role-only deltas, keepalives, errors, [DONE], and non-JSON are not."""
+    if not line.startswith("data:"):
+        return False
+    try:
+        choice = json.loads(line[5:])["choices"][0]
+        return bool(choice.get("text") or (choice.get("delta") or {}).get("content"))
+    except (ValueError, KeyError, IndexError, TypeError, AttributeError):
+        return False
 
 
 def _ms(seconds: float) -> int:
@@ -283,6 +299,13 @@ async def serve_completion(
 
     lease = None
     tenant = quota.bucket_name(x_tenant_id)
+    ttft_seen = False
+
+    def observe_ttft() -> None:  # once per streaming request: first content chunk
+        nonlocal ttft_seen
+        if not ttft_seen:
+            ttft_seen = True
+            metrics.TTFT.labels(klass).observe(time.monotonic() - started)
 
     async def try_overflow(
         code: int, reason: str, source: str, never_overflow: bool = False
@@ -309,7 +332,14 @@ async def serve_completion(
             metrics.REQUESTS.labels(str(status), klass).inc()
 
         return await _overflow(
-            OVERFLOW_CFG, reason, body, correlation_headers, log_fields, once, remaining
+            OVERFLOW_CFG,
+            reason,
+            body,
+            correlation_headers,
+            log_fields,
+            once,
+            remaining,
+            observe_ttft,
         )
 
     def reject(
@@ -559,6 +589,8 @@ async def serve_completion(
                     return
                 async for line in upstream_resp.aiter_lines():
                     if line:
+                        if _has_content(line):
+                            observe_ttft()
                         yield f"{line}\n\n"
             except httpx.RequestError as exc:
                 status = 502

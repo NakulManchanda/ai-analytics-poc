@@ -447,3 +447,90 @@ def test_overflow_holds_tenant_lease_until_stream_completes(gw, monkeypatch) -> 
     assert first.status_code == 200 and "data: done" in first.text
     b = quota._buckets["acme"]
     assert b.active == 0 and b.tokens > 0  # lease freed at completion; tokens stay charged
+
+
+# --- gateway TTFT histogram (#123 review follow-up) --------------------------------------
+
+
+def ttft_count(klass: str) -> float:
+    return sample("gateway_ttft_seconds_count", **{"class": klass})
+
+
+ROLE = 'data: {"choices":[{"delta":{"role":"assistant"}}]}'
+TOKEN = 'data: {"choices":[{"delta":{"content":"Hi"}}]}'
+TEXT = 'data: {"choices":[{"text":"Hi"}]}'
+EMPTY = 'data: {"choices":[{"delta":{"content":""}}]}'
+NOISE = [": keepalive", "data: not-json", 'data: {"error":"boom"}', "data: [DONE]", ROLE, EMPTY]
+
+
+class _Spy(_Stream):
+    """Records which lines were emitted at the moment TTFT is observed."""
+
+    emitted: list
+
+    async def aiter_lines(self):
+        for line in self._lines:
+            self.emitted.append(line)
+            yield line
+
+
+def _stream_ttft(client, lines, local=True):
+    """Post a streaming request; return the emitted-lines snapshots at each TTFT observation."""
+    emitted, seen = [], []
+
+    class Spy(_Spy):
+        pass
+
+    Spy.emitted = emitted
+
+    class Obs:
+        def observe(self, _v):
+            seen.append(list(emitted))
+
+    def fake_stream(self, method, url, **kw):
+        if local and url != OVERFLOW_URL:
+            return Spy(200, lines)
+        return _Stream(503) if url != OVERFLOW_URL else Spy(200, lines)
+
+    with (
+        patch.object(httpx.AsyncClient, "stream", fake_stream),
+        patch.object(metrics.TTFT, "labels", lambda *a: Obs()),
+    ):
+        r = client.post("/serve", json={"messages": MSG, "stream": True})
+    assert r.status_code == 200
+    return seen
+
+
+@pytest.mark.parametrize("local", [True, False])
+def test_ttft_waits_for_first_content_chunk(gw, local) -> None:
+    client, _ = gw
+    lines = [ROLE, ": keepalive", "data: not-json", EMPTY, TOKEN, "data: more", "data: [DONE]"]
+    seen = _stream_ttft(client, lines, local)
+    assert len(seen) == 1 and seen[0][-1] == TOKEN  # not at the role/keepalive record
+    assert seen[0] == lines[:5]  # observed at the content chunk, before later chunks
+
+
+def test_ttft_accepts_completions_text_chunks(gw) -> None:
+    client, _ = gw
+    seen = _stream_ttft(client, [ROLE, TEXT], True)
+    assert len(seen) == 1 and seen[0][-1] == TEXT
+
+
+@pytest.mark.parametrize("local", [True, False])
+def test_ttft_not_observed_without_content(gw, local) -> None:
+    client, _ = gw
+    assert _stream_ttft(client, NOISE, local) == []
+
+
+def test_nonstreaming_requests_absent_from_ttft_series(gw) -> None:
+    client, _ = gw
+    before = {k: ttft_count(k) for k in ("interactive", "batch")}
+    calls = Calls(httpx.Response(200, json={"choices": []}), OFLOW_OK)
+    with patch.object(httpx.AsyncClient, "post", _bind(calls)):
+        r = client.post("/serve", json={"messages": MSG}, headers={"x-request-priority": "batch"})
+    assert r.status_code == 200
+    calls = Calls(httpx.Response(503, text="busy"), OFLOW_OK)  # non-streaming overflow 200
+    with patch.object(httpx.AsyncClient, "post", _bind(calls)):
+        r = serve(client)
+    assert r.headers["x-overflow"]
+    assert {k: ttft_count(k) for k in before} == before

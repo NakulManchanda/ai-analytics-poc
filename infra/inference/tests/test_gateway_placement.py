@@ -352,3 +352,18 @@ def test_gateway_imports_flat_like_the_configmap_deployment() -> None:
     gateway_dir = Path(gateway_main.__file__).parent
     code = "import main; assert main.app.title"
     subprocess.run([sys.executable, "-c", code], cwd=gateway_dir, check=True)
+
+
+def test_worker_warm_gauge_healthy_but_not_warm() -> None:
+    from infra.inference.gateway import metrics
+
+    reg = Registry([Worker("warm_w", "http://a:1"), Worker("cold_w", "http://b:1")])
+    now = time.monotonic()
+    for wid, warm in (("warm_w", True), ("cold_w", False)):
+        s = reg.snapshots[wid]
+        s.healthy, s.warm, s.observed_at = True, warm, now
+    metrics.observe_snapshots(reg.snapshots.values(), 5.0)
+    get = metrics.REGISTRY.get_sample_value
+    assert get("worker_warm", {"worker": "warm_w"}) == 1
+    assert get("worker_warm", {"worker": "cold_w"}) == 0
+    assert get("worker_health", {"worker": "cold_w", "state": "healthy"}) == 1
