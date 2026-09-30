@@ -5,49 +5,38 @@ NYC Taxi Analytics Agent on a GPU-Aware Inference Cluster**
 
 **Primary thesis: prove that admission, placement, queueing, prefix/KV locality, and hop decisions improve a real multi-step agent workload under constrained GPU memory.**
 
-## Current status (2026-09-29)
+## Current status (2026-09-30)
 
-The application workload is intentionally re-scoped from an open-ended ReAct agent to a
-**replayable, honest traffic generator** for #122/#123's control-plane and KV experiments — see
-`#115`'s re-scope comment and `.vscode/myfiles/115-react-workload/decisions.md` D11-D19. Merged:
-governed multi-tool MCP analytics (#137), honest per-call telemetry with no silent tool-call
-fallback and worker tool-calling flags (#138), and generated per-worker Grafana dashboards for
-KV/prefix-cache/prefill/decode (#136). In review: a real growing-conversation prefix contract,
-tool-result history, and a pre-canned query catalogue (#140, "slice C'"). Not started: the
-scenario generator/replayer (slice D'), and the fresh-Lambda bring-up. Section 5 below (prefix
-design) and the ReAct references elsewhere in this document describe the ORIGINAL agent-loop
-concept; the actually-implemented mechanism is deterministic tool dispatch plus a fixed
-question->tool catalogue, not a model-driven ReAct loop — see the note in Section 5.
+- **#140 (Slice C')**: Merged. Real conversation-history prefix contract (`render_conversation_prompt`), tool-result history (`role="tool"` messages), and pre-canned query catalogue.
+- **#142 (Slice D')**: Implemented and benchmarked live on remote Lambda A100-SXM4 GPU. Automated benchmark scenario generator (`config/scenarios/`), asynchronous concurrent replayer (`ScenarioReplayer`), and zero-dependency Prometheus metrics scraper (`compute_metrics_delta`).
+- **Cluster Telemetry Baseline Established**: Live runs on dual HAMi 20GB vLLM workers confirmed Worker A active processing (KV cache hit rate stepped from 0% to **29.6%**) while Worker B remained at 0% (confirming the #121 single-worker passthrough baseline as a clean control group for upcoming routing experiments). Prefill vs decode analysis proved the workload is $> 98\%$ decode-bound with sub-60 ms TTFT.
+- **Next Milestone**: **#122** (GPU-aware guard/admission/placement/queue control plane) — implements `prefix_then_load` vs `least_loaded` routing and admission deadline shedding. See `docs/inference-testing-guide.md` for test procedures.
 
 ## Next-session priorities (in order)
 
-1. **Land #140** (slice C': real prefix contract, tool-result history, catalogue, 6-tool
-   dispatch). CI + one independent adversarial review are the merge gate (not waived for this
-   slice — see `next_session.md` Opus checkpoints 2-3). Remove its worktree after merge.
-2. **Fresh Lambda bring-up.** Create `infra/inference/.env` for the new host; `make
-   inference-up`; `make inference-tunnel`; smoke both workers. Gate before any measurement: both
-   workers healthy, the tool-proposal call returns real `tool_calls` (not a 400), thinking is
-   off, and `/tokenize` responds (needed for #140's exact token counts).
-3. **Slice D'** (scenario generator + replayer + before/after metrics snapshots) — needs #140
-   merged and, ideally, live workers to validate the generated traffic against.
-4. **#135 presentation walkthrough skeleton** — unblocked now that dashboards (#136) are merged;
-   fill rows in as #122/#123 land.
-5. **#122** (GPU-aware guard/admission/placement/queue control plane) — the next real milestone
-   once #115 (A/B/C'/D') is stable, per the original issue sequence #115 -> #122 -> #133 -> #123.
-6. **#139** (configurable agent strategy / CrewAI) — planning-only until #115's groundwork is
-   done; implementation was explicitly queued behind #140 to avoid touching `llm.py`/`loop.py`
-   twice at once.
+1. **Merge #142 (Slice D')** — All 4 benchmark scenarios executed live, PR description updated with telemetry, all Copilot review comments resolved, CI passing.
+2. **#122** (GPU-aware guard/admission/placement/queue control plane) — the central milestone implementing the gateway pipeline: `app -> guard.inspect() -> should_shed() -> place.pick() -> per-worker gateway queue -> hop check -> vLLM`.
+3. **#133** (KV hop store integration / Mooncake/LMCache) — evaluating recompute vs network hop.
+4. **#123** (Controlled experiments E0–E5 & Evidence Matrix) — final experimental proof with Jupyter notebook artifacts.
+5. **#139** (Configurable agent strategy / CrewAI) — comparative evaluation of agent orchestration strategies.
 
 # 1. Project thesis and success criteria
 
-- Application: NYC Taxi Analytics agent. A user question triggers a bounded tool-call loop:
-  model or catalogue selects one governed tool -> DuckDB/MCP -> observation -> model generates the
-  final answer from real conversation history (see Section 5 note; the original ReAct-style
-  multi-step loop was dropped from the current milestone, see Current status above).
-- Serving shape: shared system/tool prefix, conversation-specific growing prefix, unique newest suffix, repeated inference steps inside one user turn.
-- Control-plane ownership: guard -> admit/shed -> place -> gateway queue -> hop check -> vLLM. vLLM still owns engine waiting/running/preemption/chunked prefill/continuous batching.
-- Primary experiment: least-loaded routing vs prefix/KV-aware routing under the same traffic trace.
-- Supporting experiments: prefix reuse on/off or cold/warm; no-admission vs protected admission; recompute vs KV hop; cold worker vs declared-warm worker.
+> **The Unified Thesis**: Keep the taxi agent, run it on a real two-worker vLLM setup, make prefix/KV behavior visible, own guard/admit/place/queue decisions, compare least-loaded vs KV-aware routing and recompute vs hop, then prove every choice with goodput, TTFT, memory, queue, and Grafana evidence.
+
+### Core Strategic Principles:
+1. **Stay with Track B — Tool-Using Agent**: The NYC Taxi Analytics app is already a natural multi-step workload (model -> tool -> observation -> model). The application itself does not need excessive product polish; the focus is the serving behavior and reasoning about infrastructure choices.
+2. **Reasoning About Serving Decisions at the Center**: Rather than merely demonstrating that requests complete, the project explains *why* one request is handled differently from another—when contexts grow, when shared prefixes become critical, and why a specific worker was chosen.
+3. **Deliberate Prefix Architecture**: Distinct 3-tier prefix hierarchy: global shared prefix (system prompt + tool schemas), conversation-shared prefix (prior turns/observations), and unique newest suffix.
+4. **Gateway Control Plane Pipeline**: Mirror the canonical pipeline:
+   `app -> guard.inspect() -> should_shed() -> place.pick() -> per-worker gateway queue -> hop check -> vLLM waiting/running -> response -> tool -> next agent step`.
+5. **KV-Aware Routing as the Primary Experiment**: Compare `least_loaded` against `prefix_then_load` under identical traffic traces.
+6. **Mooncake / LMCache for the KV Hop Problem**: Treat Mooncake/LMCache as the hop layer when the chosen worker lacks KV cache; measure the recompute vs. hop crossover across prefix lengths.
+7. **NVIDIA Dynamo as Comparison**: Implement and measure the simple custom policy first, then compare against Dynamo KV-aware routing on the same workload.
+8. **Two Workers on 50/50 HAMi vGPU**: Start with two virtual GPU slices on a single physical A100 to make same-device contention and memory behavior visible before scaling.
+9. **Capacity Math Before Tuning**: Calculate exact KV bytes/token, decode slots, KV block budgets, hop bandwidth, and warmup time.
+10. **Goodput Over Throughput**: Interactive goodput ($TTFT \le 100\text{ ms}$, $E2E \le 3.5\text{ s}$) represents useful work; raw throughput alone can hide interactive collapse.
+11. **Three-Plane Triage Model**: Decompose failures across the Data Plane (tool/retrieval), Control Plane (admission/routing), and GPU Plane (vLLM scheduler/KV/prefill/decode). See `docs/inference-testing-guide.md`.
 - Proof standard: every design choice must have a file, scrape, notebook cell, or Grafana panel that shows what happened.
 
 # 2. Target architecture and execution boundary
