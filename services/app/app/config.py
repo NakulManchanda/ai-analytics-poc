@@ -55,9 +55,7 @@ class Settings:
 
     def __post_init__(self) -> None:
         if self.agent_strategy not in ("manual", "crewai"):
-            raise LLMConfigurationError(
-                "AGENT_STRATEGY must be manual or crewai"
-            )
+            raise LLMConfigurationError("AGENT_STRATEGY must be manual or crewai")
 
     @classmethod
     def from_environment(cls) -> "Settings":

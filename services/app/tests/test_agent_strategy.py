@@ -2,7 +2,9 @@ from typing import Any
 
 import pytest
 from app.config import LLMConfigurationError, Settings
-from app.llm import LLMResult, LocalFakeLLMClient
+from app.events import InMemoryEventPublisher
+from app.llm import LLMProviderError, LLMResult, LocalFakeLLMClient, ServeLLMClient
+from app.prefix import PrefixPartition, create_prefix_partition
 
 
 def test_agent_strategy_defaults_to_manual_and_reads_crewai(monkeypatch) -> None:
@@ -98,6 +100,124 @@ def test_two_agent_answer_is_bounded_and_returns_only_writer_output() -> None:
     assert "You write one short, direct answer" not in result.text
 
 
+def test_two_agent_answer_correlated_growing_prefixes() -> None:
+    from app.orchestration.crewai_strategy import run_two_agent_answer
+
+    captured_invocations: list[dict[str, Any]] = []
+
+    def mock_invoke(
+        role: str, partition: PrefixPartition, agent_step: int
+    ) -> LLMResult:
+        captured_invocations.append(
+            {
+                "role": role,
+                "partition": partition,
+                "agent_step": agent_step,
+            }
+        )
+        return LLMResult(
+            text=f"Summary for {role}",
+            model_id="test-model",
+            input_tokens=20,
+            output_tokens=10,
+            latency_ms=15,
+            finish_reason="stop",
+        )
+
+    res = run_two_agent_answer(
+        question="Busiest hours?",
+        governed_result={"rows": [[17, 500]]},
+        invoke_model=mock_invoke,
+        conversation_id="conv-test-123",
+        start_step=2,
+    )
+
+    assert len(captured_invocations) == 2
+    researcher_call = captured_invocations[0]
+    writer_call = captured_invocations[1]
+
+    assert researcher_call["role"] == "Researcher"
+    assert researcher_call["agent_step"] == 2
+    assert (
+        "Observation (query_result)" in researcher_call["partition"].conversation_shared
+    )
+
+    assert writer_call["role"] == "Writer"
+    assert writer_call["agent_step"] == 3
+    # Check growing prefix: writer's conversation_shared contains researcher's observation plus research summary
+    assert (
+        researcher_call["partition"].conversation_shared
+        in writer_call["partition"].conversation_shared
+    )
+    assert (
+        "Research summary: Summary for Researcher"
+        in writer_call["partition"].conversation_shared
+    )
+
+    # Shared global prompt is identical
+    assert (
+        researcher_call["partition"].global_shared
+        == writer_call["partition"].global_shared
+    )
+    # Prefix IDs are valid hashes
+    assert len(researcher_call["partition"].prefix_id) == 16
+    assert len(writer_call["partition"].prefix_id) == 16
+    assert researcher_call["partition"].prefix_id != writer_call["partition"].prefix_id
+    assert res.text == "Summary for Writer"
+
+
+def test_serve_llm_client_execute_partitioned_call_headers(monkeypatch) -> None:
+    captured_requests: list[dict[str, Any]] = []
+
+    class DummyResponse:
+        status_code = 200
+
+        def json(self):
+            return {
+                "id": "cmpl-1",
+                "model": "vllm-model",
+                "choices": [
+                    {
+                        "message": {"content": "vLLM test answer"},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {"prompt_tokens": 15, "completion_tokens": 5},
+            }
+
+    class DummyHttpClient:
+        def post(self, url, json=None, headers=None):
+            captured_requests.append({"url": url, "json": json, "headers": headers})
+            return DummyResponse()
+
+    client = ServeLLMClient(
+        gateway_url="http://localhost:8000/v1/chat/completions",
+        model_id="vllm-model",
+        http_client=DummyHttpClient(),  # type: ignore[arg-type]
+    )
+
+    part = create_prefix_partition(
+        global_shared="sys prompt",
+        conversation_shared="conv shared",
+        unique_suffix="user query",
+    )
+
+    result = client.execute_partitioned_call(
+        partition=part,
+        conversation_id="conv-abc",
+        agent_step=2,
+    )
+
+    assert result.text == "vLLM test answer"
+    assert len(captured_requests) == 1
+    req = captured_requests[0]
+    headers = req["headers"]
+    assert headers["x-conversation-id"] == "conv-abc"
+    assert headers["x-agent-step"] == "2"
+    assert headers["x-prefix-id"] == part.prefix_id
+    assert int(headers["x-estimated-prompt-tokens"]) > 0
+
+
 class FakeMCPClient:
     def get_dataset_schema(self) -> dict[str, Any]:
         return {
@@ -119,12 +239,24 @@ class FakeMCPClient:
 
 class CountingFakeLLMClient(LocalFakeLLMClient):
     def __init__(self) -> None:
-        self.ask_prompts: list[str] = []
+        self.partition_calls: list[dict[str, Any]] = []
 
-    def ask(self, prompt: str) -> LLMResult:
-        self.ask_prompts.append(prompt)
+    def execute_partitioned_call(
+        self,
+        partition: PrefixPartition,
+        *,
+        conversation_id: str | None = None,
+        agent_step: int = 1,
+    ) -> LLMResult:
+        self.partition_calls.append(
+            {
+                "partition": partition,
+                "conversation_id": conversation_id,
+                "agent_step": agent_step,
+            }
+        )
         return LLMResult(
-            text=f"Crew answer {len(self.ask_prompts)}",
+            text=f"Crew answer {len(self.partition_calls)}",
             model_id=self.model_id,
             input_tokens=15,
             output_tokens=8,
@@ -140,11 +272,13 @@ def test_orchestration_loop_crewai_strategy_end_to_end() -> None:
     repo = InMemoryStateRepository()
     llm = CountingFakeLLMClient()
     mcp = FakeMCPClient()
+    publisher = InMemoryEventPublisher()
 
     loop = OrchestrationLoop(
         llm_client=llm,
         mcp_client=mcp,  # type: ignore[arg-type]
         state_repository=repo,
+        event_publisher=publisher,
         agent_strategy="crewai",
     )
 
@@ -154,23 +288,30 @@ def test_orchestration_loop_crewai_strategy_end_to_end() -> None:
     assert result.answer == "Crew answer 2"
     assert "You write one short, direct answer" not in result.answer
 
-    # Assert exact fake LLM call count: 1 proposal + 2 crew calls (researcher + writer)
-    assert len(llm.ask_prompts) == 2
+    # 1 proposal + 2 partitioned crew calls (researcher + writer)
+    assert len(llm.partition_calls) == 2
+    assert llm.partition_calls[0]["agent_step"] == 2
+    assert llm.partition_calls[1]["agent_step"] == 3
     assert len(result.llm_calls) == 3
 
-    # Verify steps and telemetry shape
+    # Verify per-call steps
     step_types = [s.step_type for s in result.steps]
     assert step_types == [
         "llm_proposal",
         "tool_call",
         "context_reduced",
-        "crewai_crew",
+        "crewai_researcher",
+        "crewai_writer",
     ]
 
-    last_step = result.steps[-1]
-    assert last_step.step_type == "crewai_crew"
-    assert last_step.output_summary == "answer: Crew answer 2"
-    assert last_step.llm_call_id == result.llm_calls[-1].llm_call_id
+    researcher_step = result.steps[-2]
+    assert researcher_step.step_type == "crewai_researcher"
+    assert researcher_step.llm_call_id == result.llm_calls[-2].llm_call_id
+
+    writer_step = result.steps[-1]
+    assert writer_step.step_type == "crewai_writer"
+    assert writer_step.output_summary == "output: Crew answer 2"
+    assert writer_step.llm_call_id == result.llm_calls[-1].llm_call_id
 
     # Verify all LLMCall records have required telemetry fields
     for call in result.llm_calls:
@@ -181,6 +322,11 @@ def test_orchestration_loop_crewai_strategy_end_to_end() -> None:
         assert "latency_ms" in meta
         assert "finish_reason" in meta
         assert "cost_usd" in meta
+
+    # Verify per-call events emitted
+    event_types = [e.event_type for e in publisher.events]
+    assert event_types.count("llm.started") == 3  # proposal, researcher, writer
+    assert event_types.count("llm.completed") == 3
 
     # Verify durable state
     conv = repo.get_conversation(result.conversation_id)
@@ -198,7 +344,7 @@ def test_orchestration_loop_crewai_strategy_end_to_end() -> None:
     assert len(run.metadata["llm_calls"]) == 3
 
 
-def test_orchestration_loop_crewai_strategy_budget_enforcement() -> None:
+def test_orchestration_loop_crewai_strategy_pre_call_budget_enforcement() -> None:
     from app.orchestration import ExecutionBudgets, OrchestrationLoop
     from app.state import InMemoryStateRepository
 
@@ -206,7 +352,7 @@ def test_orchestration_loop_crewai_strategy_budget_enforcement() -> None:
     llm = CountingFakeLLMClient()
     mcp = FakeMCPClient()
 
-    # Proposal is call 1, researcher is call 2, writer would be call 3 -> budget exceeded
+    # Proposal is call 1, researcher is call 2. Writer pre-call check prevents call 3.
     loop = OrchestrationLoop(
         llm_client=llm,
         mcp_client=mcp,  # type: ignore[arg-type]
@@ -218,9 +364,115 @@ def test_orchestration_loop_crewai_strategy_budget_enforcement() -> None:
     result = loop.run("What are the top pickup zones by ride count?")
     assert result.status == "budget_exceeded"
 
+    # Pre-call budget check: writer was prevented BEFORE calling provider
+    assert len(llm.partition_calls) == 1  # Only researcher was called!
+
     run = repo.get_run(result.run_id)
     assert run is not None
     assert run.status == "budget_exceeded"
+    # Completed researcher call telemetry is retained
+    assert len(run.metadata["llm_calls"]) == 2
+
+
+def test_orchestration_loop_crewai_strategy_pre_call_cancellation() -> None:
+    from app.orchestration import OrchestrationLoop
+    from app.state import InMemoryStateRepository
+
+    repo = InMemoryStateRepository()
+    llm = CountingFakeLLMClient()
+    mcp = FakeMCPClient()
+
+    loop = OrchestrationLoop(
+        llm_client=llm,
+        mcp_client=mcp,  # type: ignore[arg-type]
+        state_repository=repo,
+        agent_strategy="crewai",
+    )
+
+    # Cancel the run when researcher executes
+    original_exec = llm.execute_partitioned_call
+
+    def cancel_during_researcher(partition, conversation_id=None, agent_step=1):
+        res = original_exec(
+            partition, conversation_id=conversation_id, agent_step=agent_step
+        )
+        # Mark run as cancelled
+        runs = list(repo._runs.values())
+        if runs:
+            loop.request_cancellation(runs[0].run_id)
+        return res
+
+    llm.execute_partitioned_call = cancel_during_researcher  # type: ignore[method-assign]
+
+    result = loop.run("What are the top pickup zones by ride count?")
+    assert result.status == "cancelled"
+
+    # Writer was prevented before calling provider
+    assert len(llm.partition_calls) == 1
+
+    run = repo.get_run(result.run_id)
+    assert run is not None
+    assert run.status == "cancelled"
+    # Retains researcher call telemetry
+    assert len(run.metadata["llm_calls"]) == 2
+
+
+def test_orchestration_loop_crewai_strategy_provider_failure_durable_handling() -> None:
+    from app.orchestration import OrchestrationError, OrchestrationLoop
+    from app.state import InMemoryStateRepository
+
+    repo = InMemoryStateRepository()
+    llm = CountingFakeLLMClient()
+    mcp = FakeMCPClient()
+    publisher = InMemoryEventPublisher()
+
+    # Researcher succeeds, but Writer fails with LLMProviderError
+    call_count = 0
+
+    def fail_on_writer(partition, conversation_id=None, agent_step=1):
+        nonlocal call_count
+        call_count += 1
+        if call_count >= 2 or agent_step == 3:
+            raise LLMProviderError(retryable=True, code="vllm_gateway_unavailable")
+        return LLMResult(
+            text="Research summary text",
+            model_id=llm.model_id,
+            input_tokens=10,
+            output_tokens=5,
+            latency_ms=10,
+        )
+
+    llm.execute_partitioned_call = fail_on_writer  # type: ignore[method-assign]
+
+    loop = OrchestrationLoop(
+        llm_client=llm,
+        mcp_client=mcp,  # type: ignore[arg-type]
+        state_repository=repo,
+        event_publisher=publisher,
+        agent_strategy="crewai",
+    )
+
+    with pytest.raises(OrchestrationError) as exc_info:
+        loop.run("What are the top pickup zones by ride count?")
+
+    assert exc_info.value.code == "vllm_gateway_unavailable"
+
+    # Verify durable state is updated to failed (NOT left stuck as running!)
+    runs = list(repo._runs.values())
+    assert len(runs) == 1
+    run = runs[0]
+    assert run.status == "failed"
+    assert run.failure_code == "vllm_gateway_unavailable"
+
+    # Completed researcher call telemetry was retained
+    assert len(run.metadata["llm_calls"]) == 2  # proposal + researcher
+    assert any(
+        s.step_type == "crewai_researcher" for s in repo.list_run_steps(run.run_id)
+    )
+
+    # Verify terminal run.failed event was emitted
+    event_types = [e.event_type for e in publisher.events]
+    assert "run.failed" in event_types
 
 
 def test_orchestration_loop_crewai_strategy_invalid_call_count_failure(
@@ -249,4 +501,5 @@ def test_orchestration_loop_crewai_strategy_invalid_call_count_failure(
         loop.run("What are the top pickup zones by ride count?")
 
     assert exc_info.value.code == "strategy_execution_error"
-
+    runs = list(repo._runs.values())
+    assert runs[0].status == "failed"

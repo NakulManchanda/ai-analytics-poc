@@ -202,6 +202,14 @@ class LLMClient(Protocol):
         self, prompt: str, query_result: Mapping[str, object]
     ) -> LLMResult: ...
 
+    def execute_partitioned_call(
+        self,
+        partition: PrefixPartition,
+        *,
+        conversation_id: str | None = None,
+        agent_step: int = 1,
+    ) -> LLMResult: ...
+
 
 class LocalFakeLLMClient:
     """Deterministic local-only client used by the Compose M5 smoke path."""
@@ -305,6 +313,22 @@ class LocalFakeLLMClient:
                 f"{first_row[0]} has an average trip distance of {first_row[1]} miles."
             )
         return self._result(prompt, text)
+
+    def execute_partitioned_call(
+        self,
+        partition: PrefixPartition,
+        *,
+        conversation_id: str | None = None,
+        agent_step: int = 1,
+    ) -> LLMResult:
+        user_content = (
+            f"{partition.conversation_shared}\n\n{partition.unique_suffix}".strip()
+        )
+        if agent_step == 2 or "research" in partition.unique_suffix.lower():
+            text = "Research summary: The governed query returned 2 rows."
+        else:
+            text = "Crew answer 2"
+        return self._result(user_content, text)
 
     def _result(self, prompt: str, text: str) -> LLMResult:
         return LLMResult(
@@ -535,6 +559,26 @@ class BedrockLLMClient:
         )
         return self._as_llm_result(response)
 
+    def execute_partitioned_call(
+        self,
+        partition: PrefixPartition,
+        *,
+        conversation_id: str | None = None,
+        agent_step: int = 1,
+    ) -> LLMResult:
+        user_content = (
+            f"{partition.conversation_shared}\n\n{partition.unique_suffix}".strip()
+        )
+        system_blocks = (
+            [{"text": partition.global_shared}] if partition.global_shared else None
+        )
+        response = self._converse(
+            messages=[{"role": "user", "content": [{"text": user_content}]}],
+            system=system_blocks,
+            max_tokens=1024,
+        )
+        return self._as_llm_result(response)
+
     def stream_answer_with_query_result(
         self,
         prompt: str,
@@ -603,14 +647,18 @@ class BedrockLLMClient:
         *,
         messages: list[dict[str, object]],
         tool_config: dict[str, object] | None = None,
+        system: list[dict[str, object]] | None = None,
+        max_tokens: int = 128,
     ) -> dict[str, Any]:
         request: dict[str, object] = {
             "modelId": self._model_id,
             "messages": messages,
-            "inferenceConfig": {"maxTokens": 128, "temperature": 0.0},
+            "inferenceConfig": {"maxTokens": max_tokens, "temperature": 0.0},
         }
         if tool_config is not None:
             request["toolConfig"] = tool_config
+        if system is not None:
+            request["system"] = system
         try:
             self._reserve_budget()
             return self._get_runtime_client().converse(**request)
@@ -732,6 +780,31 @@ class ServeLLMClient:
             "messages": [
                 {"role": "system", "content": partition.global_shared},
                 {"role": "user", "content": partition.unique_suffix},
+            ],
+            "max_tokens": 1024,
+            "stream": False,
+            "chat_template_kwargs": {"enable_thinking": self._answer_thinking_enabled},
+        }
+        return self._post_completion(payload, headers)
+
+    def execute_partitioned_call(
+        self,
+        partition: PrefixPartition,
+        *,
+        conversation_id: str | None = None,
+        agent_step: int = 1,
+    ) -> LLMResult:
+        headers = self._build_headers(
+            partition=partition, agent_step=agent_step, conversation_id=conversation_id
+        )
+        user_content = (
+            f"{partition.conversation_shared}\n\n{partition.unique_suffix}".strip()
+        )
+        payload: dict[str, Any] = {
+            "model": self._model_id,
+            "messages": [
+                {"role": "system", "content": partition.global_shared},
+                {"role": "user", "content": user_content},
             ],
             "max_tokens": 1024,
             "stream": False,

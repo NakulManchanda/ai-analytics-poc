@@ -118,6 +118,10 @@ resource "aws_ecs_task_definition" "ai_app" {
         {
           name  = "REDIS_URL"
           value = "redis://${aws_elasticache_cluster.redis[0].cache_nodes[0].address}:6379/0"
+        },
+        {
+          name  = "AGENT_STRATEGY"
+          value = "manual"
         }
       ]
       logConfiguration = {
