@@ -28,6 +28,7 @@ from app.benchmarks.metrics_scraper import (
     PrometheusMetricSnapshot,
     compute_metrics_delta,
 )
+from app.benchmarks.parity import check_run as parity_check_run
 from app.benchmarks.replayer import (
     ControlNotApplied,
     ReplaySummary,
@@ -40,6 +41,16 @@ logging.basicConfig(
     level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s"
 )
 logger = logging.getLogger(__name__)
+
+
+GATEWAY_ROUTER_LABEL = (
+    "gateway"  # our FastAPI-side gateway; any other label is a comparison arm
+)
+
+
+def is_our_gateway(router_label: str | None) -> bool:
+    """None (legacy runs) means our gateway; any other label (e.g. dynamo-kv) is not."""
+    return router_label in (None, GATEWAY_ROUTER_LABEL)
 
 
 DEFAULT_TOPOLOGY = "two vLLM replicas/HAMi slices on one physical A100"
@@ -95,6 +106,44 @@ async def system_prefix_record(
     except (httpx.HTTPError, ValueError) as exc:
         rec["exact_unavailable_reason"] = f"tokenize_call_failed: {type(exc).__name__}"
     return rec
+
+
+# Execution-only ScenarioConfig fields: arm settings, not workload.
+EXECUTION_ONLY_FIELDS = ("policy_override", "admission_mode")
+
+
+def _sha(obj: Any) -> str:
+    return hashlib.sha256(json.dumps(obj, sort_keys=True).encode()).hexdigest()
+
+
+def workload_sha256(source_config: ScenarioConfig) -> str:
+    """Arm-neutral hash of the SOURCE scenario (before CLI overrides, without the
+    execution-only fields), so arms of one comparison share it."""
+    data = source_config.model_dump()
+    for k in EXECUTION_ONLY_FIELDS:
+        data.pop(k, None)
+    return _sha(data)
+
+
+def run_metadata(args: argparse.Namespace) -> dict[str, Any]:
+    """Comparison-relevant metadata: CLI flag, else env var, else 'unknown'."""
+
+    def pick(attr: str, env: str, default: str = "unknown") -> str:
+        return getattr(args, attr, None) or os.environ.get(env) or default
+
+    return {
+        "topology": pick("topology", "INFERENCE_TOPOLOGY", DEFAULT_TOPOLOGY),
+        "model_revision": pick("model_revision", "MODEL_REVISION"),
+        "tokenizer_revision": pick("tokenizer_revision", "TOKENIZER_REVISION"),
+        "chat_template_revision": pick(
+            "chat_template_revision", "CHAT_TEMPLATE_REVISION"
+        ),
+        "engine_flags": pick("engine_flags", "ENGINE_FLAGS"),
+        "vllm_version": pick("vllm_version", "VLLM_VERSION"),
+        "dynamo_version": pick("dynamo_version", "DYNAMO_VERSION"),
+        "kv_block_size": pick("kv_block_size", "KV_BLOCK_SIZE"),
+        "dynamo_kv_block_size": pick("dynamo_kv_block_size", "DYNAMO_KV_BLOCK_SIZE"),
+    }
 
 
 def _tok(value: int | None) -> str:
@@ -231,6 +280,7 @@ def generate_markdown_report(
 
 async def async_main(args: argparse.Namespace) -> int:
     config = load_scenario(args.scenario)
+    source_sha256 = workload_sha256(config)  # before CLI overrides are applied
 
     if args.concurrency is not None:
         config.concurrency = args.concurrency
@@ -256,6 +306,16 @@ async def async_main(args: argparse.Namespace) -> int:
     ):
         config.target_endpoint_type = "gateway_chat"
 
+    router_label = getattr(args, "router_label", None)
+    if (config.policy_override or config.admission_mode) and not is_our_gateway(
+        router_label
+    ):
+        logger.error(
+            "policy_override/admission_mode are gateway-only test controls but "
+            "--router-label=%r is not our gateway: they can never be applied or verified",
+            router_label,
+        )
+        return 2
     if (config.policy_override or config.admission_mode) and (
         config.target_endpoint_type != "gateway_chat"
     ):
@@ -287,6 +347,21 @@ async def async_main(args: argparse.Namespace) -> int:
     )
     sweep = getattr(args, "sweep_concurrency", None)
     levels = [int(x) for x in sweep.split(",")] if sweep else [config.concurrency]
+    meta = run_metadata(args)
+    if getattr(args, "require_parity", False):
+        problems = parity_check_run(
+            {
+                **meta,
+                "router_label": router_label or GATEWAY_ROUTER_LABEL,
+                "max_tokens": config.max_tokens,
+                "offered_concurrency_levels": levels,
+                "scenario": {"sha256": source_sha256},
+                "slos": slos.model_dump(),
+            }
+        )
+        if problems:
+            logger.error("--require-parity failed, no requests sent: %s", problems)
+            return 2
     started_at = datetime.datetime.now(datetime.UTC)
     level_records: list[dict[str, Any]] = []
     all_turns: list[dict[str, Any]] = []
@@ -436,15 +511,35 @@ async def async_main(args: argparse.Namespace) -> int:
             )
     unverified = sum(t["status"] == "control_not_applied" for t in all_turns)
     any_failed = any_failed or any(ok == 0 for ok, _ in observed.values())
-    scenario_json = json.dumps(config.model_dump(), sort_keys=True)
+    execution = {
+        "policy_override": config.policy_override,
+        "admission_mode": config.admission_mode,
+        "router_label": router_label or GATEWAY_ROUTER_LABEL,
+        "gateway_stream": getattr(args, "gateway_stream", True),
+        "strategy": config.strategy,
+        "target_endpoint_type": config.target_endpoint_type,
+        "treatment": getattr(args, "label", None),
+    }
     _write_json(
         run_dir / "manifest.json",
         {
             "scenario": {
                 "name": config.name,
-                "sha256": hashlib.sha256(scenario_json.encode()).hexdigest(),
+                # Hash of the SOURCE workload (pre-override, arm-neutral): equal across arms
+                # of one comparison. Arm-specific settings are in "execution".
+                "sha256": source_sha256,
             },
+            "execution": {**execution, "sha256": _sha(execution)},
+            "max_tokens": config.max_tokens,
             "policy_under_test": getattr(args, "label", None),
+            "router_label": router_label or GATEWAY_ROUTER_LABEL,
+            # Non-gateway arms (e.g. Dynamo) do not emit x-place-decision etc.; routing
+            # distribution must then come from window-level worker metrics, not headers.
+            "gateway_decision_headers_expected": is_our_gateway(router_label),
+            "turns_with_decision_headers": sum(
+                bool((t.get("gateway_headers") or {}).get("x-place-decision"))
+                for t in all_turns
+            ),
             "policy_override_requested": config.policy_override,
             "policy_override_verified": _verified(observed, "policy_override"),
             "admission_mode_requested": config.admission_mode,
@@ -458,16 +553,7 @@ async def async_main(args: argparse.Namespace) -> int:
             "control_unverified_turns": unverified,
             "system_prefix": prefix_record,
             "slos": slos.model_dump(),
-            "topology": getattr(args, "topology", None)
-            or os.environ.get("INFERENCE_TOPOLOGY")
-            or DEFAULT_TOPOLOGY,
-            "model_revision": os.environ.get("MODEL_REVISION", "unknown"),
-            "tokenizer_revision": os.environ.get("TOKENIZER_REVISION", "unknown"),
-            "chat_template_revision": os.environ.get(
-                "CHAT_TEMPLATE_REVISION", "unknown"
-            ),
-            "engine_flags": getattr(args, "engine_flags", None)
-            or os.environ.get("ENGINE_FLAGS", "unknown"),
+            **meta,
             "gateway_base_url": args.target_url,
             "metrics_url": args.metrics_url,
             "offered_concurrency_levels": levels,
@@ -544,6 +630,13 @@ def main() -> int:
         "--label", default=None, help="Policy under test (informational)"
     )
     parser.add_argument(
+        "--router-label",
+        default=None,
+        help="Router arm under test: 'gateway' (default, our gateway) or any other label "
+        "such as dynamo-kv. Non-gateway arms tolerate missing x-place-decision headers "
+        "and reject --policy-override/--admission-mode.",
+    )
+    parser.add_argument(
         "--policy-override",
         choices=["round_robin", "least_loaded", "p2c", "prefix_then_load"],
         default=None,
@@ -580,6 +673,27 @@ def main() -> int:
     )
     parser.add_argument(
         "--topology", default=None, help="Topology string (env INFERENCE_TOPOLOGY)"
+    )
+    for flag, env in (
+        ("model-revision", "MODEL_REVISION"),
+        ("tokenizer-revision", "TOKENIZER_REVISION"),
+        ("chat-template-revision", "CHAT_TEMPLATE_REVISION"),
+        ("vllm-version", "VLLM_VERSION"),
+        ("dynamo-version", "DYNAMO_VERSION"),
+        ("kv-block-size", "KV_BLOCK_SIZE"),
+        ("dynamo-kv-block-size", "DYNAMO_KV_BLOCK_SIZE"),
+    ):
+        parser.add_argument(
+            f"--{flag}",
+            default=None,
+            help=f"Recorded in the manifest (env {env}); use n/a for Dynamo fields on "
+            "gateway arms",
+        )
+    parser.add_argument(
+        "--require-parity",
+        action="store_true",
+        help="Exit 2 before any request unless every comparison field is concrete "
+        "(no missing/'unknown'); see app.benchmarks.parity",
     )
     parser.add_argument(
         "--engine-flags", default=None, help="Free-form engine flags (env ENGINE_FLAGS)"
