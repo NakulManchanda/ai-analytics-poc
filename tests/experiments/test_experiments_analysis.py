@@ -357,3 +357,77 @@ def test_hbm_sustained_high_utilization_is_flat_at_max(tmp_path: Path) -> None:
     res = memory_proof(_write_range(tmp_path, [38500.0] * 12, [1500.0] * 12))  # 0.96
     flags = {f["flag"] for f in res["flags"]}
     assert "flat_at_max" in flags and "plateau_or_preallocated" not in flags
+
+
+@pytest.mark.parametrize(
+    "compare,a_dir,b_dir,control",
+    [
+        (e3_compare, "e3_least_loaded", "e3_prefix_then_load", "policy_override"),
+        (e4_compare, "e4_admission_off", "e4_admission_on", "admission_mode"),
+    ],
+)
+def test_varied_control_must_be_verified_in_both_runs(
+    tmp_path, compare, a_dir, b_dir, control
+) -> None:
+    assert compare(_run(a_dir), _run(b_dir))["comparable"] is True
+    edits = {
+        "false": lambda m: m.update({f"{control}_verified": False}),
+        "missing": lambda m: m.pop(f"{control}_verified"),
+        "none": lambda m: m.update({f"{control}_verified": None}),
+        "turns": lambda m: m.update(control_unverified_turns=2),
+        "mismatched_echo": lambda m: m["control_observations"][control].update(
+            mismatched=1
+        ),
+    }
+    for label, edit in edits.items():
+        for side in ("a", "b"):
+            d = tmp_path / f"{label}{side}"
+            ra = (
+                load_run(_edit_manifest(d, a_dir, edit)) if side == "a" else _run(a_dir)
+            )
+            rb = (
+                load_run(_edit_manifest(d, b_dir, edit)) if side == "b" else _run(b_dir)
+            )
+            res = compare(ra, rb)
+            assert res["comparable"] is False, (label, side)
+            probs = res["manifest_check"]["treatment_problems"]
+            assert [x["reason"] for x in probs][0] == "unverified" and probs[0][
+                "field"
+            ] == control
+            assert probs[0]["run"] == side
+            assert "runs" not in res and "runs" in res["not_comparable_numbers"]
+
+
+def test_non_varied_requested_control_must_be_verified(tmp_path: Path) -> None:
+    def requested(verified):
+        def edit(m):
+            m["admission_mode_requested"] = "on"
+            m["admission_mode_verified"] = verified
+            m["execution"]["admission_mode"] = "on"
+
+        return edit
+
+    ok_a = load_run(_edit_manifest(tmp_path / "1a", "e3_least_loaded", requested(True)))
+    ok_b = load_run(
+        _edit_manifest(tmp_path / "1b", "e3_prefix_then_load", requested(True))
+    )
+    assert e3_compare(ok_a, ok_b)["comparable"] is True
+    bad_b = load_run(
+        _edit_manifest(tmp_path / "2b", "e3_prefix_then_load", requested(False))
+    )
+    res = e3_compare(ok_a, bad_b)
+    assert (
+        res["comparable"] is False and res["manifest_check"]["treatment_varied"] is True
+    )
+    assert any(
+        "admission_mode verification" in f
+        for f in res["manifest_check"]["unprovable_fields"]
+    )
+    assert "runs" in res["not_comparable_numbers"]
+    # requested nowhere: nothing required (plain fixtures, admission_mode null and unverified)
+    assert (
+        e3_compare(_run("e3_least_loaded"), _run("e3_prefix_then_load"))["comparable"]
+        is True
+    )
+    e2 = e2_prefix_reuse(_run("e2_cold"), _run("e2_reused"))
+    assert e2["comparable"] is True

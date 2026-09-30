@@ -118,6 +118,10 @@ prefix size and offered-concurrency levels. Missing or `unknown` values also mak
 The same gate applies to E3 and E4: only `policy_override` (E3), respectively `admission_mode` (E4), may differ,
 and that control must be concrete and DIFFERENT in the two manifests; the same value twice, or a missing/`unknown`
 one, makes the pair `comparable: false` (`manifest_check.treatment_problems`). E2 varies no control.
+Every control a run REQUESTED (`policy_override`, `admission_mode`, `force_worker`) must also be verified: `*_verified`
+strictly true, no mismatched echoes in `control_observations`, and `control_unverified_turns` = 0. An unverified
+varied control is a `treatment_problems` entry (reason `unverified`); an unverified non-varied requested control
+makes the pair unproven. Controls requested in neither run need nothing.
 `e3_least_loaded` vs `e3_prefix_then_load` is NOT a valid E2 pair.
 
  `e3_routing_mixed` under

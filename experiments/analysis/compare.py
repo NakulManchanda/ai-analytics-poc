@@ -66,12 +66,36 @@ def _execution(m: dict[str, Any], f: str) -> Any:
     return v
 
 
+def _unverified(m: dict[str, Any]) -> list[tuple[str, str]]:
+    """(control, detail) for every REQUESTED control not strictly verified in this manifest.
+
+    A requested control needs `<c>_verified is True`, no mismatched echoes in control_observations
+    and no control_not_applied turns. Controls requested in neither run need nothing.
+    """
+    out = []
+    requested = [c for c in (*CONTROLS, "force_worker") if m.get(f"{c}_requested")]
+    for c in requested:
+        bad = ((m.get("control_observations") or {}).get(c) or {}).get(
+            "mismatched"
+        ) or 0
+        if m.get(f"{c}_verified") is not True:
+            out.append((c, f"{c}_verified={m.get(f'{c}_verified')!r}"))
+        elif bad:
+            out.append((c, f"{bad} mismatched echoes"))
+    if requested and m.get("control_unverified_turns"):
+        out.append(
+            (requested[0], f"{m['control_unverified_turns']} control_unverified turns")
+        )
+    return out
+
+
 def check_manifests(a: Run, b: Run, varied: tuple[str, ...] = ()) -> dict[str, Any]:
     """Prove control and treatment ran the same inputs.
 
     match      no concrete value differs (inputs and non-varied execution controls).
     proven     every required field is concrete in BOTH manifests (missing/unknown => unprovable).
-    comparable match, proven, and every `varied` control concrete in BOTH runs and unequal
+    comparable match, proven (incl. every requested non-varied control verified), and every `varied`
+               control concrete, unequal AND verified (no unverified turns) in BOTH runs
                (treatment_varied / treatment_problems); E2 passes no `varied`.
     Execution controls (policy, admission, router, stream, ...) must be identical except `varied`.
     """
@@ -114,12 +138,19 @@ def check_manifests(a: Run, b: Run, varied: tuple[str, ...] = ()) -> dict[str, A
             elif va != vb:
                 mismatches.append({"field": f"execution.{f}", "a": va, "b": vb})
         for name, m in (("a", ma), ("b", mb)):
-            for c in CONTROLS:
-                if m.get(f"{c}_requested") and m.get(f"{c}_verified") is not True:
-                    warnings.append(f"run {name}: {c} requested but NOT verified")
-            if m.get("control_unverified_turns"):
+            for c, detail in _unverified(m):
+                item = {
+                    "field": c,
+                    "run": name,
+                    "reason": "unverified",
+                    "detail": detail,
+                }
+                if c in varied:
+                    treatment_problems.append(item)
+                else:
+                    unprovable.append(f"{c} verification (run {name}: {detail})")
                 warnings.append(
-                    f"run {name}: {m['control_unverified_turns']} control_unverified turns"
+                    f"run {name}: {c} requested but NOT verified ({detail})"
                 )
     if unprovable:
         warnings.append(
