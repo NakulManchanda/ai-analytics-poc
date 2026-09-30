@@ -31,8 +31,10 @@ CONFIRMED_HOP_RESULT = "transferred"
 HOP_PROOF_FIELDS = {
     "source_worker_or_store": "provenance: where the reusable blocks came from",
     "destination_worker": "provenance: where they became available",
-    "prefix_identity": "versioned prefix identity of the reusable token region",
-    "compatibility_namespace": "model/tokenizer/template/dtype/layout compatibility namespace",
+    "router_prefix_id": "correlation only: the request's x-prefix-id router affinity label",
+    "prefix_identity": "CANONICAL identity from rendered reusable token IDs + compat inputs",
+    "compatibility_namespace": "canonical namespace: model/tokenizer/template revisions, dtypes, "
+    "adapter/cache namespace, block-layout version",
     "transferred_tokens": "tokens moved (> 0)",
     "transferred_bytes": "bytes moved (> 0)",
     "transfer_ms": "transfer duration",
@@ -42,33 +44,23 @@ HOP_PROOF_FIELDS = {
 }
 
 
-def expected_namespace_parts(manifest: dict[str, Any]) -> list[str] | None:
-    """What a compatibility_namespace must match: the manifest's explicit namespace (exact), else
-    every recorded model/tokenizer/chat-template revision (substring). None = nothing recorded.
-    """
-    if isinstance(manifest.get("compatibility_namespace"), str):
-        return [manifest["compatibility_namespace"]]
-    parts = [
-        manifest.get(k)
-        for k in ("model_revision", "tokenizer_revision", "chat_template_revision")
-    ]
-    known = [p for p in parts if isinstance(p, str) and p and p != "unknown"]
-    return known or None
-
-
 def hop_missing_fields(
     rec: dict[str, Any],
     *,
     chosen_worker: str | None = None,
-    prefix_id: str | None = None,
-    namespace_parts: list[str] | None = None,
+    router_prefix_id: str | None = None,
+    canonical_identity: str | None = None,
+    canonical_namespace: str | None = None,
 ) -> list[str]:
     """Names of proof fields absent/failing, relationship checks that fail, and checks that
     cannot be made (``unverifiable: X``). Empty list = complete, consistent proof.
 
     Relationships: source != destination; destination == the request's chosen worker;
-    reused <= transferred; prefix_identity == the request's prefix id; compatibility_namespace
-    matches the run manifest. Missing correlated data is unverifiable, never a pass."""
+    reused <= transferred; router_prefix_id == the request's x-prefix-id (correlation only);
+    prefix_identity == the manifest's ``canonical_prefix_identity``; compatibility_namespace ==
+    the manifest's ``compatibility_namespace`` (exact). x-prefix-id is a router affinity label
+    (prompt-text hash or scenario label), NOT the canonical KV identity, so the two are never
+    compared. Missing correlated/canonical evidence is unverifiable, never a pass."""
     missing = _field_failures(rec)
     src, dst = rec.get("source_worker_or_store"), rec.get("destination_worker")
     if isinstance(src, str) and src == dst:
@@ -80,18 +72,25 @@ def hop_missing_fields(
     used, moved = rec.get("destination_reused_tokens"), rec.get("transferred_tokens")
     if all(isinstance(v, (int, float)) for v in (used, moved)) and used > moved:
         missing.append("failed: destination_reused_tokens > transferred_tokens")
-    if not prefix_id:
-        missing.append("unverifiable: prefix_id")
+    if not router_prefix_id:
+        missing.append("unverifiable: request x-prefix-id (router_prefix_id)")
     elif (
-        isinstance(rec.get("prefix_identity"), str)
-        and rec["prefix_identity"] != prefix_id
+        isinstance(rec.get("router_prefix_id"), str)
+        and rec["router_prefix_id"] != router_prefix_id
     ):
-        missing.append("failed: prefix_identity != request prefix_id")
+        missing.append("failed: router_prefix_id != request x-prefix-id")
+    ident = rec.get("prefix_identity")
+    if not canonical_identity:
+        missing.append("unverifiable: canonical prefix identity")
+    elif isinstance(ident, str) and ident != canonical_identity:
+        missing.append("failed: prefix_identity != manifest canonical_prefix_identity")
     ns = rec.get("compatibility_namespace")
-    if not namespace_parts:
-        missing.append("unverifiable: manifest compatibility namespace/revisions")
-    elif isinstance(ns, str) and not all(part in ns for part in namespace_parts):
-        missing.append("failed: compatibility_namespace != manifest")
+    if not canonical_namespace:
+        missing.append("unverifiable: compatibility namespace")
+    elif isinstance(ns, str) and ns != canonical_namespace:
+        missing.append(
+            "failed: compatibility_namespace != manifest compatibility_namespace"
+        )
     return missing
 
 
@@ -478,12 +477,16 @@ def build_trace(
     hops = [r for r in recs if r.get("stage") == "hop"]
     if hops:
         # Judge the most complete record: the one with the fewest missing proof fields.
+        def _str(v: Any) -> str | None:
+            return v if isinstance(v, str) and v else None
+
         check = {
             "chosen_worker": (place or {}).get("chosen_worker")
             or hdr.get("x-place-decision"),
-            "prefix_id": (place or {}).get("prefix_id")
+            "router_prefix_id": (place or {}).get("prefix_id")
             or next((r["prefix_id"] for r in recs if r.get("prefix_id")), None),
-            "namespace_parts": expected_namespace_parts(manifest),
+            "canonical_identity": _str(manifest.get("canonical_prefix_identity")),
+            "canonical_namespace": _str(manifest.get("compatibility_namespace")),
         }
         best = min(hops, key=lambda r: len(hop_missing_fields(r, **check)))
         missing = hop_missing_fields(best, **check)
@@ -495,7 +498,8 @@ def build_trace(
                     duration_ms=best.get("transfer_ms"),
                     details={k: v for k, v in best.items() if k not in ("stage",)},
                     note="all proof fields present and consistent with this request's placement, "
-                    "prefix id and run manifest (field names assumed until #133 lands)",
+                    "router prefix id and the manifest's canonical identity/namespace "
+                    "(field names assumed until #133 lands)",
                 )
             )
         else:

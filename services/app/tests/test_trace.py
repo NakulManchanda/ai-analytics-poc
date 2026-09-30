@@ -8,6 +8,7 @@ from app.benchmarks.trace import TraceError, build_trace, parse_gateway_log, ren
 from services.app.scripts.trace_request import main as trace_main
 
 T0 = 1_000_000.0
+NS = "qwen3-0.6b/rev1/tok1/tpl1/bf16/kv-bf16/no-adapter/layout-v1"
 
 
 def _req(rid, step, hdr=None, **kw):
@@ -124,6 +125,8 @@ def _run_dir(tmp_path, with_window=True):
                 "model_revision": "rev1",
                 "tokenizer_revision": "tok1",
                 "chat_template_revision": "tpl1",
+                "canonical_prefix_identity": "canon-7f3a",
+                "compatibility_namespace": NS,
             }
         )
     )
@@ -168,8 +171,9 @@ GOOD_HOP = {
     "hop_result": "transferred",
     "source_worker_or_store": "worker_a",
     "destination_worker": "worker_b",
-    "prefix_identity": "pfx-v1-abc",
-    "compatibility_namespace": "qwen3-0.6b/rev1/tok1/tpl1/bf16",
+    "router_prefix_id": "pfx-v1-abc",
+    "prefix_identity": "canon-7f3a",
+    "compatibility_namespace": NS,
     "transferred_tokens": 2048,
     "transferred_bytes": 234881024,
     "transfer_ms": 12.0,
@@ -199,6 +203,7 @@ def test_complete_hop_record_is_confirmed(tmp_path):
         "confirm_result",
         "destination_reused_tokens",
         "prefix_identity",
+        "router_prefix_id",
         "compatibility_namespace",
         "transfer_ms",
     ],
@@ -218,7 +223,14 @@ def test_incomplete_transferred_hop_is_not_confirmed(tmp_path, field):
             {"destination_worker": "worker_a"},
             "failed: destination_worker != chosen_worker",
         ),
-        ({"prefix_identity": "other"}, "failed: prefix_identity != request prefix_id"),
+        (
+            {"router_prefix_id": "other"},
+            "failed: router_prefix_id != request x-prefix-id",
+        ),
+        (
+            {"prefix_identity": "canon-other"},
+            "failed: prefix_identity != manifest canonical",
+        ),
         (
             {"compatibility_namespace": "qwen3/rev2/tok1/tpl1"},
             "failed: compatibility_namespace != manifest",
@@ -233,6 +245,43 @@ def test_contradictory_hop_fields_are_not_confirmed(tmp_path, override, expect):
     hop = _hop(tmp_path, {**GOOD_HOP, **override})
     assert hop["status"] == "attempted_not_confirmed"
     assert any(m.startswith(expect) for m in hop["details"]["missing_proof_fields"])
+
+
+def test_canonical_identity_differs_from_x_prefix_id_and_is_confirmed(tmp_path):
+    # x-prefix-id is a router label; the canonical identity is never compared to it
+    assert GOOD_HOP["prefix_identity"] != GOOD_HOP["router_prefix_id"]
+    assert _hop(tmp_path, GOOD_HOP)["status"] == "confirmed"
+
+
+def _manifest_hop(tmp_path, manifest):
+    run = _run_dir(tmp_path)
+    (run / "manifest.json").write_text(json.dumps(manifest))
+    (run / "gateway.log").write_text(_log("r1", GOOD_HOP))
+    return _st(build_trace(run, "r1", run / "gateway.log"), "hop")
+
+
+def test_no_canonical_identity_in_manifest_is_unverifiable(tmp_path):
+    hop = _manifest_hop(tmp_path, {"compatibility_namespace": NS})
+    assert hop["status"] == "attempted_not_confirmed"
+    assert hop["details"]["missing_proof_fields"] == [
+        "unverifiable: canonical prefix identity"
+    ]
+
+
+def test_revision_substrings_do_not_substitute_for_exact_namespace(tmp_path):
+    hop = _manifest_hop(
+        tmp_path,
+        {
+            "canonical_prefix_identity": "canon-7f3a",
+            "model_revision": "rev1",
+            "tokenizer_revision": "tok1",
+            "chat_template_revision": "tpl1",
+        },
+    )
+    assert hop["status"] == "attempted_not_confirmed"
+    assert hop["details"]["missing_proof_fields"] == [
+        "unverifiable: compatibility namespace"
+    ]
 
 
 def test_hop_unverifiable_without_correlated_data(tmp_path):
@@ -257,9 +306,10 @@ def test_hop_unverifiable_without_correlated_data(tmp_path):
     assert hop["status"] == "attempted_not_confirmed"
     assert (
         "unverifiable: chosen_worker" in missing
-        and "unverifiable: prefix_id" in missing
+        and "unverifiable: request x-prefix-id (router_prefix_id)" in missing
     )
-    assert any(m.startswith("unverifiable: manifest") for m in missing)
+    assert "unverifiable: canonical prefix identity" in missing
+    assert "unverifiable: compatibility namespace" in missing
 
 
 def test_unconfirmed_destination_or_zero_bytes_not_confirmed(tmp_path):
