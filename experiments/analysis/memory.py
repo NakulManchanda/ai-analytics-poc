@@ -26,6 +26,10 @@ PANELS = (
 )
 
 
+# HBM counts as 'at max' only at this used/(used+free) level (flat_at_max alone just means flat).
+HBM_HIGH_UTIL = 0.90
+
+
 def load_range(range_dir: str | Path) -> dict[str, list[dict[str, Any]]]:
     """{query_name: [{"labels": {...}, "points": {ts: float}}]} (NaN/empty dropped)."""
     out: dict[str, list[dict[str, Any]]] = {}
@@ -119,13 +123,29 @@ def memory_proof(range_dir: str | Path) -> dict[str, Any]:
                         "note": "HBM used rose without any frees",
                     }
                 )
-            if flat_at_max(v):
+            free = series.get(c.replace("dcgm_fb_used_mib", "dcgm_fb_free_mib"))
+            util = [
+                u / (u + f)
+                for u, f in zip(vals, free or [], strict=False)
+                if u is not None and f is not None and u + f > 0
+            ]
+            if util and sum(x >= HBM_HIGH_UTIL for x in util) / len(util) >= 0.8:
                 flags.append(
                     {
                         "series": c,
                         "flag": "flat_at_max",
-                        "note": "HBM flat at max (normal if vLLM preallocates); read KV usage",
+                        "note": f"HBM utilization (used/(used+free)) >= {HBM_HIGH_UTIL} for "
+                        "most of the window",
                     }
+                )
+            elif flat_at_max(v):
+                note = (
+                    "HBM allocation flat (often vLLM preallocation); not near capacity"
+                )
+                if not util:
+                    note = "HBM flat, capacity unknown (no dcgm_fb_free_mib series)"
+                flags.append(
+                    {"series": c, "flag": "plateau_or_preallocated", "note": note}
                 )
         if base == "vllm_preemption_rate" and max(v) > 0:
             flags.append(

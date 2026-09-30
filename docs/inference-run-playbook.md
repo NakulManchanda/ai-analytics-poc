@@ -21,11 +21,12 @@ All commands run from the repository root (or the active worktree) unless noted.
   `metrics/evidence`). `--label <name>` overrides the policy label in the manifest (last flag wins).
 - **Manifest inputs** (exported before `make replay-*`; otherwise recorded as `unknown` and the comparison
   warns that a match is not provable): `MODEL_REVISION`, `TOKENIZER_REVISION`, `CHAT_TEMPLATE_REVISION`,
-  `ENGINE_FLAGS` (the workers' real vLLM flags), `INFERENCE_TOPOLOGY` (state whether Worker A/B are two HAMi
+  `ENGINE_FLAGS` (the workers' real vLLM flags), `VLLM_VERSION`, `KV_BLOCK_SIZE`, `INFERENCE_TOPOLOGY` (state whether Worker A/B are two HAMi
   slices on one physical GPU or separate GPUs), optional `INTERACTIVE_TTFT_SLO_MS`, `E2E_SLO_MS`. The
   manifest also records scenario sha256, prefix size (set `TOKENIZE_URL` or rely on
   `<target-url>/tokenize`), controls requested/verified, and SLOs. Use the SAME values for every
-  control/treatment pair.
+  control/treatment pair. Manifests written before PR #151 have arm-dependent scenario hashes and no
+  `execution` block; regenerate those runs rather than comparing them.
 - **Isolated windows:** `--metrics-url` scrapes ONE worker's `/metrics` before/after a run, so its delta is
   a window aggregate for that worker only. Run nothing else against the cluster during a measured run,
   do not overlap runs, and never attribute window deltas to a request. For the two-worker picture use the
@@ -108,7 +109,16 @@ p50/p95). Notebook keys `E1_WARMUP_COLD` / `E1_WARMUP_WARM`.
 
 ### E2 Prefix reuse (cold vs reused)
 
-Both runs use the same existing scenario and policy so only cache state differs: `e3_routing_mixed` under
+Both runs use the same existing scenario and policy so only cache state differs. These must be IDENTICAL in
+the two manifests or `e2_prefix_reuse` reports `comparable: false` (numbers only under `not_comparable_numbers`):
+scenario hash, `execution.policy_override`, `execution.admission_mode`, `router_label`, `gateway_stream`,
+SLOs, topology, model/tokenizer/chat-template revisions, engine flags, vLLM version, KV block size, `max_tokens`,
+prefix size and offered-concurrency levels. Missing or `unknown` values also make the pair unproven
+(`proven: false`), so export `VLLM_VERSION`/`KV_BLOCK_SIZE` and the revision variables per section 0.
+The same gate applies to E3 and E4 (only `policy_override`, respectively `admission_mode`, may differ).
+`e3_least_loaded` vs `e3_prefix_then_load` is NOT a valid E2 pair.
+
+ `e3_routing_mixed` under
 `least_loaded` (spreads traffic so both workers build the prefix).
 ```bash
 export RUN_ID=d123-$(date +%Y%m%d)-e2

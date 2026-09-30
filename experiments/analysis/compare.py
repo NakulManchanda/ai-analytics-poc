@@ -16,6 +16,7 @@ from experiments.analysis.runs import (
     ttft_by_turn,
 )
 
+# Mirrors app.benchmarks.parity.EQUAL_FIELDS plus the run-level inputs (kept stdlib-only here).
 MUST_MATCH = (
     "scenario.sha256",
     "system_prefix.prefix_chars",
@@ -26,9 +27,22 @@ MUST_MATCH = (
     "tokenizer_revision",
     "chat_template_revision",
     "engine_flags",
+    "vllm_version",
+    "kv_block_size",
+    "max_tokens",
     "offered_concurrency_levels",
 )
+# Execution controls: identical unless listed in `varied` (the one treatment of the experiment).
+EXECUTION_FIELDS = (
+    "policy_override",
+    "admission_mode",
+    "router_label",
+    "gateway_stream",
+    "strategy",
+    "target_endpoint_type",
+)
 CONTROLS = ("policy_override", "admission_mode")
+_UNKNOWN = {"", "unknown", "none", "null", "tbd", "?", "n/a"}
 
 
 def _dig(m: dict[str, Any], dotted: str) -> Any:
@@ -37,34 +51,96 @@ def _dig(m: dict[str, Any], dotted: str) -> Any:
     return m
 
 
+def _unprovable(v: Any) -> bool:
+    return (
+        v is None
+        or (not isinstance(v, (list, dict)) and str(v).strip().lower() in _UNKNOWN)
+        or v in ([], {})
+    )
+
+
+def _execution(m: dict[str, Any], f: str) -> Any:
+    v = _dig(m, f"execution.{f}")
+    if v is None and f in CONTROLS:  # manifests from before PR #151 lack "execution"
+        v = m.get(f"{f}_requested")
+    return v
+
+
 def check_manifests(a: Run, b: Run, varied: tuple[str, ...] = ()) -> dict[str, Any]:
-    """Prove control and treatment ran the same inputs; `varied` controls must differ."""
+    """Prove control and treatment ran the same inputs.
+
+    match      no concrete value differs (inputs and non-varied execution controls).
+    proven     every required field is concrete in BOTH manifests (missing/unknown => unprovable).
+    comparable match and proven; a varied control must also really differ.
+    Execution controls (policy, admission, router, stream, ...) must be identical except `varied`.
+    """
     ma, mb = a.manifest, b.manifest
-    mismatches, warnings = [], []
+    mismatches, unprovable, warnings = [], [], []
     if not ma or not mb:
-        warnings.append("a manifest is missing: comparability cannot be shown")
-    for f in MUST_MATCH:
-        va, vb = _dig(ma, f), _dig(mb, f)
-        if va != vb:
-            mismatches.append({"field": f, "a": va, "b": vb})
-        elif va == "unknown":
-            warnings.append(
-                f"{f} unrecorded (unknown) in both manifests: match not provable"
-            )
-    for c in varied:
-        if _dig(ma, f"{c}_requested") == _dig(mb, f"{c}_requested"):
-            warnings.append(
-                f"{c}_requested is identical in both runs: treatment not varied"
-            )
-    for name, m in (("a", ma), ("b", mb)):
-        for c in CONTROLS:
-            if m.get(f"{c}_requested") and m.get(f"{c}_verified") is not True:
-                warnings.append(f"run {name}: {c} requested but NOT verified")
-        if m.get("control_unverified_turns"):
-            warnings.append(
-                f"run {name}: {m['control_unverified_turns']} control_unverified turns"
-            )
-    return {"match": not mismatches, "mismatches": mismatches, "warnings": warnings}
+        unprovable.append("manifest (missing in at least one run)")
+    else:
+        for f in MUST_MATCH:
+            va, vb = _dig(ma, f), _dig(mb, f)
+            if _unprovable(va) or _unprovable(vb):
+                unprovable.append(f)
+            elif va != vb:
+                mismatches.append({"field": f, "a": va, "b": vb})
+        for f in EXECUTION_FIELDS:
+            va, vb = _execution(ma, f), _execution(mb, f)
+            if f in varied:
+                if va == vb:
+                    warnings.append(
+                        f"{f} is identical in both runs: treatment not varied"
+                    )
+                continue
+            # policy/admission may legitimately be None (not requested) in both runs.
+            if f not in CONTROLS and (va is None or vb is None):
+                unprovable.append(f"execution.{f}")
+            elif va != vb:
+                mismatches.append({"field": f"execution.{f}", "a": va, "b": vb})
+        for name, m in (("a", ma), ("b", mb)):
+            for c in CONTROLS:
+                if m.get(f"{c}_requested") and m.get(f"{c}_verified") is not True:
+                    warnings.append(f"run {name}: {c} requested but NOT verified")
+            if m.get("control_unverified_turns"):
+                warnings.append(
+                    f"run {name}: {m['control_unverified_turns']} control_unverified turns"
+                )
+    if unprovable:
+        warnings.append(
+            "NOT PROVEN like-for-like; missing/unknown: " + ", ".join(unprovable)
+        )
+    match, proven = not mismatches, not unprovable
+    return {
+        "match": match,
+        "proven": proven,
+        "comparable": match and proven,
+        "mismatches": mismatches,
+        "unprovable_fields": unprovable,
+        "warnings": warnings,
+    }
+
+
+def _gate(
+    check: dict[str, Any], scope: str, body: dict[str, Any], warns: list[str]
+) -> dict[str, Any]:
+    """Numbers appear at top level only for a proven like-for-like pair."""
+    out: dict[str, Any] = {
+        "scope": scope,
+        "comparable": check["comparable"],
+        "manifest_check": check,
+    }
+    if check["comparable"]:
+        return {**out, **body, "warnings": warns}
+    why = "differing inputs" if check["mismatches"] else "unprovable parity metadata"
+    return {
+        **out,
+        "warnings": [
+            f"NOT COMPARABLE ({why}): numbers shown only under not_comparable_numbers"
+        ]
+        + warns,
+        "not_comparable_numbers": body,
+    }
 
 
 def _goodput(run: Run, level: int | None) -> dict[str, Any]:
@@ -132,18 +208,12 @@ def e3_compare(ll: Run, ptl: Run, level: int | None = None) -> dict[str, Any]:
     check = check_manifests(ll, ptl, varied=("policy_override",))
     keys = [("ttft_ms", p) for p in ("p50", "p95", "p99")] + [("queue_wait_ms", "p95")]
     keys += [("goodput", "good_requests_per_s"), ("deadline_met_rate",)]
-    return {
-        "scope": PER_REQUEST + "; goodput is run-level",
-        "manifest_check": check,
-        "runs": runs,
-        "delta_b_minus_a": _delta(a, b, keys),
-        "warnings": check["warnings"]
-        + (
-            []
-            if check["match"]
-            else ["MANIFEST MISMATCH: not a like-for-like comparison"]
-        ),
-    }
+    return _gate(
+        check,
+        PER_REQUEST + "; goodput is run-level",
+        {"runs": runs, "delta_b_minus_a": _delta(a, b, keys)},
+        list(check["warnings"]),
+    )
 
 
 def jain_index(values: list[float]) -> float | None:
@@ -249,25 +319,23 @@ def e4_compare(
         }
     a, b = runs["a_admission_off"], runs["b_admission_on"]
     check = check_manifests(off, on, varied=("admission_mode",))
-    warns = list(check["warnings"]) + (
-        [] if check["match"] else ["MANIFEST MISMATCH: not a like-for-like comparison"]
-    )
+    warns = list(check["warnings"])
     for name, r in runs.items():
         if r["batch_starvation"]["batch_starved"]:
             warns.append(
                 f"{name}: batch starved (completed fraction < {starve_ratio} x interactive)"
             )
-    return {
-        "scope": PER_REQUEST + "; goodput is run-level",
-        "manifest_check": check,
-        "runs": runs,
-        "delta_b_minus_a": _delta(
-            a,
-            b,
-            [("goodput", "good_requests_per_s"), ("e2e_ms", "p99"), ("ttft_ms", "p99")],
-        ),
-        "warnings": warns,
-    }
+    delta = _delta(
+        a,
+        b,
+        [("goodput", "good_requests_per_s"), ("e2e_ms", "p99"), ("ttft_ms", "p99")],
+    )
+    return _gate(
+        check,
+        PER_REQUEST + "; goodput is run-level",
+        {"runs": runs, "delta_b_minus_a": delta},
+        warns,
+    )
 
 
 def e2_prefix_reuse(
@@ -277,7 +345,9 @@ def e2_prefix_reuse(
     reused_level: int | None = None,
 ) -> dict[str, Any]:
     """Cold vs reused TTFT (per-request) and prefix-cache hit-rate deltas (WINDOW-level only)."""
-    warns = check_manifests(cold, reused)["warnings"]
+    # Only cache state may differ: policy, admission, router, stream, scenario, SLOs, ... identical.
+    check = check_manifests(cold, reused)
+    warns = list(check["warnings"])
     per_request, window = {}, {}
     for name, run, lv in (("cold", cold, cold_level), ("reused", reused, reused_level)):
         rs = run.select(lv)
@@ -310,7 +380,7 @@ def e2_prefix_reuse(
     hr = [
         (window[n] or {}).get("prefix_cache_hit_rate_pct") for n in ("cold", "reused")
     ]
-    return {
+    body = {
         "per_request": {"scope": PER_REQUEST, **per_request},
         "window": {
             "scope": WINDOW,
@@ -319,8 +389,8 @@ def e2_prefix_reuse(
                 None if None in hr else round(hr[1] - hr[0], 2)
             ),
         },
-        "warnings": warns
-        + [
-            "window hit rate is aggregate over the whole run: never attribute it to one request"
-        ],
     }
+    warns.append(
+        "window hit rate is aggregate over the whole run: never attribute it to one request"
+    )
+    return _gate(check, PER_REQUEST + " and " + WINDOW, body, warns)

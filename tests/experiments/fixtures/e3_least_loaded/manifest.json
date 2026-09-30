@@ -31,5 +31,18 @@
    "matched": 12,
    "mismatched": 0
   }
+ },
+ "vllm_version": "0.11.0",
+ "kv_block_size": 16,
+ "max_tokens": 128,
+ "router_label": "gateway",
+ "execution": {
+  "policy_override": "least_loaded",
+  "admission_mode": null,
+  "router_label": "gateway",
+  "gateway_stream": true,
+  "strategy": "manual",
+  "target_endpoint_type": "gateway_chat",
+  "treatment": "e3-least_loaded"
  }
 }

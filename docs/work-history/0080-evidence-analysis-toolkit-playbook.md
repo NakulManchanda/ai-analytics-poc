@@ -27,6 +27,16 @@ Make the user's cluster sessions for E0/E1/E2/E3/E4 turn into evidence with mini
 - The live MCP schema check against `CANONICAL_TAXI_SCHEMA` is manual.
 - `experiments/` is outside the CI black/ruff scope (about 15 long lines).
 
+## Review follow-up
+
+Independent review of PR #153 found three issues, fixed here:
+
+1. **E2 could attribute a policy difference to cache reuse (high).** `e2_prefix_reuse` now returns the full manifest check and gates on it: execution controls (`policy_override`, `admission_mode`, `router_label`, `gateway_stream`, strategy, endpoint type), scenario hash, SLOs, topology, revisions and engine inputs must be identical. A mismatch gives `comparable: false` with numbers only under `not_comparable_numbers`. The E2 fixtures are now `e2_cold`/`e2_reused` (same scenario and policy); negative tests cover policy, scenario-hash, admission-mode, router-label and stream mismatches. Playbook E2 lists the required-identical controls.
+2. **Missing or unknown parity metadata still gave `match: true` (medium).** `check_manifests` now returns `match` (no differing concrete value), `proven` (every required field concrete in both manifests; missing, empty or `unknown`/`n/a` values, absent manifests, and missing nested prefix fields are unprovable) and `comparable`. E2, E3 and E4 all use one gate. The field list mirrors `app.benchmarks.parity.EQUAL_FIELDS` (vLLM version, KV block size, `max_tokens` included) but stays stdlib-only. Fixture manifests carry the concrete fields; tests cover absent manifests, equal `unknown` revisions and missing prefix/token fields (unproven) against a complete pair (proven).
+3. **HBM plateau reported as flat-at-max (medium).** `flat_at_max` for HBM now needs sustained used/(used+free) >= 0.90 (`HBM_HIGH_UTIL`); a merely flat allocation is reported as `plateau_or_preallocated`. Tests: 1 GiB used of 40 GiB stays plateau only, 96 percent utilization is `flat_at_max`.
+
+The playbook also notes that manifests from before PR #151 have arm-dependent scenario hashes and must be regenerated.
+
 ## PR / merge state
 
 Draft PR (this change).
