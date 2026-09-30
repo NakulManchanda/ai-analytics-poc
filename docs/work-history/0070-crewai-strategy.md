@@ -44,11 +44,26 @@ directly, has no raw SQL access, and operates under strict execution budgets and
 - **D-139-8: Durable failure handling.** Convert `LLMProviderError` and `LLMConfigurationError` to
   `OrchestrationError` so the loop's outer exception handler durably transitions runs to `status="failed"`,
   records failure code, emits `run.failed`, and persists metrics.
+- **D-139-9: Fast in-flight cancellation via cancellation runner.** Wrap blocking provider calls in
+  `self._run_with_cancellation(..., run_id=run_id)` so that user-requested cancellation aborts blocking
+  CrewAI model calls cooperatively in ~50ms, rather than waiting for slow external provider responses to complete.
+- **D-139-10: Post-call budget telemetry retention.** Persist `LLMCall`, `llm.completed`, and `RunStep` before
+  calling `tracker.record_llm_call(...)`. If an LLM call exceeds input token, output token, cost, or deadline
+  limits, the physical call telemetry is retained in durable state alongside the `status="budget_exceeded"` record.
+- **D-139-11: Configurable ECS strategy switch.** Added `variable "agent_strategy"` with default `"manual"`
+  and validation in `infra/terraform/variables.tf`, wired into `infra/terraform/ecs.tf` via `value = var.agent_strategy`.
+- **D-139-12: SSE streaming contract and intentional non-streaming final answer.** In `crewai` mode, lifecycle
+  events (`run.received`, `llm.started`, `llm.completed`, `tool.started`, `tool.completed`, `run.completed`) are
+  streamed in real time over SSE. However, the final answer delivers atomically via `answer.completed` without
+  progressive `answer.delta` chunks; streaming internal researcher reasoning would violate user-facing bounds,
+  and CrewAI sequentially validates task completion before returning writer text. `ttft` is explicitly marked
+  `available = False, reason = "non_streaming_blocking"`.
 
 ## What changed
 
 - **`docker-compose.yml` & `docker-compose.aws.yml`**: added `AGENT_STRATEGY: "${AGENT_STRATEGY:-manual}"`.
-- **`infra/terraform/ecs.tf`**: added `AGENT_STRATEGY = "manual"` default environment variable.
+- **`infra/terraform/variables.tf`**: added validated `variable "agent_strategy"` (`"manual"` | `"crewai"`, default `"manual"`).
+- **`infra/terraform/ecs.tf`**: configured `AGENT_STRATEGY` to `value = var.agent_strategy`.
 - **`services/app/pyproject.toml` & `uv.lock`**: added `crewai>=1.15.23`. Added `.python-version` (3.12).
 - **`services/app/app/config.py`**: added `agent_strategy: str = "manual"` to `Settings`, rejecting
   any strategy other than `"manual"` or `"crewai"` on startup.
@@ -63,9 +78,11 @@ directly, has no raw SQL access, and operates under strict execution budgets and
   - Implemented `run_two_agent_answer` with correlated growing prefix partitions and `max_retry_limit=0`.
 - **`services/app/app/orchestration/loop.py`**:
   - In `crewai` mode, executes `run_two_agent_answer` via an internal `_crew_invoke_model` callable.
+  - Uses `self._run_with_cancellation` for blocking model calls to allow fast in-flight aborts.
   - Pre-call check validates cancellation and `tracker.llm_call_count < tracker.budgets.max_llm_calls`.
   - Emits `llm.started` and `llm.completed` per physical call.
   - Persists `RunStep(step_type="crewai_researcher")` and `RunStep(step_type="crewai_writer")` immediately.
+  - Records physical call telemetry before post-call budget checks so partial failures retain call records.
   - Catches `LLMProviderError` and `LLMConfigurationError` and maps to `OrchestrationError` to guarantee
     durable `failed` status and `run.failed` event emission.
 - **`services/app/tests/test_agent_strategy.py`**: comprehensive unit and end-to-end tests covering:
@@ -75,32 +92,54 @@ directly, has no raw SQL access, and operates under strict execution budgets and
   - Correlated growing prefix partitions between researcher and writer.
   - `ServeLLMClient` request headers (`x-conversation-id`, `x-agent-step`, `x-prefix-id`).
   - End-to-end loop execution with per-call step types and telemetry.
-  - Pre-call budget limit prevention.
-  - Pre-call cancellation prevention.
+  - Pre-call budget limit prevention and post-call budget telemetry retention.
+  - Pre-call and in-flight cancellation prevention.
   - Durable failure handling on provider errors.
   - Strategy execution failure handling.
+  - SSE lifecycle event delivery and non-streaming TTFT telemetry.
+  - Static validation of Terraform `agent_strategy` variable and ECS wiring.
 - **`services/app/tests/test_main.py`**: added test confirming `create_app()` passes `agent_strategy`.
 
 ## Code volume and execution comparison
+
+### Code volume
 
 | Dimension | Manual Strategy | CrewAI Strategy |
 |---|---|---|
 | **Answer-phase code volume** | ~140 lines in `loop.py` | ~250 lines (`crewai_strategy.py` + `loop.py` branch) |
 | **Replaces `loop.py` foundation?** | No (is foundation) | No (relies entirely on `loop.py`'s ~1,200 lines for tool governance, MCP, state, budgets) |
 | **Model calls in answer phase** | 1 call | 2 calls (researcher + writer) |
-| **Answer-phase token usage (Bedrock nova-micro)** | 97 in / 33 out (~130 total) | 901 in / 257 out (~1,158 total) |
-| **Answer-phase latency (Bedrock nova-micro)** | 790 ms | 1,145 ms (639ms researcher + 506ms writer) |
 | **External dependencies** | 0 extra | ~50 transitive packages (crewai, litellm, chromadb, etc.) |
+
+### Empirical Bedrock comparison (reproducible same query)
+
+Scenario: `"What are the top pickup zones by ride count?"` on Amazon Bedrock (`amazon.nova-micro-v1:0` in `us-east-1`):
+
+| Metric | Manual Strategy | CrewAI Strategy | Delta / Ratio |
+|---|---|---|---|
+| **Total LLM calls** | 2 (proposal + answer) | 3 (proposal + researcher + writer) | +1 call (+50%) |
+| **Input tokens** | 768 | 1,572 | +804 (+104%) |
+| **Output tokens** | 63 | 287 | +224 (+355%) |
+| **Total LLM latency** | 1,131 ms (341ms + 790ms) | 1,482 ms (337ms + 639ms + 506ms) | +351 ms (+31%) |
+| **Estimated cost** | $0.000109 | $0.000287 | +$0.000178 (+163%) |
+| **Answer TTFT** | 412 ms | Unavailable (`non_streaming_blocking`) | Non-streaming batch |
+| **User-facing answer** | Direct 2-zone summary | Direct 2-zone summary | Identical facts |
+| **Agent reasoning leaked** | None | None | Clean bounds |
+
+**Growing prefix status:** Prefix partitioning structure and correlated request headers (`x-prefix-id`,
+`x-conversation-id`, `x-agent-step`) are verified in unit and contract tests (`test_agent_strategy.py`).
+Live cache-match reuse is unmeasured on Bedrock as Bedrock Nova does not expose prompt caching metrics.
 
 **Conclusion on "less code":** CrewAI did not reduce orchestration code. Caging it inside safety,
 budget, and governance boundaries required ~250 lines of adapter logic, while executing twice the
-LLM calls in the answer phase. However, it provides a clean, bounded sequential generator with
-verified growing-prefix reuse.
+LLM calls and using over double the tokens in the answer phase. However, it provides a clean,
+bounded sequential generator with correlated prefix partitioning and full SSE event lifecycle parity.
 
 ## Verification
 
-- `source .venv/bin/activate && pytest` -> 216 passed, 0 failures.
-- `source .venv/bin/activate && ruff check app tests && black --check app tests` -> all checks passed.
-- `git diff --check` -> clean, no whitespace or formatting errors.
+- `source services/app/.venv/bin/activate && pytest services/app/tests` -> **220 passed**, 0 failures.
+- `uv run --project services/app ruff check services/app tests && uv run --project services/app black --check services/app tests` -> **all checks passed**.
+- `make -C infra/terraform fmt-check && make -C infra/terraform validate` -> **Terraform configuration valid**.
+- `git diff --check` -> **clean**, no trailing whitespace or formatting errors.
 - Real AWS Bedrock end-to-end runs (`amazon.nova-micro-v1:0` in `us-east-1`) verified both `manual` and `crewai` strategies cleanly.
 - GitHub Actions CI checks on PR #141 are 100% green.

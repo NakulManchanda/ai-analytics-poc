@@ -1152,16 +1152,18 @@ class OrchestrationLoop:
                             llm_call_id=call_id,
                         )
 
-                        # 4. Call provider
+                        # 4. Call provider with cancellation runner
                         call_start = self._monotonic()
                         try:
                             if hasattr(llm, "execute_partitioned_call") and callable(
                                 llm.execute_partitioned_call
                             ):
-                                call_res = llm.execute_partitioned_call(
+                                call_res = self._run_with_cancellation(
+                                    llm.execute_partitioned_call,
                                     partition=partition,
                                     conversation_id=conv_id,
                                     agent_step=agent_step,
+                                    run_id=run_id,
                                 )
                             else:
                                 user_content = (
@@ -1169,7 +1171,11 @@ class OrchestrationLoop:
                                     f"{partition.unique_suffix}".strip()
                                 )
                                 prompt_text = f"{partition.global_shared}\n\n{user_content}".strip()
-                                call_res = llm.ask(prompt_text)
+                                call_res = self._run_with_cancellation(
+                                    llm.ask,
+                                    prompt_text,
+                                    run_id=run_id,
+                                )
                         except LLMConfigurationError as err:
                             raise OrchestrationError(
                                 "llm_configuration_error", False, call_id, str(err)
@@ -1181,17 +1187,13 @@ class OrchestrationLoop:
 
                         call_latency_ms = int((self._monotonic() - call_start) * 1000)
 
-                        # 5. Record cost and tracker
+                        # 5. Calculate cost
                         c_cost, c_cost_source = call_cost(
                             call_res.input_tokens, call_res.output_tokens
                         )
-                        tracker.record_llm_call(
-                            call_res.input_tokens,
-                            call_res.output_tokens,
-                            c_cost,
-                        )
 
-                        # 6. Append LLMCall
+                        # 6. Append LLMCall first so completed physical call telemetry
+                        # is never discarded
                         recorded_call = LLMCall(
                             llm_call_id=call_id,
                             model_id=call_res.model_id,
@@ -1251,7 +1253,14 @@ class OrchestrationLoop:
                         steps.append(step)
                         step_seq += 1
 
-                        # 9. Post-call cancellation check
+                        # 9. Record cost and tracker (checks post-call limits)
+                        tracker.record_llm_call(
+                            call_res.input_tokens,
+                            call_res.output_tokens,
+                            c_cost,
+                        )
+
+                        # 10. Post-call cancellation check
                         check_cancellation(
                             call_res.text if role.lower() == "writer" else ""
                         )

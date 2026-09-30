@@ -504,3 +504,166 @@ def test_orchestration_loop_crewai_strategy_invalid_call_count_failure(
     assert exc_info.value.code == "strategy_execution_error"
     runs = list(repo._runs.values())
     assert runs[0].status == "failed"
+
+
+def test_orchestration_loop_crewai_strategy_in_flight_cancellation() -> None:
+    import threading
+
+    from app.orchestration import OrchestrationLoop
+    from app.state import InMemoryStateRepository
+
+    repo = InMemoryStateRepository()
+    llm = CountingFakeLLMClient()
+    mcp = FakeMCPClient()
+
+    loop = OrchestrationLoop(
+        llm_client=llm,
+        mcp_client=mcp,  # type: ignore[arg-type]
+        state_repository=repo,
+        agent_strategy="crewai",
+    )
+
+    provider_blocked = threading.Event()
+    provider_unblock = threading.Event()
+    provider_returned = threading.Event()
+
+    original_exec = llm.execute_partitioned_call
+
+    def blocking_researcher(partition, conversation_id=None, agent_step=1):
+        if agent_step == 2:
+            provider_blocked.set()
+            provider_unblock.wait(timeout=5.0)
+            provider_returned.set()
+        return original_exec(
+            partition, conversation_id=conversation_id, agent_step=agent_step
+        )
+
+    llm.execute_partitioned_call = blocking_researcher  # type: ignore[method-assign]
+
+    run_result = None
+    loop_error = None
+
+    def run_worker():
+        nonlocal run_result, loop_error
+        try:
+            run_result = loop.run("What are the top pickup zones by ride count?")
+        except Exception as err:
+            loop_error = err
+
+    worker_thread = threading.Thread(target=run_worker)
+    worker_thread.start()
+
+    assert provider_blocked.wait(timeout=5.0), "Provider never entered blocked state"
+
+    runs = list(repo._runs.values())
+    assert runs, "Run was not initialized in repository"
+    run_id = runs[0].run_id
+    loop.request_cancellation(run_id)
+
+    worker_thread.join(timeout=3.0)
+    assert (
+        not worker_thread.is_alive()
+    ), "Worker thread did not terminate upon cancellation"
+    assert (
+        not provider_returned.is_set()
+    ), "Provider returned before cancellation aborted run"
+
+    provider_unblock.set()
+
+    assert loop_error is None
+    assert run_result is not None
+    assert run_result.status == "cancelled"
+
+    run = repo.get_run(run_id)
+    assert run is not None
+    assert run.status == "cancelled"
+
+
+def test_orchestration_loop_crewai_strategy_post_call_token_budget_exceeded() -> None:
+    from app.orchestration import ExecutionBudgets, OrchestrationLoop
+    from app.state import InMemoryStateRepository
+
+    repo = InMemoryStateRepository()
+    llm = CountingFakeLLMClient()
+    mcp = FakeMCPClient()
+
+    # Proposal call consumes 5 input tokens.
+    # Researcher call consumes 8 input tokens (total 13 > 10).
+    # Post-call tracker.record_llm_call will raise BudgetExceededError.
+    loop = OrchestrationLoop(
+        llm_client=llm,
+        mcp_client=mcp,  # type: ignore[arg-type]
+        state_repository=repo,
+        budgets=ExecutionBudgets(max_input_tokens=10),
+        agent_strategy="crewai",
+    )
+
+    result = loop.run("What are the top pickup zones by ride count?")
+    assert result.status == "budget_exceeded"
+
+    # Writer was never called
+    assert len(llm.partition_calls) == 1
+
+    run = repo.get_run(result.run_id)
+    assert run is not None
+    assert run.status == "budget_exceeded"
+    # Completed researcher call telemetry is retained despite post-call budget failure!
+    assert len(run.metadata["llm_calls"]) == 2
+    steps = repo.list_run_steps(result.run_id)
+    step_types = [s.step_type for s in steps]
+    assert "crewai_researcher" in step_types
+
+
+def test_orchestration_loop_crewai_strategy_sse_events_and_ttft() -> None:
+    from app.orchestration import OrchestrationLoop
+    from app.state import InMemoryStateRepository
+
+    repo = InMemoryStateRepository()
+    llm = CountingFakeLLMClient()
+    mcp = FakeMCPClient()
+    publisher = InMemoryEventPublisher()
+
+    loop = OrchestrationLoop(
+        llm_client=llm,
+        mcp_client=mcp,  # type: ignore[arg-type]
+        state_repository=repo,
+        event_publisher=publisher,
+        agent_strategy="crewai",
+    )
+
+    result = loop.run("What are the top pickup zones by ride count?")
+    assert result.status == "completed"
+
+    event_types = [e.event_type for e in publisher.events]
+    assert "run.received" in event_types
+    assert "llm.started" in event_types
+    assert "llm.completed" in event_types
+    assert "tool.started" in event_types
+    assert "tool.completed" in event_types
+    assert "answer.completed" in event_types
+    assert "run.completed" in event_types
+
+    # Intentional architecture decision: CrewAI delivers final answer via answer.completed
+    # without progressive answer.delta tokens to prevent internal agent scratchpad leakage
+    assert "answer.delta" not in event_types
+
+    assert result.telemetry["ttft"]["available"] is False
+    assert result.telemetry["ttft"]["reason"] == "non_streaming_blocking"
+
+
+def test_ecs_terraform_agent_strategy_variable() -> None:
+    from pathlib import Path
+
+    repo_root = Path(__file__).resolve().parents[3]
+    var_tf = repo_root / "infra" / "terraform" / "variables.tf"
+    ecs_tf = repo_root / "infra" / "terraform" / "ecs.tf"
+
+    var_content = var_tf.read_text(encoding="utf-8")
+    ecs_content = ecs_tf.read_text(encoding="utf-8")
+
+    assert 'variable "agent_strategy"' in var_content
+    assert 'default     = "manual"' in var_content
+    assert 'contains(["manual", "crewai"], var.agent_strategy)' in var_content
+
+    assert 'name  = "AGENT_STRATEGY"' in ecs_content
+    assert "value = var.agent_strategy" in ecs_content

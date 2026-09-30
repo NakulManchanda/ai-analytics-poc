@@ -121,7 +121,7 @@ resource "aws_ecs_task_definition" "ai_app" {
         },
         {
           name  = "AGENT_STRATEGY"
-          value = "manual"
+          value = var.agent_strategy
         }
       ]
       logConfiguration = {

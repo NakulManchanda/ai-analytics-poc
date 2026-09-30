@@ -206,3 +206,14 @@ variable "redis_engine_version" {
     error_message = "redis_engine_version must be a Redis 7.x version (e.g. 7.1)."
   }
 }
+
+variable "agent_strategy" {
+  description = "Agent execution strategy for the ai-app task: manual or crewai."
+  type        = string
+  default     = "manual"
+
+  validation {
+    condition     = contains(["manual", "crewai"], var.agent_strategy)
+    error_message = "agent_strategy must be either 'manual' or 'crewai'."
+  }
+}
