@@ -185,7 +185,9 @@ async def test_async_main_invalid_concurrency_fails_fast(tmp_path: Path):
                 "conversations": [
                     {
                         "conversation_id_prefix": "c1",
-                        "turns": [{"question": "Which pickup zones have the most trips?"}],
+                        "turns": [
+                            {"question": "Which pickup zones have the most trips?"}
+                        ],
                     }
                 ],
             }
