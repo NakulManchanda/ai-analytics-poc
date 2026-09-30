@@ -6,9 +6,7 @@ from pathlib import Path
 from app.query_catalogue import lookup
 from app.scenarios.models import ScenarioConfig
 
-# Anchored to the repo root (services/app/app/scenarios/loader.py -> repo root) so the
-# default works from any CWD.
-DEFAULT_SCENARIOS_DIR = Path(__file__).resolve().parents[4] / "config" / "scenarios"
+DEFAULT_SCENARIOS_DIR = Path("config/scenarios")
 
 
 def load_scenario(
