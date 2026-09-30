@@ -97,6 +97,10 @@ def test_v11_local_api_smoke_recovers_two_turn_conversation_and_sse_contract() -
     assert second["run_id"] != first["run_id"]
     assert conversation_response.status_code == 200
     conversation = conversation_response.json()
+    # Durable storage is user -> tool (D18) -> assistant per turn, but the
+    # reload endpoint the web UI calls excludes role="tool" messages (M2):
+    # they're internal prefix-renderer plumbing, not chat turns, and the UI
+    # has no notion of a tool bubble.
     assert [message["role"] for message in conversation["messages"]] == [
         "user",
         "assistant",
@@ -125,8 +129,10 @@ def test_v11_local_api_smoke_recovers_two_turn_conversation_and_sse_contract() -
     assert context_payload["query_id"] == "qry_v11_integration"
     assert context_payload["row_count"] == 1
     working_context = context_payload["working_context"]
-    assert working_context["stored_message_count"] == 3
-    assert working_context["included_message_count"] == 3
+    # turn 1: user + tool (D18) + assistant (3), turn 2 so far: user + tool (2)
+    # = 5 stored messages by the time turn 2's context is reduced.
+    assert working_context["stored_message_count"] == 5
+    assert working_context["included_message_count"] == 5
     assert working_context["recent_tool_observations"] == [
         {
             "query_id": "qry_v11_integration",

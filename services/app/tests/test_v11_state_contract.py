@@ -157,18 +157,40 @@ def test_two_ask_turns_persist_and_reload_the_durable_conversation() -> None:
     assert second.json()["conversation_id"] == first_payload["conversation_id"]
     assert second.json()["run_id"] != first_payload["run_id"]
     messages = repo.list_messages(first_payload["conversation_id"])
-    assert [(message.role, message.content) for message in messages] == [
-        ("user", "First question."),
-        ("assistant", "JFK Airport has the most trips."),
-        ("user", "Second question."),
-        ("assistant", "JFK Airport has the most trips."),
+    # user -> tool (persisted governed tool observation, D18) -> assistant,
+    # repeated per turn.
+    assert [message.role for message in messages] == [
+        "user",
+        "tool",
+        "assistant",
+        "user",
+        "tool",
+        "assistant",
+    ]
+    assert [message.content for message in messages if message.role != "tool"] == [
+        "First question.",
+        "JFK Airport has the most trips.",
+        "Second question.",
+        "JFK Airport has the most trips.",
     ]
     assert reloaded.status_code == 200
+    # M2: role="tool" messages are internal durable-history plumbing for the
+    # prefix renderer (D18); the web UI has no notion of a tool bubble and
+    # pairs assistant bubbles to runs by adjacency to the preceding user
+    # message, so the reload endpoint must never send them at all -- not
+    # merely be filtered out by the test.
+    assert "tool" not in {message["role"] for message in reloaded.json()["messages"]}
     assert [message["content"] for message in reloaded.json()["messages"]] == [
         "First question.",
         "JFK Airport has the most trips.",
         "Second question.",
         "JFK Airport has the most trips.",
+    ]
+    assert [message["role"] for message in reloaded.json()["messages"]] == [
+        "user",
+        "assistant",
+        "user",
+        "assistant",
     ]
     assert [run["run_id"] for run in reloaded.json()["runs"]] == [
         first_payload["run_id"],

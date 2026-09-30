@@ -30,6 +30,7 @@ from app.prefix import (
     build_query_proposal_partition,
     estimate_tokens,
 )
+from app.prefix_render import render_conversation_prompt
 
 RETRYABLE_BEDROCK_ERROR_CODES = {
     "InternalServerException",
@@ -782,10 +783,19 @@ class ServeLLMClient:
         schema: Mapping[str, object],
         *,
         conversation_id: str | None = None,
+        repo: Any | None = None,
+        current_message_id: str | None = None,
     ) -> ToolProposalResult:
         partition = build_query_proposal_partition(prompt, schema)
         headers = self._build_headers(
             partition=partition, agent_step=1, conversation_id=conversation_id
+        )
+        proposal_messages = self._build_proposal_messages(
+            prompt=prompt,
+            partition=partition,
+            conversation_id=conversation_id,
+            repo=repo,
+            current_message_id=current_message_id,
         )
         tools = [
             {
@@ -830,10 +840,7 @@ class ServeLLMClient:
         ]
         payload: dict[str, Any] = {
             "model": self._model_id,
-            "messages": [
-                {"role": "system", "content": partition.global_shared},
-                {"role": "user", "content": partition.unique_suffix},
-            ],
+            "messages": proposal_messages,
             "tools": tools,
             "tool_choice": "auto",
             "max_tokens": 512,
@@ -849,20 +856,21 @@ class ServeLLMClient:
         query_result: Mapping[str, object],
         *,
         conversation_id: str | None = None,
+        repo: Any | None = None,
+        current_message_id: str | None = None,
     ) -> LLMResult:
         partition = build_query_answer_partition(prompt, query_result)
         headers = self._build_headers(
             partition=partition, agent_step=2, conversation_id=conversation_id
         )
-        user_content = (
-            f"{partition.conversation_shared}\n\n{partition.unique_suffix}".strip()
-        )
         payload: dict[str, Any] = {
             "model": self._model_id,
-            "messages": [
-                {"role": "system", "content": partition.global_shared},
-                {"role": "user", "content": user_content},
-            ],
+            "messages": self._build_answer_messages(
+                partition=partition,
+                conversation_id=conversation_id,
+                repo=repo,
+                current_message_id=current_message_id,
+            ),
             "max_tokens": 1024,
             "stream": False,
             "chat_template_kwargs": {"enable_thinking": self._answer_thinking_enabled},
@@ -876,25 +884,81 @@ class ServeLLMClient:
         delta_callback: Callable[[str], None],
         *,
         conversation_id: str | None = None,
+        repo: Any | None = None,
+        current_message_id: str | None = None,
     ) -> LLMResult:
         partition = build_query_answer_partition(prompt, query_result)
         headers = self._build_headers(
             partition=partition, agent_step=2, conversation_id=conversation_id
         )
-        user_content = (
-            f"{partition.conversation_shared}\n\n{partition.unique_suffix}".strip()
-        )
         payload: dict[str, Any] = {
             "model": self._model_id,
-            "messages": [
-                {"role": "system", "content": partition.global_shared},
-                {"role": "user", "content": user_content},
-            ],
+            "messages": self._build_answer_messages(
+                partition=partition,
+                conversation_id=conversation_id,
+                repo=repo,
+                current_message_id=current_message_id,
+            ),
             "max_tokens": 1024,
             "stream": True,
             "chat_template_kwargs": {"enable_thinking": self._answer_thinking_enabled},
         }
         return self._stream_completion(payload, headers, delta_callback)
+
+    def _build_proposal_messages(
+        self,
+        *,
+        prompt: str,
+        partition: PrefixPartition,
+        conversation_id: str | None,
+        repo: Any | None,
+        current_message_id: str | None = None,
+    ) -> list[dict[str, str]]:
+        """Build the messages payload for tool proposal. Uses the real stored
+        conversation history (prefix contract v2) when a conversation_id and repo
+        are both available; otherwise falls back to today's single-turn payload
+        so call paths without durable state keep working unchanged."""
+        if conversation_id is not None and repo is not None:
+            rendered = render_conversation_prompt(
+                conversation_id,
+                partition.unique_suffix,
+                repo,
+                system_prompt=partition.global_shared,
+                current_message_id=current_message_id,
+            )
+            return rendered.messages
+        return [
+            {"role": "system", "content": partition.global_shared},
+            {"role": "user", "content": partition.unique_suffix},
+        ]
+
+    def _build_answer_messages(
+        self,
+        *,
+        partition: PrefixPartition,
+        conversation_id: str | None,
+        repo: Any | None,
+        current_message_id: str | None = None,
+    ) -> list[dict[str, str]]:
+        """Build the messages payload for the final answer. Uses real stored
+        conversation history (prefix contract v2) when available; otherwise falls
+        back to today's single-turn payload."""
+        if conversation_id is not None and repo is not None:
+            rendered = render_conversation_prompt(
+                conversation_id,
+                partition.unique_suffix,
+                repo,
+                system_prompt=partition.global_shared,
+                current_message_id=current_message_id,
+            )
+            return rendered.messages
+        user_content = (
+            f"{partition.conversation_shared}\n\n{partition.unique_suffix}".strip()
+        )
+        return [
+            {"role": "system", "content": partition.global_shared},
+            {"role": "user", "content": user_content},
+        ]
 
     def _post_completion(
         self, payload: dict[str, Any], headers: dict[str, str]

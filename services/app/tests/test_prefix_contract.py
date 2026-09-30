@@ -96,3 +96,63 @@ def test_build_dataset_profile_partition_structure() -> None:
     assert DEFAULT_SYSTEM_PROMPT in part.global_shared
     assert "2500000" in part.conversation_shared
     assert "How many trips are in the dataset?" in part.unique_suffix
+
+
+def test_exact_token_counts_unavailable_when_not_serve_mode() -> None:
+    """D17: never estimate from word count for the exact-count field; when not
+    in serve mode, counts stay None with a reason."""
+    from app.prefix import build_ask_partition, count_prefix_tokens_exact
+
+    partition = build_ask_partition("What are the busiest pickup zones?")
+    result = count_prefix_tokens_exact(
+        partition, model_id="fake-model", gateway_url=None, is_serve_mode=False
+    )
+    assert result.global_shared_tokens is None
+    assert result.conversation_shared_tokens is None
+    assert result.unique_suffix_tokens is None
+    assert result.token_count_unavailable_reason == "not_serve_mode"
+
+
+def test_exact_token_counts_unavailable_when_tokenize_call_fails() -> None:
+    """A failed /tokenize call (serve mode) must also never fall back to the
+    word-count estimator -- counts stay None with a reason."""
+    import httpx
+    from app.prefix import build_ask_partition, count_prefix_tokens_exact
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("connection refused", request=request)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    partition = build_ask_partition("What are the busiest pickup zones?")
+    result = count_prefix_tokens_exact(
+        partition,
+        model_id="fake-model",
+        gateway_url="http://localhost:18080/serve",
+        is_serve_mode=True,
+        http_client=client,
+    )
+    assert result.global_shared_tokens is None
+    assert result.token_count_unavailable_reason is not None
+    assert result.token_count_unavailable_reason.startswith("tokenize_call_failed")
+
+
+def test_exact_token_counts_succeed_via_gateway_tokenize() -> None:
+    import httpx
+    from app.prefix import build_ask_partition, count_prefix_tokens_exact
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"count": 7, "tokens": list(range(7))})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    partition = build_ask_partition("What are the busiest pickup zones?")
+    result = count_prefix_tokens_exact(
+        partition,
+        model_id="fake-model",
+        gateway_url="http://localhost:18080/serve",
+        is_serve_mode=True,
+        http_client=client,
+    )
+    assert result.token_count_unavailable_reason is None
+    assert result.global_shared_tokens == 7
+    assert result.conversation_shared_tokens == 0
+    assert result.unique_suffix_tokens == 7
