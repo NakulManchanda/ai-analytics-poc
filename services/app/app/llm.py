@@ -784,6 +784,7 @@ class ServeLLMClient:
         *,
         conversation_id: str | None = None,
         repo: Any | None = None,
+        current_message_id: str | None = None,
     ) -> ToolProposalResult:
         partition = build_query_proposal_partition(prompt, schema)
         headers = self._build_headers(
@@ -794,6 +795,7 @@ class ServeLLMClient:
             partition=partition,
             conversation_id=conversation_id,
             repo=repo,
+            current_message_id=current_message_id,
         )
         tools = [
             {
@@ -855,6 +857,7 @@ class ServeLLMClient:
         *,
         conversation_id: str | None = None,
         repo: Any | None = None,
+        current_message_id: str | None = None,
     ) -> LLMResult:
         partition = build_query_answer_partition(prompt, query_result)
         headers = self._build_headers(
@@ -863,7 +866,10 @@ class ServeLLMClient:
         payload: dict[str, Any] = {
             "model": self._model_id,
             "messages": self._build_answer_messages(
-                partition=partition, conversation_id=conversation_id, repo=repo
+                partition=partition,
+                conversation_id=conversation_id,
+                repo=repo,
+                current_message_id=current_message_id,
             ),
             "max_tokens": 1024,
             "stream": False,
@@ -879,6 +885,7 @@ class ServeLLMClient:
         *,
         conversation_id: str | None = None,
         repo: Any | None = None,
+        current_message_id: str | None = None,
     ) -> LLMResult:
         partition = build_query_answer_partition(prompt, query_result)
         headers = self._build_headers(
@@ -887,7 +894,10 @@ class ServeLLMClient:
         payload: dict[str, Any] = {
             "model": self._model_id,
             "messages": self._build_answer_messages(
-                partition=partition, conversation_id=conversation_id, repo=repo
+                partition=partition,
+                conversation_id=conversation_id,
+                repo=repo,
+                current_message_id=current_message_id,
             ),
             "max_tokens": 1024,
             "stream": True,
@@ -902,6 +912,7 @@ class ServeLLMClient:
         partition: PrefixPartition,
         conversation_id: str | None,
         repo: Any | None,
+        current_message_id: str | None = None,
     ) -> list[dict[str, str]]:
         """Build the messages payload for tool proposal. Uses the real stored
         conversation history (prefix contract v2) when a conversation_id and repo
@@ -913,6 +924,7 @@ class ServeLLMClient:
                 partition.unique_suffix,
                 repo,
                 system_prompt=partition.global_shared,
+                current_message_id=current_message_id,
             )
             return rendered.messages
         return [
@@ -926,6 +938,7 @@ class ServeLLMClient:
         partition: PrefixPartition,
         conversation_id: str | None,
         repo: Any | None,
+        current_message_id: str | None = None,
     ) -> list[dict[str, str]]:
         """Build the messages payload for the final answer. Uses real stored
         conversation history (prefix contract v2) when available; otherwise falls
@@ -936,6 +949,7 @@ class ServeLLMClient:
                 partition.unique_suffix,
                 repo,
                 system_prompt=partition.global_shared,
+                current_message_id=current_message_id,
             )
             return rendered.messages
         user_content = (

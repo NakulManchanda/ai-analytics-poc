@@ -786,7 +786,11 @@ class OrchestrationLoop:
                     call_start = self._monotonic()
                     try:
                         proposal_kwargs: dict[str, Any] = (
-                            {"conversation_id": conv_id, "repo": self._repo}
+                            {
+                                "conversation_id": conv_id,
+                                "repo": self._repo,
+                                "current_message_id": user_msg_id,
+                            }
                             if is_self_hosted
                             else {}
                         )
@@ -1136,7 +1140,11 @@ class OrchestrationLoop:
                         llm, "stream_answer_with_query_result", None
                     )
                     answer_kwargs: dict[str, Any] = (
-                        {"conversation_id": conv_id, "repo": self._repo}
+                        {
+                            "conversation_id": conv_id,
+                            "repo": self._repo,
+                            "current_message_id": user_msg_id,
+                        }
                         if is_self_hosted
                         else {}
                     )

@@ -762,3 +762,115 @@ def test_extended_tool_model_proposal_is_parsed_and_validated() -> None:
         latency_ms=0,
     )
     assert parse_query_proposal(bad_proposal) is None
+
+
+def test_turn_two_question_appears_exactly_once_in_rendered_messages() -> None:
+    """M1 regression (loop-level): `prepare_run` durably persists the current
+    turn's raw user message before the renderer runs; the renderer must not
+    also append it, or the question shows up twice in the payload actually
+    sent to the model. Runs a real 2-turn conversation through the loop
+    against a fake ServeLLMClient transport that captures every payload's
+    exact messages list, and asserts turn 2's question string appears
+    exactly once while turn 1's tool result is also present (so this stays a
+    real regression test for the "second highest zone" conversational-prefix
+    bug, not just a duplication check)."""
+    import json as _json
+
+    import httpx
+    from app.llm import ServeLLMClient
+
+    captured_payloads: list[dict[str, Any]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = _json.loads(request.content)
+        captured_payloads.append(payload)
+        if "tools" in payload:
+            return httpx.Response(
+                200,
+                json={
+                    "model": "Qwen/Qwen3-0.6B",
+                    "choices": [
+                        {
+                            "message": {
+                                "tool_calls": [
+                                    {
+                                        "id": "call-1",
+                                        "type": "function",
+                                        "function": {
+                                            "name": "query_taxi_data",
+                                            "arguments": _json.dumps(
+                                                {
+                                                    "analysis": "top_pickup_zones",
+                                                    "limit": 5,
+                                                }
+                                            ),
+                                        },
+                                    }
+                                ]
+                            },
+                            "finish_reason": "tool_calls",
+                        }
+                    ],
+                    "usage": {"prompt_tokens": 30, "completion_tokens": 6},
+                },
+            )
+        return httpx.Response(
+            200,
+            json={
+                "model": "Qwen/Qwen3-0.6B",
+                "choices": [
+                    {
+                        "message": {"content": "JFK Airport leads with 1500 trips."},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {"prompt_tokens": 60, "completion_tokens": 12},
+            },
+        )
+
+    transport = httpx.MockTransport(handler)
+    serve_client = ServeLLMClient(
+        gateway_url="http://localhost:18080/serve",
+        model_id="Qwen/Qwen3-0.6B",
+        http_client=httpx.Client(transport=transport),
+    )
+
+    repo = InMemoryStateRepository()
+    loop = OrchestrationLoop(
+        llm_client=serve_client,
+        mcp_client=FakeMCPClient(),  # type: ignore[arg-type]
+        state_repository=repo,
+    )
+
+    turn_one_question = "Which pickup zones have the most trips?"
+    turn_one = loop.run(turn_one_question)
+    assert turn_one.status == "completed"
+
+    turn_two_question = "What about the second highest zone?"
+    turn_two = loop.run(turn_two_question, conversation_id=turn_one.conversation_id)
+    assert turn_two.status == "completed"
+
+    # The final answer call of turn 2 is the last captured payload without
+    # "tools" (a proposal call), i.e. the last captured payload overall.
+    turn_two_answer_payload = captured_payloads[-1]
+    assert "tools" not in turn_two_answer_payload
+    turn_two_messages = turn_two_answer_payload["messages"]
+
+    occurrences = [m for m in turn_two_messages if m["content"] == turn_two_question]
+    assert len(occurrences) <= 1, (
+        "turn 2's raw question must not appear verbatim more than once "
+        f"in the rendered messages: {turn_two_messages}"
+    )
+    question_mentions = [
+        m for m in turn_two_messages if turn_two_question in m["content"]
+    ]
+    assert len(question_mentions) == 1, (
+        "turn 2's question must appear exactly once in the rendered "
+        f"messages (as the trailing user turn): {turn_two_messages}"
+    )
+
+    all_content = " ".join(m["content"] for m in turn_two_messages)
+    assert "JFK Airport" in all_content or "1500" in all_content, (
+        "turn 2 must still see turn 1's tool result/answer in its rendered "
+        f"history: {turn_two_messages}"
+    )

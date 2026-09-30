@@ -101,3 +101,54 @@ def test_render_with_no_conversation_id_is_single_turn() -> None:
     rendered = render_conversation_prompt(None, "A bare question", repo)
     assert rendered.messages[-1] == {"role": "user", "content": "A bare question"}
     assert len(rendered.messages) == 2  # system + user only
+
+
+def test_current_message_excluded_by_id_is_not_duplicated() -> None:
+    """M1 regression: `prepare_run` persists the current turn's raw user
+    message before the renderer runs. Passing its id must exclude it from
+    history so the trailing appended `new_question` (e.g. the partition's
+    "Question: ..." unique_suffix) is the only occurrence, not a duplicate."""
+    from app.state import Conversation
+
+    repo = InMemoryStateRepository()
+    conv_id = "conv-dedup"
+    repo.create_conversation(Conversation(conversation_id=conv_id))
+
+    _add(repo, conv_id, 1, "user", "How many trips were there in January?")
+    _add(repo, conv_id, 2, "assistant", "There were 42 trips.")
+    _add(repo, conv_id, 3, "user", "What about February?")
+
+    rendered = render_conversation_prompt(
+        conv_id,
+        "Question: What about February?",
+        repo,
+        current_message_id="msg-conv-dedup-3",
+    )
+
+    occurrences = [
+        m for m in rendered.messages if m["content"] == "What about February?"
+    ]
+    assert occurrences == [], "raw current-turn question must not appear verbatim"
+    assert rendered.messages[-1] == {
+        "role": "user",
+        "content": "Question: What about February?",
+    }
+
+
+def test_current_message_excluded_by_content_fallback_when_no_id_given() -> None:
+    """Without a current_message_id, a stored trailing user message whose
+    content already equals new_question is treated as the current turn and
+    excluded, so it isn't duplicated."""
+    from app.state import Conversation
+
+    repo = InMemoryStateRepository()
+    conv_id = "conv-dedup-fallback"
+    repo.create_conversation(Conversation(conversation_id=conv_id))
+
+    _add(repo, conv_id, 1, "user", "Same question text")
+
+    rendered = render_conversation_prompt(conv_id, "Same question text", repo)
+
+    assert (
+        rendered.messages.count({"role": "user", "content": "Same question text"}) == 1
+    )
