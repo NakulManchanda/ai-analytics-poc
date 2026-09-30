@@ -207,3 +207,87 @@ async def test_async_main_invalid_concurrency_fails_fast(tmp_path: Path):
 
     with pytest.raises(ValidationError):
         await async_main(MockInvalidArgs())
+
+
+@pytest.mark.anyio
+async def test_async_main_writes_run_directory_with_sweep(tmp_path: Path, monkeypatch):
+    import httpx
+
+    scen_file = tmp_path / "gw.json"
+    scen_file.write_text(
+        json.dumps(
+            {
+                "name": "gw",
+                "description": "gateway scenario",
+                "target_endpoint_type": "gateway_chat",
+                "conversations": [
+                    {
+                        "turns": [{"question": "q", "tenant_id": "t1"}],
+                    },
+                    {"turns": [{"question": "q2"}]},
+                ],
+            }
+        )
+    )
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if "/metrics" in str(request.url):
+            return httpx.Response(200, text="vllm:prefix_cache_hits_total 1.0\n")
+        return httpx.Response(
+            200,
+            headers={"x-place-decision": "w1"},
+            json={"id": "i", "usage": {"prompt_tokens": 1, "completion_tokens": 4}},
+        )
+
+    original = httpx.AsyncClient
+
+    def factory(*a, **kw):
+        kw["transport"] = httpx.MockTransport(handler)
+        return original(*a, **kw)
+
+    monkeypatch.setattr(httpx, "AsyncClient", factory)
+    monkeypatch.setenv("MODEL_REVISION", "rev123")
+
+    class Args:
+        scenario = str(scen_file)
+        target_url = "http://gw:18080"
+        metrics_url = "http://gw:18001/metrics"
+        concurrency = None
+        strategy = None
+        endpoint_type = None
+        timeout = 10.0
+        no_sse = False
+        output_dir = str(tmp_path / "evidence")
+        sweep_concurrency = "1,2"
+        label = "least_loaded"
+        ttft_slo_ms = 100.0
+        e2e_slo_ms = 3500.0
+        topology = None
+        engine_flags = "--max-num-seqs 8"
+
+    assert await async_main(Args()) == 0
+    runs = [p for p in (tmp_path / "evidence").iterdir() if p.is_dir()]
+    assert len(runs) == 1
+    run = runs[0]
+    manifest = json.loads((run / "manifest.json").read_text())
+    assert manifest["scenario"]["name"] == "gw"
+    assert len(manifest["scenario"]["sha256"]) == 64
+    assert manifest["policy_under_test"] == "least_loaded"
+    assert manifest["slos"]["interactive_ttft_slo_ms"] == 100.0
+    assert "A100" in manifest["topology"]
+    assert manifest["model_revision"] == "rev123"
+    assert manifest["tokenizer_revision"] == "unknown"
+    assert manifest["engine_flags"] == "--max-num-seqs 8"
+    assert "MUST NOT be attributed" in manifest["evidence_scope"]
+    assert manifest["gateway_base_url"] == "http://gw:18080"
+    assert manifest["started_at"] and manifest["ended_at"]
+    lines = (run / "requests.jsonl").read_text().splitlines()
+    assert len(lines) == 4
+    rec = json.loads(lines[0])
+    assert rec["offered_concurrency"] in (1, 2)
+    assert rec["gateway_headers"]["x-place-decision"] == "w1"
+    summary = json.loads((run / "summary.json").read_text())
+    assert [lv["offered_concurrency"] for lv in summary["levels"]] == [1, 2]
+    assert summary["levels"][0]["prometheus_window"]["scope"] == "window"
+    assert (run / "sweep.csv").read_text().startswith("offered_concurrency")
+    assert json.loads((run / "sweep.json").read_text())[1]["offered_concurrency"] == 2

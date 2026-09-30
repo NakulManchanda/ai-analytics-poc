@@ -4,6 +4,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+WorkloadClass = Literal["interactive", "batch"]
+
 
 class ScenarioTurn(BaseModel):
     """A single turn within a conversation."""
@@ -15,6 +17,14 @@ class ScenarioTurn(BaseModel):
     delay_seconds: float = Field(
         default=0.0, ge=0.0, description="Optional delay before submitting this turn"
     )
+    workload_class: WorkloadClass | None = Field(
+        default=None, description="Sent as x-request-priority on gateway_chat"
+    )
+    tenant_id: str | None = Field(default=None, description="Sent as x-tenant-id")
+    deadline_ms: int | None = Field(
+        default=None, gt=0, description="Per-turn E2E deadline; sent as x-deadline-ms"
+    )
+    prefix_id: str | None = Field(default=None, description="Sent as x-prefix-id")
 
 
 class ScenarioConversation(BaseModel):
@@ -25,6 +35,12 @@ class ScenarioConversation(BaseModel):
     )
     turns: list[ScenarioTurn] = Field(
         ..., min_length=1, description="Sequential turns in this conversation"
+    )
+    workload_class: WorkloadClass | None = Field(
+        default=None, description="Default workload class for turns that omit it"
+    )
+    tenant_id: str | None = Field(
+        default=None, description="Default tenant for turns that omit it"
     )
 
 

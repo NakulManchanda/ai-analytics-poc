@@ -13,6 +13,19 @@ from app.scenarios.models import ScenarioConfig, ScenarioConversation, ScenarioT
 
 logger = logging.getLogger(__name__)
 
+GATEWAY_DECISION_HEADERS = (
+    "x-place-decision",
+    "x-placement-policy",
+    "x-placement-reason",
+    "x-intended-action",
+    "x-admit-decision",
+    "x-queue-decision",
+    "x-queue-wait-ms",
+    "x-overflow",
+    "x-overflow-reason",
+    "x-guard-decision",
+)
+
 
 def calculate_percentiles(values: list[float]) -> dict[str, float]:
     if not values:
@@ -48,6 +61,21 @@ class TurnResult(BaseModel):
     tokens_out: int = 0
     error: str | None = None
     turn_metadata: dict[str, Any] = Field(default_factory=dict)
+    # Per-request evidence. client_duration_ms is the end-to-end latency.
+    started_at: float | None = None  # wall-clock epoch seconds
+    ended_at: float | None = None
+    workload_class: str | None = None
+    tenant_id: str | None = None
+    deadline_ms: int | None = None
+    # Raw gateway decision headers; None when headers are not visible (app_runs).
+    gateway_headers: dict[str, str] | None = None
+
+
+def _defaults(conv: ScenarioConversation, turn: ScenarioTurn) -> dict[str, Any]:
+    return {
+        "workload_class": turn.workload_class or conv.workload_class,
+        "tenant_id": turn.tenant_id or conv.tenant_id,
+    }
 
 
 class ConversationResult(BaseModel):
@@ -80,12 +108,14 @@ class ScenarioReplayer:
         client: httpx.AsyncClient | None = None,
         timeout: float = 120.0,
         use_sse: bool = True,
+        gateway_stream: bool = True,
     ) -> None:
         self.config = config
         self.target_base_url = target_base_url.rstrip("/")
         self.client = client
         self.timeout = timeout
         self.use_sse = use_sse
+        self.gateway_stream = gateway_stream
 
     async def run(self) -> ReplaySummary:
         start_time = time.perf_counter()
@@ -159,7 +189,12 @@ class ScenarioReplayer:
                 if turn.delay_seconds > 0:
                     await asyncio.sleep(turn.delay_seconds)
 
-                turn_res = await self._execute_turn(conv_id, turn_idx, turn, client)
+                turn_res = await self._execute_turn(
+                    conv_id,
+                    turn_idx,
+                    turn.model_copy(update=_defaults(conv, turn)),
+                    client,
+                )
                 results.append(turn_res)
                 conv_id = turn_res.conversation_id or conv_id
                 if turn_res.status != "completed":
@@ -179,11 +214,21 @@ class ScenarioReplayer:
         turn: ScenarioTurn,
         client: httpx.AsyncClient,
     ) -> TurnResult:
+        started_at = time.time()
         if self.config.target_endpoint_type == "gateway_chat":
-            return await self._execute_gateway_turn(
+            result = await self._execute_gateway_turn(
                 conversation_id, turn_index, turn, client
             )
-        return await self._execute_app_turn(conversation_id, turn_index, turn, client)
+        else:
+            result = await self._execute_app_turn(
+                conversation_id, turn_index, turn, client
+            )
+        result.started_at = started_at
+        result.ended_at = time.time()
+        result.workload_class = turn.workload_class or "interactive"
+        result.tenant_id = turn.tenant_id
+        result.deadline_ms = turn.deadline_ms
+        return result
 
     async def _execute_app_turn(
         self,
@@ -454,39 +499,102 @@ class ScenarioReplayer:
             "max_tokens": 512,
             "temperature": 0.0,
         }
+        if self.gateway_stream:
+            payload["stream"] = True
+            payload["stream_options"] = {"include_usage": True}
         headers = {
             "x-conversation-id": conversation_id,
             "x-agent-step": str(turn_index + 1),
         }
+        for name, value in (
+            ("x-request-priority", turn.workload_class),
+            ("x-tenant-id", turn.tenant_id),
+            ("x-deadline-ms", turn.deadline_ms),
+            ("x-prefix-id", turn.prefix_id),
+        ):
+            if value is not None:
+                headers[name] = str(value)
 
         try:
-            resp = await client.post(
-                url, json=payload, headers=headers, timeout=self.timeout
-            )
-            duration_ms = (time.perf_counter() - t_start) * 1000.0
-            if resp.status_code == 200:
-                data = resp.json()
-                usage = data.get("usage", {})
-                tokens_in = usage.get("prompt_tokens", 0)
-                tokens_out = usage.get("completion_tokens", 0)
+            async with client.stream(
+                "POST", url, json=payload, headers=headers, timeout=self.timeout
+            ) as resp:
+                seen = {
+                    h: resp.headers[h]
+                    for h in GATEWAY_DECISION_HEADERS
+                    if h in resp.headers
+                }
+                is_sse = "text/event-stream" in resp.headers.get("content-type", "")
+                if resp.status_code != 200 or not is_sse:
+                    body = await resp.aread()
+                    duration_ms = (time.perf_counter() - t_start) * 1000.0
+                    if resp.status_code != 200:
+                        return TurnResult(
+                            conversation_id=conversation_id,
+                            turn_index=turn_index,
+                            prompt=turn.question,
+                            status=f"http_{resp.status_code}",
+                            client_duration_ms=duration_ms,
+                            gateway_headers=seen,
+                            error=f"Gateway error: {resp.status_code} - "
+                            f"{body.decode(errors='replace')[:200]}",
+                        )
+                    data = json.loads(body)
+                    usage = data.get("usage") or {}
+                    return TurnResult(
+                        conversation_id=conversation_id,
+                        turn_index=turn_index,
+                        prompt=turn.question,
+                        run_id=data.get("id"),
+                        status="completed",
+                        client_duration_ms=duration_ms,
+                        tokens_in=usage.get("prompt_tokens", 0),
+                        tokens_out=usage.get("completion_tokens", 0),
+                        gateway_headers=seen,
+                    )
+
+                ttft: float | None = None
+                chunks = 0
+                usage: dict[str, Any] = {}
+                run_id: str | None = None
+                error: str | None = None
+                async for line in resp.aiter_lines():
+                    if not line.startswith("data:"):
+                        continue
+                    raw = line[len("data:") :].strip()
+                    if raw == "[DONE]":
+                        break
+                    try:
+                        chunk = json.loads(raw)
+                    except ValueError:
+                        continue
+                    if not isinstance(chunk, dict):
+                        continue
+                    if chunk.get("error"):
+                        error = str(chunk["error"])[:200]
+                        break
+                    run_id = run_id or chunk.get("id")
+                    usage = chunk.get("usage") or usage
+                    for choice in chunk.get("choices") or []:
+                        if (choice.get("delta") or {}).get("content"):
+                            chunks += 1
+                            if ttft is None:
+                                ttft = (time.perf_counter() - t_start) * 1000.0
+                duration_ms = (time.perf_counter() - t_start) * 1000.0
                 return TurnResult(
                     conversation_id=conversation_id,
                     turn_index=turn_index,
                     prompt=turn.question,
-                    run_id=data.get("id"),
-                    status="completed",
+                    run_id=run_id,
+                    status="stream_error" if error else "completed",
                     client_duration_ms=duration_ms,
-                    tokens_in=tokens_in,
-                    tokens_out=tokens_out,
+                    server_ttft_ms=ttft,
+                    tokens_in=usage.get("prompt_tokens", 0),
+                    # Fallback when usage is absent: content chunk count (~1 token each).
+                    tokens_out=usage.get("completion_tokens", chunks),
+                    gateway_headers=seen,
+                    error=error,
                 )
-            return TurnResult(
-                conversation_id=conversation_id,
-                turn_index=turn_index,
-                prompt=turn.question,
-                status=f"http_{resp.status_code}",
-                client_duration_ms=duration_ms,
-                error=f"Gateway error: {resp.status_code} - {resp.text[:200]}",
-            )
         except Exception as exc:
             duration_ms = (time.perf_counter() - t_start) * 1000.0
             return TurnResult(
