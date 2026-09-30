@@ -69,3 +69,4 @@ Monotonically numbered log of every post-bootstrap task. Each entry records the 
 - [0063 — Isolated Lambda inference cluster bundle](0063-lambda-inference-cluster.md) — [PR #131](https://github.com/NakulManchanda/ai-analytics-poc/pull/131), Open draft
 - [0072 — Replayer and scenario loader review follow-ups](0072-replayer-review-followups.md) — #142 review fixes
 - [0073 — Control plane Slice 1: placement foundation](0073-control-plane-placement-foundation.md) — #122
+- [0074 — Control plane Slice 2: admission and tenant quotas](0074-control-plane-admission.md) — #122

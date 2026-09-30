@@ -1,4 +1,4 @@
-"""Inference Gateway: guard -> place -> proxy to vLLM Worker A/B (#121, #122 slice 1)."""
+"""Inference Gateway: guard -> tenant quota -> admit -> place -> proxy (#121, #122 slices 1-2)."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ import contextlib
 import json
 import logging
 import os
+import time
 
 import httpx
 from fastapi import FastAPI, Header, HTTPException, Request, Response
@@ -15,10 +16,14 @@ from fastapi.responses import JSONResponse, StreamingResponse
 try:  # package import (tests) or flat import (ConfigMap mounted at /app, `uvicorn main:app`)
     from . import guard as guard_mod
     from . import metrics, placement
+    from .admission import AdmitConfig, AdmitRequest, Shed, should_shed
+    from .tenants import TenantQuota
     from .workers import build_registry
 except ImportError:
     import guard as guard_mod
     import placement
+    from admission import AdmitConfig, AdmitRequest, Shed, should_shed
+    from tenants import TenantQuota
     from workers import build_registry
 
     import metrics
@@ -30,6 +35,8 @@ PLACEMENT_POLICY = os.getenv("PLACEMENT_POLICY", "prefix_then_load")
 SNAPSHOT_REFRESH_S = float(os.getenv("SNAPSHOT_REFRESH_S", "1.0"))
 SNAPSHOT_STALE_S = float(os.getenv("SNAPSHOT_STALE_S", "5.0"))
 
+ADMIT_CFG = AdmitConfig.from_env()
+quota = TenantQuota.from_env()
 registry = build_registry()
 DEFAULT_WORKER_URL = registry.snapshots["worker_a"].worker.url  # /tokenize goes to A
 
@@ -42,6 +49,9 @@ async def lifespan(_: FastAPI):
                 await registry.refresh(client)
                 await asyncio.sleep(SNAPSHOT_REFRESH_S)
 
+    # One awaited scrape before serving so the first request does not see no_signal.
+    async with httpx.AsyncClient(timeout=2.0) as client:
+        await registry.refresh(client)
     task = asyncio.create_task(refresh_loop())
     try:
         yield
@@ -101,6 +111,13 @@ async def tokenize(request: Request) -> Response:
     return JSONResponse(status_code=upstream_resp.status_code, content=content)
 
 
+def _int_or_none(value: str | None) -> int | None:
+    try:
+        return int(value) if value is not None and int(value) >= 0 else None
+    except ValueError:
+        return None
+
+
 @app.api_route("/serve", methods=["POST"])
 @app.api_route("/v1/chat/completions", methods=["POST"])
 async def serve_completion(
@@ -138,15 +155,40 @@ async def serve_completion(
         "workload_class": klass,
     }
 
-    def reject(status: int, code: str, reason: str, stage: str, **hdrs: str) -> JSONResponse:
+    lease = None
+    tenant = quota.bucket_name(x_tenant_id)
+
+    def reject(
+        status: int,
+        code: str,
+        reason: str,
+        stage: str,
+        extra: dict | None = None,
+        **hdrs: str,
+    ) -> JSONResponse:
+        if lease is not None:
+            lease.release()
         metrics.REQUESTS.labels(str(status), klass).inc()
-        log.info(json.dumps({**log_fields, "stage": stage, "code": code, "reason": reason}))
+        log.info(
+            json.dumps(
+                {
+                    **log_fields,
+                    "stage": stage,
+                    "code": code,
+                    "reason": reason,
+                    **(extra or {}),
+                }
+            )
+        )
         headers = {**correlation_headers, "x-orchestration-stage": stage, **hdrs}
         return JSONResponse(
-            status_code=status, content={"error": code, "detail": reason}, headers=headers
+            status_code=status,
+            content={"error": code, "detail": reason},
+            headers=headers,
         )
 
-    verdict = guard_mod.inspect(body, estimated_tokens_header=x_estimated_prompt_tokens)
+    with metrics.timed("guard", klass):
+        verdict = guard_mod.inspect(body, estimated_tokens_header=x_estimated_prompt_tokens)
     if not verdict.ok:
         metrics.GUARD_REJECT.labels(verdict.code).inc()
         return reject(
@@ -154,18 +196,64 @@ async def serve_completion(
             verdict.code,
             verdict.reason,
             "guard",
-            **{"x-guard-decision": f"reject:{verdict.code}"},
+            **{
+                "x-guard-decision": f"reject:{verdict.code}",
+                "x-admit-decision": "not_evaluated",
+            },
         )
 
     est_tokens = guard_mod.estimate_prompt_tokens(body, x_estimated_prompt_tokens)
-    decision = placement.pick(
-        placement.PlacementRequest(x_prefix_id, est_tokens, klass, x_force_worker),
-        list(registry.snapshots.values()),
-        policy=PLACEMENT_POLICY,
-        stale_after=SNAPSHOT_STALE_S,
-        rr_index=registry.next_rr(),
-        allow_forced=os.getenv("ALLOW_FORCED_PLACEMENT") == "1",
+    now = time.monotonic()
+    with metrics.timed("admit", klass):
+        result = quota.acquire(x_tenant_id, est_tokens, now)
+        if not isinstance(result, Shed):
+            lease = result
+            result = should_shed(
+                AdmitRequest(est_tokens, _int_or_none(x_deadline_ms), klass),
+                list(registry.snapshots.values()),
+                now=now,
+                cfg=ADMIT_CFG,
+            )
+    if isinstance(result, Shed):
+        metrics.ADMIT.labels("shed", result.reason, klass).inc()
+        metrics.SHED.labels(result.reason, klass, str(result.code)).inc()
+        metrics.TENANT_REQUESTS.labels(tenant, "shed").inc()
+        return reject(
+            result.code,
+            result.reason,
+            "request shed by admission",
+            "admit",
+            {
+                "admission_inputs": result.inputs,
+                "never_overflow": result.never_overflow,
+            },
+            **{
+                "x-admit-decision": f"shed:{result.reason}",
+                "retry-after": str(result.retry_after_seconds),
+            },
+        )
+    metrics.ADMIT.labels("accept", "ok", klass).inc()
+    metrics.TENANT_REQUESTS.labels(tenant, "admitted").inc()
+    log.info(
+        json.dumps(
+            {
+                **log_fields,
+                "stage": "admit",
+                "decision": "accept",
+                "admission_inputs": result.inputs,
+            }
+        )
     )
+
+    with metrics.timed("place", klass):
+        decision = placement.pick(
+            placement.PlacementRequest(x_prefix_id, est_tokens, klass, x_force_worker),
+            list(registry.snapshots.values()),
+            policy=PLACEMENT_POLICY,
+            stale_after=SNAPSHOT_STALE_S,
+            rr_index=registry.next_rr(),
+            allow_forced=os.getenv("ALLOW_FORCED_PLACEMENT") == "1",
+        )
     if isinstance(decision, placement.PlacementError):
         metrics.PLACEMENT_ERRORS.labels(decision.reason).inc()
         return reject(503, decision.reason, "no worker available for placement", "place")
@@ -192,7 +280,11 @@ async def serve_completion(
     snap.inflight += 1
     snap.inflight_tokens += est_tokens
 
+    proxy_start = time.perf_counter()
+
     def release(status: int) -> None:
+        lease.release()
+        metrics.STAGE_DURATION.labels("proxy", klass).observe(time.perf_counter() - proxy_start)
         snap.inflight -= 1
         snap.inflight_tokens -= est_tokens
         metrics.REQUESTS.labels(str(status), klass).inc()

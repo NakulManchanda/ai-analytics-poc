@@ -314,7 +314,7 @@ def test_gateway_guard_reject_and_placement_error(gw) -> None:
     for s in reg.snapshots.values():
         s.healthy = False
     r = client.post("/serve", json={"messages": MSG})
-    assert r.status_code == 503 and r.json()["error"] == "no_healthy_worker"
+    assert r.status_code == 503 and r.json()["error"] == "no_signal"  # admission fails closed first
     assert r.headers["x-place-decision"] == "none"
 
 
