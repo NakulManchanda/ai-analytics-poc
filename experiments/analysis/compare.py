@@ -71,11 +71,12 @@ def check_manifests(a: Run, b: Run, varied: tuple[str, ...] = ()) -> dict[str, A
 
     match      no concrete value differs (inputs and non-varied execution controls).
     proven     every required field is concrete in BOTH manifests (missing/unknown => unprovable).
-    comparable match and proven; a varied control must also really differ.
+    comparable match, proven, and every `varied` control concrete in BOTH runs and unequal
+               (treatment_varied / treatment_problems); E2 passes no `varied`.
     Execution controls (policy, admission, router, stream, ...) must be identical except `varied`.
     """
     ma, mb = a.manifest, b.manifest
-    mismatches, unprovable, warnings = [], [], []
+    mismatches, unprovable, warnings, treatment_problems = [], [], [], []
     if not ma or not mb:
         unprovable.append("manifest (missing in at least one run)")
     else:
@@ -88,9 +89,23 @@ def check_manifests(a: Run, b: Run, varied: tuple[str, ...] = ()) -> dict[str, A
         for f in EXECUTION_FIELDS:
             va, vb = _execution(ma, f), _execution(mb, f)
             if f in varied:
-                if va == vb:
-                    warnings.append(
-                        f"{f} is identical in both runs: treatment not varied"
+                if _unprovable(va) or _unprovable(vb):
+                    treatment_problems.append(
+                        {
+                            "field": f"execution.{f}",
+                            "reason": "unprovable",
+                            "a": va,
+                            "b": vb,
+                        }
+                    )
+                elif va == vb:
+                    treatment_problems.append(
+                        {
+                            "field": f"execution.{f}",
+                            "reason": "same value in both runs",
+                            "a": va,
+                            "b": vb,
+                        }
                     )
                 continue
             # policy/admission may legitimately be None (not requested) in both runs.
@@ -110,11 +125,17 @@ def check_manifests(a: Run, b: Run, varied: tuple[str, ...] = ()) -> dict[str, A
         warnings.append(
             "NOT PROVEN like-for-like; missing/unknown: " + ", ".join(unprovable)
         )
+    for t in treatment_problems:
+        warnings.append(f"TREATMENT NOT VARIED/PROVEN: {t['field']} {t['reason']}")
+    if varied and (not ma or not mb):
+        treatment_problems.append({"field": "manifest", "reason": "unprovable"})
     match, proven = not mismatches, not unprovable
     return {
         "match": match,
         "proven": proven,
-        "comparable": match and proven,
+        "treatment_varied": bool(varied) and not treatment_problems,
+        "treatment_problems": treatment_problems,
+        "comparable": match and proven and not treatment_problems,
         "mismatches": mismatches,
         "unprovable_fields": unprovable,
         "warnings": warnings,
@@ -132,7 +153,15 @@ def _gate(
     }
     if check["comparable"]:
         return {**out, **body, "warnings": warns}
-    why = "differing inputs" if check["mismatches"] else "unprovable parity metadata"
+    why = (
+        "differing inputs"
+        if check["mismatches"]
+        else (
+            "unprovable parity metadata"
+            if not check["proven"]
+            else "treatment not varied or unprovable"
+        )
+    )
     return {
         **out,
         "warnings": [

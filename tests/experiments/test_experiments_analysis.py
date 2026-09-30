@@ -110,10 +110,53 @@ def test_manifest_mismatch_and_unverified_controls_are_warned(tmp_path: Path) ->
     )
 
 
-def test_identical_treatment_is_warned() -> None:
-    run = _run("e3_least_loaded")
-    check = check_manifests(run, run, varied=("policy_override",))
-    assert check["match"] and "not varied" in check["warnings"][0]
+def test_unchanged_or_unproven_treatment_is_not_comparable(tmp_path: Path) -> None:
+    ll = _run("e3_least_loaded")
+    same = e3_compare(ll, _run("e3_least_loaded"))
+    assert same["comparable"] is False and "NOT COMPARABLE" in same["warnings"][0]
+    assert same["manifest_check"]["treatment_varied"] is False
+    assert (
+        same["manifest_check"]["treatment_problems"][0]["reason"]
+        == "same value in both runs"
+    )
+    assert "runs" not in same and "runs" in same["not_comparable_numbers"]
+
+    e4_same = e4_compare(_run("e4_admission_on"), _run("e4_admission_on"))
+    assert (
+        e4_same["comparable"] is False and "runs" in e4_same["not_comparable_numbers"]
+    )
+
+    def drop(m):
+        m["execution"]["policy_override"] = "unknown"
+        m["policy_override_requested"] = "unknown"
+
+    def none_(m):
+        m["execution"].pop("policy_override")
+        m.pop("policy_override_requested")
+
+    for n, edit in enumerate((drop, none_)):
+        b = load_run(_edit_manifest(tmp_path / str(n), "e3_prefix_then_load", edit))
+        res = e3_compare(ll, b)
+        assert res["comparable"] is False
+        assert res["manifest_check"]["treatment_problems"][0]["reason"] == "unprovable"
+        assert "runs" in res["not_comparable_numbers"]
+        both = load_run(_edit_manifest(tmp_path / f"b{n}", "e3_least_loaded", edit))
+        assert e3_compare(both, b)["comparable"] is False
+
+
+def test_genuinely_varied_treatment_is_comparable_and_e2_needs_none() -> None:
+    chk = check_manifests(
+        _run("e3_least_loaded"),
+        _run("e3_prefix_then_load"),
+        varied=("policy_override",),
+    )
+    assert chk["treatment_varied"] is True and chk["treatment_problems"] == []
+    assert (
+        e4_compare(_run("e4_admission_off"), _run("e4_admission_on"))["comparable"]
+        is True
+    )
+    e2 = e2_prefix_reuse(_run("e2_cold"), _run("e2_reused"))
+    assert e2["comparable"] is True and e2["manifest_check"]["treatment_problems"] == []
 
 
 def test_e4_compare_sheds_fairness_and_batch_starvation() -> None:

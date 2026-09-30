@@ -115,7 +115,9 @@ scenario hash, `execution.policy_override`, `execution.admission_mode`, `router_
 SLOs, topology, model/tokenizer/chat-template revisions, engine flags, vLLM version, KV block size, `max_tokens`,
 prefix size and offered-concurrency levels. Missing or `unknown` values also make the pair unproven
 (`proven: false`), so export `VLLM_VERSION`/`KV_BLOCK_SIZE` and the revision variables per section 0.
-The same gate applies to E3 and E4 (only `policy_override`, respectively `admission_mode`, may differ).
+The same gate applies to E3 and E4: only `policy_override` (E3), respectively `admission_mode` (E4), may differ,
+and that control must be concrete and DIFFERENT in the two manifests; the same value twice, or a missing/`unknown`
+one, makes the pair `comparable: false` (`manifest_check.treatment_problems`). E2 varies no control.
 `e3_least_loaded` vs `e3_prefix_then_load` is NOT a valid E2 pair.
 
  `e3_routing_mixed` under
