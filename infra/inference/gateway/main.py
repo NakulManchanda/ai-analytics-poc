@@ -350,6 +350,11 @@ async def serve_completion(
 
     client = httpx.AsyncClient(timeout=60.0)
 
+    async def stream_cleanup() -> None:
+        # Safety net if the client disconnects before the generator ever starts.
+        release(499)
+        await client.aclose()
+
     if bool(body.get("stream", False)):
 
         async def stream_generator():
@@ -381,8 +386,7 @@ async def serve_completion(
             stream_generator(),
             media_type="text/event-stream",
             headers=correlation_headers,
-            # Safety net if the client disconnects before the generator ever starts.
-            background=BackgroundTask(release, 499),
+            background=BackgroundTask(stream_cleanup),
         )
 
     try:
