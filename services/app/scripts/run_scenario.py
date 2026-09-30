@@ -139,7 +139,8 @@ async def async_main(args: argparse.Namespace) -> int:
     if args.strategy is not None:
         config.strategy = args.strategy
         logger.info(
-            "Scenario reporting strategy set to '%s'. (Note: Target application executes the strategy configured by its AGENT_STRATEGY env var at boot).",
+            "Scenario reporting strategy set to '%s'. (Note: Target application executes "
+            "the strategy configured by its AGENT_STRATEGY env var at boot).",
             config.strategy,
         )
 

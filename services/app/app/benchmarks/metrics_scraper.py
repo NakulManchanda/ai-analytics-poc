@@ -169,7 +169,7 @@ def compute_metrics_delta(
     queue_sum = deltas.get("vllm:request_queue_time_seconds_sum", 0.0)
     avg_queue = (queue_sum / queue_count) if queue_count > 0 else None
 
-    # Gauges snapshot from after (prefer vllm:kv_cache_usage_perc, fallback to gpu_cache_usage_factor)
+    # Gauges snapshot from after (prefer kv_cache_usage_perc, fallback to gpu_cache_usage_factor)
     gpu_cache_usage = after.get_first_value("vllm:kv_cache_usage_perc")
     if gpu_cache_usage is None:
         gpu_cache_usage = after.get_first_value("vllm:gpu_cache_usage_factor")
