@@ -88,7 +88,8 @@ directly, has no raw SQL access, and operates under strict execution budgets and
 | **Answer-phase code volume** | ~140 lines in `loop.py` | ~250 lines (`crewai_strategy.py` + `loop.py` branch) |
 | **Replaces `loop.py` foundation?** | No (is foundation) | No (relies entirely on `loop.py`'s ~1,200 lines for tool governance, MCP, state, budgets) |
 | **Model calls in answer phase** | 1 call | 2 calls (researcher + writer) |
-| **Answer-phase token usage** | 15 in / 8 out (~23 total) | 30 in / 16 out (~46 total) |
+| **Answer-phase token usage (Bedrock nova-micro)** | 97 in / 33 out (~130 total) | 901 in / 257 out (~1,158 total) |
+| **Answer-phase latency (Bedrock nova-micro)** | 790 ms | 1,145 ms (639ms researcher + 506ms writer) |
 | **External dependencies** | 0 extra | ~50 transitive packages (crewai, litellm, chromadb, etc.) |
 
 **Conclusion on "less code":** CrewAI did not reduce orchestration code. Caging it inside safety,
@@ -99,5 +100,7 @@ verified growing-prefix reuse.
 ## Verification
 
 - `source .venv/bin/activate && pytest` -> 216 passed, 0 failures.
-- `source .venv/bin/activate && black --check app tests` -> all checks passed.
+- `source .venv/bin/activate && ruff check app tests && black --check app tests` -> all checks passed.
 - `git diff --check` -> clean, no whitespace or formatting errors.
+- Real AWS Bedrock end-to-end runs (`amazon.nova-micro-v1:0` in `us-east-1`) verified both `manual` and `crewai` strategies cleanly.
+- GitHub Actions CI checks on PR #141 are 100% green.
