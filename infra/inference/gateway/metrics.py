@@ -5,11 +5,15 @@ High-cardinality values (request/conversation/prefix ids) go to the decision log
 
 from __future__ import annotations
 
+import contextlib
+import time
+
 from prometheus_client import (
     CONTENT_TYPE_LATEST,
     CollectorRegistry,
     Counter,
     Gauge,
+    Histogram,
     generate_latest,
 )
 
@@ -21,22 +25,61 @@ REQUESTS = Counter(
 )
 GUARD_REJECT = Counter("guard_reject_total", "Guard rejections", ["reason"], registry=REGISTRY)
 PICKS = Counter(
-    "orch_pick_total", "Placement picks", ["policy", "worker", "reason"], registry=REGISTRY
+    "orch_pick_total",
+    "Placement picks",
+    ["policy", "worker", "reason"],
+    registry=REGISTRY,
 )
 PLACEMENT_ERRORS = Counter(
     "placement_error_total", "Placement errors", ["reason"], registry=REGISTRY
 )
 WORKER_HEALTH = Gauge(
-    "worker_health", "1 for the worker's current state", ["worker", "state"], registry=REGISTRY
+    "worker_health",
+    "1 for the worker's current state",
+    ["worker", "state"],
+    registry=REGISTRY,
 )
 SNAPSHOT_AGE = Gauge(
-    "worker_snapshot_age_seconds", "Age of last good snapshot", ["worker"], registry=REGISTRY
+    "worker_snapshot_age_seconds",
+    "Age of last good snapshot",
+    ["worker"],
+    registry=REGISTRY,
 )
 
 
 STALE_FALLBACK = Counter(
-    "stale_snapshot_fallback_total", "Placements made on stale snapshots", registry=REGISTRY
+    "stale_snapshot_fallback_total",
+    "Placements made on stale snapshots",
+    registry=REGISTRY,
 )
+ADMIT = Counter(
+    "orch_admit_total",
+    "Admission decisions",
+    ["decision", "reason", "class"],
+    registry=REGISTRY,
+)
+SHED = Counter("orch_shed_total", "Shed requests", ["reason", "class", "code"], registry=REGISTRY)
+TENANT_REQUESTS = Counter(
+    "orch_tenant_total",
+    "Tenant outcomes (tenant is an allowlisted bucket or 'other')",
+    ["tenant", "outcome"],
+    registry=REGISTRY,
+)
+STAGE_DURATION = Histogram(
+    "gateway_request_duration_seconds",
+    "Time spent per gateway pipeline stage",
+    ["stage", "class"],
+    registry=REGISTRY,
+)
+
+
+@contextlib.contextmanager
+def timed(stage: str, klass: str):
+    start = time.perf_counter()
+    try:
+        yield
+    finally:
+        STAGE_DURATION.labels(stage, klass).observe(time.perf_counter() - start)
 
 
 def observe_snapshots(snaps, stale_after: float) -> None:
