@@ -34,7 +34,7 @@ class RenderedPrompt:
 def render_conversation_prompt(
     conversation_id: str | None,
     new_question: str,
-    repo: "StateRepository",
+    repo: StateRepository,
     *,
     system_prompt: str = DEFAULT_SYSTEM_PROMPT,
     current_message_id: str | None = None,

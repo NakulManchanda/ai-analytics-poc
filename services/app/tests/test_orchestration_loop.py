@@ -638,7 +638,9 @@ def test_non_catalogue_question_records_tool_source_model_and_gets_prior_turn_co
                                     {
                                         "function": {
                                             "name": "query_taxi_data",
-                                            "arguments": '{"analysis": "top_pickup_zones", "limit": 5}',
+                                            "arguments": (
+                                                '{"analysis": "top_pickup_zones", "limit": 5}'
+                                            ),
                                         }
                                     }
                                 ],

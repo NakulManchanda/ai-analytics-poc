@@ -117,7 +117,6 @@ def test_exact_token_counts_unavailable_when_tokenize_call_fails() -> None:
     """A failed /tokenize call (serve mode) must also never fall back to the
     word-count estimator -- counts stay None with a reason."""
     import httpx
-
     from app.prefix import build_ask_partition, count_prefix_tokens_exact
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -139,7 +138,6 @@ def test_exact_token_counts_unavailable_when_tokenize_call_fails() -> None:
 
 def test_exact_token_counts_succeed_via_gateway_tokenize() -> None:
     import httpx
-
     from app.prefix import build_ask_partition, count_prefix_tokens_exact
 
     def handler(request: httpx.Request) -> httpx.Response:

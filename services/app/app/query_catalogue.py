@@ -62,7 +62,11 @@ _RAW_CATALOGUE: dict[str, tuple[str, ToolArguments]] = {
     "How do airport trips compare with non-airport trips on fare and duration?": (
         "compare_taxi_segments",
         {
-            "segment_dimension": "airport_trip",
+            # segment_dimension must be shared across both filtered sides for
+            # compare_taxi_segments' FULL OUTER JOIN to align rows; segmenting
+            # on the same field being filtered (airport_trip) would give every
+            # row a null delta since baseline and comparison keys never match.
+            "segment_dimension": "payment_type",
             "measures": ["average_fare", "average_duration_minutes"],
             "baseline_filters": {"airport_trip": False},
             "comparison_filters": {"airport_trip": True},
@@ -104,7 +108,10 @@ _RAW_CATALOGUE: dict[str, tuple[str, ToolArguments]] = {
             "limit": 20,
         },
     ),
-    "Which fare amount bucket has the most trips, and what is the median trip distance in that bucket?": (
+    (
+        "Which fare amount bucket has the most trips, and what is the median "
+        "trip distance in that bucket?"
+    ): (
         "aggregate_taxi_data",
         {
             "dimensions": ["fare_amount_bucket"],
@@ -128,7 +135,10 @@ _RAW_CATALOGUE: dict[str, tuple[str, ToolArguments]] = {
     "Compare Manhattan and Queens on trip count, average fare, and average tip": (
         "compare_taxi_segments",
         {
-            "segment_dimension": "pickup_borough",
+            # segment_dimension shared across both sides (see the airport-vs-
+            # non-airport entry above for why segmenting on pickup_borough
+            # itself, while also filtering on it, would misalign every row).
+            "segment_dimension": "payment_type",
             "measures": ["trip_count", "average_fare", "average_tip"],
             "baseline_filters": {"pickup_borough": "Manhattan"},
             "comparison_filters": {"pickup_borough": "Queens"},
@@ -145,7 +155,10 @@ _RAW_CATALOGUE: dict[str, tuple[str, ToolArguments]] = {
             "limit": 20,
         },
     ),
-    "Which borough contributed most to the busiest pickup hour, and which zones inside it dominate?": (
+    (
+        "Which borough contributed most to the busiest pickup hour, and "
+        "which zones inside it dominate?"
+    ): (
         "aggregate_taxi_data",
         {
             "dimensions": ["pickup_hour", "pickup_borough"],
@@ -158,15 +171,22 @@ _RAW_CATALOGUE: dict[str, tuple[str, ToolArguments]] = {
     "Compare the first and last complete weeks of the dataset on trip count and average fare": (
         "compare_taxi_segments",
         {
-            "segment_dimension": "pickup_date",
+            # segment_dimension shared across both weeks (pickup_weekday
+            # recurs in every week, unlike pickup_date which would give two
+            # disjoint key sets and an all-null join -- see the
+            # airport-vs-non-airport entry above for the general reason).
+            # Last complete Mon-Sun week in the pinned Jan 2024 dataset is
+            # Jan 22-28; the first complete week is Jan 1-7 (dataset starts
+            # on a Monday).
+            "segment_dimension": "pickup_weekday",
             "measures": ["trip_count", "average_fare"],
             "baseline_filters": {
                 "start_timestamp": "2024-01-01T00:00:00",
                 "end_timestamp": "2024-01-08T00:00:00",
             },
             "comparison_filters": {
-                "start_timestamp": "2024-01-25T00:00:00",
-                "end_timestamp": "2024-02-01T00:00:00",
+                "start_timestamp": "2024-01-22T00:00:00",
+                "end_timestamp": "2024-01-29T00:00:00",
             },
             "limit": 20,
         },

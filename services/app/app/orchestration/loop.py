@@ -30,13 +30,13 @@ from app.mcp_client import (
     sanitize_query_result,
 )
 from app.metrics import emit_run_metrics
-from app.query_catalogue import lookup as catalogue_lookup
 from app.orchestration.budgets import (
     BudgetExceededError,
     BudgetTracker,
     ExecutionBudgets,
 )
 from app.orchestration.reducer import ContextReducer
+from app.query_catalogue import lookup as catalogue_lookup
 from app.state import (
     Conversation,
     InMemoryStateRepository,
