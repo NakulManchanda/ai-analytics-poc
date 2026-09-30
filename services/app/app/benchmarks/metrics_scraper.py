@@ -18,6 +18,8 @@ _PROMETHEUS_LINE_RE = re.compile(
 )
 
 _LABEL_RE = re.compile(r'(?P<key>[a-zA-Z_][a-zA-Z0-9_]*)="(?P<val>(?:\\.|[^"\\])*)"')
+_ESCAPE_RE = re.compile(r'\\(["\\n])')
+_ESCAPE_MAP = {'"': '"', "\\": "\\", "n": "\n"}
 
 
 def parse_labels(labels_str: str | None) -> dict[str, str]:
@@ -25,11 +27,8 @@ def parse_labels(labels_str: str | None) -> dict[str, str]:
         return {}
     res = {}
     for match in _LABEL_RE.finditer(labels_str):
-        val = (
-            match.group("val")
-            .replace(r"\"", '"')
-            .replace(r"\\", "\\")
-            .replace(r"\n", "\n")
+        val = _ESCAPE_RE.sub(
+            lambda m: _ESCAPE_MAP.get(m.group(1), m.group(0)), match.group("val")
         )
         res[match.group("key")] = val
     return res

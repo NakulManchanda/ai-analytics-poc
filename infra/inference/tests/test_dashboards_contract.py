@@ -29,6 +29,7 @@ ALLOWED_NON_PROM_METRICS = frozenset(
         "node_memory_MemAvailable_bytes",
         "container_cpu_usage_seconds_total",
         "container_memory_working_set_bytes",
+        "up",
     }
 )
 

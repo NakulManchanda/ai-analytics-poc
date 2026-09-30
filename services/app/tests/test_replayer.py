@@ -64,18 +64,31 @@ async def test_replayer_sse_path():
                 },
             )
         elif request.method == "GET" and "/events" in url_str:
-            completed_payload = json.dumps(
+            completed_envelope = json.dumps(
                 {
-                    "status": "completed",
-                    "input_tokens": 150,
-                    "output_tokens": 50,
-                    "telemetry": {"ttft_ms": 45.2},
+                    "event_id": "evt_3",
+                    "event_type": "run.completed",
+                    "run_id": "run_test",
+                    "conversation_id": "c1",
+                    "sequence": 3,
+                    "payload": {
+                        "status": "completed",
+                        "input_tokens": 150,
+                        "output_tokens": 50,
+                        "telemetry": {"ttft_ms": 45.2},
+                    },
                 }
             )
+            received_str = (
+                '{"event_type": "run.received", "payload": {"status": "in_progress"}}'
+            )
+            delta_str = (
+                '{"event_type": "answer.delta", "payload": {"delta": "Top zones..."}}'
+            )
             sse_content = (
-                'event: run.received\ndata: {"status": "in_progress"}\n\n'
-                'event: answer.delta\ndata: {"delta": "The top zones are..."}\n\n'
-                f"event: run.completed\ndata: {completed_payload}\n\n"
+                f"event: run.received\ndata: {received_str}\n\n"
+                f"event: answer.delta\ndata: {delta_str}\n\n"
+                f"event: run.completed\ndata: {completed_envelope}\n\n"
             )
             return httpx.Response(
                 200,
@@ -90,6 +103,7 @@ async def test_replayer_sse_path():
             config=cfg,
             target_base_url="http://mock-app:8080",
             client=client,
+            timeout=5.0,
             use_sse=True,
         )
         summary = await replayer.run()

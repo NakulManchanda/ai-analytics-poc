@@ -288,17 +288,34 @@ class ScenarioReplayer:
                     # Dispatch event block
                     if current_event_type and current_data:
                         try:
-                            payload = json.loads(current_data)
+                            raw_data = json.loads(current_data)
                         except Exception:
+                            raw_data = {}
+
+                        # RunEvent serializes fields under 'payload' in its SSE envelope
+                        if isinstance(raw_data, dict) and isinstance(
+                            raw_data.get("payload"), dict
+                        ):
+                            payload = raw_data["payload"]
+                        elif isinstance(raw_data, dict):
+                            payload = raw_data
+                        else:
                             payload = {}
 
+                        event_type = current_event_type or (
+                            raw_data.get("event_type")
+                            if isinstance(raw_data, dict)
+                            else ""
+                        )
+
                         if client_ttft is None and (
-                            current_event_type in ("answer.delta", "step.crewai_writer")
+                            event_type in ("answer.delta", "step.crewai_writer")
+                            or "delta" in payload
                             or "delta" in current_data
                         ):
                             client_ttft = (time.perf_counter() - t_start) * 1000.0
 
-                        if current_event_type in (
+                        if event_type in (
                             "run.completed",
                             "run.failed",
                             "run.budget_exceeded",
@@ -306,8 +323,8 @@ class ScenarioReplayer:
                         ):
                             status = (
                                 "completed"
-                                if current_event_type == "run.completed"
-                                else current_event_type.replace("run.", "")
+                                if event_type == "run.completed"
+                                else event_type.replace("run.", "")
                             )
                             tokens_in = payload.get("input_tokens", 0)
                             tokens_out = payload.get("output_tokens", 0)
@@ -332,6 +349,43 @@ class ScenarioReplayer:
                 elif line.startswith("data:"):
                     chunk = line[len("data:") :].strip()
                     current_data = f"{current_data}{chunk}" if current_data else chunk
+
+        # If stream closed without trailing blank line, check last buffered event
+        if current_data:
+            try:
+                raw_data = json.loads(current_data)
+            except Exception:
+                raw_data = {}
+            payload = (
+                raw_data["payload"]
+                if isinstance(raw_data, dict)
+                and isinstance(raw_data.get("payload"), dict)
+                else (raw_data if isinstance(raw_data, dict) else {})
+            )
+            event_type = current_event_type or (
+                raw_data.get("event_type") if isinstance(raw_data, dict) else ""
+            )
+            if event_type in (
+                "run.completed",
+                "run.failed",
+                "run.budget_exceeded",
+                "run.cancelled",
+            ):
+                status = (
+                    "completed"
+                    if event_type == "run.completed"
+                    else event_type.replace("run.", "")
+                )
+                tokens_in = payload.get("input_tokens", 0)
+                tokens_out = payload.get("output_tokens", 0)
+                telem = payload.get("telemetry", {})
+                sttft = telem.get("ttft_ms")
+                try:
+                    server_ttft = float(sttft) if sttft is not None else client_ttft
+                except (ValueError, TypeError):
+                    server_ttft = client_ttft
+                err = payload.get("error") or payload.get("reason")
+                return status, tokens_in, tokens_out, server_ttft, err
 
         # If stream closed without terminal event, fall back to polling
         raise RuntimeError("SSE stream closed without terminal event")

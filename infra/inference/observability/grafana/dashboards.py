@@ -25,6 +25,7 @@ target), not by ``pod``.
 Regenerate with ``python3 infra/inference/observability/grafana/dashboards.py`` (or
 ``make inference-dashboards``) and commit the resulting JSON.
 """
+
 from __future__ import annotations
 
 import json
@@ -79,12 +80,21 @@ METRIC_NAMES = {
         "node_memory_MemAvailable_bytes",
         "container_cpu_usage_seconds_total",
         "container_memory_working_set_bytes",
+        "up",
     ),
 }
 
 ALLOWED_METRIC_NAMES = frozenset(
     name for group in METRIC_NAMES.values() for name in group
 )
+
+UP_THRESHOLDS = {
+    "mode": "absolute",
+    "steps": [
+        {"color": "red", "value": None},
+        {"color": "green", "value": 1.0},
+    ],
+}
 
 
 def _target(
@@ -118,16 +128,29 @@ def _panel(
     h: int = 8,
     extra: list[tuple[str, str]] | None = None,
     unit: str = "",
+    thresholds: dict | None = None,
 ) -> dict:
     is_table = kind == "table"
-    targets = [_target(expr, legend, "A", instant=is_table, fmt="table" if is_table else "")]
+    targets = [
+        _target(expr, legend, "A", instant=is_table, fmt="table" if is_table else "")
+    ]
     for i, (ex, leg) in enumerate(extra or []):
         targets.append(
-            _target(ex, leg, chr(ord("B") + i), instant=is_table, fmt="table" if is_table else "")
+            _target(
+                ex,
+                leg,
+                chr(ord("B") + i),
+                instant=is_table,
+                fmt="table" if is_table else "",
+            )
         )
-    defaults: dict = {"custom": {"drawStyle": "line", "fillOpacity": 10, "lineWidth": 1}}
+    defaults: dict = {
+        "custom": {"drawStyle": "line", "fillOpacity": 10, "lineWidth": 1}
+    }
     if unit:
         defaults["unit"] = unit
+    if thresholds:
+        defaults["thresholds"] = thresholds
     panel = {
         "id": pid,
         "type": kind,
@@ -135,7 +158,9 @@ def _panel(
         "gridPos": {"h": h, "w": w, "x": x, "y": y},
         "datasource": PROM,
         "targets": targets,
-        "options": {"legend": {"displayMode": "list", "placement": "bottom", "showLegend": True}},
+        "options": {
+            "legend": {"displayMode": "list", "placement": "bottom", "showLegend": True}
+        },
         "fieldConfig": {"defaults": defaults, "overrides": []},
     }
     if kind == "stat":
@@ -151,7 +176,9 @@ def _panel(
     return panel
 
 
-def _text_panel(pid: int, title: str, body: str, *, x: int, y: int, w: int = 24, h: int = 3) -> dict:
+def _text_panel(
+    pid: int, title: str, body: str, *, x: int, y: int, w: int = 24, h: int = 3
+) -> dict:
     return {
         "id": pid,
         "type": "text",
@@ -397,7 +424,9 @@ def prefill_decode() -> dict:
             "Prompt tokens/s vs generation tokens/s per worker",
             "rate(vllm:prompt_tokens_total[5m])",
             legend="prompt {{instance}}",
-            extra=[("rate(vllm:generation_tokens_total[5m])", "generation {{instance}}")],
+            extra=[
+                ("rate(vllm:generation_tokens_total[5m])", "generation {{instance}}")
+            ],
             x=0,
             y=27,
             w=12,
@@ -559,46 +588,68 @@ def gpu_slices() -> dict:
     )
     panels = [
         note,
-        _panel(2, "DCGM GPU utilization %", "DCGM_FI_DEV_GPU_UTIL", legend="{{instance}}", x=0, y=3, w=8, h=8, unit="percent"),
+        _panel(
+            2,
+            "vLLM Workers Up (1=Healthy)",
+            'up{job="inference-workers"}',
+            legend="{{instance}}",
+            x=0,
+            y=3,
+            w=8,
+            h=8,
+            kind="stat",
+            thresholds=UP_THRESHOLDS,
+        ),
         _panel(
             3,
-            "DCGM framebuffer used/free",
-            "DCGM_FI_DEV_FB_USED * 1024 * 1024",
-            legend="used {{instance}}",
-            extra=[("DCGM_FI_DEV_FB_FREE * 1024 * 1024", "free {{instance}}")],
+            "DCGM GPU utilization %",
+            "DCGM_FI_DEV_GPU_UTIL",
+            legend="{{instance}}",
             x=8,
             y=3,
             w=8,
             h=8,
-            unit="decbytes",
+            unit="percent",
         ),
-        _panel(4, "DCGM power usage", "DCGM_FI_DEV_POWER_USAGE", legend="{{instance}}", x=16, y=3, w=8, h=8, unit="watt"),
+        _panel(
+            4,
+            "DCGM power usage",
+            "DCGM_FI_DEV_POWER_USAGE",
+            legend="{{instance}}",
+            x=16,
+            y=3,
+            w=8,
+            h=8,
+            unit="watt",
+        ),
         _panel(
             5,
+            "DCGM framebuffer used/free",
+            "DCGM_FI_DEV_FB_USED * 1024 * 1024",
+            legend="used {{instance}}",
+            extra=[("DCGM_FI_DEV_FB_FREE * 1024 * 1024", "free {{instance}}")],
+            x=0,
+            y=11,
+            w=12,
+            h=8,
+            unit="decbytes",
+        ),
+        _panel(
+            6,
             "DCGM memory-copy utilization %",
             "DCGM_FI_DEV_MEM_COPY_UTIL",
             legend="{{instance}}",
-            x=0,
+            x=12,
             y=11,
             w=12,
             h=8,
             unit="percent",
         ),
         _panel(
-            6,
+            7,
             "Pod restarts (inference-lab)",
             f"kube_pod_container_status_restarts_total{{{WORKER_POD_MATCH}}}",
             legend="{{pod}}",
-            x=12,
-            y=11,
-            w=12,
-            h=8,
-        ),
-        _panel(
-            7,
-            "Ready replicas (inference-lab)",
-            'kube_deployment_status_replicas{deployment=~"inference-worker-a|inference-worker-b"}',
-            legend="{{deployment}}",
             x=0,
             y=19,
             w=12,
@@ -606,12 +657,22 @@ def gpu_slices() -> dict:
         ),
         _panel(
             8,
-            "Pod phase (inference-lab)",
-            f"kube_pod_status_phase{{{WORKER_POD_MATCH}}}",
-            legend="{{pod}} {{phase}}",
+            "Ready replicas (inference-lab)",
+            'kube_deployment_status_replicas{deployment=~"inference-worker-a|inference-worker-b"}',
+            legend="{{deployment}}",
             x=12,
             y=19,
             w=12,
+            h=8,
+        ),
+        _panel(
+            9,
+            "Pod phase (inference-lab)",
+            f"kube_pod_status_phase{{{WORKER_POD_MATCH}}}",
+            legend="{{pod}} {{phase}}",
+            x=0,
+            y=27,
+            w=24,
             h=8,
         ),
     ]
@@ -626,13 +687,73 @@ def gpu_slices() -> dict:
 def cluster() -> dict:
     pod = 'pod=~"inference-worker-a.*|inference-worker-b.*|prometheus.*|grafana.*"'
     panels = [
-        _panel(1, "Node Ready", 'kube_node_status_condition{condition="Ready",status="true"}', legend="{{node}}", x=0, y=0, w=8, h=6, kind="stat"),
-        _panel(2, "CPU (node-exporter)", '1 - avg(rate(node_cpu_seconds_total{mode="idle"}[5m]))', x=8, y=0, w=8, h=6, kind="stat", unit="percentunit"),
-        _panel(3, "Mem available", "node_memory_MemAvailable_bytes", x=16, y=0, w=8, h=6, kind="stat", unit="decbytes"),
-        _panel(4, "Pods by phase", "sum by (phase) (kube_pod_status_phase)", legend="{{phase}}", x=0, y=6, w=12, h=8),
-        _panel(5, "Restarts", f"kube_pod_container_status_restarts_total{{{pod}}}", legend="{{pod}}", x=12, y=6, w=12, h=8),
+        _panel(
+            1,
+            "Node Ready",
+            'kube_node_status_condition{condition="Ready",status="true"}',
+            legend="{{node}}",
+            x=0,
+            y=0,
+            w=6,
+            h=6,
+            kind="stat",
+        ),
+        _panel(
+            2,
+            "vLLM Workers Up (1=Healthy)",
+            'up{job="inference-workers"}',
+            legend="{{instance}}",
+            x=6,
+            y=0,
+            w=6,
+            h=6,
+            kind="stat",
+            thresholds=UP_THRESHOLDS,
+        ),
+        _panel(
+            3,
+            "CPU (node-exporter)",
+            '1 - avg(rate(node_cpu_seconds_total{mode="idle"}[5m]))',
+            x=12,
+            y=0,
+            w=6,
+            h=6,
+            kind="stat",
+            unit="percentunit",
+        ),
+        _panel(
+            4,
+            "Mem available",
+            "node_memory_MemAvailable_bytes",
+            x=18,
+            y=0,
+            w=6,
+            h=6,
+            kind="stat",
+            unit="decbytes",
+        ),
+        _panel(
+            5,
+            "Pods by phase",
+            "sum by (phase) (kube_pod_status_phase)",
+            legend="{{phase}}",
+            x=0,
+            y=6,
+            w=12,
+            h=8,
+        ),
         _panel(
             6,
+            "Restarts",
+            f"kube_pod_container_status_restarts_total{{{pod}}}",
+            legend="{{pod}}",
+            x=12,
+            y=6,
+            w=12,
+            h=8,
+        ),
+        _panel(
+            7,
             "Container CPU",
             f'sum by (pod) (rate(container_cpu_usage_seconds_total{{container!="",{pod}}}[5m]))',
             legend="{{pod}}",
@@ -642,7 +763,7 @@ def cluster() -> dict:
             h=8,
         ),
         _panel(
-            7,
+            8,
             "Container memory",
             f'container_memory_working_set_bytes{{container!="",{pod}}}',
             legend="{{pod}}",
@@ -652,9 +773,39 @@ def cluster() -> dict:
             h=8,
             unit="decbytes",
         ),
-        _panel(8, "DCGM GPU util %", "DCGM_FI_DEV_GPU_UTIL", legend="{{instance}}", x=0, y=22, w=8, h=8, unit="percent"),
-        _panel(9, "DCGM framebuffer used", "DCGM_FI_DEV_FB_USED * 1024 * 1024", legend="{{instance}} FB used", x=8, y=22, w=8, h=8, unit="decbytes"),
-        _panel(10, "DCGM power", "DCGM_FI_DEV_POWER_USAGE", legend="{{instance}} power", x=16, y=22, w=8, h=8, unit="watt"),
+        _panel(
+            9,
+            "DCGM GPU util %",
+            "DCGM_FI_DEV_GPU_UTIL",
+            legend="{{instance}}",
+            x=0,
+            y=22,
+            w=8,
+            h=8,
+            unit="percent",
+        ),
+        _panel(
+            10,
+            "DCGM framebuffer used",
+            "DCGM_FI_DEV_FB_USED * 1024 * 1024",
+            legend="{{instance}} FB used",
+            x=8,
+            y=22,
+            w=8,
+            h=8,
+            unit="decbytes",
+        ),
+        _panel(
+            11,
+            "DCGM power",
+            "DCGM_FI_DEV_POWER_USAGE",
+            legend="{{instance}} power",
+            x=16,
+            y=22,
+            w=8,
+            h=8,
+            unit="watt",
+        ),
     ]
     return _dash(
         "inference-cluster-dcgm",
