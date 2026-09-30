@@ -77,3 +77,4 @@ Monotonically numbered log of every post-bootstrap task. Each entry records the 
 - [0079 — #123 Slice C: E3/E4 scenarios and experiment controls](0079-e3-e4-scenarios-experiment-controls.md) — policy/admission overrides, scenarios
 - [0082 — #123 E6: Dynamo comparison plan](0082-e6-dynamo-comparison-plan.md) — ADR 0011, protocol, --router-label
 - [0081 — #123 E5 recompute control, locality scenarios, trace tool, evidence index](0081-e5-recompute-control-trace-evidence.md) — E5 control, trace, evidence index
+- [0080 — #123 D-prep: analysis toolkit and run playbook](0080-evidence-analysis-toolkit-playbook.md) — experiments/, range export, notebook, playbook

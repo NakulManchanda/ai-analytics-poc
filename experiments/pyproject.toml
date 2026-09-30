@@ -1,0 +1,11 @@
+[project]
+name = "ai-analytics-poc-experiments"
+version = "0.0.0"
+description = "Local analysis toolkit and notebook for the #123 inference evidence runs"
+requires-python = ">=3.12"
+# The analysis module itself is stdlib-only (so root CI can test it with the services/app
+# environment); these packages are only for notebook rendering and ad hoc exploration.
+dependencies = ["pandas", "matplotlib", "nbformat", "nbclient", "ipykernel", "jupyter", "pytest"]
+
+[tool.uv]
+package = false

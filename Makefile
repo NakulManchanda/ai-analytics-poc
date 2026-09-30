@@ -10,7 +10,7 @@ OBSERVABILITY_PROMETHEUS_PORT ?= 19090
 OBSERVABILITY_BURST_COUNT ?= 10
 OBSERVABILITY_LOG_TAIL ?= 200
 
-.PHONY: help check-bootstrap dev app-serve-dev mcp-dev mcp-smoke dataset-test dataset-smoke smoke test mcp-test infra-test web-test compose-smoke observability-up observability-down observability-smoke observability-dev-up observability-dev-info observability-dev-ask observability-dev-burst observability-dev-metrics observability-dev-logs observability-dev-down local-aws-compose local-aws-refresh local-serve-compose local-serve-refresh local-bedrock-compose bedrock-smoke m5-bedrock-smoke m6-bedrock-smoke dashboard tf-dispatch tf-resume tf-park inference-validate inference-sync inference-config inference-secret inference-bootstrap inference-deploy inference-up inference-tunnel inference-connect inference-smoke inference-warmup inference-capacity inference-restart inference-gateway-restart inference-serve-smoke inference-run inference-pull-evidence inference-teardown replay-fanout replay-multi-turn replay-compare-strategies replay-strategy-manual replay-strategy-crewai replay-e3-least-loaded replay-e3-prefix-then-load replay-e4-admission-on replay-e4-admission-off replay-e3-large-prefix-least-loaded replay-e3-large-prefix-prefix-then-load replay-e5 trace-request
+.PHONY: help check-bootstrap dev app-serve-dev mcp-dev mcp-smoke dataset-test dataset-smoke smoke test mcp-test infra-test web-test compose-smoke observability-up observability-down observability-smoke observability-dev-up observability-dev-info observability-dev-ask observability-dev-burst observability-dev-metrics observability-dev-logs observability-dev-down local-aws-compose local-aws-refresh local-serve-compose local-serve-refresh local-bedrock-compose bedrock-smoke m5-bedrock-smoke m6-bedrock-smoke dashboard tf-dispatch tf-resume tf-park inference-validate inference-sync inference-config inference-secret inference-bootstrap inference-deploy inference-up inference-tunnel inference-connect inference-smoke inference-warmup inference-capacity inference-restart inference-gateway-restart inference-serve-smoke inference-run inference-pull-evidence inference-pull-range evidence-analyze evidence-notebook inference-teardown replay-fanout replay-multi-turn replay-compare-strategies replay-strategy-manual replay-strategy-crewai replay-e3-least-loaded replay-e3-prefix-then-load replay-e4-admission-on replay-e4-admission-off replay-e3-large-prefix-least-loaded replay-e3-large-prefix-prefix-then-load replay-e5 trace-request
 
 
 help: ## Show available commands
@@ -95,6 +95,17 @@ inference-run: inference-smoke inference-warmup inference-capacity inference-pul
 inference-pull-evidence: ## Pull run evidence into metrics/inference
 	@mkdir -p $(INFERENCE_LOG_DIR)
 	@set -o pipefail; bash infra/inference/scripts/pull-evidence.sh $(INFERENCE_RUN_ID) 2>&1 | tee $(INFERENCE_LOG_DIR)/pull-evidence.log
+
+inference-pull-range: ## Export Prometheus range series for the memory proof (usage: make inference-pull-range RUN_ID=<id> [START=<epoch> END=<epoch> STEP=15s]; needs make inference-tunnel)
+	@test -n "$(RUN_ID)" || { echo "RUN_ID is required"; exit 2; }
+	@START='$(START)' END='$(END)' STEP='$(STEP)' bash infra/inference/scripts/pull-prometheus-range.sh $(RUN_ID)
+
+evidence-analyze: ## Text summary of pulled run dirs (usage: make evidence-analyze RUN="metrics/inference/<id>/<run_dir> ..." [RANGE=metrics/inference/<id>/prometheus_range])
+	uv run --project services/app python -m experiments.analysis $(RUN) $(if $(RANGE),--range $(RANGE))
+
+evidence-notebook: ## Regenerate experiments/123_evidence.ipynb from its generator and open Jupyter
+	uv run --project experiments python experiments/build_notebook.py
+	uv run --project experiments jupyter lab experiments/123_evidence.ipynb
 
 inference-teardown: ## Remove only issue-owned inference resources
 	@mkdir -p $(INFERENCE_LOG_DIR)

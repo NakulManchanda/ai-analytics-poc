@@ -1,0 +1,35 @@
+{
+ "scenario": {
+  "name": "fixture",
+  "sha256": "abc123"
+ },
+ "policy_under_test": "e3-least_loaded",
+ "policy_override_requested": "least_loaded",
+ "policy_override_verified": true,
+ "admission_mode_requested": null,
+ "admission_mode_verified": null,
+ "control_unverified_turns": 0,
+ "system_prefix": {
+  "prefix_chars": 1080,
+  "exact_tokens": 270
+ },
+ "slos": {
+  "interactive_ttft_slo_ms": 100.0,
+  "default_e2e_slo_ms": 3500.0,
+  "require_ttft": true
+ },
+ "topology": "two vLLM replicas on one A100",
+ "model_revision": "rev1",
+ "tokenizer_revision": "rev1",
+ "chat_template_revision": "rev1",
+ "engine_flags": "--max-model-len 8192",
+ "offered_concurrency_levels": [
+  4
+ ],
+ "control_observations": {
+  "policy_override": {
+   "matched": 12,
+   "mismatched": 0
+  }
+ }
+}

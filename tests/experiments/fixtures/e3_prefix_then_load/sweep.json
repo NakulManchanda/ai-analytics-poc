@@ -1,0 +1,16 @@
+[
+ {
+  "offered_concurrency": 4,
+  "requests": 12,
+  "successful": 12,
+  "good_requests": 12,
+  "requests_per_s": 0.6,
+  "tokens_measured": 12,
+  "tokens_unmeasured": 0,
+  "tokens_per_s": 38.4,
+  "good_requests_per_s": 0.6,
+  "good_tokens_per_s": 38.4,
+  "ttft_p95_ms": 77.25,
+  "e2e_p95_ms": 1131.75
+ }
+]
