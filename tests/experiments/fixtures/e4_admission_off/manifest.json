@@ -1,0 +1,48 @@
+{
+ "scenario": {
+  "name": "fixture",
+  "sha256": "abc123"
+ },
+ "policy_under_test": "e4-admission_off",
+ "policy_override_requested": null,
+ "policy_override_verified": null,
+ "admission_mode_requested": "off",
+ "admission_mode_verified": true,
+ "control_unverified_turns": 0,
+ "system_prefix": {
+  "prefix_chars": 1080,
+  "exact_tokens": 270
+ },
+ "slos": {
+  "interactive_ttft_slo_ms": 100.0,
+  "default_e2e_slo_ms": 3500.0,
+  "require_ttft": true
+ },
+ "topology": "two vLLM replicas on one A100",
+ "model_revision": "rev1",
+ "tokenizer_revision": "rev1",
+ "chat_template_revision": "rev1",
+ "engine_flags": "--max-model-len 8192",
+ "offered_concurrency_levels": [
+  4
+ ],
+ "control_observations": {
+  "admission_mode": {
+   "matched": 12,
+   "mismatched": 0
+  }
+ },
+ "vllm_version": "0.11.0",
+ "kv_block_size": 16,
+ "max_tokens": 128,
+ "router_label": "gateway",
+ "execution": {
+  "policy_override": null,
+  "admission_mode": "off",
+  "router_label": "gateway",
+  "gateway_stream": true,
+  "strategy": "manual",
+  "target_endpoint_type": "gateway_chat",
+  "treatment": "e4-admission_off"
+ }
+}

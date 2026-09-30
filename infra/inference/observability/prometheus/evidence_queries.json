@@ -1,0 +1,113 @@
+{
+  "version": 1,
+  "default_step": "15s",
+  "default_window_minutes": 30,
+  "queries": [
+    {
+      "name": "dcgm_fb_used_mib",
+      "expr": "DCGM_FI_DEV_FB_USED",
+      "metrics": [
+        "DCGM_FI_DEV_FB_USED"
+      ]
+    },
+    {
+      "name": "dcgm_fb_free_mib",
+      "expr": "DCGM_FI_DEV_FB_FREE",
+      "metrics": [
+        "DCGM_FI_DEV_FB_FREE"
+      ]
+    },
+    {
+      "name": "dcgm_gpu_util",
+      "expr": "DCGM_FI_DEV_GPU_UTIL",
+      "metrics": [
+        "DCGM_FI_DEV_GPU_UTIL"
+      ]
+    },
+    {
+      "name": "vllm_kv_cache_usage",
+      "expr": "vllm:kv_cache_usage_perc",
+      "metrics": [
+        "vllm:kv_cache_usage_perc"
+      ]
+    },
+    {
+      "name": "vllm_requests_running",
+      "expr": "vllm:num_requests_running",
+      "metrics": [
+        "vllm:num_requests_running"
+      ]
+    },
+    {
+      "name": "vllm_requests_waiting",
+      "expr": "vllm:num_requests_waiting",
+      "metrics": [
+        "vllm:num_requests_waiting"
+      ]
+    },
+    {
+      "name": "vllm_request_rate",
+      "expr": "sum by (instance) (rate(vllm:request_success_total[1m]))",
+      "metrics": [
+        "vllm:request_success_total"
+      ]
+    },
+    {
+      "name": "vllm_preemption_rate",
+      "expr": "sum by (instance) (rate(vllm:num_preemptions_total[1m]))",
+      "metrics": [
+        "vllm:num_preemptions_total"
+      ]
+    },
+    {
+      "name": "vllm_prefix_hit_ratio",
+      "expr": "sum by (instance) (rate(vllm:prefix_cache_hits_total[1m])) / clamp_min(sum by (instance) (rate(vllm:prefix_cache_queries_total[1m])), 1e-9)",
+      "metrics": [
+        "vllm:prefix_cache_hits_total",
+        "vllm:prefix_cache_queries_total"
+      ]
+    },
+    {
+      "name": "vllm_ttft_p95",
+      "expr": "histogram_quantile(0.95, sum by (le, instance) (rate(vllm:time_to_first_token_seconds_bucket[1m])))",
+      "metrics": [
+        "vllm:time_to_first_token_seconds"
+      ]
+    },
+    {
+      "name": "orch_replica_queue_depth",
+      "expr": "orch_replica_queue_depth",
+      "metrics": [
+        "orch_replica_queue_depth"
+      ]
+    },
+    {
+      "name": "orch_shed_rate",
+      "expr": "sum by (reason) (rate(orch_shed_total[1m]))",
+      "metrics": [
+        "orch_shed_total"
+      ]
+    },
+    {
+      "name": "orch_pick_rate",
+      "expr": "sum by (worker, reason) (rate(orch_pick_total[1m]))",
+      "metrics": [
+        "orch_pick_total"
+      ]
+    },
+    {
+      "name": "orch_queue_wait_p95",
+      "expr": "histogram_quantile(0.95, sum by (le, worker) (rate(orch_queue_wait_seconds_bucket[1m])))",
+      "metrics": [
+        "orch_queue_wait_seconds"
+      ]
+    },
+    {
+      "name": "gateway_ttft_p95",
+      "expr": "histogram_quantile(0.95, sum by (le, class) (rate(gateway_ttft_seconds_bucket[1m])))",
+      "metrics": [
+        "gateway_ttft_seconds"
+      ]
+    }
+  ]
+}

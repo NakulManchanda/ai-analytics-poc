@@ -74,6 +74,8 @@ curl -s http://127.0.0.1:18002/health
 curl -s http://127.0.0.1:18080/health
 ```
 
+For the ordered cluster-session commands that produce E0-E4 evidence (run ids, cold-start recipe, required gateway env, artifact locations, analysis and notebook), follow [inference-run-playbook.md](inference-run-playbook.md).
+
 ---
 
 ## 3. What to Test: The 6 Controlled Experiments

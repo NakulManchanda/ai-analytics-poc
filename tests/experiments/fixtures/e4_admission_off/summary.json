@@ -1,0 +1,38 @@
+{
+ "slos": {
+  "interactive_ttft_slo_ms": 100.0,
+  "default_e2e_slo_ms": 3500.0,
+  "require_ttft": true
+ },
+ "levels": [
+  {
+   "offered_concurrency": 4,
+   "summary": {
+    "requests": 12,
+    "successful": 12,
+    "good_requests": 0,
+    "requests_per_s": 0.4,
+    "tokens_measured": 12,
+    "tokens_unmeasured": 0,
+    "tokens_per_s": 25.6,
+    "good_requests_per_s": 0.0,
+    "good_tokens_per_s": 0.0,
+    "ttft_ms": {
+     "p50": 305.0,
+     "p95": 389.0,
+     "p99": 397.8
+    },
+    "e2e_ms": {
+     "p50": 4350.0,
+     "p95": 6000.0,
+     "p99": 6000.0
+    }
+   },
+   "prometheus_window": {
+    "scope": "window",
+    "note": "isolated-window aggregate",
+    "delta": null
+   }
+  }
+ ]
+}

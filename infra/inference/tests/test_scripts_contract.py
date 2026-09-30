@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -21,6 +22,7 @@ LIFECYCLE_SCRIPTS = (
     "smoke.sh",
     "restart-test.sh",
     "pull-evidence.sh",
+    "pull-prometheus-range.sh",
     "teardown.sh",
 )
 
@@ -40,6 +42,7 @@ MAKE_TARGETS = (
     "inference-capacity",
     "inference-run",
     "inference-pull-evidence",
+    "inference-pull-range",
     "inference-teardown",
 )
 
@@ -211,3 +214,24 @@ def test_config_plan_exposes_only_allowlisted_names_not_raw_env_values() -> None
     assert "HF_TOKEN" not in printed
     assert "inference-test-private-key.pem" not in printed
     assert "inference-test-token-must-not-print" not in printed
+
+
+def test_pull_prometheus_range_contract(tmp_path: Path) -> None:
+    script = SCRIPTS / "pull-prometheus-range.sh"
+    text = script.read_text(encoding="utf-8")
+    assert subprocess.run(["bash", "-n", str(script)]).returncode == 0
+    assert "evidence_queries.json" in text and "query_range" in text
+    assert "prometheus_range" in text and "WINDOW" in text
+    # No secrets/connection values: uses the loopback tunnel (make inference-tunnel) only.
+    assert "127.0.0.1:19090" in text and "LAMBDA_SSH_KEY_PATH" not in text
+    # Fails closed without a RUN_ID and without a reachable Prometheus.
+    no_run = subprocess.run(["bash", str(script)], cwd=ROOT, text=True, capture_output=True)
+    assert no_run.returncode != 0 and "RUN_ID" in no_run.stderr
+    env = {**os.environ, "PROMETHEUS_URL": "http://127.0.0.1:9"}
+    unreachable = subprocess.run(
+        ["bash", str(script), "contract-test-run"], cwd=ROOT, text=True, capture_output=True, env=env
+    )
+    assert unreachable.returncode != 0 and "make inference-tunnel" in unreachable.stderr
+    leaked = ROOT / "metrics" / "inference" / "contract-test-run"
+    assert not leaked.exists(), "must not create output before Prometheus is reachable"
+    shutil.rmtree(leaked, ignore_errors=True)
