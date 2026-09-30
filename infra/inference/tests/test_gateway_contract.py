@@ -1,16 +1,25 @@
 """Contract and unit tests for the thin inference gateway service."""
 
+import time
 from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
 from fastapi.testclient import TestClient
 
+from infra.inference.gateway import main as gateway_main
 from infra.inference.gateway.main import app
+from infra.inference.gateway.workers import Registry, Worker
 
 
 @pytest.fixture
-def client() -> TestClient:
+def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
+    """Single fresh worker_a; the snapshot refresher is not started (no lifespan)."""
+    reg = Registry([Worker("worker_a", "http://worker-a:8000")])
+    snap = reg.snapshots["worker_a"]
+    snap.healthy, snap.observed_at = True, time.monotonic()
+    monkeypatch.setattr(gateway_main, "registry", reg)
+    monkeypatch.setattr(gateway_main, "DEFAULT_WORKER_URL", "http://worker-a:8000")
     return TestClient(app)
 
 
@@ -59,7 +68,7 @@ def test_gateway_serve_forwarding(client: TestClient) -> None:
         assert headers["x-conversation-id"] == "conv-gw-1"
         assert headers["x-agent-step"] == "1"
         assert headers["x-prefix-id"] == "prefix-hash-1234"
-        assert headers["x-orchestration-stage"] == "worker_passthrough"
+        assert headers["x-orchestration-stage"] == "worker_dispatch"
         assert headers["x-guard-decision"] == "allow"
         assert headers["x-admit-decision"] == "accept"
         assert headers["x-place-decision"] == "worker_a"
@@ -71,7 +80,7 @@ def test_gateway_serve_worker_unavailable(client: TestClient) -> None:
 
         response = client.post(
             "/serve",
-            json={"model": "Qwen/Qwen3-0.6B", "messages": []},
+            json={"model": "Qwen/Qwen3-0.6B", "messages": [{"role": "user", "content": "hi"}]},
             headers={"x-request-id": "req-fail"},
         )
         assert response.status_code == 503
