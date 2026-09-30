@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import time
+import uuid
 from typing import Any
 
 import httpx
@@ -57,13 +58,15 @@ class TurnResult(BaseModel):
     status: str
     client_duration_ms: float
     server_ttft_ms: float | None = None
-    tokens_in: int = 0
-    tokens_out: int = 0
+    # None = usage not reported (unmeasured); never estimated.
+    tokens_in: int | None = None
+    tokens_out: int | None = None
     error: str | None = None
     turn_metadata: dict[str, Any] = Field(default_factory=dict)
     # Per-request evidence. client_duration_ms is the end-to-end latency.
     started_at: float | None = None  # wall-clock epoch seconds
     ended_at: float | None = None
+    request_id: str | None = None
     workload_class: str | None = None
     tenant_id: str | None = None
     deadline_ms: int | None = None
@@ -148,8 +151,8 @@ class ScenarioReplayer:
             t.server_ttft_ms for t in successful_turns if t.server_ttft_ms is not None
         ]
 
-        total_prompt_tok = sum(t.tokens_in for t in all_turns)
-        total_comp_tok = sum(t.tokens_out for t in all_turns)
+        total_prompt_tok = sum(t.tokens_in or 0 for t in all_turns)
+        total_comp_tok = sum(t.tokens_out or 0 for t in all_turns)
 
         return ReplaySummary(
             scenario_name=self.config.name,
@@ -492,6 +495,9 @@ class ScenarioReplayer:
         client: httpx.AsyncClient,
     ) -> TurnResult:
         t_start = time.perf_counter()
+        request_id = (
+            f"{self.config.name}-{conversation_id}-{turn_index}-{uuid.uuid4().hex[:8]}"
+        )
         url = f"{self.target_base_url}/v1/chat/completions"
         payload = {
             "model": "Qwen/Qwen3-0.6B",
@@ -505,6 +511,7 @@ class ScenarioReplayer:
         headers = {
             "x-conversation-id": conversation_id,
             "x-agent-step": str(turn_index + 1),
+            "x-request-id": request_id,
         }
         for name, value in (
             ("x-request-priority", turn.workload_class),
@@ -524,6 +531,7 @@ class ScenarioReplayer:
                     for h in GATEWAY_DECISION_HEADERS
                     if h in resp.headers
                 }
+                rid = resp.headers.get("x-request-id", request_id)
                 is_sse = "text/event-stream" in resp.headers.get("content-type", "")
                 if resp.status_code != 200 or not is_sse:
                     body = await resp.aread()
@@ -536,6 +544,7 @@ class ScenarioReplayer:
                             status=f"http_{resp.status_code}",
                             client_duration_ms=duration_ms,
                             gateway_headers=seen,
+                            request_id=rid,
                             error=f"Gateway error: {resp.status_code} - "
                             f"{body.decode(errors='replace')[:200]}",
                         )
@@ -548,13 +557,14 @@ class ScenarioReplayer:
                         run_id=data.get("id"),
                         status="completed",
                         client_duration_ms=duration_ms,
-                        tokens_in=usage.get("prompt_tokens", 0),
-                        tokens_out=usage.get("completion_tokens", 0),
+                        tokens_in=usage.get("prompt_tokens"),
+                        tokens_out=usage.get("completion_tokens"),
                         gateway_headers=seen,
+                        request_id=rid,
                     )
 
                 ttft: float | None = None
-                chunks = 0
+                done = False
                 usage: dict[str, Any] = {}
                 run_id: str | None = None
                 error: str | None = None
@@ -563,6 +573,7 @@ class ScenarioReplayer:
                         continue
                     raw = line[len("data:") :].strip()
                     if raw == "[DONE]":
+                        done = True
                         break
                     try:
                         chunk = json.loads(raw)
@@ -577,7 +588,6 @@ class ScenarioReplayer:
                     usage = chunk.get("usage") or usage
                     for choice in chunk.get("choices") or []:
                         if (choice.get("delta") or {}).get("content"):
-                            chunks += 1
                             if ttft is None:
                                 ttft = (time.perf_counter() - t_start) * 1000.0
                 duration_ms = (time.perf_counter() - t_start) * 1000.0
@@ -586,14 +596,18 @@ class ScenarioReplayer:
                     turn_index=turn_index,
                     prompt=turn.question,
                     run_id=run_id,
-                    status="stream_error" if error else "completed",
+                    status=(
+                        "stream_error"
+                        if error
+                        else "completed" if done else "incomplete_stream"
+                    ),
                     client_duration_ms=duration_ms,
                     server_ttft_ms=ttft,
-                    tokens_in=usage.get("prompt_tokens", 0),
-                    # Fallback when usage is absent: content chunk count (~1 token each).
-                    tokens_out=usage.get("completion_tokens", chunks),
+                    tokens_in=usage.get("prompt_tokens"),
+                    tokens_out=usage.get("completion_tokens"),
                     gateway_headers=seen,
-                    error=error,
+                    request_id=rid,
+                    error=error or (None if done else "Stream ended without [DONE]"),
                 )
         except Exception as exc:
             duration_ms = (time.perf_counter() - t_start) * 1000.0

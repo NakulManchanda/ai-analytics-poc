@@ -204,6 +204,7 @@ async def async_main(args: argparse.Namespace) -> int:
     level_records: list[dict[str, Any]] = []
     all_turns: list[dict[str, Any]] = []
     summary: ReplaySummary | None = None
+    any_failed = False
     metrics_delta: MetricsDelta | None = None
 
     for level in levels:
@@ -233,6 +234,7 @@ async def async_main(args: argparse.Namespace) -> int:
             gateway_stream=getattr(args, "gateway_stream", True),
         )
         summary = await replayer.run()
+        any_failed = any_failed or summary.failed_turns > 0
         logger.info(
             "Replay finished: %d/%d turns succeeded in %.2fs (%.2f req/s)",
             summary.successful_turns,
@@ -356,7 +358,7 @@ async def async_main(args: argparse.Namespace) -> int:
     )
     logger.info("Wrote run artifact directory %s", run_dir)
 
-    return 0 if summary.failed_turns == 0 else 1
+    return 1 if any_failed else 0
 
 
 def main() -> int:

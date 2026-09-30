@@ -291,3 +291,51 @@ async def test_async_main_writes_run_directory_with_sweep(tmp_path: Path, monkey
     assert summary["levels"][0]["prometheus_window"]["scope"] == "window"
     assert (run / "sweep.csv").read_text().startswith("offered_concurrency")
     assert json.loads((run / "sweep.json").read_text())[1]["offered_concurrency"] == 2
+
+
+@pytest.mark.anyio
+async def test_sweep_exit_nonzero_when_earlier_level_fails(tmp_path: Path, monkeypatch):
+    import httpx
+
+    scen = tmp_path / "s.json"
+    scen.write_text(
+        json.dumps(
+            {
+                "name": "s",
+                "description": "d",
+                "target_endpoint_type": "gateway_chat",
+                "conversations": [{"turns": [{"question": "q"}]}],
+            }
+        )
+    )
+    calls = {"n": 0}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return httpx.Response(503, json={"error": "x"})
+        return httpx.Response(200, json={"id": "i", "usage": {}})
+
+    original = httpx.AsyncClient
+    monkeypatch.setattr(
+        httpx,
+        "AsyncClient",
+        lambda *a, **kw: original(
+            *a, **{**kw, "transport": httpx.MockTransport(handler)}
+        ),
+    )
+
+    class Args:
+        scenario = str(scen)
+        target_url = "http://gw:18080"
+        metrics_url = None
+        concurrency = None
+        strategy = None
+        endpoint_type = None
+        timeout = 10.0
+        no_sse = False
+        output_dir = str(tmp_path / "ev")
+        sweep_concurrency = "1,2"
+        gateway_stream = False
+
+    assert await async_main(Args()) == 1

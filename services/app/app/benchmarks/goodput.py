@@ -90,9 +90,14 @@ def summarize_turns(
         "ttft_unmeasured": sum(t.server_ttft_ms is None for t in ok),
         "duration_s": round(dur, 3),
         "requests_per_s": round(len(turns) / dur, 2),
-        "tokens_per_s": round(sum(t.tokens_out for t in ok) / dur, 2),
+        "tokens_unmeasured": sum(t.tokens_out is None for t in ok),
+        "tokens_per_s": round(
+            sum(t.tokens_out for t in ok if t.tokens_out is not None) / dur, 2
+        ),
         "good_requests_per_s": round(len(good) / dur, 2),
-        "good_tokens_per_s": round(sum(t.tokens_out for t in good) / dur, 2),
+        "good_tokens_per_s": round(
+            sum(t.tokens_out for t in good if t.tokens_out is not None) / dur, 2
+        ),
         "ttft_ms": _pcts(
             [t.server_ttft_ms for t in ok if t.server_ttft_ms is not None]
         ),
@@ -114,6 +119,7 @@ SWEEP_COLUMNS = (
     "successful",
     "good_requests",
     "requests_per_s",
+    "tokens_unmeasured",
     "tokens_per_s",
     "good_requests_per_s",
     "good_tokens_per_s",
@@ -124,7 +130,7 @@ SWEEP_COLUMNS = (
 
 def sweep_row(offered_concurrency: int, summary: dict[str, Any]) -> dict[str, Any]:
     row = {"offered_concurrency": offered_concurrency}
-    row.update({k: summary[k] for k in SWEEP_COLUMNS[1:8]})
+    row.update({k: summary[k] for k in SWEEP_COLUMNS[1:9]})
     row["ttft_p95_ms"] = summary["ttft_ms"]["p95"]
     row["e2e_p95_ms"] = summary["e2e_ms"]["p95"]
     return row

@@ -510,7 +510,7 @@ async def test_gateway_stream_success_measures_ttft_and_usage():
 
 
 @pytest.mark.anyio
-async def test_gateway_stream_without_usage_falls_back_to_chunk_count():
+async def test_gateway_stream_without_usage_leaves_tokens_unmeasured():
     body = (
         'data: {"choices":[{"delta":{"content":"a"}}]}\n\n'
         'data: {"choices":[{"delta":{"content":"b"}}]}\n\n'
@@ -521,7 +521,39 @@ async def test_gateway_stream_without_usage_falls_back_to_chunk_count():
         return httpx.Response(200, headers=_SSE, text=body)
 
     r = (await _run_gw(handler)).turn_results[0]
-    assert r.tokens_out == 2 and r.server_ttft_ms is not None
+    assert r.status == "completed" and r.server_ttft_ms is not None
+    assert r.tokens_out is None and r.tokens_in is None
+
+
+@pytest.mark.anyio
+async def test_gateway_stream_premature_eof_is_incomplete_not_good():
+    from app.benchmarks.goodput import Slos, is_good
+
+    body = 'data: {"choices":[{"delta":{"content":"a"}}]}\n\n'
+
+    async def handler(request):
+        return httpx.Response(200, headers=_SSE, text=body)
+
+    r = (await _run_gw(handler)).turn_results[0]
+    assert r.status == "incomplete_stream"
+    assert not is_good(r, Slos())
+
+
+@pytest.mark.anyio
+async def test_gateway_request_id_sent_returned_and_stored():
+    sent = {}
+
+    async def handler(request):
+        sent["id"] = request.headers["x-request-id"]
+        return httpx.Response(
+            200,
+            headers={**_SSE, "x-request-id": request.headers["x-request-id"]},
+            text="data: [DONE]\n\n",
+        )
+
+    r = (await _run_gw(handler)).turn_results[0]
+    assert r.request_id == sent["id"]
+    assert sent["id"].startswith("gw_stream-")
 
 
 @pytest.mark.anyio

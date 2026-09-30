@@ -31,3 +31,12 @@ Draft PR (this change). Later #123 slices: dashboards and alerts, E3/E4 scenario
 ## Lessons
 
 - A goodput metric that silently reads 0 because TTFT is unmeasured is worse than no metric; measure TTFT on the path the experiments use.
+
+## Review follow-up
+
+Independent review found four issues; all fixed with tests.
+
+- **Truncated streams counted as success:** a stream ending without `data: [DONE]` is now `incomplete_stream` (failure, never good).
+- **Chunk count used as token count:** removed. `tokens_in`/`tokens_out` are `None` when the gateway reports no usage; `tokens_per_s` and `good_tokens_per_s` use measured usage only, and `tokens_unmeasured` (successful requests without usage) is reported in summaries and sweep rows. Request-rate and goodput metrics are unaffected. `stream_options.include_usage` stays on.
+- **No correlation id:** each gateway turn sends a unique `x-request-id`; the returned header (else the sent id) is stored as `request_id` in `requests.jsonl`.
+- **Sweep exit status:** `run_scenario.py` now exits nonzero if any sweep level had a failed turn, not just the last.

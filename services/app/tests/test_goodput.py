@@ -110,3 +110,19 @@ def test_sweep_csv():
     assert out[1]["offered_concurrency"] == "4"
     assert out[1]["good_requests_per_s"] == "0.5"
     assert sweep_to_csv([]) == ""
+
+
+def test_tokens_only_from_measured_usage():
+    turns = [
+        _t(tokens_out=10),
+        _t(tokens_out=None),
+        _t(status="http_500", tokens_out=None),
+    ]
+    s = summarize_turns(turns, 1.0, Slos())
+    assert s["tokens_per_s"] == 10.0
+    assert s["good_tokens_per_s"] == 10.0
+    assert s["tokens_unmeasured"] == 1  # failed request is not counted
+    assert s["good_requests_per_s"] == 2.0  # request metrics unaffected
+    from app.benchmarks.goodput import sweep_row
+
+    assert sweep_row(1, s)["tokens_unmeasured"] == 1
