@@ -339,3 +339,38 @@ async def test_sweep_exit_nonzero_when_earlier_level_fails(tmp_path: Path, monke
         gateway_stream = False
 
     assert await async_main(Args()) == 1
+
+
+def test_markdown_and_json_render_unavailable_tokens_as_na():
+    summary = ReplaySummary(
+        scenario_name="s",
+        total_conversations=1,
+        total_turns=1,
+        successful_turns=1,
+        failed_turns=0,
+        duration_seconds=1.0,
+        requests_per_second=1.0,
+        latency_ms={},
+        ttft_ms={},
+        total_prompt_tokens=None,
+        total_completion_tokens=None,
+        tokens_measured_turns=0,
+        tokens_unmeasured_turns=1,
+        turn_results=[
+            TurnResult(
+                conversation_id="c",
+                turn_index=0,
+                prompt="p",
+                status="completed",
+                client_duration_ms=1.0,
+            )
+        ],
+    )
+    md = generate_markdown_report(summary, None, "u", None, "manual", "t")
+    assert "| **Prompt Tokens** | n/a |" in md
+    assert "| **Completion Tokens** | n/a |" in md
+    assert "| 0 / 1 |" in md
+    assert "| n/a | n/a |" in md
+    dumped = summary.model_dump()
+    assert dumped["total_prompt_tokens"] is None
+    assert dumped["tokens_unmeasured_turns"] == 1

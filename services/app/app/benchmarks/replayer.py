@@ -98,8 +98,11 @@ class ReplaySummary(BaseModel):
     requests_per_second: float
     latency_ms: dict[str, float]
     ttft_ms: dict[str, float]
-    total_prompt_tokens: int
-    total_completion_tokens: int
+    # None = unavailable: at least one successful turn had no reported usage.
+    total_prompt_tokens: int | None = None
+    total_completion_tokens: int | None = None
+    tokens_measured_turns: int = 0
+    tokens_unmeasured_turns: int = 0
     turn_results: list[TurnResult] = Field(default_factory=list)
 
 
@@ -151,8 +154,15 @@ class ScenarioReplayer:
             t.server_ttft_ms for t in successful_turns if t.server_ttft_ms is not None
         ]
 
-        total_prompt_tok = sum(t.tokens_in or 0 for t in all_turns)
-        total_comp_tok = sum(t.tokens_out or 0 for t in all_turns)
+        unmeasured = sum(
+            t.tokens_in is None or t.tokens_out is None for t in successful_turns
+        )
+        total_prompt_tok = (
+            None if unmeasured else sum(t.tokens_in or 0 for t in all_turns)
+        )
+        total_comp_tok = (
+            None if unmeasured else sum(t.tokens_out or 0 for t in all_turns)
+        )
 
         return ReplaySummary(
             scenario_name=self.config.name,
@@ -166,6 +176,8 @@ class ScenarioReplayer:
             ttft_ms=calculate_percentiles(ttfts),
             total_prompt_tokens=total_prompt_tok,
             total_completion_tokens=total_comp_tok,
+            tokens_measured_turns=len(successful_turns) - unmeasured,
+            tokens_unmeasured_turns=unmeasured,
             turn_results=all_turns,
         )
 
@@ -522,6 +534,8 @@ class ScenarioReplayer:
             if value is not None:
                 headers[name] = str(value)
 
+        rid = request_id
+        seen: dict[str, str] | None = None
         try:
             async with client.stream(
                 "POST", url, json=payload, headers=headers, timeout=self.timeout
@@ -617,5 +631,7 @@ class ScenarioReplayer:
                 prompt=turn.question,
                 status="client_exception",
                 client_duration_ms=duration_ms,
+                request_id=rid,
+                gateway_headers=seen,
                 error=str(exc),
             )

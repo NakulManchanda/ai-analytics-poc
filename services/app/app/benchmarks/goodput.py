@@ -42,6 +42,13 @@ def is_good(t: TurnResult, slos: Slos) -> bool:
     return True
 
 
+def _rate(turns: list[TurnResult], dur: float) -> float | None:
+    """Tokens/s, or None (unavailable) unless usage was measured for every turn."""
+    if any(t.tokens_out is None for t in turns):
+        return None
+    return round(sum(t.tokens_out or 0 for t in turns) / dur, 2)
+
+
 def _pcts(values: list[float]) -> dict[str, float]:
     full = calculate_percentiles(values)
     return {k: full[k] for k in _PCTS}
@@ -90,14 +97,11 @@ def summarize_turns(
         "ttft_unmeasured": sum(t.server_ttft_ms is None for t in ok),
         "duration_s": round(dur, 3),
         "requests_per_s": round(len(turns) / dur, 2),
+        "tokens_measured": sum(t.tokens_out is not None for t in ok),
         "tokens_unmeasured": sum(t.tokens_out is None for t in ok),
-        "tokens_per_s": round(
-            sum(t.tokens_out for t in ok if t.tokens_out is not None) / dur, 2
-        ),
+        "tokens_per_s": _rate(ok, dur),
         "good_requests_per_s": round(len(good) / dur, 2),
-        "good_tokens_per_s": round(
-            sum(t.tokens_out for t in good if t.tokens_out is not None) / dur, 2
-        ),
+        "good_tokens_per_s": _rate(good, dur),
         "ttft_ms": _pcts(
             [t.server_ttft_ms for t in ok if t.server_ttft_ms is not None]
         ),
@@ -119,6 +123,7 @@ SWEEP_COLUMNS = (
     "successful",
     "good_requests",
     "requests_per_s",
+    "tokens_measured",
     "tokens_unmeasured",
     "tokens_per_s",
     "good_requests_per_s",
@@ -130,7 +135,7 @@ SWEEP_COLUMNS = (
 
 def sweep_row(offered_concurrency: int, summary: dict[str, Any]) -> dict[str, Any]:
     row = {"offered_concurrency": offered_concurrency}
-    row.update({k: summary[k] for k in SWEEP_COLUMNS[1:9]})
+    row.update({k: summary[k] for k in SWEEP_COLUMNS[1:10]})
     row["ttft_p95_ms"] = summary["ttft_ms"]["p95"]
     row["e2e_p95_ms"] = summary["e2e_ms"]["p95"]
     return row
@@ -142,5 +147,5 @@ def sweep_to_csv(rows: list[dict[str, Any]]) -> str:
     buf = io.StringIO()
     w = csv.DictWriter(buf, fieldnames=list(rows[0]), lineterminator="\n")
     w.writeheader()
-    w.writerows(rows)
+    w.writerows([{k: "n/a" if v is None else v for k, v in r.items()} for r in rows])
     return buf.getvalue()

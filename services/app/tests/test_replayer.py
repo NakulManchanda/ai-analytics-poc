@@ -611,3 +611,48 @@ async def test_goodput_from_streamed_ttft():
     r = (await _run_gw(handler)).turn_results[0]
     assert is_good(r, Slos())
     assert not is_good(r, Slos(interactive_ttft_slo_ms=0.0))
+
+
+@pytest.mark.anyio
+async def test_replay_summary_tokens_unavailable_when_unmeasured():
+    body = 'data: {"choices":[{"delta":{"content":"a"}}]}\n\ndata: [DONE]\n\n'
+
+    async def handler(request):
+        return httpx.Response(200, headers=_SSE, text=body)
+
+    summary = await _run_gw(handler)
+    assert summary.total_prompt_tokens is None
+    assert summary.total_completion_tokens is None
+    assert summary.tokens_unmeasured_turns == 1
+    assert summary.tokens_measured_turns == 0
+
+
+@pytest.mark.anyio
+async def test_gateway_stream_read_error_keeps_request_id_and_headers():
+    class Boom(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            yield b'data: {"choices":[{"delta":{"content":"a"}}]}\n\n'
+            raise httpx.ReadError("connection reset")
+
+    async def handler(request):
+        return httpx.Response(
+            200,
+            headers={**_SSE, "x-request-id": "srv-id"},
+            stream=Boom(),
+        )
+
+    r = (await _run_gw(handler)).turn_results[0]
+    assert r.status == "client_exception"
+    assert r.request_id == "srv-id"
+    assert r.gateway_headers == {"x-place-decision": "w1"}
+
+
+@pytest.mark.anyio
+async def test_gateway_connect_error_keeps_generated_request_id():
+    async def handler(request):
+        raise httpx.ConnectError("down")
+
+    r = (await _run_gw(handler)).turn_results[0]
+    assert r.status == "client_exception"
+    assert r.request_id and r.request_id.startswith("gw_stream-")
+    assert r.gateway_headers is None

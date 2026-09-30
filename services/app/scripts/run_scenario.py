@@ -47,6 +47,10 @@ EVIDENCE_SCOPE = (
 )
 
 
+def _tok(value: int | None) -> str:
+    return "n/a" if value is None else str(value)
+
+
 def _write_json(path: Path, data: Any) -> None:
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
@@ -83,8 +87,10 @@ def generate_markdown_report(
             f"| **Failed Turns** | {summary.failed_turns} |",
             f"| **Total Duration** | {summary.duration_seconds:.2f} s |",
             f"| **Client Throughput** | {summary.requests_per_second:.2f} req/s |",
-            f"| **Prompt Tokens** | {summary.total_prompt_tokens} |",
-            f"| **Completion Tokens** | {summary.total_completion_tokens} |",
+            f"| **Prompt Tokens** | {_tok(summary.total_prompt_tokens)} |",
+            f"| **Completion Tokens** | {_tok(summary.total_completion_tokens)} |",
+            f"| **Token Usage Measured / Unmeasured Turns** | "
+            f"{summary.tokens_measured_turns} / {summary.tokens_unmeasured_turns} |",
             "",
             "## 2. Client Latency & TTFT Percentiles",
             "",
@@ -151,7 +157,8 @@ def generate_markdown_report(
             short_prompt = short_prompt[:37] + "..."
         lines.append(
             f"| `{tr.conversation_id}` | {tr.turn_index + 1} | {short_prompt} | "
-            f"`{tr.status}` | {tr.client_duration_ms:.1f} | {tr.tokens_in} | {tr.tokens_out} |"
+            f"`{tr.status}` | {tr.client_duration_ms:.1f} | "
+            f"{_tok(tr.tokens_in)} | {_tok(tr.tokens_out)} |"
         )
     lines.append("")
     return "\n".join(lines)

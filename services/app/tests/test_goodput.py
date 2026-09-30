@@ -112,17 +112,29 @@ def test_sweep_csv():
     assert sweep_to_csv([]) == ""
 
 
-def test_tokens_only_from_measured_usage():
+def test_partially_measured_tokens_are_unavailable_with_counts():
     turns = [
         _t(tokens_out=10),
         _t(tokens_out=None),
         _t(status="http_500", tokens_out=None),
     ]
     s = summarize_turns(turns, 1.0, Slos())
-    assert s["tokens_per_s"] == 10.0
-    assert s["good_tokens_per_s"] == 10.0
-    assert s["tokens_unmeasured"] == 1  # failed request is not counted
+    assert s["tokens_per_s"] is None and s["good_tokens_per_s"] is None
+    assert (s["tokens_measured"], s["tokens_unmeasured"]) == (1, 1)
     assert s["good_requests_per_s"] == 2.0  # request metrics unaffected
+
+
+def test_fully_measured_tokens_have_rates():
+    s = summarize_turns([_t(tokens_out=10), _t(tokens_out=5)], 1.0, Slos())
+    assert s["tokens_per_s"] == 15.0 and s["tokens_unmeasured"] == 0
+
+
+def test_all_unmeasured_sweep_row_and_csv_are_na_not_zero():
     from app.benchmarks.goodput import sweep_row
 
-    assert sweep_row(1, s)["tokens_unmeasured"] == 1
+    s = summarize_turns([_t(tokens_out=None)], 1.0, Slos())
+    row = sweep_row(1, s)
+    assert row["tokens_per_s"] is None and row["tokens_unmeasured"] == 1
+    out = list(csv.DictReader(io.StringIO(sweep_to_csv([row]))))[0]
+    assert out["tokens_per_s"] == "n/a" and out["good_tokens_per_s"] == "n/a"
+    assert out["tokens_measured"] == "0"
