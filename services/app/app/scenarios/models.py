@@ -5,6 +5,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 WorkloadClass = Literal["interactive", "batch"]
+ForcedWorker = Literal["worker_a", "worker_b"]
 
 
 class ScenarioTurn(BaseModel):
@@ -25,6 +26,11 @@ class ScenarioTurn(BaseModel):
         default=None, gt=0, description="Per-turn E2E deadline; sent as x-deadline-ms"
     )
     prefix_id: str | None = Field(default=None, description="Sent as x-prefix-id")
+    force_worker: ForcedWorker | None = Field(
+        default=None,
+        description="gateway_chat: x-force-worker for this turn (E5 control; overrides the "
+        "conversation default; gateway needs ALLOW_FORCED_PLACEMENT=1)",
+    )
 
 
 PolicyOverride = Literal["round_robin", "least_loaded", "p2c", "prefix_then_load"]
@@ -51,6 +57,9 @@ class ScenarioConversation(BaseModel):
     )
     system_prefix: str | None = Field(
         default=None, description=_PREFIX_DESC + " (per conversation)"
+    )
+    force_worker: ForcedWorker | None = Field(
+        default=None, description="Default x-force-worker for turns that omit it"
     )
 
 
@@ -82,9 +91,22 @@ class ScenarioConfig(BaseModel):
     admission_mode: Literal["on", "off"] | None = Field(
         default=None, description="gateway_chat: x-admission-mode (test-only control)"
     )
+    treatment: str | None = Field(
+        default=None,
+        description="Free-form experiment label recorded in the run manifest (e.g. "
+        "e5_recompute_control); informational only",
+    )
     conversations: list[ScenarioConversation] = Field(
         ..., min_length=1, description="List of conversations to execute"
     )
+
+    @property
+    def uses_force_worker(self) -> bool:
+        return any(
+            (t.force_worker or c.force_worker)
+            for c in self.conversations
+            for t in c.turns
+        )
 
     @property
     def total_turns(self) -> int:

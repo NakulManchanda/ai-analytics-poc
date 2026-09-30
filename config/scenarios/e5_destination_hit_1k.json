@@ -1,0 +1,40 @@
+{
+  "name": "e5_destination_hit_1k",
+  "description": "Independent destination hit: the ~1k prefix is warmed separately on worker_b, then an A-origin continuation goes to worker_b, which uses its OWN cache entry. No A->B hop occurred; this is not transfer evidence. SYNTHETIC prefix-size treatment, not the taxi-agent prefix. Needs the gateway with ALLOW_FORCED_PLACEMENT=1 and no KV transfer backend. Real-transfer (#133) treatment is NOT implemented; it must reuse these exact prefix sizes. Placement intent (x-intended-action) is a belief, never proof; observed reuse comes from vLLM evidence.",
+  "concurrency": 1,
+  "strategy": "manual",
+  "target_endpoint_type": "gateway_chat",
+  "system_prefix": "SYNTHETIC E5 PREFIX case e5_destination_hit_1k size 1024. Note 0. The analytics assistant answers questions about taxi trips using governed read only tools. Note 1. Every answer must cite the observation returned by a tool and never invent figures. Note 2. Trip volume is grouped by pickup zone, hour of day, weekday and payment type. Note 3. Fares, tips, tolls and surcharges are reported in US dollars per trip. Note 4. Distances are reported in miles and durations in minutes between pickup and dropoff. Note 5. When a question is ambiguous the assistant states its assumption before answering. Note 6. Row limits bound every query so that responses stay small and cheap to read. Note 7. Airport trips carry a separate fee and are compared against ordinary city trips. Note 8. The analytics assistant answers questions about taxi trips using governed read only tools. Note 9. Every answer must cite the observation returned by a tool and never invent figures. Note 10. Trip volume is grouped by pickup zone, hour of day, weekday and payment type. Note 11. Fares, tips, tolls and surcharges are reported in US dollars per trip. Note 12. Distances are reported in miles and durations in minutes between pickup and dropoff. Note 13. When a question is ambiguous the assistant states its assumption before answering. Note 14. Row limits bound every query so that responses stay small and cheap to read. Note 15. Airport trips carry a separate fee and are compared against ordinary city trips. Note 16. The analytics assistant answers questions about taxi trips using governed read only tools. Note 17. Every answer must cite the observation returned by a tool and never invent figures. Note 18. Trip volume is grouped by pickup zone, hour of day, weekday and payment type. Note 19. Fares, tips, tolls and surcharges are reported in US dollars per trip. Note 20. Distances are reported in miles and durations in minutes between pickup and dropoff. Note 21. When a question is ambiguous the assistant states its assumption before answering. Note 22. Row limits bound every query so that responses stay small and cheap to read. Note 23. Airport trips carry a separate fee and are compared against ordinary city trips. Note 24. The analytics assistant answers questions about taxi trips using governed read only tools. Note 25. Every answer must cite the observation returned by a tool and never invent figures. Note 26. Trip volume is grouped by pickup zone, hour of day, weekday and payment type. Note 27. Fares, tips, tolls and surcharges are reported in US dollars per trip. Note 28. Distances are reported in miles and durations in minutes between pickup and dropoff. Note 29. When a question is ambiguous the assistant states its assumption before answering. Note 30. Row limits bound every query so that responses stay small and cheap to read. Note 31. Airport trips carry a separate fee and are compared against ordinary city trips. Note 32. The analytics assistant answers questions about taxi trips using governed read only tools. Note 33. Every answer must cite the observation returned by a tool and never invent figures. Note 34. Trip volume is grouped by pickup zone, hour of day, weekday and payment type. Note 35. Fares, tips, tolls and surcharges are reported in US dollars per trip. Note 36. Distances are reported in miles and durations in minutes between pickup and dropoff. Note 37. When a question is ambiguous the assistant states its assumption before answering. Note 38. Row limits bound every query so that responses stay small and cheap to read. Note 39. Airport trips carry a separate fee and are compared against ordinary city trips. Note 40. The analytics assistant answers questions about taxi trips using governed read only tools. Note 41. Every answer must cite the observation returned by a tool and never invent figures. Note 42. Trip volume is grouped by pickup zone, hour of day, weekday and payment type. Note 43. Fares, tips, tolls and surcharges are reported in US dollars per trip. Note 44. Distances are reported in miles an",
+  "max_tokens": 32,
+  "treatment": "e5_destination_hit",
+  "conversations": [
+    {
+      "conversation_id_prefix": "e5_warm_b",
+      "turns": [
+        {
+          "question": "List the pickup boroughs present in the dataset",
+          "expected_tool": "list_taxi_dimension_values",
+          "delay_seconds": 0.0,
+          "force_worker": "worker_b"
+        }
+      ]
+    },
+    {
+      "conversation_id_prefix": "e5_dest",
+      "turns": [
+        {
+          "question": "Which pickup zones have the most trips?",
+          "expected_tool": "query_taxi_data",
+          "delay_seconds": 0.0,
+          "force_worker": "worker_a"
+        },
+        {
+          "question": "What are the peak hours and busiest times for taxi rides in NYC?",
+          "expected_tool": "query_taxi_data",
+          "delay_seconds": 0.0,
+          "force_worker": "worker_b"
+        }
+      ]
+    }
+  ]
+}

@@ -142,3 +142,23 @@ def test_forced_worker_still_wins_over_override(gw, monkeypatch) -> None:
     assert (
         r.headers["x-place-decision"] == "worker_b" and r.headers["x-placement-policy"] == "forced"
     )
+
+
+def test_decision_log_carries_agent_step_and_stage_timestamps(gw, monkeypatch, caplog) -> None:
+    """Log-only fields the single-request trace tool joins on (#123)."""
+    import json as _json
+
+    client, _ = gw
+    monkeypatch.setenv("ALLOW_FORCED_PLACEMENT", "1")
+    with caplog.at_level(logging.INFO, logger="inference.gateway"):
+        r, _ = _post(
+            client,
+            {"x-request-id": "rq1", "x-agent-step": "3", "x-force-worker": "worker_b"},
+        )
+    assert r.headers["x-place-decision"] == "worker_b"
+    recs = [_json.loads(m) for m in caplog.messages if m.startswith("{")]
+    recs = [x for x in recs if x.get("request_id") == "rq1"]
+    by_stage = {x["stage"]: x for x in recs if x["stage"] in ("admit", "place")}
+    assert all(x["agent_step"] == "3" and x["received_at"] <= x["ts"] for x in by_stage.values())
+    assert by_stage["admit"]["ts"] <= by_stage["place"]["ts"]
+    assert by_stage["place"]["placement_policy"] == "forced"

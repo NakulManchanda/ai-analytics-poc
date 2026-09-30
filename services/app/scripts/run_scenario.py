@@ -307,20 +307,19 @@ async def async_main(args: argparse.Namespace) -> int:
         config.target_endpoint_type = "gateway_chat"
 
     router_label = getattr(args, "router_label", None)
-    if (config.policy_override or config.admission_mode) and not is_our_gateway(
-        router_label
-    ):
+    uses_controls = bool(
+        config.policy_override or config.admission_mode or config.uses_force_worker
+    )
+    if uses_controls and not is_our_gateway(router_label):
         logger.error(
-            "policy_override/admission_mode are gateway-only test controls but "
+            "policy_override/admission_mode/force_worker are gateway-only test controls but "
             "--router-label=%r is not our gateway: they can never be applied or verified",
             router_label,
         )
         return 2
-    if (config.policy_override or config.admission_mode) and (
-        config.target_endpoint_type != "gateway_chat"
-    ):
+    if uses_controls and config.target_endpoint_type != "gateway_chat":
         logger.error(
-            "policy_override/admission_mode need target_endpoint_type gateway_chat "
+            "policy_override/admission_mode/force_worker need target_endpoint_type gateway_chat "
             "(got %s): the control could never be verified",
             config.target_endpoint_type,
         )
@@ -546,6 +545,12 @@ async def async_main(args: argparse.Namespace) -> int:
             "admission_mode_verified": _verified(observed, "admission_mode"),
             # matched / mismatched gateway echoes per requested control; verified needs >= 1
             # matched and 0 mismatched, so a run with no observable response is not verified.
+            "treatment": config.treatment,
+            "force_worker_requested": sorted(
+                {t["force_worker"] for t in all_turns if t.get("force_worker")}
+            )
+            or None,
+            "force_worker_verified": _verified(observed, "force_worker"),
             "control_observations": {
                 k: {"matched": ok, "mismatched": bad}
                 for k, (ok, bad) in observed.items()

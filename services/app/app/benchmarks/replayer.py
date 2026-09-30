@@ -30,6 +30,9 @@ GATEWAY_DECISION_HEADERS = (
     "x-policy-override-applied",
     "x-admission-mode",
 )
+FORCED_POLICY = (
+    "forced"  # x-placement-policy the gateway reports for an honored x-force-worker
+)
 
 
 def calculate_percentiles(values: list[float]) -> dict[str, float]:
@@ -77,6 +80,7 @@ class TurnResult(BaseModel):
     # Experiment controls sent with this request (gateway_chat only).
     policy_override: str | None = None
     admission_mode: str | None = None
+    force_worker: str | None = None  # x-force-worker sent for this turn (E5 control)
     # Raw gateway decision headers; None when headers are not visible (app_runs).
     gateway_headers: dict[str, str] | None = None
 
@@ -85,6 +89,7 @@ def _defaults(conv: ScenarioConversation, turn: ScenarioTurn) -> dict[str, Any]:
     return {
         "workload_class": turn.workload_class or conv.workload_class,
         "tenant_id": turn.tenant_id or conv.tenant_id,
+        "force_worker": turn.force_worker or conv.force_worker,
     }
 
 
@@ -159,13 +164,16 @@ class ScenarioReplayer:
         self.use_sse = use_sse
         self.gateway_stream = gateway_stream
         self._gw_convs: dict[str, _GatewayConv] = {}
-        self._control_checked = False
+        self._controls_checked: set[str] = (
+            set()
+        )  # controls whose FIRST echo was evaluated
         # Explicit observations per requested control: [echo matched, echo missing/mismatched].
         self.control_observations: dict[str, list[int]] = {
             name: [0, 0]
             for name, want in (
                 ("policy_override", config.policy_override),
                 ("admission_mode", config.admission_mode),
+                ("force_worker", config.uses_force_worker or None),
             )
             if want is not None
         }
@@ -311,6 +319,7 @@ class ScenarioReplayer:
         if self.config.target_endpoint_type == "gateway_chat":
             result.policy_override = self.config.policy_override
             result.admission_mode = self.config.admission_mode
+            result.force_worker = turn.force_worker
             self._verify_controls(result)
         return result
 
@@ -320,26 +329,57 @@ class ScenarioReplayer:
         if seen is None:
             return
         cfg = self.config
-        missing = []
-        for name, hdr in (
-            ("policy_override", "x-policy-override-applied"),
-            ("admission_mode", "x-admission-mode"),
+        checks = [
+            (name, hdr, getattr(cfg, name))
+            for name, hdr in (
+                ("policy_override", "x-policy-override-applied"),
+                ("admission_mode", "x-admission-mode"),
+            )
+            if getattr(cfg, name) is not None
+        ]
+        if result.force_worker and (
+            seen.get("x-place-decision") not in (None, "none")
+            or result.status == "completed"
         ):
-            want = getattr(cfg, name)
-            if want is None:
-                continue
-            ok = seen.get(hdr) == want
+            # Only judge a forced turn that reached placement: an earlier guard/admit
+            # rejection (x-place-decision "none") is an ordinary failure, not an ignored
+            # control. Honored = chosen worker AND policy "forced" (a coincidental pick by
+            # the normal policy would otherwise pass as forced).
+            ok = (
+                seen.get("x-place-decision") == result.force_worker
+                and seen.get("x-placement-policy") == FORCED_POLICY
+            )
+            checks.append(
+                ("force_worker", "x-place-decision", (result.force_worker, ok))
+            )
+        missing = []
+        first_failed = []
+        for name, hdr, want in checks:
+            if name == "force_worker":
+                want, ok = want
+                got = f"{seen.get('x-place-decision')!r}, policy {seen.get('x-placement-policy')!r}"
+            else:
+                ok = seen.get(hdr) == want
+                got = repr(seen.get(hdr))
             self.control_observations[name][0 if ok else 1] += 1
+            first = name not in self._controls_checked
+            self._controls_checked.add(name)
             if not ok:
-                missing.append(f"{hdr}={want!r} (got {seen.get(hdr)!r})")
+                missing.append(f"{hdr}={want!r} (got {got})")
+                if first:
+                    first_failed.append(name)
         if missing:
             msg = "requested experiment control not applied by gateway: " + ", ".join(
                 missing
             )
-            if not self._control_checked:
-                self._abort = msg + " (is ALLOW_EXPERIMENT_CONTROLS=1 on the gateway?)"
+            if first_failed:
+                hint = (
+                    "ALLOW_FORCED_PLACEMENT=1"
+                    if first_failed == ["force_worker"]
+                    else "ALLOW_EXPERIMENT_CONTROLS=1 / ALLOW_FORCED_PLACEMENT=1"
+                )
+                self._abort = f"{msg} (is {hint} on the gateway?)"
             result.status, result.error = "control_not_applied", msg
-        self._control_checked = True
 
     async def _execute_app_turn(
         self,
@@ -649,6 +689,7 @@ class ScenarioReplayer:
             ("x-prefix-tokens", None if turn.prefix_id else state.prefix_tokens),
             ("x-placement-policy-override", self.config.policy_override),
             ("x-admission-mode", self.config.admission_mode),
+            ("x-force-worker", turn.force_worker),
         ):
             if value is not None:
                 headers[name] = str(value)
