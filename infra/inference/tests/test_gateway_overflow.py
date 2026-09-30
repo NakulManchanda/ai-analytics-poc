@@ -456,33 +456,81 @@ def ttft_count(klass: str) -> float:
     return sample("gateway_ttft_seconds_count", **{"class": klass})
 
 
-def test_ttft_observed_for_streaming_interactive_request(gw) -> None:
-    client, _ = gw
-    before = ttft_count("interactive")
-    with patch.object(
-        httpx.AsyncClient,
-        "stream",
-        lambda self, m, url, **kw: _Stream(200, ["data: a", "data: b"]),
+ROLE = 'data: {"choices":[{"delta":{"role":"assistant"}}]}'
+TOKEN = 'data: {"choices":[{"delta":{"content":"Hi"}}]}'
+TEXT = 'data: {"choices":[{"text":"Hi"}]}'
+EMPTY = 'data: {"choices":[{"delta":{"content":""}}]}'
+NOISE = [": keepalive", "data: not-json", 'data: {"error":"boom"}', "data: [DONE]", ROLE, EMPTY]
+
+
+class _Spy(_Stream):
+    """Records which lines were emitted at the moment TTFT is observed."""
+
+    emitted: list
+
+    async def aiter_lines(self):
+        for line in self._lines:
+            self.emitted.append(line)
+            yield line
+
+
+def _stream_ttft(client, lines, local=True):
+    """Post a streaming request; return the emitted-lines snapshots at each TTFT observation."""
+    emitted, seen = [], []
+
+    class Spy(_Spy):
+        pass
+
+    Spy.emitted = emitted
+
+    class Obs:
+        def observe(self, _v):
+            seen.append(list(emitted))
+
+    def fake_stream(self, method, url, **kw):
+        if local and url != OVERFLOW_URL:
+            return Spy(200, lines)
+        return _Stream(503) if url != OVERFLOW_URL else Spy(200, lines)
+
+    with (
+        patch.object(httpx.AsyncClient, "stream", fake_stream),
+        patch.object(metrics.TTFT, "labels", lambda *a: Obs()),
     ):
         r = client.post("/serve", json={"messages": MSG, "stream": True})
     assert r.status_code == 200
-    assert ttft_count("interactive") == before + 1  # once per request, not per chunk
+    return seen
 
 
-def test_ttft_observed_for_batch_nonstreaming_and_overflow(gw) -> None:
+@pytest.mark.parametrize("local", [True, False])
+def test_ttft_waits_for_first_content_chunk(gw, local) -> None:
     client, _ = gw
-    b_before, i_before = ttft_count("batch"), ttft_count("interactive")
+    lines = [ROLE, ": keepalive", "data: not-json", EMPTY, TOKEN, "data: more", "data: [DONE]"]
+    seen = _stream_ttft(client, lines, local)
+    assert len(seen) == 1 and seen[0][-1] == TOKEN  # not at the role/keepalive record
+    assert seen[0] == lines[:5]  # observed at the content chunk, before later chunks
+
+
+def test_ttft_accepts_completions_text_chunks(gw) -> None:
+    client, _ = gw
+    seen = _stream_ttft(client, [ROLE, TEXT], True)
+    assert len(seen) == 1 and seen[0][-1] == TEXT
+
+
+@pytest.mark.parametrize("local", [True, False])
+def test_ttft_not_observed_without_content(gw, local) -> None:
+    client, _ = gw
+    assert _stream_ttft(client, NOISE, local) == []
+
+
+def test_nonstreaming_requests_absent_from_ttft_series(gw) -> None:
+    client, _ = gw
+    before = {k: ttft_count(k) for k in ("interactive", "batch")}
     calls = Calls(httpx.Response(200, json={"choices": []}), OFLOW_OK)
     with patch.object(httpx.AsyncClient, "post", _bind(calls)):
         r = client.post("/serve", json={"messages": MSG}, headers={"x-request-priority": "batch"})
-    assert r.status_code == 200 and ttft_count("batch") == b_before + 1
-    # overflow (local 503 -> overflow 200) also counts as time-to-response
-    calls = Calls(httpx.Response(503, text="busy"), OFLOW_OK)
+    assert r.status_code == 200
+    calls = Calls(httpx.Response(503, text="busy"), OFLOW_OK)  # non-streaming overflow 200
     with patch.object(httpx.AsyncClient, "post", _bind(calls)):
         r = serve(client)
-    assert r.headers["x-overflow"] and ttft_count("interactive") == i_before + 1
-    # a failed request observes nothing
-    calls = Calls(httpx.Response(503, text="busy"), httpx.Response(500, text="no"))
-    with patch.object(httpx.AsyncClient, "post", _bind(calls)):
-        serve(client)
-    assert ttft_count("interactive") == i_before + 1
+    assert r.headers["x-overflow"]
+    assert {k: ttft_count(k) for k in before} == before

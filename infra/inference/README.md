@@ -208,8 +208,9 @@ UI only. Four are the required production alerts, plus one supplemental engine a
 - `InferenceKVPressureSustained`: KV usage > 85% for 5m; above this vLLM starts queueing/preempting.
 - `GatewayInteractiveTTFTSLOBreach` (the TTFT SLO alert): p99 of
   `gateway_ttft_seconds{class="interactive"}` > 0.1s for 5m. The histogram is observed in the
-  gateway when the first streamed chunk (local or overflow) is sent; for non-streaming requests it
-  is time-to-response. It includes gateway queue time.
+  gateway at the first streamed chunk with non-empty content (role-only deltas, keepalives, errors
+  and `[DONE]` are ignored), local or overflow. Non-streaming requests are not measured, so this
+  alert covers streaming traffic only. It includes gateway queue time.
 - `GatewayQueueShedSurge`: `orch_shed_total` + `timeout_queue` rejects > 0.5/s for 5m.
 - `InferenceWorkerIntegrity` (worker/target integrity): worker not healthy, snapshot age > 15s
   (gateway stale threshold is 5s), preemptions > 0.1/s, any gateway/worker scrape target `up == 0`,

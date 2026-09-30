@@ -18,8 +18,8 @@ groups:
         labels:
           severity: critical
         annotations:
-          summary: "Gateway-observed interactive p99 TTFT above 100ms for 5m"
-          description: "Client-visible TTFT from the gateway (first streamed chunk; time-to-response when not streaming), interactive class only. Includes gateway queue time."
+          summary: "Gateway-observed interactive p99 streaming TTFT above 100ms for 5m"
+          description: "Client-visible TTFT from the gateway (first streamed chunk with content), streaming interactive requests only; non-streaming requests are not measured. Includes gateway queue time."
       - alert: InferenceEngineTTFTHigh
         expr: histogram_quantile(0.95, sum by (le, instance) (rate(vllm:time_to_first_token_seconds_bucket[5m]))) > 0.1
         for: 5m

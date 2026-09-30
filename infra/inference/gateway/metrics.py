@@ -94,12 +94,13 @@ OVERFLOW = Counter(
 OVERFLOW_ERROR = Counter(
     "overflow_error_total", "Overflow attempts that failed", ["reason"], registry=REGISTRY
 )
-# Client-visible time to first token, measured from gateway arrival. Streaming: first chunk sent
-# to the client (local or overflow upstream). Non-streaming: time to the 200 response. Buckets
-# bracket the 0.1s interactive SLO.
+# Client-visible time to first token for STREAMING requests only: from gateway arrival to the
+# first SSE chunk with non-empty generated content (role-only deltas, keepalives, errors and
+# [DONE] do not count). Non-streaming requests are not observed here (they have no first token;
+# see gateway_request_duration_seconds). Buckets bracket the 0.1s interactive SLO.
 TTFT = Histogram(
     "gateway_ttft_seconds",
-    "Gateway-observed time to first token (time-to-response when not streaming)",
+    "Gateway-observed time to first generated token (streaming requests only)",
     ["class"],
     buckets=(0.025, 0.05, 0.075, 0.1, 0.15, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0),
     registry=REGISTRY,
