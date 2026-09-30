@@ -28,7 +28,6 @@ from app.llm import (
     ServeLLMClient,
     ToolProposalResult,
 )
-from app.prefix import PrefixPartition
 from app.mcp_client import (
     ALLOWED_ANALYSES,
     DatasetProfileMCPClient,
@@ -43,6 +42,7 @@ from app.orchestration.budgets import (
     ExecutionBudgets,
 )
 from app.orchestration.reducer import ContextReducer
+from app.prefix import PrefixPartition
 from app.query_catalogue import lookup as catalogue_lookup
 from app.state import (
     Conversation,
@@ -1164,7 +1164,10 @@ class OrchestrationLoop:
                                     agent_step=agent_step,
                                 )
                             else:
-                                user_content = f"{partition.conversation_shared}\n\n{partition.unique_suffix}".strip()
+                                user_content = (
+                                    f"{partition.conversation_shared}\n\n"
+                                    f"{partition.unique_suffix}".strip()
+                                )
                                 prompt_text = f"{partition.global_shared}\n\n{user_content}".strip()
                                 call_res = llm.ask(prompt_text)
                         except LLMConfigurationError as err:

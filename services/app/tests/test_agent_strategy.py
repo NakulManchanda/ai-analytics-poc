@@ -144,7 +144,8 @@ def test_two_agent_answer_correlated_growing_prefixes() -> None:
 
     assert writer_call["role"] == "Writer"
     assert writer_call["agent_step"] == 3
-    # Check growing prefix: writer's conversation_shared contains researcher's observation plus research summary
+    # Check growing prefix: writer's conversation_shared contains
+    # researcher's observation plus research summary
     assert (
         researcher_call["partition"].conversation_shared
         in writer_call["partition"].conversation_shared

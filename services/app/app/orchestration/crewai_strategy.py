@@ -87,7 +87,9 @@ def run_two_agent_answer(
     start_step: int = 2,
     on_call: Callable[[LLMResult], None] | None = None,
 ) -> CrewAnswer:
-    """Run one researcher and one writer with no delegation or memory, using correlated growing prefixes."""
+    """Run one researcher and one writer with no delegation or memory,
+    using correlated growing prefixes.
+    """
     if invoke_model is None:
         if llm_client is None:
             raise ValueError("Either invoke_model or llm_client must be provided")
