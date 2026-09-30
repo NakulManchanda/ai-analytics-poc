@@ -36,6 +36,16 @@ spec:
               value: "http://inference-worker-b.inference-lab.svc.cluster.local:8000"
             - name: PLACEMENT_POLICY
               value: "prefix_then_load"
+            # Overflow (#122 slice 4): off by default. To enable, set OVERFLOW_ENABLED "1" plus the
+            # destination below; OVERFLOW_API_KEY must come from a Secret, never a literal here.
+            - name: OVERFLOW_ENABLED
+              value: "0"
+            - name: OVERFLOW_PROVIDER
+              value: ""
+            - name: OVERFLOW_MODEL
+              value: ""
+            - name: OVERFLOW_URL
+              value: ""  # OpenAI-compatible .../v1/chat/completions
           ports:
             - containerPort: 8080
           readinessProbe:

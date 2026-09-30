@@ -1,4 +1,4 @@
-"""Inference Gateway: guard -> quota -> admit -> place -> queue -> proxy (#121, #122 slices 1-3)."""
+"""Inference Gateway: guard -> quota -> admit -> place -> queue -> proxy (#121, #122 slices 1-4)."""
 
 from __future__ import annotations
 
@@ -18,6 +18,7 @@ try:  # package import (tests) or flat import (ConfigMap mounted at /app, `uvico
     from . import guard as guard_mod
     from . import metrics, placement
     from .admission import AdmitConfig, AdmitRequest, Shed, should_shed
+    from .overflow import Overflow, OverflowConfig, decide
     from .queueing import CLASSES, QueueConfig, QueueRejected, WorkerQueues
     from .tenants import TenantQuota
     from .workers import build_registry
@@ -25,6 +26,7 @@ except ImportError:
     import guard as guard_mod
     import placement
     from admission import AdmitConfig, AdmitRequest, Shed, should_shed
+    from overflow import Overflow, OverflowConfig, decide
     from queueing import CLASSES, QueueConfig, QueueRejected, WorkerQueues
     from tenants import TenantQuota
     from workers import build_registry
@@ -42,6 +44,7 @@ ADMIT_CFG = AdmitConfig.from_env()
 quota = TenantQuota.from_env()
 registry = build_registry()
 queues = WorkerQueues(QueueConfig.from_env())
+OVERFLOW_CFG = OverflowConfig.from_env()
 DEFAULT_WORKER_URL = registry.snapshots["worker_a"].worker.url  # /tokenize goes to A
 
 
@@ -116,6 +119,67 @@ async def tokenize(request: Request) -> Response:
     return JSONResponse(status_code=upstream_resp.status_code, content=content)
 
 
+async def _overflow(
+    cfg: OverflowConfig, reason: str, body: dict, headers: dict, log_fields: dict
+) -> Response | None:
+    """ONE attempt at the configured destination (model rewritten). None -> caller returns
+    the original local error. Never logs the API key or exception text (may echo the URL)."""
+    dest = {"overflow_provider": cfg.provider, "overflow_model": cfg.model}
+    out_headers = {
+        **headers,
+        "x-orchestration-stage": "overflow",
+        "x-place-decision": "overflow",
+        "x-overflow": cfg.destination,
+        "x-overflow-reason": reason,
+    }
+    payload = {**body, "model": cfg.model}
+    client = httpx.AsyncClient(timeout=cfg.timeout_s)
+    cm = None
+    try:
+        if body.get("stream"):
+            cm = client.stream("POST", cfg.url, json=payload, headers=cfg.headers())
+            upstream = await cm.__aenter__()
+            if upstream.status_code != 200:
+                raise ValueError(f"overflow status {upstream.status_code}")
+        else:
+            upstream = await client.post(cfg.url, json=payload, headers=cfg.headers())
+            if upstream.status_code != 200:
+                raise ValueError(f"overflow status {upstream.status_code}")
+            content = upstream.json()
+    except (httpx.HTTPError, ValueError) as exc:
+        if cm is not None:
+            with contextlib.suppress(Exception):
+                await cm.__aexit__(None, None, None)
+        await client.aclose()
+        metrics.OVERFLOW.labels(reason, cfg.provider, cfg.model, "error").inc()
+        metrics.OVERFLOW_ERROR.labels(reason).inc()
+        log.info(
+            json.dumps(
+                {**log_fields, "stage": "overflow", "reason": reason, **dest, "outcome": "error"}
+                | {"error_type": type(exc).__name__}
+            )
+        )
+        return None
+    metrics.OVERFLOW.labels(reason, cfg.provider, cfg.model, "ok").inc()
+    log.info(
+        json.dumps({**log_fields, "stage": "overflow", "reason": reason, **dest, "outcome": "ok"})
+    )
+    if cm is None:
+        await client.aclose()
+        return JSONResponse(content=content, headers=out_headers)
+
+    async def gen():
+        try:
+            async for line in upstream.aiter_lines():
+                if line:
+                    yield f"{line}\n\n"
+        finally:
+            await cm.__aexit__(None, None, None)
+            await client.aclose()
+
+    return StreamingResponse(gen(), media_type="text/event-stream", headers=out_headers)
+
+
 def _ms(seconds: float) -> int:
     return round(seconds * 1000)
 
@@ -166,6 +230,22 @@ async def serve_completion(
 
     lease = None
     tenant = quota.bucket_name(x_tenant_id)
+
+    async def try_overflow(
+        code: int, reason: str, source: str, never_overflow: bool = False
+    ) -> Response | None:
+        """Overflow a local 503/529 if eligible and configured; the local slot is already
+        released (or is released here) and the request never bounces back to local."""
+        if not OVERFLOW_CFG.active or not isinstance(
+            decide(code, reason, never_overflow, source), Overflow
+        ):
+            return None
+        resp = await _overflow(OVERFLOW_CFG, reason, body, correlation_headers, log_fields)
+        if resp is not None:
+            if lease is not None:
+                lease.release(refund=True)  # nothing was served locally
+            metrics.REQUESTS.labels("200", klass).inc()
+        return resp
 
     def reject(
         status: int,
@@ -227,6 +307,8 @@ async def serve_completion(
         metrics.ADMIT.labels("shed", result.reason, klass).inc()
         metrics.SHED.labels(result.reason, klass, str(result.code)).inc()
         metrics.TENANT_REQUESTS.labels(tenant, "shed").inc()
+        if resp := await try_overflow(result.code, result.reason, "admit", result.never_overflow):
+            return resp
         return reject(
             result.code,
             result.reason,
@@ -267,6 +349,8 @@ async def serve_completion(
         )
     if isinstance(decision, placement.PlacementError):
         metrics.PLACEMENT_ERRORS.labels(decision.reason).inc()
+        if resp := await try_overflow(503, decision.reason, "place"):
+            return resp
         return reject(503, decision.reason, "no worker available for placement", "place")
 
     metrics.PICKS.labels(
@@ -295,6 +379,8 @@ async def serve_completion(
             ticket = await queues.acquire(snap.id, klass, est_tokens, deadline_at)
     except QueueRejected as exc:
         metrics.QUEUE_ERRORS.labels(exc.reason, klass).inc()
+        if resp := await try_overflow(503, exc.reason, "queue"):
+            return resp
         return reject(
             503,
             exc.reason,
@@ -356,30 +442,54 @@ async def serve_completion(
         await client.aclose()
 
     if bool(body.get("stream", False)):
+        cm = client.stream(
+            "POST", target_url, json=body, headers={"content-type": "application/json"}
+        )
+        try:  # open before returning so a local 503/529 is known before any bytes stream
+            upstream_resp = await cm.__aenter__()
+        except httpx.RequestError as exc:
+            code = 503 if isinstance(exc, httpx.ConnectError) else 502
+            release(code)
+            await client.aclose()
+            if resp := await try_overflow(code, "worker_unavailable", "upstream"):
+                return resp
+            raise HTTPException(
+                status_code=code,
+                detail=f"Worker unavailable at {snap.worker.url}: {exc}",
+                headers=correlation_headers,
+            ) from exc
+        if upstream_resp.status_code in (503, 529):
+            err = (await upstream_resp.aread()).decode("utf-8", errors="replace")
+            release(upstream_resp.status_code)
+            await cm.__aexit__(None, None, None)
+            await client.aclose()
+            if resp := await try_overflow(
+                upstream_resp.status_code, "worker_overloaded", "upstream"
+            ):
+                return resp
+            return JSONResponse(
+                status_code=upstream_resp.status_code,
+                content={"error": err},
+                headers=correlation_headers,
+            )
 
         async def stream_generator():
-            status = 200
+            status = upstream_resp.status_code
             try:
-                async with client.stream(
-                    "POST",
-                    target_url,
-                    json=body,
-                    headers={"content-type": "application/json"},
-                ) as upstream_resp:
-                    status = upstream_resp.status_code
-                    if status != 200:
-                        err_content = await upstream_resp.aread()
-                        decoded_err = err_content.decode("utf-8", errors="replace")
-                        yield f"data: {json.dumps({'error': decoded_err})}\n\n"
-                        return
-                    async for line in upstream_resp.aiter_lines():
-                        if line:
-                            yield f"{line}\n\n"
+                if status != 200:
+                    err_content = await upstream_resp.aread()
+                    decoded_err = err_content.decode("utf-8", errors="replace")
+                    yield f"data: {json.dumps({'error': decoded_err})}\n\n"
+                    return
+                async for line in upstream_resp.aiter_lines():
+                    if line:
+                        yield f"{line}\n\n"
             except httpx.RequestError as exc:
                 status = 502
                 yield f"data: {json.dumps({'error': str(exc)})}\n\n"
             finally:
                 release(status)
+                await cm.__aexit__(None, None, None)
                 await client.aclose()
 
         return StreamingResponse(
@@ -397,6 +507,8 @@ async def serve_completion(
         )
     except httpx.ConnectError as exc:
         release(503)
+        if resp := await try_overflow(503, "worker_unavailable", "upstream"):
+            return resp
         raise HTTPException(
             status_code=503,
             detail=f"Worker unavailable at {snap.worker.url}: {exc}",
@@ -413,6 +525,10 @@ async def serve_completion(
         await client.aclose()
 
     release(upstream_resp.status_code)
+    if upstream_resp.status_code in (503, 529) and (
+        resp := await try_overflow(upstream_resp.status_code, "worker_overloaded", "upstream")
+    ):
+        return resp
     content = (
         upstream_resp.json() if upstream_resp.status_code == 200 else {"error": upstream_resp.text}
     )
