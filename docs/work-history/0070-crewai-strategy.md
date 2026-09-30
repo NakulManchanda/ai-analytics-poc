@@ -47,6 +47,9 @@ directly, has no raw SQL access, and operates under strict execution budgets and
 - **D-139-9: Fast in-flight cancellation via cancellation runner.** Wrap blocking provider calls in
   `self._run_with_cancellation(..., run_id=run_id)` so that user-requested cancellation aborts blocking
   CrewAI model calls cooperatively in ~50ms, rather than waiting for slow external provider responses to complete.
+  *Distinction / Limitation:* The cancellation runner unblocks the orchestration loop immediately and transitions
+  the run to `status="cancelled"` in durable state; it does not guarantee that the remote provider HTTP connection
+  itself was severed by the underlying AWS SDK socket.
 - **D-139-10: Post-call budget telemetry retention.** Persist `LLMCall`, `llm.completed`, and `RunStep` before
   calling `tracker.record_llm_call(...)`. If an LLM call exceeds input token, output token, cost, or deadline
   limits, the physical call telemetry is retained in durable state alongside the `status="budget_exceeded"` record.
@@ -142,4 +145,8 @@ bounded sequential generator with correlated prefix partitioning and full SSE ev
 - `make -C infra/terraform fmt-check && make -C infra/terraform validate` -> **Terraform configuration valid**.
 - `git diff --check` -> **clean**, no trailing whitespace or formatting errors.
 - Real AWS Bedrock end-to-end runs (`amazon.nova-micro-v1:0` in `us-east-1`) verified both `manual` and `crewai` strategies cleanly.
+- Live Docker Compose verification (`test139` isolated stack on port 3005 with `AGENT_STRATEGY=crewai` and Bedrock):
+  - In-flight cancellation via `POST /api/runs/{run_id}/cancel`: run stopped waiting for provider and transitioned immediately to terminal `status="cancelled"` in DynamoDB. (Limitation: proves orchestration stopped waiting; does not prove the remote Bedrock socket was severed).
+  - End-to-end completion: query completed in 11.5s with 5 steps, 2,147 in / 368 out tokens, and accurate governed summary.
+  - Isolated teardown cleanly completed (`docker compose -p test139 down`).
 - GitHub Actions CI checks on PR #141 are 100% green.
