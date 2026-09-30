@@ -316,6 +316,8 @@ async def serve_completion(
     log_fields = {
         "request_id": correlation_headers["x-request-id"],
         "conversation_id": correlation_headers["x-conversation-id"],
+        "agent_step": correlation_headers["x-agent-step"],
+        "received_at": time.time(),  # epoch; anchors stage durations in the decision log
         "prefix_id": x_prefix_id,
         "tenant_id": x_tenant_id,
         "workload_class": klass,
@@ -396,6 +398,7 @@ async def serve_completion(
                 {
                     **log_fields,
                     "stage": stage,
+                    "ts": time.time(),
                     "code": code,
                     "reason": reason,
                     **(extra or {}),
@@ -476,6 +479,7 @@ async def serve_completion(
             {
                 **log_fields,
                 "stage": "admit",
+                "ts": time.time(),
                 "decision": "accept",
                 "admission_inputs": result.inputs if result else {"skipped": "admission_off"},
             }
@@ -523,7 +527,7 @@ async def serve_completion(
             "x-intended-action": decision.intended_action,
         }
     )
-    log.info(json.dumps({**log_fields, "stage": "place", **vars(decision)}))
+    log.info(json.dumps({**log_fields, "stage": "place", "ts": time.time(), **vars(decision)}))
 
     deadline_at = now + deadline_ms / 1000 if deadline_ms is not None else None
     queue_enter = time.time()
