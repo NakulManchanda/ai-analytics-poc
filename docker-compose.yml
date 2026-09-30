@@ -25,6 +25,7 @@ services:
       MCP_URL: http://mcp:8001/mcp
       REDIS_URL: redis://redis:6379/0
       LLM_PROVIDER: fake
+      AGENT_STRATEGY: "${AGENT_STRATEGY:-manual}"
       METRICS_FILE: /app/metrics/runs.jsonl
     volumes:
       - ./metrics:/app/metrics
