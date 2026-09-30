@@ -21,7 +21,7 @@ from app.events import (
     context_reduced_payload,
     terminal_run_payload,
 )
-from app.llm import LLMClient, LLMProviderError, ServeLLMClient, ToolProposalResult
+from app.llm import LLMClient, LLMProviderError, LLMResult, ServeLLMClient, ToolProposalResult
 from app.mcp_client import (
     ALLOWED_ANALYSES,
     DatasetProfileMCPClient,
@@ -349,6 +349,7 @@ class OrchestrationLoop:
         tool_call_id_factory: Callable[[], str] = generate_tool_call_id,
         monotonic_factory: Callable[[], float] = time.monotonic,
         tracer: Tracer | None = None,
+        agent_strategy: str = "manual",
     ) -> None:
         self._llm_client = llm_client
         self._llm_client_factory = llm_client_factory
@@ -363,7 +364,7 @@ class OrchestrationLoop:
         self._tool_call_id_factory = tool_call_id_factory
         self._monotonic = monotonic_factory
         self._tracer = tracer or trace.get_tracer("ai_analytics_poc.orchestration")
-
+        self._agent_strategy = agent_strategy
         # Initialize Polly client if voice synthesis is enabled
         if self._voice_settings.enabled and self._voice_settings.provider == "polly":
             from app.voice.polly import get_polly_client
@@ -1111,167 +1112,318 @@ class OrchestrationLoop:
                 answer_call_id = self._llm_call_id_factory()
                 final_answer_phase_reached = True
                 check_cancellation()
-                emit(
-                    "llm.started",
-                    {"llm_call_id": answer_call_id, "phase": "final_answer"},
-                )
                 ans_start = self._monotonic()
-                accumulated_answer_chunks: list[str] = []
 
-                def publish_answer_delta(
-                    delta: str,
-                    _start: float = ans_start,
-                    _call_id: str = answer_call_id,
-                    _chunks: list[str] = accumulated_answer_chunks,
-                ) -> None:
-                    nonlocal ttft_ms
-                    if ttft_ms is None:
-                        ttft_ms = int((self._monotonic() - _start) * 1000)
-                    _chunks.append(delta)
+                if self._agent_strategy == "crewai":
+                    from app.orchestration.crewai_strategy import run_two_agent_answer
+
                     emit(
-                        "answer.delta",
-                        {"delta": delta},
-                        llm_call_id=_call_id,
+                        "llm.started",
+                        {"llm_call_id": answer_call_id, "phase": "final_answer"},
                     )
-                    check_cancellation("".join(_chunks))
 
-                try:
-                    stream_answer = getattr(
-                        llm, "stream_answer_with_query_result", None
-                    )
-                    answer_kwargs: dict[str, Any] = (
-                        {
-                            "conversation_id": conv_id,
-                            "repo": self._repo,
-                            "current_message_id": user_msg_id,
-                        }
-                        if is_self_hosted
-                        else {}
-                    )
-                    if callable(stream_answer):
-                        final_answer_stream_started = True
-                        answer_result = stream_answer(
-                            prompt,
-                            query_result,
-                            publish_answer_delta,
-                            **answer_kwargs,
+                    def _on_crew_call(call_res: LLMResult) -> None:
+                        call_cost_usd, _ = call_cost(
+                            call_res.input_tokens, call_res.output_tokens
                         )
-                    else:
-                        final_answer_stream_started = False
-                        answer_result = llm.answer_with_query_result(
-                            prompt, query_result, **answer_kwargs
+                        tracker.record_llm_call(
+                            call_res.input_tokens,
+                            call_res.output_tokens,
+                            call_cost_usd,
                         )
-                except LLMConfigurationError as err:
-                    raise OrchestrationError(
-                        "llm_configuration_error", False, answer_call_id, str(err)
-                    ) from err
-                except LLMProviderError as err:
-                    raise OrchestrationError(
-                        err.code, err.retryable, answer_call_id, str(err)
-                    ) from err
-                ans_latency_ms = int((self._monotonic() - ans_start) * 1000)
-                final_answer_latency_ms = ans_latency_ms
+                        check_cancellation()
 
-                emit(
-                    "answer.completed",
-                    {"answer": answer_result.text},
-                    llm_call_id=answer_call_id,
-                )
-
-                # Synthesize audio if voice output is enabled
-                if self._polly_client and self._voice_settings.enabled:
                     try:
-                        audio_bytes = self._polly_client.synthesize_speech(
-                            text=answer_result.text,
-                            voice_name=self._voice_settings.voice_name,
-                            language_code=self._voice_settings.language,
-                            output_format="mp3",
+                        crew_answer = run_two_agent_answer(
+                            llm_client=llm,
+                            question=prompt,
+                            governed_result=query_result,
+                            on_call=_on_crew_call,
                         )
-                        if audio_bytes:
-                            audio_base64 = base64.b64encode(audio_bytes).decode("utf-8")
-                            emit(
-                                "answer.audio",
-                                answer_audio_payload(
-                                    audio_base64=audio_base64,
-                                    voice_name=self._voice_settings.voice_name,
-                                    format="mp3",
-                                ),
-                                llm_call_id=answer_call_id,
-                            )
+                    except (
+                        LLMConfigurationError,
+                        LLMProviderError,
+                        RunCancelledError,
+                        BudgetExceededError,
+                    ):
+                        raise
+                    except RuntimeError as err:
+                        raise OrchestrationError(
+                            "strategy_execution_error", False, answer_call_id, str(err)
+                        ) from err
                     except Exception as err:
-                        logger.warning(f"Failed to synthesize audio: {err}")
+                        raise OrchestrationError(
+                            "strategy_execution_error", False, answer_call_id, str(err)
+                        ) from err
 
-                ans_cost, ans_cost_source = call_cost(
-                    answer_result.input_tokens, answer_result.output_tokens
-                )
-                tracker.record_llm_call(
-                    answer_result.input_tokens,
-                    answer_result.output_tokens,
-                    ans_cost,
-                )
-                llm_calls.append(
-                    LLMCall(
+                    ans_latency_ms = int((self._monotonic() - ans_start) * 1000)
+                    final_answer_latency_ms = ans_latency_ms
+                    final_answer_text = crew_answer.text
+
+                    emit(
+                        "answer.completed",
+                        {"answer": final_answer_text},
                         llm_call_id=answer_call_id,
-                        model_id=answer_result.model_id,
-                        input_tokens=answer_result.input_tokens,
-                        output_tokens=answer_result.output_tokens,
-                        latency_ms=answer_result.latency_ms,
-                        finish_reason=answer_result.finish_reason,
-                        configured_max_tokens=answer_result.configured_max_tokens,
-                        ttft_ms=answer_result.ttft_ms,
-                        first_visible_answer_ms=answer_result.first_visible_answer_ms,
-                        reasoning_tokens=answer_result.reasoning_tokens,
-                        reasoning_tokens_unavailable_reason=(
-                            answer_result.reasoning_tokens_unavailable_reason
-                        ),
-                        visible_answer_tokens=answer_result.visible_answer_tokens,
-                        visible_answer_tokens_unavailable_reason=(
-                            answer_result.visible_answer_tokens_unavailable_reason
-                        ),
-                        cost_usd=ans_cost,
-                        cost_source=ans_cost_source,
                     )
-                )
-                emit(
-                    "llm.completed",
-                    {
-                        "llm_call_id": answer_call_id,
-                        "phase": "final_answer",
-                        "latency_ms": ans_latency_ms,
-                        "tokens": {
-                            "input": answer_result.input_tokens,
-                            "output": answer_result.output_tokens,
+
+                    # Synthesize audio if voice output is enabled
+                    if self._polly_client and self._voice_settings.enabled:
+                        try:
+                            audio_bytes = self._polly_client.synthesize_speech(
+                                text=final_answer_text,
+                                voice_name=self._voice_settings.voice_name,
+                                language_code=self._voice_settings.language,
+                                output_format="mp3",
+                            )
+                            if audio_bytes:
+                                audio_base64 = base64.b64encode(audio_bytes).decode("utf-8")
+                                emit(
+                                    "answer.audio",
+                                    answer_audio_payload(
+                                        audio_base64=audio_base64,
+                                        voice_name=self._voice_settings.voice_name,
+                                        format="mp3",
+                                    ),
+                                    llm_call_id=answer_call_id,
+                                )
+                        except Exception as err:
+                            logger.warning(f"Failed to synthesize audio: {err}")
+
+                    for idx, call_res in enumerate(crew_answer.calls):
+                        cid = (
+                            self._llm_call_id_factory()
+                            if idx < len(crew_answer.calls) - 1
+                            else answer_call_id
+                        )
+                        c_cost, c_cost_source = call_cost(
+                            call_res.input_tokens, call_res.output_tokens
+                        )
+                        llm_calls.append(
+                            LLMCall(
+                                llm_call_id=cid,
+                                model_id=call_res.model_id,
+                                input_tokens=call_res.input_tokens,
+                                output_tokens=call_res.output_tokens,
+                                latency_ms=call_res.latency_ms,
+                                finish_reason=call_res.finish_reason,
+                                configured_max_tokens=call_res.configured_max_tokens,
+                                ttft_ms=call_res.ttft_ms,
+                                first_visible_answer_ms=call_res.first_visible_answer_ms,
+                                reasoning_tokens=call_res.reasoning_tokens,
+                                reasoning_tokens_unavailable_reason=(
+                                    call_res.reasoning_tokens_unavailable_reason
+                                ),
+                                visible_answer_tokens=call_res.visible_answer_tokens,
+                                visible_answer_tokens_unavailable_reason=(
+                                    call_res.visible_answer_tokens_unavailable_reason
+                                ),
+                                cost_usd=c_cost,
+                                cost_source=c_cost_source,
+                            )
+                        )
+
+                    emit(
+                        "llm.completed",
+                        {
+                            "llm_call_id": answer_call_id,
+                            "phase": "final_answer",
+                            "latency_ms": ans_latency_ms,
+                            "tokens": {
+                                "input": sum(c.input_tokens for c in crew_answer.calls),
+                                "output": sum(c.output_tokens for c in crew_answer.calls),
+                            },
                         },
-                    },
-                    llm_call_id=answer_call_id,
-                )
-
-                answer_step = RunStep(
-                    step_id=generate_step_id(),
-                    run_id=run_id,
-                    sequence=step_seq,
-                    step_type="llm_final_answer",
-                    status="completed",
-                    llm_call_id=answer_call_id,
-                    input_summary=f"query_id={query_id_val}",
-                    output_summary=f"answer: {answer_result.text[:80]}",
-                    duration_ms=ans_latency_ms,
-                    metadata=llm_calls[-1].to_metadata(),
-                )
-                self._repo.add_run_step(answer_step)
-                steps.append(answer_step)
-
-                # Persist assistant Message
-                asst_msg_id = generate_message_id()
-                self._repo.add_message(
-                    Message(
-                        message_id=asst_msg_id,
-                        conversation_id=conv_id,
-                        sequence=next_seq,
-                        role="assistant",
-                        content=answer_result.text,
+                        llm_call_id=answer_call_id,
                     )
-                )
+
+                    answer_step = RunStep(
+                        step_id=generate_step_id(),
+                        run_id=run_id,
+                        sequence=step_seq,
+                        step_type="crewai_crew",
+                        status="completed",
+                        llm_call_id=answer_call_id,
+                        input_summary=f"query_id={query_id_val}",
+                        output_summary=f"answer: {final_answer_text[:80]}",
+                        duration_ms=ans_latency_ms,
+                        metadata=llm_calls[-1].to_metadata(),
+                    )
+                    self._repo.add_run_step(answer_step)
+                    steps.append(answer_step)
+
+                    # Persist assistant Message
+                    asst_msg_id = generate_message_id()
+                    self._repo.add_message(
+                        Message(
+                            message_id=asst_msg_id,
+                            conversation_id=conv_id,
+                            sequence=next_seq,
+                            role="assistant",
+                            content=final_answer_text,
+                        )
+                    )
+                else:
+                    emit(
+                        "llm.started",
+                        {"llm_call_id": answer_call_id, "phase": "final_answer"},
+                    )
+                    accumulated_answer_chunks: list[str] = []
+
+                    def publish_answer_delta(
+                        delta: str,
+                        _start: float = ans_start,
+                        _call_id: str = answer_call_id,
+                        _chunks: list[str] = accumulated_answer_chunks,
+                    ) -> None:
+                        nonlocal ttft_ms
+                        if ttft_ms is None:
+                            ttft_ms = int((self._monotonic() - _start) * 1000)
+                        _chunks.append(delta)
+                        emit(
+                            "answer.delta",
+                            {"delta": delta},
+                            llm_call_id=_call_id,
+                        )
+                        check_cancellation("".join(_chunks))
+
+                    try:
+                        stream_answer = getattr(
+                            llm, "stream_answer_with_query_result", None
+                        )
+                        answer_kwargs: dict[str, Any] = (
+                            {
+                                "conversation_id": conv_id,
+                                "repo": self._repo,
+                                "current_message_id": user_msg_id,
+                            }
+                            if is_self_hosted
+                            else {}
+                        )
+                        if callable(stream_answer):
+                            final_answer_stream_started = True
+                            answer_result = stream_answer(
+                                prompt,
+                                query_result,
+                                publish_answer_delta,
+                                **answer_kwargs,
+                            )
+                        else:
+                            final_answer_stream_started = False
+                            answer_result = llm.answer_with_query_result(
+                                prompt, query_result, **answer_kwargs
+                            )
+                    except LLMConfigurationError as err:
+                        raise OrchestrationError(
+                            "llm_configuration_error", False, answer_call_id, str(err)
+                        ) from err
+                    except LLMProviderError as err:
+                        raise OrchestrationError(
+                            err.code, err.retryable, answer_call_id, str(err)
+                        ) from err
+                    ans_latency_ms = int((self._monotonic() - ans_start) * 1000)
+                    final_answer_latency_ms = ans_latency_ms
+                    final_answer_text = answer_result.text
+
+                    emit(
+                        "answer.completed",
+                        {"answer": final_answer_text},
+                        llm_call_id=answer_call_id,
+                    )
+
+                    # Synthesize audio if voice output is enabled
+                    if self._polly_client and self._voice_settings.enabled:
+                        try:
+                            audio_bytes = self._polly_client.synthesize_speech(
+                                text=final_answer_text,
+                                voice_name=self._voice_settings.voice_name,
+                                language_code=self._voice_settings.language,
+                                output_format="mp3",
+                            )
+                            if audio_bytes:
+                                audio_base64 = base64.b64encode(audio_bytes).decode("utf-8")
+                                emit(
+                                    "answer.audio",
+                                    answer_audio_payload(
+                                        audio_base64=audio_base64,
+                                        voice_name=self._voice_settings.voice_name,
+                                        format="mp3",
+                                    ),
+                                    llm_call_id=answer_call_id,
+                                )
+                        except Exception as err:
+                            logger.warning(f"Failed to synthesize audio: {err}")
+
+                    ans_cost, ans_cost_source = call_cost(
+                        answer_result.input_tokens, answer_result.output_tokens
+                    )
+                    tracker.record_llm_call(
+                        answer_result.input_tokens,
+                        answer_result.output_tokens,
+                        ans_cost,
+                    )
+                    llm_calls.append(
+                        LLMCall(
+                            llm_call_id=answer_call_id,
+                            model_id=answer_result.model_id,
+                            input_tokens=answer_result.input_tokens,
+                            output_tokens=answer_result.output_tokens,
+                            latency_ms=answer_result.latency_ms,
+                            finish_reason=answer_result.finish_reason,
+                            configured_max_tokens=answer_result.configured_max_tokens,
+                            ttft_ms=answer_result.ttft_ms,
+                            first_visible_answer_ms=answer_result.first_visible_answer_ms,
+                            reasoning_tokens=answer_result.reasoning_tokens,
+                            reasoning_tokens_unavailable_reason=(
+                                answer_result.reasoning_tokens_unavailable_reason
+                            ),
+                            visible_answer_tokens=answer_result.visible_answer_tokens,
+                            visible_answer_tokens_unavailable_reason=(
+                                answer_result.visible_answer_tokens_unavailable_reason
+                            ),
+                            cost_usd=ans_cost,
+                            cost_source=ans_cost_source,
+                        )
+                    )
+                    emit(
+                        "llm.completed",
+                        {
+                            "llm_call_id": answer_call_id,
+                            "phase": "final_answer",
+                            "latency_ms": ans_latency_ms,
+                            "tokens": {
+                                "input": answer_result.input_tokens,
+                                "output": answer_result.output_tokens,
+                            },
+                        },
+                        llm_call_id=answer_call_id,
+                    )
+
+                    answer_step = RunStep(
+                        step_id=generate_step_id(),
+                        run_id=run_id,
+                        sequence=step_seq,
+                        step_type="llm_final_answer",
+                        status="completed",
+                        llm_call_id=answer_call_id,
+                        input_summary=f"query_id={query_id_val}",
+                        output_summary=f"answer: {final_answer_text[:80]}",
+                        duration_ms=ans_latency_ms,
+                        metadata=llm_calls[-1].to_metadata(),
+                    )
+                    self._repo.add_run_step(answer_step)
+                    steps.append(answer_step)
+
+                    # Persist assistant Message
+                    asst_msg_id = generate_message_id()
+                    self._repo.add_message(
+                        Message(
+                            message_id=asst_msg_id,
+                            conversation_id=conv_id,
+                            sequence=next_seq,
+                            role="assistant",
+                            content=final_answer_text,
+                        )
+                    )
 
                 # Update Run to completed
                 total_latency_ms = int((self._monotonic() - start_mono) * 1000)
@@ -1323,7 +1475,7 @@ class OrchestrationLoop:
                 )
 
                 return LoopResult(
-                    answer=answer_result.text,
+                    answer=final_answer_text,
                     status="completed",
                     run_id=run_id,
                     conversation_id=conv_id,

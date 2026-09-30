@@ -51,6 +51,13 @@ class Settings:
     # D2: Qwen3 thinking is off for structured calls unconditionally; the final answer
     # call is off by default too, behind this flag, so #123 can compare on/off.
     inference_answer_thinking: bool = False
+    agent_strategy: str = "manual"
+
+    def __post_init__(self) -> None:
+        if self.agent_strategy not in ("manual", "crewai"):
+            raise LLMConfigurationError(
+                "AGENT_STRATEGY must be manual or crewai"
+            )
 
     @classmethod
     def from_environment(cls) -> "Settings":
@@ -73,6 +80,7 @@ class Settings:
                 "INFERENCE_ANSWER_THINKING", "false"
             ).lower()
             in ("true", "1", "yes"),
+            agent_strategy=os.getenv("AGENT_STRATEGY", "manual"),
         )
 
     def validate_m4_alignment(self) -> None:

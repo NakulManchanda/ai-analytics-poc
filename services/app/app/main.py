@@ -60,6 +60,7 @@ def create_app(
         state_repository=shared_state_repo,
         event_publisher=resolved_publisher,
         tracer=tracer,
+        agent_strategy=resolved_settings.agent_strategy,
         **(
             {"llm_call_id_factory": llm_call_id_factory}
             if llm_call_id_factory is not None
