@@ -282,6 +282,7 @@ class ScenarioReplayer:
         current_data = ""
 
         async with client.stream("GET", events_url, timeout=self.timeout) as stream:
+            stream.raise_for_status()
             async for raw_line in stream.aiter_lines():
                 line = raw_line.strip()
                 if not line:
@@ -344,11 +345,13 @@ class ScenarioReplayer:
                     current_data = ""
                     continue
 
-                if line.startswith("event:"):
-                    current_event_type = line[len("event:") :].strip()
-                elif line.startswith("data:"):
-                    chunk = line[len("data:") :].strip()
-                    current_data = f"{current_data}{chunk}" if current_data else chunk
+                if raw_line.startswith("event:"):
+                    current_event_type = raw_line[len("event:") :].strip()
+                elif raw_line.startswith("data:"):
+                    chunk = raw_line[len("data:") :]
+                    if chunk.startswith(" "):
+                        chunk = chunk[1:]
+                    current_data = f"{current_data}\n{chunk}" if current_data else chunk
 
         # If stream closed without trailing blank line, check last buffered event
         if current_data:

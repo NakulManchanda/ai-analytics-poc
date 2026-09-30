@@ -234,3 +234,75 @@ async def test_replayer_gateway_chat_path():
         assert summary.successful_turns == 1
         assert summary.total_prompt_tokens == 200
         assert summary.total_completion_tokens == 80
+
+
+@pytest.mark.anyio
+async def test_replayer_multiline_sse_payload():
+    cfg = ScenarioConfig(
+        name="test_multiline_sse",
+        description="Multi-line SSE payload",
+        concurrency=1,
+        strategy="manual",
+        target_endpoint_type="app_runs",
+        conversations=[
+            ScenarioConversation(
+                conversation_id_prefix="ml_c1",
+                turns=[
+                    ScenarioTurn(question="Which pickup zones have the most trips?")
+                ],
+            )
+        ],
+    )
+
+    async def mock_handler(request: httpx.Request) -> httpx.Response:
+        url_str = str(request.url)
+        if request.method == "POST" and url_str.endswith("/api/runs"):
+            return httpx.Response(
+                202,
+                json={
+                    "conversation_id": "ml_c1",
+                    "message_id": "msg_ml",
+                    "run_id": "run_ml_1",
+                    "events_url": "/api/runs/run_ml_1/events",
+                },
+            )
+        elif request.method == "GET" and "/events" in url_str:
+            # Multi-line SSE data payload with line breaks inside JSON
+            sse_content = (
+                "event: answer.delta\n"
+                "data: {\n"
+                'data:   "event_type": "answer.delta",\n'
+                'data:   "payload": {"delta": "hello\\nworld"}\n'
+                "data: }\n\n"
+                "event: run.completed\n"
+                "data: {\n"
+                'data:   "event_type": "run.completed",\n'
+                'data:   "payload": {\n'
+                'data:     "status": "completed",\n'
+                'data:     "input_tokens": 100,\n'
+                'data:     "output_tokens": 25,\n'
+                'data:     "telemetry": {"ttft_ms": 30.0}\n'
+                "data:   }\n"
+                "data: }\n\n"
+            )
+            return httpx.Response(
+                200,
+                headers={"content-type": "text/event-stream"},
+                text=sse_content,
+            )
+        return httpx.Response(404)
+
+    transport = httpx.MockTransport(mock_handler)
+    async with httpx.AsyncClient(transport=transport) as client:
+        replayer = ScenarioReplayer(
+            config=cfg,
+            target_base_url="http://mock-app:8080",
+            client=client,
+            timeout=5.0,
+            use_sse=True,
+        )
+        summary = await replayer.run()
+        assert summary.successful_turns == 1
+        assert summary.total_prompt_tokens == 100
+        assert summary.total_completion_tokens == 25
+        assert summary.ttft_ms["p50"] == pytest.approx(30.0)
