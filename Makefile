@@ -10,7 +10,7 @@ OBSERVABILITY_PROMETHEUS_PORT ?= 19090
 OBSERVABILITY_BURST_COUNT ?= 10
 OBSERVABILITY_LOG_TAIL ?= 200
 
-.PHONY: help check-bootstrap dev app-serve-dev mcp-dev mcp-smoke dataset-test dataset-smoke smoke test mcp-test infra-test web-test compose-smoke observability-up observability-down observability-smoke observability-dev-up observability-dev-info observability-dev-ask observability-dev-burst observability-dev-metrics observability-dev-logs observability-dev-down local-aws-compose local-aws-refresh local-serve-compose local-serve-refresh local-bedrock-compose bedrock-smoke m5-bedrock-smoke m6-bedrock-smoke dashboard tf-dispatch tf-resume tf-park inference-validate inference-sync inference-config inference-secret inference-bootstrap inference-deploy inference-up inference-tunnel inference-connect inference-smoke inference-warmup inference-capacity inference-restart inference-gateway-restart inference-serve-smoke inference-run inference-pull-evidence inference-teardown
+.PHONY: help check-bootstrap dev app-serve-dev mcp-dev mcp-smoke dataset-test dataset-smoke smoke test mcp-test infra-test web-test compose-smoke observability-up observability-down observability-smoke observability-dev-up observability-dev-info observability-dev-ask observability-dev-burst observability-dev-metrics observability-dev-logs observability-dev-down local-aws-compose local-aws-refresh local-serve-compose local-serve-refresh local-bedrock-compose bedrock-smoke m5-bedrock-smoke m6-bedrock-smoke dashboard tf-dispatch tf-resume tf-park inference-validate inference-sync inference-config inference-secret inference-bootstrap inference-deploy inference-up inference-tunnel inference-connect inference-smoke inference-warmup inference-capacity inference-restart inference-gateway-restart inference-serve-smoke inference-run inference-pull-evidence inference-teardown replay-fanout replay-multi-turn replay-compare-strategies
 
 
 help: ## Show available commands
@@ -263,3 +263,17 @@ tf-resume: ## Run Terraform on GitHub Actions with demo_enabled=true (resumes pa
 
 tf-park: ## Run Terraform on GitHub Actions with demo_enabled=false (parks demo backend to stop costs)
 	@$(MAKE) tf-dispatch REF=$(or $(REF),main) DEMO=false
+
+TARGET_URL ?= http://127.0.0.1:8080
+METRICS_URL ?= http://127.0.0.1:18001/metrics
+REPLAYER_FLAGS ?=
+
+replay-fanout: ## Replay shared_prefix_fanout scenario (usage: make replay-fanout [TARGET_URL=...] [METRICS_URL=...])
+	uv run --project services/app python services/app/scripts/run_scenario.py --scenario shared_prefix_fanout --target-url $(TARGET_URL) $(if $(METRICS_URL),--metrics-url $(METRICS_URL)) $(REPLAYER_FLAGS)
+
+replay-multi-turn: ## Replay growing_multi_turn scenario (usage: make replay-multi-turn [TARGET_URL=...] [METRICS_URL=...])
+	uv run --project services/app python services/app/scripts/run_scenario.py --scenario growing_multi_turn --target-url $(TARGET_URL) $(if $(METRICS_URL),--metrics-url $(METRICS_URL)) $(REPLAYER_FLAGS)
+
+replay-compare-strategies: ## Replay comparative scenario across manual and crewai strategies
+	uv run --project services/app python services/app/scripts/run_scenario.py --scenario strategy_comparison --strategy manual --target-url $(TARGET_URL) $(if $(METRICS_URL),--metrics-url $(METRICS_URL)) $(REPLAYER_FLAGS)
+	uv run --project services/app python services/app/scripts/run_scenario.py --scenario strategy_comparison --strategy crewai --target-url $(TARGET_URL) $(if $(METRICS_URL),--metrics-url $(METRICS_URL)) $(REPLAYER_FLAGS)
