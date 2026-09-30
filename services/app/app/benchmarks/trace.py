@@ -42,8 +42,60 @@ HOP_PROOF_FIELDS = {
 }
 
 
-def hop_missing_fields(rec: dict[str, Any]) -> list[str]:
-    """Names of proof fields absent or failing validation (empty list = complete proof)."""
+def expected_namespace_parts(manifest: dict[str, Any]) -> list[str] | None:
+    """What a compatibility_namespace must match: the manifest's explicit namespace (exact), else
+    every recorded model/tokenizer/chat-template revision (substring). None = nothing recorded.
+    """
+    if isinstance(manifest.get("compatibility_namespace"), str):
+        return [manifest["compatibility_namespace"]]
+    parts = [
+        manifest.get(k)
+        for k in ("model_revision", "tokenizer_revision", "chat_template_revision")
+    ]
+    known = [p for p in parts if isinstance(p, str) and p and p != "unknown"]
+    return known or None
+
+
+def hop_missing_fields(
+    rec: dict[str, Any],
+    *,
+    chosen_worker: str | None = None,
+    prefix_id: str | None = None,
+    namespace_parts: list[str] | None = None,
+) -> list[str]:
+    """Names of proof fields absent/failing, relationship checks that fail, and checks that
+    cannot be made (``unverifiable: X``). Empty list = complete, consistent proof.
+
+    Relationships: source != destination; destination == the request's chosen worker;
+    reused <= transferred; prefix_identity == the request's prefix id; compatibility_namespace
+    matches the run manifest. Missing correlated data is unverifiable, never a pass."""
+    missing = _field_failures(rec)
+    src, dst = rec.get("source_worker_or_store"), rec.get("destination_worker")
+    if isinstance(src, str) and src == dst:
+        missing.append("failed: source == destination (no cross-worker transfer)")
+    if not chosen_worker:
+        missing.append("unverifiable: chosen_worker")
+    elif isinstance(dst, str) and dst != chosen_worker:
+        missing.append(f"failed: destination_worker != chosen_worker ({chosen_worker})")
+    used, moved = rec.get("destination_reused_tokens"), rec.get("transferred_tokens")
+    if all(isinstance(v, (int, float)) for v in (used, moved)) and used > moved:
+        missing.append("failed: destination_reused_tokens > transferred_tokens")
+    if not prefix_id:
+        missing.append("unverifiable: prefix_id")
+    elif (
+        isinstance(rec.get("prefix_identity"), str)
+        and rec["prefix_identity"] != prefix_id
+    ):
+        missing.append("failed: prefix_identity != request prefix_id")
+    ns = rec.get("compatibility_namespace")
+    if not namespace_parts:
+        missing.append("unverifiable: manifest compatibility namespace/revisions")
+    elif isinstance(ns, str) and not all(part in ns for part in namespace_parts):
+        missing.append("failed: compatibility_namespace != manifest")
+    return missing
+
+
+def _field_failures(rec: dict[str, Any]) -> list[str]:
     missing = []
     for name in HOP_PROOF_FIELDS:
         v = rec.get(name)
@@ -426,8 +478,15 @@ def build_trace(
     hops = [r for r in recs if r.get("stage") == "hop"]
     if hops:
         # Judge the most complete record: the one with the fewest missing proof fields.
-        best = min(hops, key=lambda r: len(hop_missing_fields(r)))
-        missing = hop_missing_fields(best)
+        check = {
+            "chosen_worker": (place or {}).get("chosen_worker")
+            or hdr.get("x-place-decision"),
+            "prefix_id": (place or {}).get("prefix_id")
+            or next((r["prefix_id"] for r in recs if r.get("prefix_id")), None),
+            "namespace_parts": expected_namespace_parts(manifest),
+        }
+        best = min(hops, key=lambda r: len(hop_missing_fields(r, **check)))
+        missing = hop_missing_fields(best, **check)
         if not missing:
             stages.append(
                 _stage(
@@ -435,7 +494,8 @@ def build_trace(
                     "confirmed",
                     duration_ms=best.get("transfer_ms"),
                     details={k: v for k, v in best.items() if k not in ("stage",)},
-                    note="all proof fields present (field names assumed until #133 lands)",
+                    note="all proof fields present and consistent with this request's placement, "
+                    "prefix id and run manifest (field names assumed until #133 lands)",
                 )
             )
         else:

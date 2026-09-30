@@ -48,6 +48,7 @@ def _log(rid, extra_hop=None):
         "conversation_id": "c1",
         "agent_step": "2",
         "received_at": T0,
+        "prefix_id": "pfx-v1-abc",
     }
     lines = [
         {
@@ -116,7 +117,15 @@ def _run_dir(tmp_path, with_window=True):
         )
     )
     (tmp_path / "manifest.json").write_text(
-        json.dumps({"scenario": {"name": "s"}, "topology": "one A100"})
+        json.dumps(
+            {
+                "scenario": {"name": "s"},
+                "topology": "one A100",
+                "model_revision": "rev1",
+                "tokenizer_revision": "tok1",
+                "chat_template_revision": "tpl1",
+            }
+        )
     )
     return tmp_path
 
@@ -160,7 +169,7 @@ GOOD_HOP = {
     "source_worker_or_store": "worker_a",
     "destination_worker": "worker_b",
     "prefix_identity": "pfx-v1-abc",
-    "compatibility_namespace": "qwen3-0.6b/rev/tpl1/bf16",
+    "compatibility_namespace": "qwen3-0.6b/rev1/tok1/tpl1/bf16",
     "transferred_tokens": 2048,
     "transferred_bytes": 234881024,
     "transfer_ms": 12.0,
@@ -199,6 +208,58 @@ def test_incomplete_transferred_hop_is_not_confirmed(tmp_path, field):
     hop = _hop(tmp_path, rec)
     assert hop["status"] == "attempted_not_confirmed"
     assert hop["details"]["missing_proof_fields"] == [field]
+
+
+@pytest.mark.parametrize(
+    "override,expect",
+    [
+        ({"source_worker_or_store": "worker_b"}, "failed: source == destination"),
+        (
+            {"destination_worker": "worker_a"},
+            "failed: destination_worker != chosen_worker",
+        ),
+        ({"prefix_identity": "other"}, "failed: prefix_identity != request prefix_id"),
+        (
+            {"compatibility_namespace": "qwen3/rev2/tok1/tpl1"},
+            "failed: compatibility_namespace != manifest",
+        ),
+        (
+            {"destination_reused_tokens": 4096},
+            "failed: destination_reused_tokens > transferred_tokens",
+        ),
+    ],
+)
+def test_contradictory_hop_fields_are_not_confirmed(tmp_path, override, expect):
+    hop = _hop(tmp_path, {**GOOD_HOP, **override})
+    assert hop["status"] == "attempted_not_confirmed"
+    assert any(m.startswith(expect) for m in hop["details"]["missing_proof_fields"])
+
+
+def test_hop_unverifiable_without_correlated_data(tmp_path):
+    run = _run_dir(tmp_path)
+    (run / "manifest.json").write_text(json.dumps({"scenario": {"name": "s"}}))
+    lines = [
+        json.loads(line.split(":", 2)[2])
+        for line in _log("r1", GOOD_HOP).splitlines()
+        if line.startswith("INFO")
+    ]
+    kept = [
+        {k: v for k, v in r.items() if k != "prefix_id"}
+        for r in lines
+        if r.get("stage") != "place" and r.get("request_id") == "r1"
+    ]
+    (run / "gateway.log").write_text("\n".join(json.dumps(r) for r in kept))
+    req = [json.loads(x) for x in (run / "requests.jsonl").read_text().splitlines()]
+    req[1]["gateway_headers"] = {}
+    (run / "requests.jsonl").write_text("\n".join(json.dumps(r) for r in req))
+    hop = _st(build_trace(run, "r1", run / "gateway.log"), "hop")
+    missing = hop["details"]["missing_proof_fields"]
+    assert hop["status"] == "attempted_not_confirmed"
+    assert (
+        "unverifiable: chosen_worker" in missing
+        and "unverifiable: prefix_id" in missing
+    )
+    assert any(m.startswith("unverifiable: manifest") for m in missing)
 
 
 def test_unconfirmed_destination_or_zero_bytes_not_confirmed(tmp_path):
