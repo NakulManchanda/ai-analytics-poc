@@ -45,7 +45,12 @@ SNAPSHOT_AGE = Gauge(
     ["worker"],
     registry=REGISTRY,
 )
-
+WORKER_WARM = Gauge(
+    "worker_warm",
+    "1 once at least one scrape of the worker has ever succeeded (healthy but cold = 0)",
+    ["worker"],
+    registry=REGISTRY,
+)
 
 STALE_FALLBACK = Counter(
     "stale_snapshot_fallback_total",
@@ -89,6 +94,16 @@ OVERFLOW = Counter(
 OVERFLOW_ERROR = Counter(
     "overflow_error_total", "Overflow attempts that failed", ["reason"], registry=REGISTRY
 )
+# Client-visible time to first token, measured from gateway arrival. Streaming: first chunk sent
+# to the client (local or overflow upstream). Non-streaming: time to the 200 response. Buckets
+# bracket the 0.1s interactive SLO.
+TTFT = Histogram(
+    "gateway_ttft_seconds",
+    "Gateway-observed time to first token (time-to-response when not streaming)",
+    ["class"],
+    buckets=(0.025, 0.05, 0.075, 0.1, 0.15, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0),
+    registry=REGISTRY,
+)
 STAGE_DURATION = Histogram(
     "gateway_request_duration_seconds",
     "Time spent per gateway pipeline stage",
@@ -111,6 +126,7 @@ def observe_snapshots(snaps, stale_after: float) -> None:
         state = "unhealthy" if not s.healthy else "stale" if s.is_stale(stale_after) else "healthy"
         for st in HEALTH_STATES:
             WORKER_HEALTH.labels(s.id, st).set(1 if st == state else 0)
+        WORKER_WARM.labels(s.id).set(1 if s.warm else 0)
         SNAPSHOT_AGE.labels(s.id).set(min(s.age(), 1e9))
 
 

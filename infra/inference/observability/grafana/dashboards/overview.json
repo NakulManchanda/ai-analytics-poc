@@ -254,6 +254,68 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
+          "expr": "histogram_quantile(0.50, sum by (le, class) (rate(gateway_ttft_seconds_bucket[5m])))",
+          "legendFormat": "p50 {{class}}",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le, class) (rate(gateway_ttft_seconds_bucket[5m])))",
+          "legendFormat": "p95 {{class}}",
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.99, sum by (le, class) (rate(gateway_ttft_seconds_bucket[5m])))",
+          "legendFormat": "p99 {{class}}",
+          "refId": "C"
+        }
+      ],
+      "title": "Gateway TTFT p50/p95/p99 by class (SLO 0.1s)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 19
+      },
+      "id": 7,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
           "expr": "histogram_quantile(0.95, sum by (le, stage) (rate(gateway_request_duration_seconds_bucket[5m])))",
           "legendFormat": "{{stage}}",
           "refId": "A"
@@ -280,10 +342,10 @@
       "gridPos": {
         "h": 8,
         "w": 12,
-        "x": 0,
+        "x": 12,
         "y": 19
       },
-      "id": 7,
+      "id": 8,
       "options": {
         "legend": {
           "displayMode": "list",
@@ -323,10 +385,10 @@
       "gridPos": {
         "h": 8,
         "w": 12,
-        "x": 12,
-        "y": 19
+        "x": 0,
+        "y": 27
       },
-      "id": 8,
+      "id": 9,
       "options": {
         "legend": {
           "displayMode": "list",

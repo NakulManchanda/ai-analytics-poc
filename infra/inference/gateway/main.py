@@ -142,11 +142,13 @@ async def _overflow(
     log_fields: dict,
     on_done,
     remaining_s: float | None = None,
+    on_first=lambda: None,
 ) -> Response | None:
     """ONE attempt at the configured destination (model rewritten). None -> caller returns
     the original local error. ``on_done(status)`` runs once when the client-visible response
     is complete (after the stream ends for streaming). ``remaining_s`` is the request's
-    remaining x-deadline-ms budget. Never logs the API key or exception text."""
+    remaining x-deadline-ms budget. ``on_first()`` marks the first byte/response (TTFT).
+    Never logs the API key or exception text."""
     dest = {"overflow_provider": cfg.provider, "overflow_model": cfg.model}
     if remaining_s is not None and remaining_s <= 0:
         metrics.OVERFLOW_ERROR.labels("no_time_remaining").inc()
@@ -198,6 +200,7 @@ async def _overflow(
     if cm is None:
         await client.aclose()
         record("ok")
+        on_first()
         on_done(200)
         return JSONResponse(content=content, headers=out_headers)
 
@@ -206,6 +209,7 @@ async def _overflow(
         try:
             async for line in upstream.aiter_lines():
                 if line:
+                    on_first()
                     yield f"{line}\n\n"
             status = 200
             record("ok")
@@ -283,6 +287,13 @@ async def serve_completion(
 
     lease = None
     tenant = quota.bucket_name(x_tenant_id)
+    ttft_seen = False
+
+    def observe_ttft() -> None:  # once per request: first streamed chunk / 200 response
+        nonlocal ttft_seen
+        if not ttft_seen:
+            ttft_seen = True
+            metrics.TTFT.labels(klass).observe(time.monotonic() - started)
 
     async def try_overflow(
         code: int, reason: str, source: str, never_overflow: bool = False
@@ -309,7 +320,14 @@ async def serve_completion(
             metrics.REQUESTS.labels(str(status), klass).inc()
 
         return await _overflow(
-            OVERFLOW_CFG, reason, body, correlation_headers, log_fields, once, remaining
+            OVERFLOW_CFG,
+            reason,
+            body,
+            correlation_headers,
+            log_fields,
+            once,
+            remaining,
+            observe_ttft,
         )
 
     def reject(
@@ -559,6 +577,7 @@ async def serve_completion(
                     return
                 async for line in upstream_resp.aiter_lines():
                     if line:
+                        observe_ttft()
                         yield f"{line}\n\n"
             except httpx.RequestError as exc:
                 status = 502
@@ -607,6 +626,8 @@ async def serve_completion(
     ):
         return resp
     finish(upstream_resp.status_code)
+    if upstream_resp.status_code == 200:
+        observe_ttft()
     content = (
         upstream_resp.json() if upstream_resp.status_code == 200 else {"error": upstream_resp.text}
     )

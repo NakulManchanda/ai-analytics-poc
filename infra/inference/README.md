@@ -202,16 +202,20 @@ request rate, preemptions, prefix hit ratio on one time axis), and a text-only *
 (real hop metrics land with #133).
 
 #### Alerts (#123 slice B)
-Four rules live in `observability/prometheus/alerts.yaml` (standard rule-group format) and are
+Five rules live in `observability/prometheus/alerts.yaml` (standard rule-group format) and are
 loaded by `deploy.sh` via `--set-file`; Alertmanager stays disabled, so they show in the Prometheus
-UI only. Thresholds:
+UI only. Four are the required production alerts, plus one supplemental engine alert:
 - `InferenceKVPressureSustained`: KV usage > 85% for 5m; above this vLLM starts queueing/preempting.
-- `InferenceTTFTSLOBreach`: engine-side p95 `vllm:time_to_first_token_seconds` > 0.1s for 5m (the
-  100ms interactive TTFT SLO). It excludes gateway queue time and mixes classes; end-to-end SLO
-  attainment comes from the replayer.
+- `GatewayInteractiveTTFTSLOBreach` (the TTFT SLO alert): p99 of
+  `gateway_ttft_seconds{class="interactive"}` > 0.1s for 5m. The histogram is observed in the
+  gateway when the first streamed chunk (local or overflow) is sent; for non-streaming requests it
+  is time-to-response. It includes gateway queue time.
 - `GatewayQueueShedSurge`: `orch_shed_total` + `timeout_queue` rejects > 0.5/s for 5m.
-- `InferenceWorkerIntegrity`: worker not healthy, snapshot age > 15s (gateway stale threshold is
-  5s), or preemptions > 0.1/s, for 2m.
+- `InferenceWorkerIntegrity` (worker/target integrity): worker not healthy, snapshot age > 15s
+  (gateway stale threshold is 5s), preemptions > 0.1/s, any gateway/worker scrape target `up == 0`,
+  gateway `up` series absent, or fewer than 2 workers up, for 2m.
+- `InferenceEngineTTFTHigh` (supplemental): engine-side p95 `vllm:time_to_first_token_seconds` >
+  0.1s for 5m. Mixes classes and excludes gateway queue time, so it is not the SLO alert.
 
 Contract tests for the generator live in `tests/test_dashboards_contract.py` and run with the
 rest of the inference test suite:

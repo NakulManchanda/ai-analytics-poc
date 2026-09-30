@@ -69,6 +69,8 @@ METRIC_NAMES = {
     "gateway": (
         "gateway_requests_total",
         "gateway_request_duration_seconds",
+        "gateway_ttft_seconds",
+        "worker_warm",
         "guard_reject_total",
         "orch_pick_total",
         "placement_error_total",
@@ -903,6 +905,18 @@ def overview() -> dict:
                 {"kind": "stat"},
             ),
             (
+                "Gateway TTFT p50/p95/p99 by class (SLO 0.1s)",
+                _q("0.50", "gateway_ttft_seconds", "class"),
+                "p50 {{class}}",
+                {
+                    "unit": "s",
+                    "extra": [
+                        (_q("0.95", "gateway_ttft_seconds", "class"), "p95 {{class}}"),
+                        (_q("0.99", "gateway_ttft_seconds", "class"), "p99 {{class}}"),
+                    ],
+                },
+            ),
+            (
                 "Gateway stage duration p95",
                 _q("0.95", "gateway_request_duration_seconds", "stage"),
                 "{{stage}}",
@@ -998,6 +1012,7 @@ def router_placement() -> dict:
                 "{{worker}} {{state}}",
                 {},
             ),
+            ("Worker warm (0 = healthy but cold)", "worker_warm", "{{worker}}", {}),
             (
                 "Snapshot age",
                 "worker_snapshot_age_seconds",

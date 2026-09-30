@@ -447,3 +447,42 @@ def test_overflow_holds_tenant_lease_until_stream_completes(gw, monkeypatch) -> 
     assert first.status_code == 200 and "data: done" in first.text
     b = quota._buckets["acme"]
     assert b.active == 0 and b.tokens > 0  # lease freed at completion; tokens stay charged
+
+
+# --- gateway TTFT histogram (#123 review follow-up) --------------------------------------
+
+
+def ttft_count(klass: str) -> float:
+    return sample("gateway_ttft_seconds_count", **{"class": klass})
+
+
+def test_ttft_observed_for_streaming_interactive_request(gw) -> None:
+    client, _ = gw
+    before = ttft_count("interactive")
+    with patch.object(
+        httpx.AsyncClient,
+        "stream",
+        lambda self, m, url, **kw: _Stream(200, ["data: a", "data: b"]),
+    ):
+        r = client.post("/serve", json={"messages": MSG, "stream": True})
+    assert r.status_code == 200
+    assert ttft_count("interactive") == before + 1  # once per request, not per chunk
+
+
+def test_ttft_observed_for_batch_nonstreaming_and_overflow(gw) -> None:
+    client, _ = gw
+    b_before, i_before = ttft_count("batch"), ttft_count("interactive")
+    calls = Calls(httpx.Response(200, json={"choices": []}), OFLOW_OK)
+    with patch.object(httpx.AsyncClient, "post", _bind(calls)):
+        r = client.post("/serve", json={"messages": MSG}, headers={"x-request-priority": "batch"})
+    assert r.status_code == 200 and ttft_count("batch") == b_before + 1
+    # overflow (local 503 -> overflow 200) also counts as time-to-response
+    calls = Calls(httpx.Response(503, text="busy"), OFLOW_OK)
+    with patch.object(httpx.AsyncClient, "post", _bind(calls)):
+        r = serve(client)
+    assert r.headers["x-overflow"] and ttft_count("interactive") == i_before + 1
+    # a failed request observes nothing
+    calls = Calls(httpx.Response(503, text="busy"), httpx.Response(500, text="no"))
+    with patch.object(httpx.AsyncClient, "post", _bind(calls)):
+        serve(client)
+    assert ttft_count("interactive") == i_before + 1

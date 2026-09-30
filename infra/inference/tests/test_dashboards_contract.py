@@ -278,7 +278,7 @@ def _alert_rules() -> list[dict]:
 
 def test_alert_rules_structure_and_metrics_are_known() -> None:
     rules = _alert_rules()
-    assert len(rules) == 4
+    assert len(rules) == 5
     known = _base_names(_known_names())
     for rule in rules:
         assert rule["alert"] and rule["expr"] and rule["for"]
@@ -292,7 +292,8 @@ def test_alert_rules_structure_and_metrics_are_known() -> None:
         assert not unknown, f"{rule['alert']} uses unknown metrics: {sorted(unknown)}"
     assert {r["alert"] for r in rules} == {
         "InferenceKVPressureSustained",
-        "InferenceTTFTSLOBreach",
+        "GatewayInteractiveTTFTSLOBreach",
+        "InferenceEngineTTFTHigh",
         "GatewayQueueShedSurge",
         "InferenceWorkerIntegrity",
     }
@@ -308,3 +309,25 @@ def test_prometheus_scrapes_gateway_and_loads_alert_rules() -> None:
         encoding="utf-8"
     )
     assert "observability/prometheus/alerts.yaml" in deploy
+
+
+def test_alert_expressions_cover_target_loss_and_gateway_ttft() -> None:
+    by_name = {r["alert"]: " ".join(r["expr"].split()) for r in _alert_rules()}
+    integrity = by_name["InferenceWorkerIntegrity"]
+    assert (
+        'up{job=~"inference-gateway|inference-workers"} == 0' in integrity
+    )  # target down
+    assert 'absent(up{job="inference-gateway"})' in integrity  # gateway series vanished
+    assert (
+        'count(up{job="inference-workers"} == 1) or vector(0)) < 2' in integrity
+    )  # worker gone
+    slo = by_name["GatewayInteractiveTTFTSLOBreach"]
+    assert 'gateway_ttft_seconds_bucket{class="interactive"}' in slo and "> 0.1" in slo
+    assert "vllm:" not in slo
+    assert "vllm:time_to_first_token_seconds" in by_name["InferenceEngineTTFTHigh"]
+
+
+def test_ttft_and_warm_panels_exist() -> None:
+    module = _load_module()
+    text = json.dumps({k: b() for k, b in module.DASHBOARDS.items()})
+    assert "gateway_ttft_seconds_bucket" in text and "worker_warm" in text

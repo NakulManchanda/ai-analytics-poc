@@ -167,8 +167,7 @@
             "drawStyle": "line",
             "fillOpacity": 10,
             "lineWidth": 1
-          },
-          "unit": "s"
+          }
         },
         "overrides": []
       },
@@ -179,6 +178,50 @@
         "y": 11
       },
       "id": 5,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "worker_warm",
+          "legendFormat": "{{worker}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Worker warm (0 = healthy but cold)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 19
+      },
+      "id": 6,
       "options": {
         "legend": {
           "displayMode": "list",
@@ -219,9 +262,9 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 19
+        "y": 27
       },
-      "id": 6,
+      "id": 7,
       "options": {
         "legend": {
           "displayMode": "list",
