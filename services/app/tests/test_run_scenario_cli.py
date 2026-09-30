@@ -207,3 +207,170 @@ async def test_async_main_invalid_concurrency_fails_fast(tmp_path: Path):
 
     with pytest.raises(ValidationError):
         await async_main(MockInvalidArgs())
+
+
+@pytest.mark.anyio
+async def test_async_main_writes_run_directory_with_sweep(tmp_path: Path, monkeypatch):
+    import httpx
+
+    scen_file = tmp_path / "gw.json"
+    scen_file.write_text(
+        json.dumps(
+            {
+                "name": "gw",
+                "description": "gateway scenario",
+                "target_endpoint_type": "gateway_chat",
+                "conversations": [
+                    {
+                        "turns": [{"question": "q", "tenant_id": "t1"}],
+                    },
+                    {"turns": [{"question": "q2"}]},
+                ],
+            }
+        )
+    )
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if "/metrics" in str(request.url):
+            return httpx.Response(200, text="vllm:prefix_cache_hits_total 1.0\n")
+        return httpx.Response(
+            200,
+            headers={"x-place-decision": "w1"},
+            json={"id": "i", "usage": {"prompt_tokens": 1, "completion_tokens": 4}},
+        )
+
+    original = httpx.AsyncClient
+
+    def factory(*a, **kw):
+        kw["transport"] = httpx.MockTransport(handler)
+        return original(*a, **kw)
+
+    monkeypatch.setattr(httpx, "AsyncClient", factory)
+    monkeypatch.setenv("MODEL_REVISION", "rev123")
+
+    class Args:
+        scenario = str(scen_file)
+        target_url = "http://gw:18080"
+        metrics_url = "http://gw:18001/metrics"
+        concurrency = None
+        strategy = None
+        endpoint_type = None
+        timeout = 10.0
+        no_sse = False
+        output_dir = str(tmp_path / "evidence")
+        sweep_concurrency = "1,2"
+        label = "least_loaded"
+        ttft_slo_ms = 100.0
+        e2e_slo_ms = 3500.0
+        topology = None
+        engine_flags = "--max-num-seqs 8"
+
+    assert await async_main(Args()) == 0
+    runs = [p for p in (tmp_path / "evidence").iterdir() if p.is_dir()]
+    assert len(runs) == 1
+    run = runs[0]
+    manifest = json.loads((run / "manifest.json").read_text())
+    assert manifest["scenario"]["name"] == "gw"
+    assert len(manifest["scenario"]["sha256"]) == 64
+    assert manifest["policy_under_test"] == "least_loaded"
+    assert manifest["slos"]["interactive_ttft_slo_ms"] == 100.0
+    assert "A100" in manifest["topology"]
+    assert manifest["model_revision"] == "rev123"
+    assert manifest["tokenizer_revision"] == "unknown"
+    assert manifest["engine_flags"] == "--max-num-seqs 8"
+    assert "MUST NOT be attributed" in manifest["evidence_scope"]
+    assert manifest["gateway_base_url"] == "http://gw:18080"
+    assert manifest["started_at"] and manifest["ended_at"]
+    lines = (run / "requests.jsonl").read_text().splitlines()
+    assert len(lines) == 4
+    rec = json.loads(lines[0])
+    assert rec["offered_concurrency"] in (1, 2)
+    assert rec["gateway_headers"]["x-place-decision"] == "w1"
+    summary = json.loads((run / "summary.json").read_text())
+    assert [lv["offered_concurrency"] for lv in summary["levels"]] == [1, 2]
+    assert summary["levels"][0]["prometheus_window"]["scope"] == "window"
+    assert (run / "sweep.csv").read_text().startswith("offered_concurrency")
+    assert json.loads((run / "sweep.json").read_text())[1]["offered_concurrency"] == 2
+
+
+@pytest.mark.anyio
+async def test_sweep_exit_nonzero_when_earlier_level_fails(tmp_path: Path, monkeypatch):
+    import httpx
+
+    scen = tmp_path / "s.json"
+    scen.write_text(
+        json.dumps(
+            {
+                "name": "s",
+                "description": "d",
+                "target_endpoint_type": "gateway_chat",
+                "conversations": [{"turns": [{"question": "q"}]}],
+            }
+        )
+    )
+    calls = {"n": 0}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return httpx.Response(503, json={"error": "x"})
+        return httpx.Response(200, json={"id": "i", "usage": {}})
+
+    original = httpx.AsyncClient
+    monkeypatch.setattr(
+        httpx,
+        "AsyncClient",
+        lambda *a, **kw: original(
+            *a, **{**kw, "transport": httpx.MockTransport(handler)}
+        ),
+    )
+
+    class Args:
+        scenario = str(scen)
+        target_url = "http://gw:18080"
+        metrics_url = None
+        concurrency = None
+        strategy = None
+        endpoint_type = None
+        timeout = 10.0
+        no_sse = False
+        output_dir = str(tmp_path / "ev")
+        sweep_concurrency = "1,2"
+        gateway_stream = False
+
+    assert await async_main(Args()) == 1
+
+
+def test_markdown_and_json_render_unavailable_tokens_as_na():
+    summary = ReplaySummary(
+        scenario_name="s",
+        total_conversations=1,
+        total_turns=1,
+        successful_turns=1,
+        failed_turns=0,
+        duration_seconds=1.0,
+        requests_per_second=1.0,
+        latency_ms={},
+        ttft_ms={},
+        total_prompt_tokens=None,
+        total_completion_tokens=None,
+        tokens_measured_turns=0,
+        tokens_unmeasured_turns=1,
+        turn_results=[
+            TurnResult(
+                conversation_id="c",
+                turn_index=0,
+                prompt="p",
+                status="completed",
+                client_duration_ms=1.0,
+            )
+        ],
+    )
+    md = generate_markdown_report(summary, None, "u", None, "manual", "t")
+    assert "| **Prompt Tokens** | n/a |" in md
+    assert "| **Completion Tokens** | n/a |" in md
+    assert "| 0 / 1 |" in md
+    assert "| n/a | n/a |" in md
+    dumped = summary.model_dump()
+    assert dumped["total_prompt_tokens"] is None
+    assert dumped["tokens_unmeasured_turns"] == 1

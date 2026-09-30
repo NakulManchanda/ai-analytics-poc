@@ -72,3 +72,4 @@ Monotonically numbered log of every post-bootstrap task. Each entry records the 
 - [0074 — Control plane Slice 2: admission and tenant quotas](0074-control-plane-admission.md) — #122
 - [0075 — Control plane Slice 3: per-worker gateway queues](0075-control-plane-gateway-queues.md) — #122
 - [0076 — Control plane Slice 4: overflow policy](0076-control-plane-overflow.md) — #122
+- [0077 — #123 Slice A: measurement harness](0077-evidence-measurement-harness.md) — goodput, decision headers, run manifest

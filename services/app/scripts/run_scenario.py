@@ -6,12 +6,21 @@ from __future__ import annotations
 import argparse
 import asyncio
 import datetime
+import hashlib
 import json
 import logging
+import os
 import sys
 from pathlib import Path
 from typing import Any
 
+from app.benchmarks.goodput import (
+    Slos,
+    is_good,
+    summarize_turns,
+    sweep_row,
+    sweep_to_csv,
+)
 from app.benchmarks.metrics_scraper import (
     MetricsDelta,
     PrometheusMetricSnapshot,
@@ -25,6 +34,26 @@ logging.basicConfig(
     level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s"
 )
 logger = logging.getLogger(__name__)
+
+
+DEFAULT_TOPOLOGY = "two vLLM replicas/HAMi slices on one physical A100"
+WINDOW_NOTE = (
+    "Prometheus deltas are isolated-window aggregates; do not attribute to requests."
+)
+EVIDENCE_SCOPE = (
+    "Per-request fields (requests.jsonl) are per-request. Prometheus deltas "
+    "(prometheus_window) are isolated-window aggregates only and MUST NOT be "
+    "attributed to individual requests."
+)
+
+
+def _tok(value: int | None) -> str:
+    return "n/a" if value is None else str(value)
+
+
+def _write_json(path: Path, data: Any) -> None:
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
 
 
 def generate_markdown_report(
@@ -58,8 +87,10 @@ def generate_markdown_report(
             f"| **Failed Turns** | {summary.failed_turns} |",
             f"| **Total Duration** | {summary.duration_seconds:.2f} s |",
             f"| **Client Throughput** | {summary.requests_per_second:.2f} req/s |",
-            f"| **Prompt Tokens** | {summary.total_prompt_tokens} |",
-            f"| **Completion Tokens** | {summary.total_completion_tokens} |",
+            f"| **Prompt Tokens** | {_tok(summary.total_prompt_tokens)} |",
+            f"| **Completion Tokens** | {_tok(summary.total_completion_tokens)} |",
+            f"| **Token Usage Measured / Unmeasured Turns** | "
+            f"{summary.tokens_measured_turns} / {summary.tokens_unmeasured_turns} |",
             "",
             "## 2. Client Latency & TTFT Percentiles",
             "",
@@ -126,7 +157,8 @@ def generate_markdown_report(
             short_prompt = short_prompt[:37] + "..."
         lines.append(
             f"| `{tr.conversation_id}` | {tr.turn_index + 1} | {short_prompt} | "
-            f"`{tr.status}` | {tr.client_duration_ms:.1f} | {tr.tokens_in} | {tr.tokens_out} |"
+            f"`{tr.status}` | {tr.client_duration_ms:.1f} | "
+            f"{_tok(tr.tokens_in)} | {_tok(tr.tokens_out)} |"
         )
     lines.append("")
     return "\n".join(lines)
@@ -166,51 +198,97 @@ async def async_main(args: argparse.Namespace) -> int:
         config.strategy,
     )
 
-    # 1. Pre-burst metrics scrape
-    snap_before: PrometheusMetricSnapshot | None = None
-    if args.metrics_url:
-        try:
-            logger.info("Scraping pre-burst metrics from %s...", args.metrics_url)
-            snap_before = await PrometheusMetricSnapshot.scrape(args.metrics_url)
-        except Exception as e:
-            logger.warning("Failed to scrape pre-burst metrics: %s", e)
-
-    # 2. Replay scenario
-    logger.info("Starting scenario replay against %s...", args.target_url)
-    replayer = ScenarioReplayer(
-        config=config,
-        target_base_url=args.target_url,
-        timeout=args.timeout,
-        use_sse=not args.no_sse,
+    slos = Slos(
+        interactive_ttft_slo_ms=getattr(args, "ttft_slo_ms", None)
+        or float(os.environ.get("INTERACTIVE_TTFT_SLO_MS", 100.0)),
+        default_e2e_slo_ms=getattr(args, "e2e_slo_ms", None)
+        or float(os.environ.get("E2E_SLO_MS", 3500.0)),
+        require_ttft=not getattr(args, "allow_missing_ttft", False),
     )
-    summary = await replayer.run()
-    logger.info(
-        "Replay finished: %d/%d turns succeeded in %.2fs (%.2f req/s)",
-        summary.successful_turns,
-        summary.total_turns,
-        summary.duration_seconds,
-        summary.requests_per_second,
-    )
-
-    # 3. Post-burst metrics scrape
-    snap_after: PrometheusMetricSnapshot | None = None
+    sweep = getattr(args, "sweep_concurrency", None)
+    levels = [int(x) for x in sweep.split(",")] if sweep else [config.concurrency]
+    started_at = datetime.datetime.now(datetime.UTC)
+    level_records: list[dict[str, Any]] = []
+    all_turns: list[dict[str, Any]] = []
+    summary: ReplaySummary | None = None
+    any_failed = False
     metrics_delta: MetricsDelta | None = None
-    if args.metrics_url and snap_before:
-        try:
-            logger.info("Scraping post-burst metrics from %s...", args.metrics_url)
-            snap_after = await PrometheusMetricSnapshot.scrape(args.metrics_url)
-            metrics_delta = compute_metrics_delta(snap_before, snap_after)
-            logger.info(
-                "Metrics delta: hits=%.0f, queries=%.0f, hit_rate=%.1f%%",
-                metrics_delta.prefix_cache_hits,
-                metrics_delta.prefix_cache_queries,
-                metrics_delta.prefix_cache_hit_rate_pct,
-            )
-        except Exception as e:
-            logger.warning("Failed to scrape post-burst metrics: %s", e)
+
+    for level in levels:
+        level_cfg = config.model_copy(update={"concurrency": level})
+        ScenarioConfig.model_validate(level_cfg.model_dump())
+
+        # 1. Pre-burst metrics scrape (window-level aggregate)
+        snap_before: PrometheusMetricSnapshot | None = None
+        if args.metrics_url:
+            try:
+                logger.info("Scraping pre-burst metrics from %s...", args.metrics_url)
+                snap_before = await PrometheusMetricSnapshot.scrape(args.metrics_url)
+            except Exception as e:
+                logger.warning("Failed to scrape pre-burst metrics: %s", e)
+
+        # 2. Replay scenario
+        logger.info(
+            "Starting scenario replay against %s (concurrency=%d)...",
+            args.target_url,
+            level,
+        )
+        replayer = ScenarioReplayer(
+            config=level_cfg,
+            target_base_url=args.target_url,
+            timeout=args.timeout,
+            use_sse=not args.no_sse,
+            gateway_stream=getattr(args, "gateway_stream", True),
+        )
+        summary = await replayer.run()
+        any_failed = any_failed or summary.failed_turns > 0
+        logger.info(
+            "Replay finished: %d/%d turns succeeded in %.2fs (%.2f req/s)",
+            summary.successful_turns,
+            summary.total_turns,
+            summary.duration_seconds,
+            summary.requests_per_second,
+        )
+
+        # 3. Post-burst metrics scrape
+        metrics_delta = None
+        if args.metrics_url and snap_before:
+            try:
+                logger.info("Scraping post-burst metrics from %s...", args.metrics_url)
+                snap_after = await PrometheusMetricSnapshot.scrape(args.metrics_url)
+                metrics_delta = compute_metrics_delta(snap_before, snap_after)
+                logger.info(
+                    "Metrics delta: hits=%.0f, queries=%.0f, hit_rate=%.1f%%",
+                    metrics_delta.prefix_cache_hits,
+                    metrics_delta.prefix_cache_queries,
+                    metrics_delta.prefix_cache_hit_rate_pct,
+                )
+            except Exception as e:
+                logger.warning("Failed to scrape post-burst metrics: %s", e)
+
+        level_records.append(
+            {
+                "offered_concurrency": level,
+                "summary": summarize_turns(
+                    summary.turn_results, summary.duration_seconds, slos
+                ),
+                "prometheus_window": {
+                    "scope": "window",
+                    "note": WINDOW_NOTE,
+                    "delta": metrics_delta.model_dump() if metrics_delta else None,
+                },
+            }
+        )
+        for tr in summary.turn_results:
+            rec = tr.model_dump()
+            rec["offered_concurrency"] = level
+            rec["good"] = is_good(tr, slos)
+            all_turns.append(rec)
+    assert summary is not None
+    ended_at = datetime.datetime.now(datetime.UTC)
 
     # 4. Save evidence artifacts
-    now = datetime.datetime.now(datetime.UTC)
+    now = ended_at
     ts_str = now.strftime("%Y%m%d_%H%M%S")
     out_dir = Path(args.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -244,7 +322,50 @@ async def async_main(args: argparse.Namespace) -> int:
         f.write(md_report)
     logger.info("Wrote Markdown report to %s", md_path)
 
-    return 0 if summary.failed_turns == 0 else 1
+    run_dir = out_dir / base_name
+    run_dir.mkdir(parents=True, exist_ok=True)
+    with open(run_dir / "requests.jsonl", "w", encoding="utf-8") as f:
+        for rec in all_turns:
+            f.write(json.dumps(rec) + "\n")
+    sweep_rows = [
+        sweep_row(lv["offered_concurrency"], lv["summary"]) for lv in level_records
+    ]
+    _write_json(
+        run_dir / "summary.json", {"slos": slos.model_dump(), "levels": level_records}
+    )
+    _write_json(run_dir / "sweep.json", sweep_rows)
+    (run_dir / "sweep.csv").write_text(sweep_to_csv(sweep_rows), encoding="utf-8")
+    scenario_json = json.dumps(config.model_dump(), sort_keys=True)
+    _write_json(
+        run_dir / "manifest.json",
+        {
+            "scenario": {
+                "name": config.name,
+                "sha256": hashlib.sha256(scenario_json.encode()).hexdigest(),
+            },
+            "policy_under_test": getattr(args, "label", None),
+            "slos": slos.model_dump(),
+            "topology": getattr(args, "topology", None)
+            or os.environ.get("INFERENCE_TOPOLOGY")
+            or DEFAULT_TOPOLOGY,
+            "model_revision": os.environ.get("MODEL_REVISION", "unknown"),
+            "tokenizer_revision": os.environ.get("TOKENIZER_REVISION", "unknown"),
+            "chat_template_revision": os.environ.get(
+                "CHAT_TEMPLATE_REVISION", "unknown"
+            ),
+            "engine_flags": getattr(args, "engine_flags", None)
+            or os.environ.get("ENGINE_FLAGS", "unknown"),
+            "gateway_base_url": args.target_url,
+            "metrics_url": args.metrics_url,
+            "offered_concurrency_levels": levels,
+            "started_at": started_at.isoformat(),
+            "ended_at": ended_at.isoformat(),
+            "evidence_scope": EVIDENCE_SCOPE,
+        },
+    )
+    logger.info("Wrote run artifact directory %s", run_dir)
+
+    return 1 if any_failed else 0
 
 
 def main() -> int:
@@ -299,6 +420,45 @@ def main() -> int:
         "--output-dir",
         default="metrics/evidence",
         help="Directory to save evidence artifacts (default: metrics/evidence)",
+    )
+
+    parser.add_argument(
+        "--sweep-concurrency",
+        default=None,
+        help="Comma-separated concurrency levels (offered-load sweep), e.g. 1,2,4,8",
+    )
+    parser.add_argument(
+        "--label", default=None, help="Policy under test (informational)"
+    )
+    parser.add_argument(
+        "--ttft-slo-ms",
+        type=float,
+        default=None,
+        help="Interactive TTFT SLO (env INTERACTIVE_TTFT_SLO_MS, default 100)",
+    )
+    parser.add_argument(
+        "--e2e-slo-ms",
+        type=float,
+        default=None,
+        help="Default E2E SLO (env E2E_SLO_MS, default 3500)",
+    )
+    parser.add_argument(
+        "--allow-missing-ttft",
+        action="store_true",
+        help="Do not fail the TTFT clause when TTFT was not measured",
+    )
+    parser.add_argument(
+        "--topology", default=None, help="Topology string (env INFERENCE_TOPOLOGY)"
+    )
+    parser.add_argument(
+        "--engine-flags", default=None, help="Free-form engine flags (env ENGINE_FLAGS)"
+    )
+
+    parser.add_argument(
+        "--gateway-stream",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Stream gateway_chat responses to measure TTFT (default: on)",
     )
 
     args = parser.parse_args()
