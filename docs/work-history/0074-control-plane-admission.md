@@ -34,3 +34,9 @@ Draft PR (this change). Slices 3 (queues, `timeout_queue`) and 4 (overflow) rema
 ## Lessons
 
 - With no healthy worker, `no_signal` from admission now fires before placement's `no_healthy_worker`.
+
+## Review follow-up
+
+- Copilot found that tokens committed by the tenant quota were never refunded when a later stage shed the request (or the worker failed),
+  so capacity 503/504s could burn a tenant's budget and cause local 429s. `Lease.release(refund=True)` now returns tokens for pre-dispatch
+  rejects and worker 5xx/connect failures; served work stays committed. Also fixed a docstring naming a nonexistent metric.

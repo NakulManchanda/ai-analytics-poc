@@ -388,3 +388,30 @@ def test_flat_import_with_admission_modules() -> None:
         cwd=gateway_dir,
         check=True,
     )
+
+
+def test_refund_returns_tokens_only_when_requested() -> None:
+    q = TenantQuota(frozenset({"a"}), token_budget=100, window_s=10, max_concurrency=99)
+    q.acquire("a", 60, now=0).release(refund=True)  # shed after quota: never ran
+    assert not isinstance(q.acquire("a", 100, now=1), Shed)
+    q2 = TenantQuota(frozenset({"a"}), token_budget=100, window_s=10, max_concurrency=99)
+    q2.acquire("a", 60, now=0).release()  # served: tokens stay committed
+    assert isinstance(q2.acquire("a", 60, now=1), Shed)
+    lease = q2.acquire("a", 40, now=1)
+    lease.release(refund=True)
+    lease.release(refund=True)  # idempotent: no double refund
+    assert not isinstance(q2.acquire("a", 40, now=2), Shed)
+    assert isinstance(q2.acquire("a", 1, now=2), Shed)
+
+
+def test_capacity_shed_does_not_burn_tenant_budget(gw) -> None:
+    client, _ = gw
+    q = gateway_main.quota
+    hdrs = {"x-deadline-ms": "1", "x-tenant-id": "acme"}  # passes quota, then deadline shed
+    with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as post:
+        for _ in range(3):
+            r = client.post("/serve", json={"messages": MSG}, headers=hdrs)
+            assert r.status_code == 504
+        post.assert_not_called()
+    bucket = q._buckets[q.bucket_name("acme")]
+    assert (bucket.tokens, bucket.active, len(bucket.window)) == (0, 0, 0)

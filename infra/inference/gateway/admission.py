@@ -1,7 +1,7 @@
 """Admission: decide whether the fleet should accept valid work *now* (#122 slice 2).
 
 Pure: no I/O; snapshots and the clock come in as arguments. Shed taxonomy (stable
-``admit_shed_total{reason}`` label values), evaluated in this order:
+``orch_shed_total{reason}`` label values), evaluated in this order:
 
   no_signal            503  no healthy worker with a fresh snapshot (fail closed)
   kv_pressure          503  best eligible worker kv_free_ratio < KV_FREE_MIN

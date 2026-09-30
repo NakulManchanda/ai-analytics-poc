@@ -28,15 +28,24 @@ class _Bucket:
 
 
 class Lease:
-    """Concurrency slot; ``release`` is idempotent (safe from error and stream-end paths)."""
+    """Concurrency slot; ``release`` is idempotent (safe from error and stream-end paths).
 
-    def __init__(self, bucket: _Bucket) -> None:
+    ``refund=True`` also returns the committed tokens to the window, for work that never
+    ran on a GPU (shed after the quota check, or a worker failure)."""
+
+    def __init__(self, bucket: _Bucket, entry: tuple[float, int]) -> None:
         self._bucket: _Bucket | None = bucket
+        self._entry = entry
 
-    def release(self) -> None:
-        if self._bucket is not None:
-            self._bucket.active -= 1
-            self._bucket = None
+    def release(self, refund: bool = False) -> None:
+        b = self._bucket
+        if b is None:
+            return
+        b.active -= 1
+        self._bucket = None
+        if refund and self._entry in b.window:  # not already aged out of the window
+            b.window.remove(self._entry)
+            b.tokens -= self._entry[1]
 
 
 class TenantQuota:
@@ -77,7 +86,8 @@ class TenantQuota:
         if b.tokens + tokens > self.token_budget:
             wait = math.ceil(b.window[0][0] + self.window_s - now) if b.window else 1
             return Shed(429, "tenant_tokens", max(wait, 1), inputs, never_overflow=True)
-        b.window.append((now, tokens))
+        entry = (now, tokens)
+        b.window.append(entry)
         b.tokens += tokens
         b.active += 1
-        return Lease(b)
+        return Lease(b, entry)

@@ -167,7 +167,7 @@ async def serve_completion(
         **hdrs: str,
     ) -> JSONResponse:
         if lease is not None:
-            lease.release()
+            lease.release(refund=True)  # never dispatched: no tokens consumed
         metrics.REQUESTS.labels(str(status), klass).inc()
         log.info(
             json.dumps(
@@ -283,7 +283,7 @@ async def serve_completion(
     proxy_start = time.perf_counter()
 
     def release(status: int) -> None:
-        lease.release()
+        lease.release(refund=status >= 500)  # worker failure: tokens weren't served
         metrics.STAGE_DURATION.labels("proxy", klass).observe(time.perf_counter() - proxy_start)
         snap.inflight -= 1
         snap.inflight_tokens -= est_tokens
