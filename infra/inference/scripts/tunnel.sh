@@ -9,6 +9,7 @@ echo "Opening loopback SSH tunnel to Lambda host..."
 echo "  - http://127.0.0.1:18080 -> Inference Gateway (/serve)"
 echo "  - http://127.0.0.1:18001 -> Worker A (vLLM)"
 echo "  - http://127.0.0.1:18002 -> Worker B (vLLM)"
+echo "  - http://127.0.0.1:19090 -> Prometheus"
 echo "  - http://127.0.0.1:13000 -> Grafana"
 
 exec ssh -i "$LAMBDA_SSH_KEY_PATH" \
@@ -16,7 +17,7 @@ exec ssh -i "$LAMBDA_SSH_KEY_PATH" \
   -o ExitOnForwardFailure=yes \
   -o ServerAliveInterval=30 \
   -o ServerAliveCountMax=6 \
-  -L 18080:127.0.0.1:8080 -L 18001:127.0.0.1:8001 -L 18002:127.0.0.1:8002 -L 13000:127.0.0.1:3000 \
+  -L 18080:127.0.0.1:8080 -L 18001:127.0.0.1:8001 -L 18002:127.0.0.1:8002 -L 19090:127.0.0.1:9090 -L 13000:127.0.0.1:3000 \
   "$(ssh_target)" "
     while true; do
       kubectl -n '$INFERENCE_NAMESPACE' port-forward --address 127.0.0.1 svc/inference-gateway 8080:8080 >/dev/null 2>&1 || true
@@ -28,6 +29,10 @@ exec ssh -i "$LAMBDA_SSH_KEY_PATH" \
     done &
     while true; do
       kubectl -n '$INFERENCE_NAMESPACE' port-forward --address 127.0.0.1 svc/inference-worker-b 8002:8000 >/dev/null 2>&1 || true
+      sleep 1
+    done &
+    while true; do
+      kubectl -n '$INFERENCE_NAMESPACE' port-forward --address 127.0.0.1 svc/prometheus-server 9090:80 >/dev/null 2>&1 || true
       sleep 1
     done &
     while true; do
