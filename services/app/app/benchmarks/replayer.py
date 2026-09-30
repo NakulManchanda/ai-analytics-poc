@@ -161,7 +161,7 @@ class ScenarioReplayer:
 
                 turn_res = await self._execute_turn(conv_id, turn_idx, turn, client)
                 results.append(turn_res)
-                conv_id = turn_res.conversation_id or conv_label
+                conv_id = turn_res.conversation_id or conv_id
                 if turn_res.status != "completed":
                     all_success = False
 
