@@ -345,6 +345,8 @@ async def async_main(args: argparse.Namespace) -> int:
         or float(os.environ.get("E2E_SLO_MS", 3500.0)),
         require_ttft=not getattr(args, "allow_missing_ttft", False),
     )
+    sweep = getattr(args, "sweep_concurrency", None)
+    levels = [int(x) for x in sweep.split(",")] if sweep else [config.concurrency]
     meta = run_metadata(args)
     if getattr(args, "require_parity", False):
         problems = parity_check_run(
@@ -352,6 +354,7 @@ async def async_main(args: argparse.Namespace) -> int:
                 **meta,
                 "router_label": router_label or GATEWAY_ROUTER_LABEL,
                 "max_tokens": config.max_tokens,
+                "offered_concurrency_levels": levels,
                 "scenario": {"sha256": source_sha256},
                 "slos": slos.model_dump(),
             }
@@ -359,8 +362,6 @@ async def async_main(args: argparse.Namespace) -> int:
         if problems:
             logger.error("--require-parity failed, no requests sent: %s", problems)
             return 2
-    sweep = getattr(args, "sweep_concurrency", None)
-    levels = [int(x) for x in sweep.split(",")] if sweep else [config.concurrency]
     started_at = datetime.datetime.now(datetime.UTC)
     level_records: list[dict[str, Any]] = []
     all_turns: list[dict[str, Any]] = []

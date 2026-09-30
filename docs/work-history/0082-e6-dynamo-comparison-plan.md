@@ -17,7 +17,7 @@ Prepare the optional E6 comparison (our `prefix_then_load` vs an engine-informed
 
 ## Verification
 
-- `uv run --project services/app pytest services/app/tests tests infra/inference/tests -q` — 542 passed (includes new `test_parity.py` and the three-arm hash test); black/ruff clean at CI scope.
+- `uv run --project services/app pytest services/app/tests tests infra/inference/tests -q` — 546 passed (includes `test_parity.py` with arm-role and concurrency-level cases, and the three-arm hash test); black/ruff clean at CI scope.
 - Not verified: anything about Dynamo itself. The research came from doc pages summarized by a small model, not full reads; Dynamo version to pin, NATS/etcd requirement, routing-decision metric names, per-request worker id, HAMi fractional-GPU compatibility, engine-flag compatibility, and tokenization/block-size parity are all open (see ADR 0011).
 
 ## PR / merge state
@@ -28,6 +28,7 @@ Draft PR (this change). Nothing deployed; deploying requires an explicit user de
 
 - Scenario hash: `scenario.sha256` previously hashed the post-override config, so policy/admission arms (and Dynamo) could never match. It now hashes the source scenario before CLI overrides without `policy_override`/`admission_mode`; arm settings and `execution.sha256` are recorded separately (also fixes E3/E4 pairs).
 - Parity: `unknown` could satisfy equality. New `app.benchmarks.parity` module, `--require-parity` (exit 2 before any request) and a manifest CLI reject missing/`unknown` fields (including vLLM/Dynamo versions and both KV block sizes) and cross-arm differences. New manifest fields `vllm_version`, `dynamo_version`, `kv_block_size`, `dynamo_kv_block_size`, `max_tokens`.
+- Second follow-up: the set checker now requires arm roles A (gateway `least_loaded`), B (gateway `prefix_then_load`) and C (`dynamo*`, no override) derived from manifest router_label/execution, rejects ambiguous roles, allows repeats, and requires non-empty `offered_concurrency_levels` compared without filtering.
 - Verification: see test_parity.py and the full suite below.
 
 ## Lessons

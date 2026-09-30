@@ -54,6 +54,9 @@ def check_run(m: dict[str, Any]) -> list[str]:
         p.append("kv_block_size must be a positive number")
     if _bad(m.get("scenario", {}).get("sha256")):
         p.append("scenario.sha256 missing")
+    levels = m.get("offered_concurrency_levels")
+    if not isinstance(levels, list) or not levels:
+        p.append("offered_concurrency_levels missing or empty")
     if not m.get("slos"):
         p.append("slos missing")
     dv, db = m.get("dynamo_version"), m.get("dynamo_kv_block_size")
@@ -77,11 +80,43 @@ def check_run(m: dict[str, Any]) -> list[str]:
     return p
 
 
+REQUIRED_ROLES = ("A", "B", "C")
+ROLE_DOC = {
+    "A": "gateway + policy_override=least_loaded",
+    "B": "gateway + policy_override=prefix_then_load",
+    "C": "Dynamo router_label (dynamo*) with no policy_override",
+}
+
+
+def role_of(m: dict[str, Any]) -> str | None:
+    """E6 arm role from router_label + execution.policy_override; None if ambiguous."""
+    label = m.get("router_label") or (m.get("execution") or {}).get("router_label")
+    override = (m.get("execution") or {}).get("policy_override")
+    if label == "gateway":
+        return {"least_loaded": "A", "prefix_then_load": "B"}.get(override)
+    if isinstance(label, str) and label.startswith("dynamo") and override is None:
+        return "C"
+    return None
+
+
 def check_arms(manifests: dict[str, dict[str, Any]]) -> list[str]:
     """Problems across arms: each arm complete, shared inputs equal, >= 2 arms."""
     problems = [f"{a}: {x}" for a, m in manifests.items() for x in check_run(m)]
-    if len(manifests) < 2:
-        problems.append("need at least two arms to compare")
+    roles: dict[str, list[str]] = {r: [] for r in REQUIRED_ROLES}
+    for arm, m in manifests.items():
+        role = role_of(m)
+        if role is None:
+            ex = m.get("execution") or {}
+            problems.append(
+                f"{arm}: ambiguous arm role (router_label={m.get('router_label')!r}, "
+                f"policy_override={ex.get('policy_override')!r}); expected one of "
+                + "; ".join(f"{r}: {d}" for r, d in ROLE_DOC.items())
+            )
+        else:
+            roles[role].append(arm)
+    for r in REQUIRED_ROLES:
+        if not roles[r]:
+            problems.append(f"missing arm role {r} ({ROLE_DOC[r]})")
     fields = [(f, lambda m, f=f: m.get(f)) for f in EQUAL_FIELDS]
     fields += [
         ("scenario.sha256", lambda m: m.get("scenario", {}).get("sha256")),
@@ -92,7 +127,9 @@ def check_arms(manifests: dict[str, dict[str, Any]]) -> list[str]:
         ),
     ]
     for name, get in fields:
-        vals = {a: get(m) for a, m in manifests.items() if not _bad(get(m))}
+        # No silent filtering: a missing value is already reported by check_run and, for
+        # levels, must still count as a difference.
+        vals = {a: get(m) for a, m in manifests.items()}
         if len({str(v) for v in vals.values()}) > 1:
             problems.append(f"{name} differs across arms: {vals}")
     dyn = {a: m.get("dynamo_version") for a, m in manifests.items() if _is_dynamo(m)}

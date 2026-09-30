@@ -39,7 +39,7 @@ replace understanding or measuring the custom path (E3 stays the headline).
      contract test would be reviewed in that PR.
 5. Parity is enforced, not assumed: `run_scenario.py --require-parity` and
    `python -m app.benchmarks.parity` reject missing/`unknown` model, tokenizer, template,
-   engine flags, vLLM and Dynamo versions and KV block sizes, and any cross-arm difference.
+   engine flags, vLLM and Dynamo versions and KV block sizes, any cross-arm difference, a missing A/B/C arm role and missing offered concurrency levels.
    `manifest.scenario.sha256` is the arm-neutral source-workload hash; arm settings are in
    `manifest.execution`.
 6. Harness accommodation (this PR): `run_scenario.py --router-label` records the arm in the

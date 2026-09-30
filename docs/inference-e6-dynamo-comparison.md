@@ -52,6 +52,14 @@ record `--dynamo-version n/a --dynamo-kv-block-size n/a` explicitly. Set them wi
    <B>/manifest.json <C>/manifest.json`. Exit 1 and a `PARITY FAIL` line for any incomplete arm or any cross-arm
    difference. A failed check voids the comparison.
 
+   The set checker also enforces arm roles, derived from `manifest.router_label` and
+   `manifest.execution.policy_override`: A = `gateway` + `least_loaded`, B = `gateway` +
+   `prefix_then_load`, C = a `dynamo*` label with no override. At least one arm of each role
+   is required (A/B only, or two A's, fail and name the missing roles). Repeats of a role are
+   allowed and expected (at least 3 per level). Any other combination is rejected as an
+   ambiguous role. `offered_concurrency_levels` is required, non-empty and must be equal
+   across all arms.
+
 ## Isolation and warm state
 
 1. One arm at a time. Scale the other arm's frontend and workers to zero; do not run two

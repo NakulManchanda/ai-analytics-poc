@@ -14,10 +14,13 @@ from services.app.scripts.run_scenario import async_main
 SLOS = {"interactive_ttft_slo_ms": 100.0, "default_e2e_slo_ms": 3500.0}
 
 
-def manifest(label: str = "gateway", **over):
+def manifest(label: str = "gateway", policy: str | None = None, **over):
     dyn = label != "gateway"
+    if policy is None and not dyn:
+        policy = "least_loaded"
     m = {
         "router_label": label,
+        "execution": {"router_label": label, "policy_override": policy},
         "scenario": {"sha256": "abc"},
         "slos": SLOS,
         "max_tokens": 128,
@@ -37,7 +40,11 @@ def manifest(label: str = "gateway", **over):
 
 
 def arms():
-    return {"A": manifest(), "B": manifest(), "C": manifest("dynamo-kv")}
+    return {
+        "A": manifest(),
+        "B": manifest(policy="prefix_then_load"),
+        "C": manifest("dynamo-kv"),
+    }
 
 
 def test_complete_matching_set_accepted():
@@ -48,12 +55,17 @@ def test_unknown_on_all_arms_rejected():
     a = {
         k: manifest(
             k_label,
+            policy=pol,
             model_revision="unknown",
             tokenizer_revision="unknown",
             chat_template_revision="unknown",
             engine_flags="unknown",
         )
-        for k, k_label in (("A", "gateway"), ("B", "gateway"), ("C", "dynamo-kv"))
+        for k, k_label, pol in (
+            ("A", "gateway", "least_loaded"),
+            ("B", "gateway", "prefix_then_load"),
+            ("C", "dynamo-kv", None),
+        )
     }
     problems = check_arms(a)
     assert any("model_revision" in p for p in problems)
@@ -88,6 +100,43 @@ def test_dynamo_version_na_rejected_for_dynamo_arm_only():
     assert check_run(manifest()) == []
     assert check_run(manifest("dynamo-kv", dynamo_version="n/a"))
     assert check_run(manifest(dynamo_version=None))  # must be explicit
+
+
+def test_missing_roles_rejected():
+    ab = {k: v for k, v in arms().items() if k != "C"}
+    problems = check_arms(ab)
+    assert any("missing arm role C" in p for p in problems)
+    two_a = {"A1": manifest(), "A2": manifest()}
+    problems = check_arms(two_a)
+    assert any("missing arm role B" in p for p in problems)
+    assert any("missing arm role C" in p for p in problems)
+    assert not any("missing arm role A" in p for p in problems)
+
+
+def test_repeats_of_a_role_accepted():
+    a = arms()
+    a["A2"], a["C2"] = manifest(), manifest("dynamo-kv")
+    assert check_arms(a) == []
+
+
+def test_ambiguous_role_rejected():
+    a = arms()
+    a["X"] = manifest(policy="round_robin")  # gateway, not A or B
+    a["Y"] = manifest("dynamo-kv", policy="least_loaded")  # Dynamo with override
+    a["Z"] = manifest("other-router")
+    problems = check_arms(a)
+    assert sum("ambiguous arm role" in p for p in problems) == 3
+
+
+def test_offered_levels_required_and_compared():
+    a = arms()
+    del a["B"]["offered_concurrency_levels"]
+    problems = check_arms(a)
+    assert any("offered_concurrency_levels missing" in p for p in problems)
+    assert any("offered_concurrency_levels differs" in p for p in problems)
+    a = arms()
+    a["C"]["offered_concurrency_levels"] = []
+    assert check_arms(a)
 
 
 def test_manifest_cli(tmp_path: Path):
