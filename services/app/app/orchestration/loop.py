@@ -56,54 +56,17 @@ from app.state import (
 logger = logging.getLogger(__name__)
 EXPECTED_TOOL_NAME = "query_taxi_data"
 AVERAGE_METRICS_TOOL_NAME = "average_trip_metrics"
-# Extended governed tools reachable only via the fixed query catalogue (D19),
-# never via the model tool-proposal path today. Their result envelopes carry
-# extra descriptive fields (query_class, dimensions, code_dictionaries, ...)
-# on top of the base bounded shape, so they do not fit the strict
-# row/column-only schema `sanitize_query_result` enforces for
-# query_taxi_data/average_trip_metrics/compare_taxi_segments. They get a
-# lighter, local bounds check instead of being forced through that schema.
+# Extended governed tools added by slice A. Reachable via the fixed query
+# catalogue (D19) and, like the original tools, also via the model
+# tool-proposal path. Their result envelopes carry extra descriptive fields
+# (query_class, dimensions, code_dictionaries, ...) on top of the base
+# bounded shape; the mcp_client adapter already runs each of these through
+# the correct per-tool sanitizer (sanitize_describe_result /
+# sanitize_governed_query_result) before the result reaches this loop, so no
+# further app-side sanitization happens here.
 EXTENDED_GOVERNED_TOOL_NAMES = frozenset(
     {"describe_taxi_dataset", "list_taxi_dimension_values", "aggregate_taxi_data"}
 )
-MAX_EXTENDED_RESULT_BYTES = 8_192
-
-
-def sanitize_extended_governed_result(payload: Any) -> dict[str, object]:
-    """Bounds-check the result of an extended governed tool (describe/list/
-    aggregate) without forcing it through the row/column-only schema used by
-    the original three tools. The dataset_spike layer already enforces the
-    row/column/byte caps; this is a defense-in-depth check on the app side
-    that the app never forwards something unbounded or malformed to the
-    model. A structured `{"error": {...}}` validation envelope (per slice A)
-    is treated as a non-retryable tool failure."""
-    if not isinstance(payload, Mapping):
-        raise MCPToolError(retryable=False, message="Malformed tool result")
-    error = payload.get("error")
-    if isinstance(error, Mapping):
-        message = error.get("message")
-        raise MCPToolError(
-            retryable=False,
-            message=str(message) if message is not None else "Tool validation error",
-        )
-    row_count = payload.get("row_count")
-    query_id = payload.get("query_id")
-    truncated = payload.get("truncated")
-    if (
-        isinstance(row_count, bool)
-        or not isinstance(row_count, int)
-        or not isinstance(query_id, str)
-        or not query_id
-        or not isinstance(truncated, bool)
-    ):
-        raise MCPToolError(retryable=False, message="Malformed tool result")
-    try:
-        encoded = json.dumps(dict(payload), separators=(",", ":"), allow_nan=False)
-    except (TypeError, ValueError) as error:
-        raise MCPToolError(retryable=False, message="Unserializable tool result") from error
-    if len(encoded.encode("utf-8")) > MAX_EXTENDED_RESULT_BYTES:
-        raise MCPToolError(retryable=False, message="Tool result too large")
-    return dict(payload)
 
 
 class RunCancelledError(Exception):
@@ -981,28 +944,32 @@ class OrchestrationLoop:
                         )
                         query_result = sanitize_query_result(raw_query_result)
                     elif tool_name == "compare_taxi_segments":
-                        raw_query_result = self._run_with_cancellation(
+                        # The mcp_client adapter already runs the result
+                        # through sanitize_governed_query_result, which
+                        # legitimately keeps extra fields (query_class,
+                        # segment_dimension, measures, ...) beyond the base
+                        # 6-field row/column shape. Re-sanitizing here with
+                        # sanitize_query_result would reject every real
+                        # compare result, so we use the already-sanitized
+                        # result as-is.
+                        query_result = self._run_with_cancellation(
                             mcp.compare_taxi_segments,
                             run_id=run_id,
                             **tool_arguments,
                         )
-                        # compare_taxi_segments' envelope is exactly the
-                        # row/column shape sanitize_query_result enforces.
-                        query_result = sanitize_query_result(raw_query_result)
                     elif tool_name in EXTENDED_GOVERNED_TOOL_NAMES:
                         # Catalogue-only governed tools (D19): describe/list/
                         # aggregate carry extra descriptive fields
                         # (query_class, dimensions, code_dictionaries, ...) on
-                        # top of the base bounded shape, so they get the
-                        # lighter extended sanitizer instead of being forced
-                        # through the row/column-only schema.
-                        raw_query_result = self._run_with_cancellation(
+                        # top of the base bounded shape. The mcp_client
+                        # adapter already runs each of these through the
+                        # correct per-tool sanitizer
+                        # (sanitize_describe_result / sanitize_governed_query_result),
+                        # so no further app-side sanitization is needed here.
+                        query_result = self._run_with_cancellation(
                             getattr(mcp, tool_name),
                             run_id=run_id,
                             **tool_arguments,
-                        )
-                        query_result = sanitize_extended_governed_result(
-                            raw_query_result
                         )
                     else:
                         raise MCPToolError(
