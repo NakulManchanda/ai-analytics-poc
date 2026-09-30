@@ -1,0 +1,38 @@
+# Prometheus alerting rules for the inference lab (#123 slice B).
+# Loaded by deploy.sh via `--set-file serverFiles.alerting_rules\.yml=...`; alertmanager stays
+# disabled, so these are visible/firing in the Prometheus UI only. Rationale: README "Alerts".
+groups:
+  - name: inference-lab
+    rules:
+      - alert: InferenceKVPressureSustained
+        expr: max by (instance) (vllm:kv_cache_usage_perc) > 0.85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "KV cache above 85% on {{ $labels.instance }} for 5m"
+          description: "Sustained KV pressure precedes queueing and preemptions."
+      - alert: InferenceTTFTSLOBreach
+        expr: histogram_quantile(0.95, sum by (le, instance) (rate(vllm:time_to_first_token_seconds_bucket[5m]))) > 0.1
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Engine-side p95 TTFT above 100ms on {{ $labels.instance }} for 5m"
+          description: "Engine-side TTFT across all classes (excludes gateway queue time); the interactive SLO is measured end-to-end by the replayer."
+      - alert: GatewayQueueShedSurge
+        expr: (sum(rate(orch_shed_total[5m])) or vector(0)) + (sum(rate(queue_error_total{reason="timeout_queue"}[5m])) or vector(0)) > 0.5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Gateway sheds plus queue timeouts above 0.5/s for 5m"
+          description: "Load exceeds capacity or a queue is stuck; see the Gateway & Admission dashboard."
+      - alert: InferenceWorkerIntegrity
+        expr: (worker_health{state!="healthy"} == 1) or (worker_snapshot_age_seconds > 15) or (sum by (instance) (rate(vllm:num_preemptions_total[5m])) > 0.1)
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Worker or engine integrity problem ({{ $labels.worker }}{{ $labels.instance }})"
+          description: "Worker unhealthy/stale, snapshot older than 15s, or preemptions above 0.1/s."

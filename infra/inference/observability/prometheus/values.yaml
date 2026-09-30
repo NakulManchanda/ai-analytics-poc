@@ -14,6 +14,11 @@ extraScrapeConfigs: |
       - targets:
           - inference-worker-a.inference-lab.svc.cluster.local:8000
           - inference-worker-b.inference-lab.svc.cluster.local:8000
+  - job_name: inference-gateway
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - inference-gateway.inference-lab.svc.cluster.local:8080
   - job_name: hami
     static_configs:
       - targets:

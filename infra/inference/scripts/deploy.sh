@@ -17,6 +17,7 @@ ssh_cmd "
     --namespace '$INFERENCE_NAMESPACE' \
     --version '25.27.0' \
     -f $(remote_dir)/observability/prometheus/values.yaml \
+    --set-file 'serverFiles.alerting_rules\\.yml=$(remote_dir)/observability/prometheus/alerts.yaml' \
     --wait --timeout 10m
   helm repo add grafana https://grafana.github.io/helm-charts >/dev/null 2>&1 || true
   helm repo update grafana >/dev/null 2>&1 || true
