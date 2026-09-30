@@ -1,4 +1,4 @@
-"""Inference Gateway: guard -> tenant quota -> admit -> place -> proxy (#121, #122 slices 1-2)."""
+"""Inference Gateway: guard -> quota -> admit -> place -> queue -> proxy (#121, #122 slices 1-3)."""
 
 from __future__ import annotations
 
@@ -12,17 +12,20 @@ import time
 import httpx
 from fastapi import FastAPI, Header, HTTPException, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
+from starlette.background import BackgroundTask
 
 try:  # package import (tests) or flat import (ConfigMap mounted at /app, `uvicorn main:app`)
     from . import guard as guard_mod
     from . import metrics, placement
     from .admission import AdmitConfig, AdmitRequest, Shed, should_shed
+    from .queueing import CLASSES, QueueConfig, QueueRejected, WorkerQueues
     from .tenants import TenantQuota
     from .workers import build_registry
 except ImportError:
     import guard as guard_mod
     import placement
     from admission import AdmitConfig, AdmitRequest, Shed, should_shed
+    from queueing import CLASSES, QueueConfig, QueueRejected, WorkerQueues
     from tenants import TenantQuota
     from workers import build_registry
 
@@ -38,6 +41,7 @@ SNAPSHOT_STALE_S = float(os.getenv("SNAPSHOT_STALE_S", "5.0"))
 ADMIT_CFG = AdmitConfig.from_env()
 quota = TenantQuota.from_env()
 registry = build_registry()
+queues = WorkerQueues(QueueConfig.from_env())
 DEFAULT_WORKER_URL = registry.snapshots["worker_a"].worker.url  # /tokenize goes to A
 
 
@@ -72,6 +76,7 @@ app = FastAPI(
 @app.get("/metrics")
 async def prometheus_metrics() -> Response:
     metrics.observe_snapshots(registry.snapshots.values(), SNAPSHOT_STALE_S)
+    metrics.observe_queues(queues, registry.snapshots, CLASSES)
     body, content_type = metrics.render()
     return Response(body, media_type=content_type)
 
@@ -109,6 +114,10 @@ async def tokenize(request: Request) -> Response:
         upstream_resp.json() if upstream_resp.status_code == 200 else {"error": upstream_resp.text}
     )
     return JSONResponse(status_code=upstream_resp.status_code, content=content)
+
+
+def _ms(seconds: float) -> int:
+    return round(seconds * 1000)
 
 
 def _int_or_none(value: str | None) -> int | None:
@@ -245,6 +254,8 @@ async def serve_completion(
         )
     )
 
+    for w in registry.snapshots.values():
+        w.queued = queues.depth(w.id)  # gateway queue depth participates in the load score
     with metrics.timed("place", klass):
         decision = placement.pick(
             placement.PlacementRequest(x_prefix_id, est_tokens, klass, x_force_worker),
@@ -276,20 +287,73 @@ async def serve_completion(
     )
     log.info(json.dumps({**log_fields, "stage": "place", **vars(decision)}))
 
+    deadline_ms = _int_or_none(x_deadline_ms)
+    deadline_at = now + deadline_ms / 1000 if deadline_ms is not None else None
+    queue_enter = time.time()
+    try:
+        with metrics.timed("queue", klass):
+            ticket = await queues.acquire(snap.id, klass, est_tokens, deadline_at)
+    except QueueRejected as exc:
+        metrics.QUEUE_ERRORS.labels(exc.reason, klass).inc()
+        return reject(
+            503,
+            exc.reason,
+            "request could not get a dispatch slot",
+            "queue",
+            {"queue_enter": queue_enter, "queue_wait_ms": _ms(time.time() - queue_enter)},
+            **{
+                "x-queue-decision": exc.reason,
+                "x-queue-wait-ms": str(_ms(time.time() - queue_enter)),
+                "retry-after": str(ADMIT_CFG.retry_after_s),
+            },
+        )
+    except asyncio.CancelledError:  # client went away while queued: nothing dispatched
+        lease.release(refund=True)
+        raise
+    queue_wait_ms = _ms(ticket.wait_s)
+    metrics.QUEUE_WAIT.labels(snap.id, klass).observe(ticket.wait_s)
+    correlation_headers.update(
+        {"x-queue-decision": "dispatched", "x-queue-wait-ms": str(queue_wait_ms)}
+    )
+    log.info(
+        json.dumps(
+            {
+                **log_fields,
+                "stage": "queue",
+                "queue_enter": queue_enter,
+                "queue_dispatch": queue_enter + ticket.wait_s,
+                "queue_wait_ms": queue_wait_ms,
+            }
+        )
+    )
+
     target_url = f"{snap.worker.url}/v1/chat/completions"
     snap.inflight += 1
     snap.inflight_tokens += est_tokens
 
     proxy_start = time.perf_counter()
 
+    released = False
+
     def release(status: int) -> None:
+        nonlocal released
+        if released:  # idempotent: also called from the response background task
+            return
+        released = True
         lease.release(refund=status >= 500)  # worker failure: tokens weren't served
         metrics.STAGE_DURATION.labels("proxy", klass).observe(time.perf_counter() - proxy_start)
         snap.inflight -= 1
         snap.inflight_tokens -= est_tokens
+        ticket.release()
+        log.info(json.dumps({**log_fields, "stage": "queue", "queue_release": time.time()}))
         metrics.REQUESTS.labels(str(status), klass).inc()
 
     client = httpx.AsyncClient(timeout=60.0)
+
+    async def stream_cleanup() -> None:
+        # Safety net if the client disconnects before the generator ever starts.
+        release(499)
+        await client.aclose()
 
     if bool(body.get("stream", False)):
 
@@ -322,6 +386,7 @@ async def serve_completion(
             stream_generator(),
             media_type="text/event-stream",
             headers=correlation_headers,
+            background=BackgroundTask(stream_cleanup),
         )
 
     try:

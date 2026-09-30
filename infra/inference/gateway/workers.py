@@ -8,6 +8,7 @@ Snapshot signals (all scraped from the worker's vLLM /metrics):
   prefixes           the router's time-bounded *belief* of where a prefix identity
                      was last placed (not proof of a KV hit; vLLM may have evicted it)
   inflight[_tokens]  requests / estimated prompt tokens dispatched by this gateway, not yet done
+  queued             requests admitted and placed here but still waiting for a dispatch slot
 """
 
 from __future__ import annotations
@@ -46,6 +47,7 @@ class WorkerSnapshot:
     warm: bool = False
     inflight: int = 0
     inflight_tokens: int = 0
+    queued: int = 0  # requests waiting in this gateway's per-worker queue (#122 slice 3)
     prefixes: dict[str, PrefixBelief] = field(default_factory=dict)
 
     @property

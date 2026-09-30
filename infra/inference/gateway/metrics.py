@@ -65,6 +65,21 @@ TENANT_REQUESTS = Counter(
     ["tenant", "outcome"],
     registry=REGISTRY,
 )
+QUEUE_DEPTH = Gauge(
+    "orch_replica_queue_depth",
+    "Requests waiting in the gateway queue per worker and class",
+    ["worker", "class"],
+    registry=REGISTRY,
+)
+QUEUE_WAIT = Histogram(
+    "orch_queue_wait_seconds",
+    "Time spent waiting for a dispatch slot",
+    ["worker", "class"],
+    registry=REGISTRY,
+)
+QUEUE_ERRORS = Counter(
+    "queue_error_total", "Queue rejections", ["reason", "class"], registry=REGISTRY
+)
 STAGE_DURATION = Histogram(
     "gateway_request_duration_seconds",
     "Time spent per gateway pipeline stage",
@@ -88,6 +103,12 @@ def observe_snapshots(snaps, stale_after: float) -> None:
         for st in HEALTH_STATES:
             WORKER_HEALTH.labels(s.id, st).set(1 if st == state else 0)
         SNAPSHOT_AGE.labels(s.id).set(min(s.age(), 1e9))
+
+
+def observe_queues(queues, worker_ids, classes) -> None:
+    for w in worker_ids:
+        for c in classes:
+            QUEUE_DEPTH.labels(w, c).set(queues.depth(w, c))
 
 
 def render() -> tuple[bytes, str]:

@@ -57,9 +57,10 @@ class PlacementError:
 
 
 def load(s: WorkerSnapshot) -> tuple[bool, float]:
-    """Queue depth (waiting, weighted) participates alongside running and in-flight work;
+    """Worker queue depth (waiting, weighted) and the gateway's own queue (queued) participate
+    alongside running and in-flight work;
     a never-observed worker sorts last."""
-    return (s.observed_at is None, 2 * s.waiting + s.running + s.inflight)
+    return (s.observed_at is None, 2 * s.waiting + s.running + s.inflight + s.queued)
 
 
 def pick(
