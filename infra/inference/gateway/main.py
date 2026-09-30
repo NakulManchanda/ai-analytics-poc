@@ -291,6 +291,7 @@ async def serve_completion(
     x_estimated_prompt_tokens: str | None = Header(None),
     x_deadline_ms: str | None = Header(None),
     x_force_worker: str | None = Header(None),
+    x_prefix_tokens: str | None = Header(None),
     x_placement_policy_override: str | None = Header(None),
     x_admission_mode: str | None = Header(None),
     x_tenant_quota_mode: str | None = Header(None),
@@ -483,9 +484,17 @@ async def serve_completion(
 
     for w in registry.snapshots.values():
         w.queued = queues.depth(w.id)  # gateway queue depth participates in the load score
+    # x-prefix-tokens sizes the region x-prefix-id names (e.g. system prefix only). Absent or
+    # invalid = legacy: the whole prompt is believed reusable, which over-counts prompts that
+    # carry a per-turn suffix or divergent history.
+    prefix_tokens = _int_or_none(x_prefix_tokens)
+    if prefix_tokens is not None:
+        prefix_tokens = min(prefix_tokens, est_tokens)
     with metrics.timed("place", klass):
         decision = placement.pick(
-            placement.PlacementRequest(x_prefix_id, est_tokens, klass, x_force_worker),
+            placement.PlacementRequest(
+                x_prefix_id, est_tokens, klass, x_force_worker, prefix_tokens
+            ),
             list(registry.snapshots.values()),
             policy=policy_override or PLACEMENT_POLICY,
             stale_after=SNAPSHOT_STALE_S,
@@ -504,7 +513,9 @@ async def serve_completion(
     if decision.fallback:
         metrics.STALE_FALLBACK.inc()
     snap = registry.snapshots[decision.chosen_worker]
-    registry.record_prefix(decision.chosen_worker, x_prefix_id, est_tokens)
+    registry.record_prefix(
+        decision.chosen_worker, x_prefix_id, est_tokens if prefix_tokens is None else prefix_tokens
+    )
     correlation_headers.update(
         {
             "x-orchestration-stage": "worker_dispatch",

@@ -22,6 +22,12 @@ Let the same traffic trace run under different routing policies and with admissi
 - `uv run --project services/app pytest services/app/tests tests -q` — 330 passed; `pytest infra/inference/tests -q` — 161 passed; black/ruff clean at CI scope.
 - Not verified: any run against a live gateway/cluster; thresholds are uncalibrated. The E4 scenario file is ~62 KB because the long batch prefix is embedded per conversation.
 
+## Review follow-up
+
+- **Prefix belief truthfulness (HIGH).** A system-only `x-prefix-id` was recorded with the whole prompt's token estimate, inflating `estimated_reusable_tokens` and the 0.8 overlap test. Replayer now sends `x-prefix-tokens` (system-prefix region only, ~4 chars/token); the gateway clamps it to `[0, est_tokens]`, stores it as the reusable belief, and uses it as the overlap denominator (`PlacementRequest.prefix_tokens`). Absent or invalid header keeps the legacy whole-prompt behavior. E3 therefore measures shared system-prefix affinity only; history-aware prefix identity (system + prior completed turns, per `docs/prefix-contract.md`) is a possible follow-up, not measured here.
+- **Ignored controls (MEDIUM).** Requested controls must be echoed by the gateway. First response missing/mismatching -> run aborts (exit 2, no evidence); later mismatches -> turn status `control_not_applied` (failed). Manifest: `policy_override_requested/_verified`, `admission_mode_requested/_verified`, `control_unverified_turns` (replaces the old `policy_override`/`admission_mode` keys).
+- Verification: `pytest services/app/tests tests infra/inference/tests` — 513 passed; black/ruff clean.
+
 ## PR / merge state
 
 Draft PR (this change). Next: Slice D real runs (E0/E1/E2), Slice E proofs.

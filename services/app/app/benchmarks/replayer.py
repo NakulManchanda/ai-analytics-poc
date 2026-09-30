@@ -96,6 +96,15 @@ class _GatewayConv:
     history: list[dict[str, str]] = field(default_factory=list)
 
     @property
+    def prefix_tokens(self) -> int | None:
+        """Estimated tokens of the system-prefix region only (gateway guard's ~4 chars/token)."""
+        return (
+            len(json.dumps([{"role": "system", "content": self.prefix}])) // 4
+            if self.prefix
+            else None
+        )
+
+    @property
     def prefix_id(self) -> str | None:
         return (
             hashlib.sha256(self.prefix.encode()).hexdigest()[:16]
@@ -129,6 +138,10 @@ class ReplaySummary(BaseModel):
     turn_results: list[TurnResult] = Field(default_factory=list)
 
 
+class ControlNotApplied(RuntimeError):
+    """The gateway did not echo a requested experiment control (ALLOW_EXPERIMENT_CONTROLS off?)."""
+
+
 class ScenarioReplayer:
     def __init__(
         self,
@@ -146,6 +159,8 @@ class ScenarioReplayer:
         self.use_sse = use_sse
         self.gateway_stream = gateway_stream
         self._gw_convs: dict[str, _GatewayConv] = {}
+        self._control_checked = False
+        self._abort: str | None = None
 
     async def run(self) -> ReplaySummary:
         start_time = time.perf_counter()
@@ -163,6 +178,8 @@ class ScenarioReplayer:
         finally:
             if owns_client:
                 await client.aclose()
+        if self._abort:
+            raise ControlNotApplied(self._abort)
 
         elapsed_total = max(time.perf_counter() - start_time, 0.001)
 
@@ -258,6 +275,17 @@ class ScenarioReplayer:
         client: httpx.AsyncClient,
     ) -> TurnResult:
         started_at = time.time()
+        if (
+            self._abort
+        ):  # first response showed a requested control was ignored: stop sending
+            return TurnResult(
+                conversation_id=conversation_id,
+                turn_index=turn_index,
+                prompt=turn.question,
+                status="aborted",
+                client_duration_ms=0.0,
+                error=self._abort,
+            )
         if self.config.target_endpoint_type == "gateway_chat":
             result = await self._execute_gateway_turn(
                 conversation_id, turn_index, turn, client
@@ -274,7 +302,31 @@ class ScenarioReplayer:
         if self.config.target_endpoint_type == "gateway_chat":
             result.policy_override = self.config.policy_override
             result.admission_mode = self.config.admission_mode
+            self._verify_controls(result)
         return result
+
+    def _verify_controls(self, result: TurnResult) -> None:
+        """A requested control must be echoed by the gateway, else the turn is not evidence."""
+        seen = result.gateway_headers
+        if seen is None:
+            return
+        cfg = self.config
+        missing = [
+            f"{hdr}={want!r} (got {seen.get(hdr)!r})"
+            for hdr, want in (
+                ("x-policy-override-applied", cfg.policy_override),
+                ("x-admission-mode", cfg.admission_mode),
+            )
+            if want is not None and seen.get(hdr) != want
+        ]
+        if missing:
+            msg = "requested experiment control not applied by gateway: " + ", ".join(
+                missing
+            )
+            if not self._control_checked:
+                self._abort = msg + " (is ALLOW_EXPERIMENT_CONTROLS=1 on the gateway?)"
+            result.status, result.error = "control_not_applied", msg
+        self._control_checked = True
 
     async def _execute_app_turn(
         self,
@@ -580,6 +632,8 @@ class ScenarioReplayer:
             ("x-tenant-id", turn.tenant_id),
             ("x-deadline-ms", turn.deadline_ms),
             ("x-prefix-id", turn.prefix_id or state.prefix_id),
+            # Size of the region x-prefix-id names; only known for the default system-only id.
+            ("x-prefix-tokens", None if turn.prefix_id else state.prefix_tokens),
             ("x-placement-policy-override", self.config.policy_override),
             ("x-admission-mode", self.config.admission_mode),
         ):

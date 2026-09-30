@@ -5,6 +5,7 @@ import json
 import httpx
 import pytest
 from app.benchmarks.replayer import (
+    ControlNotApplied,
     ScenarioReplayer,
     calculate_percentiles,
 )
@@ -681,7 +682,10 @@ async def test_gateway_system_prefix_grows_history_and_sends_stable_prefix_id():
         sent.append((body["messages"], request.headers))
         return httpx.Response(
             200,
-            headers={"x-admission-mode": "off"},
+            headers={
+                "x-admission-mode": "off",
+                "x-policy-override-applied": "least_loaded",
+            },
             json={"choices": [{"message": {"content": f"a{len(sent)}"}}]},
         )
 
@@ -706,11 +710,17 @@ async def test_gateway_system_prefix_grows_history_and_sends_stable_prefix_id():
     assert len(m3) == 2  # a new conversation does not inherit history
     assert h1["x-prefix-id"] == h2["x-prefix-id"] == h3["x-prefix-id"]
     assert len(h1["x-prefix-id"]) == 16
+    # x-prefix-tokens sizes the system-prefix region only, constant across turns/conversations
+    assert h1["x-prefix-tokens"] == h2["x-prefix-tokens"] == h3["x-prefix-tokens"]
+    assert 0 < int(h1["x-prefix-tokens"]) < len(json.dumps(m2)) // 4
     assert h1["x-placement-policy-override"] == "least_loaded"
     assert h1["x-admission-mode"] == "off"
     r = summary.turn_results[0]
     assert (r.policy_override, r.admission_mode) == ("least_loaded", "off")
-    assert r.gateway_headers == {"x-admission-mode": "off"}
+    assert r.gateway_headers == {
+        "x-admission-mode": "off",
+        "x-policy-override-applied": "least_loaded",
+    }
 
 
 @pytest.mark.anyio
@@ -727,7 +737,12 @@ async def test_gateway_without_prefix_or_controls_sends_bare_question():
         ).run()
     body, headers = seen[0]
     assert body["messages"] == [{"role": "user", "content": "q"}]
-    for h in ("x-prefix-id", "x-placement-policy-override", "x-admission-mode"):
+    for h in (
+        "x-prefix-id",
+        "x-prefix-tokens",
+        "x-placement-policy-override",
+        "x-admission-mode",
+    ):
         assert h not in headers
 
 
@@ -749,3 +764,81 @@ async def test_gateway_stream_history_uses_streamed_text():
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         await ScenarioReplayer(cfg, "http://gw", client=client).run()
     assert bodies[1][2] == {"role": "assistant", "content": "Hello"}
+
+
+def _ctl_cfg(**kw) -> ScenarioConfig:
+    return _gw_cfg().model_copy(update=kw)
+
+
+@pytest.mark.anyio
+async def test_control_not_echoed_marks_turn_and_aborts_run():
+    cfg = _ctl_cfg(policy_override="p2c")
+    cfg.conversations[0].turns.append(ScenarioTurn(question="q2"))
+    calls = []
+
+    async def handler(request):
+        calls.append(1)
+        return httpx.Response(200, headers={"x-place-decision": "w1"}, json={"id": "x"})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(ControlNotApplied):
+            await ScenarioReplayer(
+                cfg, "http://gw", client=client, gateway_stream=False
+            ).run()
+    assert len(calls) == 1  # aborted after the first response, second turn never sent
+
+
+@pytest.mark.anyio
+async def test_control_echo_mismatch_is_control_not_applied_turn():
+    cfg = _ctl_cfg(admission_mode="off")
+
+    async def handler(request):
+        return httpx.Response(200, headers={"x-admission-mode": "on"}, json={"id": "x"})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        # first response is verified before abort; run() raises rather than reporting success
+        with pytest.raises(ControlNotApplied):
+            await ScenarioReplayer(
+                cfg, "http://gw", client=client, gateway_stream=False
+            ).run()
+
+
+@pytest.mark.anyio
+async def test_matching_echo_is_verified_and_completed():
+    cfg = _ctl_cfg(policy_override="p2c", admission_mode="on")
+
+    async def handler(request):
+        return httpx.Response(
+            200,
+            headers={"x-policy-override-applied": "p2c", "x-admission-mode": "on"},
+            json={"id": "x"},
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        s = await ScenarioReplayer(
+            cfg, "http://gw", client=client, gateway_stream=False
+        ).run()
+    assert s.turn_results[0].status == "completed"
+
+
+@pytest.mark.anyio
+async def test_control_lost_mid_run_marks_only_that_turn_failed():
+    cfg = _ctl_cfg(policy_override="p2c")
+    cfg.conversations[0].turns.append(ScenarioTurn(question="q2"))
+    n = []
+
+    async def handler(request):
+        n.append(1)
+        hdrs = (
+            {"x-policy-override-applied": "p2c"}
+            if len(n) == 1
+            else {"x-place-decision": "w"}
+        )
+        return httpx.Response(200, headers=hdrs, json={"id": "x"})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        s = await ScenarioReplayer(
+            cfg, "http://gw", client=client, gateway_stream=False
+        ).run()
+    assert [t.status for t in s.turn_results] == ["completed", "control_not_applied"]
+    assert s.failed_turns == 1

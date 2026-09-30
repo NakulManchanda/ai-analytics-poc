@@ -26,7 +26,11 @@ from app.benchmarks.metrics_scraper import (
     PrometheusMetricSnapshot,
     compute_metrics_delta,
 )
-from app.benchmarks.replayer import ReplaySummary, ScenarioReplayer
+from app.benchmarks.replayer import (
+    ControlNotApplied,
+    ReplaySummary,
+    ScenarioReplayer,
+)
 from app.scenarios.loader import load_scenario
 from app.scenarios.models import ScenarioConfig
 
@@ -245,7 +249,11 @@ async def async_main(args: argparse.Namespace) -> int:
             use_sse=not args.no_sse,
             gateway_stream=getattr(args, "gateway_stream", True),
         )
-        summary = await replayer.run()
+        try:
+            summary = await replayer.run()
+        except ControlNotApplied as exc:
+            logger.error("Aborting run, no evidence written: %s", exc)
+            return 2
         any_failed = any_failed or summary.failed_turns > 0
         logger.info(
             "Replay finished: %d/%d turns succeeded in %.2fs (%.2f req/s)",
@@ -340,6 +348,7 @@ async def async_main(args: argparse.Namespace) -> int:
     )
     _write_json(run_dir / "sweep.json", sweep_rows)
     (run_dir / "sweep.csv").write_text(sweep_to_csv(sweep_rows), encoding="utf-8")
+    unverified = sum(t["status"] == "control_not_applied" for t in all_turns)
     scenario_json = json.dumps(config.model_dump(), sort_keys=True)
     _write_json(
         run_dir / "manifest.json",
@@ -349,8 +358,15 @@ async def async_main(args: argparse.Namespace) -> int:
                 "sha256": hashlib.sha256(scenario_json.encode()).hexdigest(),
             },
             "policy_under_test": getattr(args, "label", None),
-            "policy_override": config.policy_override,
-            "admission_mode": config.admission_mode,
+            "policy_override_requested": config.policy_override,
+            "policy_override_verified": (
+                None if config.policy_override is None else unverified == 0
+            ),
+            "admission_mode_requested": config.admission_mode,
+            "admission_mode_verified": (
+                None if config.admission_mode is None else unverified == 0
+            ),
+            "control_unverified_turns": unverified,
             "slos": slos.model_dump(),
             "topology": getattr(args, "topology", None)
             or os.environ.get("INFERENCE_TOPOLOGY")

@@ -367,3 +367,49 @@ def test_worker_warm_gauge_healthy_but_not_warm() -> None:
     assert get("worker_warm", {"worker": "warm_w"}) == 1
     assert get("worker_warm", {"worker": "cold_w"}) == 0
     assert get("worker_health", {"worker": "cold_w", "state": "healthy"}) == 1
+
+
+def _belief_after(client, reg, headers, content="x" * 400):
+    with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as post:
+        post.side_effect = _ok
+        r = client.post(
+            "/serve",
+            json={"messages": [{"role": "user", "content": content}]},
+            headers={"x-prefix-id": "sys1", **headers},
+        )
+    return r, max(
+        (s.prefixes["sys1"] for s in reg.snapshots.values() if "sys1" in s.prefixes),
+        key=lambda b: b.observed_at,
+    )
+
+
+def test_prefix_tokens_header_bounds_reusable_belief(gw) -> None:
+    client, reg = gw
+    # two conversations, same system-only id, very different totals: belief stays the system size
+    _, b1 = _belief_after(client, reg, {"x-prefix-tokens": "50"}, "a" * 4000)
+    assert b1.tokens == 50
+    _, b2 = _belief_after(client, reg, {"x-prefix-tokens": "50"}, "b" * 12000)
+    assert b2.tokens == 50  # not the ~3000-token total
+
+
+def test_prefix_tokens_clamped_and_legacy_path(gw) -> None:
+    client, reg = gw
+    _, b = _belief_after(client, reg, {"x-prefix-tokens": "999999"}, "a" * 400)
+    assert 0 < b.tokens <= 110  # clamped to the ~100-token estimate
+    _, b = _belief_after(client, reg, {"x-prefix-tokens": "-5"})
+    assert b.tokens > 50  # negative -> invalid -> legacy
+    _, b = _belief_after(client, reg, {"x-prefix-tokens": "junk"})
+    assert b.tokens > 50  # invalid -> legacy: whole prompt estimate
+    _, b = _belief_after(client, reg, {})
+    assert b.tokens > 50  # absent -> legacy (over-counts prompts with a per-turn suffix)
+
+
+def test_prefix_affinity_uses_prefix_region_for_overlap(gw, monkeypatch) -> None:
+    client, reg = gw
+    monkeypatch.setattr(gateway_main, "PLACEMENT_POLICY", "prefix_then_load")
+    r1, _ = _belief_after(client, reg, {"x-prefix-tokens": "100"}, "s" * 400)
+    owner = r1.headers["x-place-decision"]
+    # much longer prompt (history grew) but same system region: still sticky
+    r2, _ = _belief_after(client, reg, {"x-prefix-tokens": "100"}, "s" * 4000)
+    assert r2.headers["x-place-decision"] == owner
+    assert r2.headers["x-placement-reason"] == "prefix_affinity"

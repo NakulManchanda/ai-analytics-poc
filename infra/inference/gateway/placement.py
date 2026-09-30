@@ -37,6 +37,8 @@ class PlacementRequest:
     est_tokens: int = 0
     workload_class: str = "interactive"
     forced_worker: str | None = None
+    # Size of the region x-prefix-id names (x-prefix-tokens). None = legacy: the whole prompt.
+    prefix_tokens: int | None = None
 
 
 @dataclass(frozen=True)
@@ -118,9 +120,8 @@ def pick(
             return decide(_p2c(eligible, rng), policy, "no_prefix_known")
         if owner not in eligible:
             return decide(_p2c(eligible, rng), policy, "prefix_owner_unavailable")
-        overlap = (
-            owner.prefixes[req.prefix_id].tokens / req.est_tokens if req.est_tokens > 0 else 1.0
-        )
+        region = req.prefix_tokens if req.prefix_tokens is not None else req.est_tokens
+        overlap = owner.prefixes[req.prefix_id].tokens / region if region > 0 else 1.0
         if 1.0 - owner.kv_free_ratio >= kv_used_max and len(eligible) > 1:
             return decide(
                 _p2c([w for w in eligible if w is not owner], rng),
