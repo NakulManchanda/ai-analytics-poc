@@ -1,0 +1,39 @@
+{
+  "name": "growing_multi_turn",
+  "description": "1 conversation progressing through 5 sequential catalogue turns to test conversational prefix extension cache hit rate across turns.",
+  "concurrency": 1,
+  "strategy": "manual",
+  "target_endpoint_type": "app_runs",
+  "conversations": [
+    {
+      "conversation_id_prefix": "multi_turn_01",
+      "turns": [
+        {
+          "question": "Which pickup zones have the most trips?",
+          "expected_tool": "query_taxi_data",
+          "delay_seconds": 0.0
+        },
+        {
+          "question": "What are the peak hours and busiest times for taxi rides in NYC?",
+          "expected_tool": "query_taxi_data",
+          "delay_seconds": 0.0
+        },
+        {
+          "question": "Compare weekday and weekend trip volume by hour",
+          "expected_tool": "aggregate_taxi_data",
+          "delay_seconds": 0.0
+        },
+        {
+          "question": "Which pickup zone has the longest average trip duration?",
+          "expected_tool": "aggregate_taxi_data",
+          "delay_seconds": 0.0
+        },
+        {
+          "question": "Compare Manhattan and Queens on trip count, average fare, and average tip",
+          "expected_tool": "compare_taxi_segments",
+          "delay_seconds": 0.0
+        }
+      ]
+    }
+  ]
+}

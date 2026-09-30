@@ -39,7 +39,19 @@
             "fillOpacity": 10,
             "lineWidth": 1
           },
-          "unit": "percent"
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1.0
+              }
+            ]
+          }
         },
         "overrides": []
       },
@@ -51,11 +63,17 @@
       },
       "id": 2,
       "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        }
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
       },
       "targets": [
         {
@@ -63,13 +81,13 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "DCGM_FI_DEV_GPU_UTIL",
+          "expr": "up{job=\"inference-workers\"}",
           "legendFormat": "{{instance}}",
           "refId": "A"
         }
       ],
-      "title": "DCGM GPU utilization %",
-      "type": "timeseries"
+      "title": "vLLM Workers Up (1=Healthy)",
+      "type": "stat"
     },
     {
       "datasource": {
@@ -83,7 +101,7 @@
             "fillOpacity": 10,
             "lineWidth": 1
           },
-          "unit": "decbytes"
+          "unit": "percent"
         },
         "overrides": []
       },
@@ -107,21 +125,12 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "DCGM_FI_DEV_FB_USED * 1024 * 1024",
-          "legendFormat": "used {{instance}}",
+          "expr": "DCGM_FI_DEV_GPU_UTIL",
+          "legendFormat": "{{instance}}",
           "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "DCGM_FI_DEV_FB_FREE * 1024 * 1024",
-          "legendFormat": "free {{instance}}",
-          "refId": "B"
         }
       ],
-      "title": "DCGM framebuffer used/free",
+      "title": "DCGM GPU utilization %",
       "type": "timeseries"
     },
     {
@@ -180,7 +189,7 @@
             "fillOpacity": 10,
             "lineWidth": 1
           },
-          "unit": "percent"
+          "unit": "decbytes"
         },
         "overrides": []
       },
@@ -191,6 +200,59 @@
         "y": 11
       },
       "id": 5,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "DCGM_FI_DEV_FB_USED * 1024 * 1024",
+          "legendFormat": "used {{instance}}",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "DCGM_FI_DEV_FB_FREE * 1024 * 1024",
+          "legendFormat": "free {{instance}}",
+          "refId": "B"
+        }
+      ],
+      "title": "DCGM framebuffer used/free",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1
+          },
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 11
+      },
+      "id": 6,
       "options": {
         "legend": {
           "displayMode": "list",
@@ -230,10 +292,10 @@
       "gridPos": {
         "h": 8,
         "w": 12,
-        "x": 12,
-        "y": 11
+        "x": 0,
+        "y": 19
       },
-      "id": 6,
+      "id": 7,
       "options": {
         "legend": {
           "displayMode": "list",
@@ -273,10 +335,10 @@
       "gridPos": {
         "h": 8,
         "w": 12,
-        "x": 0,
+        "x": 12,
         "y": 19
       },
-      "id": 7,
+      "id": 8,
       "options": {
         "legend": {
           "displayMode": "list",
@@ -315,11 +377,11 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 19
+        "w": 24,
+        "x": 0,
+        "y": 27
       },
-      "id": 8,
+      "id": 9,
       "options": {
         "legend": {
           "displayMode": "list",

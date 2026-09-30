@@ -1,0 +1,89 @@
+{
+  "name": "shared_prefix_fanout",
+  "description": "20 independent conversations sharing identical global system prompt and initial catalogue question to test global prefix cache hit rate.",
+  "concurrency": 4,
+  "strategy": "manual",
+  "target_endpoint_type": "app_runs",
+  "conversations": [
+    {
+      "conversation_id_prefix": "fanout_01",
+      "turns": [{"question": "Which pickup zones have the most trips?", "expected_tool": "query_taxi_data", "delay_seconds": 0.0}]
+    },
+    {
+      "conversation_id_prefix": "fanout_02",
+      "turns": [{"question": "Which pickup zones have the most trips?", "expected_tool": "query_taxi_data", "delay_seconds": 0.0}]
+    },
+    {
+      "conversation_id_prefix": "fanout_03",
+      "turns": [{"question": "Which pickup zones have the most trips?", "expected_tool": "query_taxi_data", "delay_seconds": 0.0}]
+    },
+    {
+      "conversation_id_prefix": "fanout_04",
+      "turns": [{"question": "Which pickup zones have the most trips?", "expected_tool": "query_taxi_data", "delay_seconds": 0.0}]
+    },
+    {
+      "conversation_id_prefix": "fanout_05",
+      "turns": [{"question": "Which pickup zones have the most trips?", "expected_tool": "query_taxi_data", "delay_seconds": 0.0}]
+    },
+    {
+      "conversation_id_prefix": "fanout_06",
+      "turns": [{"question": "Which pickup zones have the most trips?", "expected_tool": "query_taxi_data", "delay_seconds": 0.0}]
+    },
+    {
+      "conversation_id_prefix": "fanout_07",
+      "turns": [{"question": "Which pickup zones have the most trips?", "expected_tool": "query_taxi_data", "delay_seconds": 0.0}]
+    },
+    {
+      "conversation_id_prefix": "fanout_08",
+      "turns": [{"question": "Which pickup zones have the most trips?", "expected_tool": "query_taxi_data", "delay_seconds": 0.0}]
+    },
+    {
+      "conversation_id_prefix": "fanout_09",
+      "turns": [{"question": "Which pickup zones have the most trips?", "expected_tool": "query_taxi_data", "delay_seconds": 0.0}]
+    },
+    {
+      "conversation_id_prefix": "fanout_10",
+      "turns": [{"question": "Which pickup zones have the most trips?", "expected_tool": "query_taxi_data", "delay_seconds": 0.0}]
+    },
+    {
+      "conversation_id_prefix": "fanout_11",
+      "turns": [{"question": "Which pickup zones have the most trips?", "expected_tool": "query_taxi_data", "delay_seconds": 0.0}]
+    },
+    {
+      "conversation_id_prefix": "fanout_12",
+      "turns": [{"question": "Which pickup zones have the most trips?", "expected_tool": "query_taxi_data", "delay_seconds": 0.0}]
+    },
+    {
+      "conversation_id_prefix": "fanout_13",
+      "turns": [{"question": "Which pickup zones have the most trips?", "expected_tool": "query_taxi_data", "delay_seconds": 0.0}]
+    },
+    {
+      "conversation_id_prefix": "fanout_14",
+      "turns": [{"question": "Which pickup zones have the most trips?", "expected_tool": "query_taxi_data", "delay_seconds": 0.0}]
+    },
+    {
+      "conversation_id_prefix": "fanout_15",
+      "turns": [{"question": "Which pickup zones have the most trips?", "expected_tool": "query_taxi_data", "delay_seconds": 0.0}]
+    },
+    {
+      "conversation_id_prefix": "fanout_16",
+      "turns": [{"question": "Which pickup zones have the most trips?", "expected_tool": "query_taxi_data", "delay_seconds": 0.0}]
+    },
+    {
+      "conversation_id_prefix": "fanout_17",
+      "turns": [{"question": "Which pickup zones have the most trips?", "expected_tool": "query_taxi_data", "delay_seconds": 0.0}]
+    },
+    {
+      "conversation_id_prefix": "fanout_18",
+      "turns": [{"question": "Which pickup zones have the most trips?", "expected_tool": "query_taxi_data", "delay_seconds": 0.0}]
+    },
+    {
+      "conversation_id_prefix": "fanout_19",
+      "turns": [{"question": "Which pickup zones have the most trips?", "expected_tool": "query_taxi_data", "delay_seconds": 0.0}]
+    },
+    {
+      "conversation_id_prefix": "fanout_20",
+      "turns": [{"question": "Which pickup zones have the most trips?", "expected_tool": "query_taxi_data", "delay_seconds": 0.0}]
+    }
+  ]
+}

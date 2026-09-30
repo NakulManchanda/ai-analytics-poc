@@ -16,6 +16,12 @@ ssh_cmd "
 
   export KUBECONFIG='/etc/rancher/k3s/k3s.yaml'
   mkdir -p ~/.kube && cp -f /etc/rancher/k3s/k3s.yaml ~/.kube/config 2>/dev/null && chmod 600 ~/.kube/config 2>/dev/null || true
+  for i in \$(seq 1 30); do
+    if kubectl get nodes -o name 2>/dev/null | grep -q 'node/'; then
+      break
+    fi
+    sleep 2
+  done
   kubectl wait --for=condition=Ready node --all --timeout=60s
 
   CURRENT_HELM=""

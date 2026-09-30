@@ -1,0 +1,29 @@
+{
+  "name": "strategy_comparison",
+  "description": "Identical question sequence driven to evaluate multi-agent prefix overhead under load.",
+  "concurrency": 1,
+  "strategy": "manual",
+  "target_endpoint_type": "app_runs",
+  "conversations": [
+    {
+      "conversation_id_prefix": "strat_comp_01",
+      "turns": [
+        {
+          "question": "Which pickup zones have the most trips?",
+          "expected_tool": "query_taxi_data",
+          "delay_seconds": 0.0
+        },
+        {
+          "question": "What are the peak hours and busiest times for taxi rides in NYC?",
+          "expected_tool": "query_taxi_data",
+          "delay_seconds": 0.0
+        },
+        {
+          "question": "Compare weekday and weekend trip volume by hour",
+          "expected_tool": "aggregate_taxi_data",
+          "delay_seconds": 0.0
+        }
+      ]
+    }
+  ]
+}
