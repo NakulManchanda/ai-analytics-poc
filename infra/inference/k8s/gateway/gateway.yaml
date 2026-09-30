@@ -36,6 +36,9 @@ spec:
               value: "http://inference-worker-b.inference-lab.svc.cluster.local:8000"
             - name: PLACEMENT_POLICY
               value: "prefix_then_load"
+            # Test-only experiment headers (#123): keep "0" outside controlled E3/E4 runs.
+            - name: ALLOW_EXPERIMENT_CONTROLS
+              value: "0"
             # Overflow (#122 slice 4): off by default. To enable, set OVERFLOW_ENABLED "1" plus the
             # destination below; OVERFLOW_API_KEY must come from a Secret, never a literal here.
             - name: OVERFLOW_ENABLED

@@ -74,3 +74,4 @@ Monotonically numbered log of every post-bootstrap task. Each entry records the 
 - [0076 — Control plane Slice 4: overflow policy](0076-control-plane-overflow.md) — #122
 - [0077 — #123 Slice A: measurement harness](0077-evidence-measurement-harness.md) — goodput, decision headers, run manifest
 - [0078 — #123 Slice B: dashboards and four alerts](0078-evidence-dashboards-alerts.md) — gateway scrape, 7 dashboards, alert rules
+- [0079 — #123 Slice C: E3/E4 scenarios and experiment controls](0079-e3-e4-scenarios-experiment-controls.md) — policy/admission overrides, scenarios

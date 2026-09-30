@@ -10,7 +10,7 @@ OBSERVABILITY_PROMETHEUS_PORT ?= 19090
 OBSERVABILITY_BURST_COUNT ?= 10
 OBSERVABILITY_LOG_TAIL ?= 200
 
-.PHONY: help check-bootstrap dev app-serve-dev mcp-dev mcp-smoke dataset-test dataset-smoke smoke test mcp-test infra-test web-test compose-smoke observability-up observability-down observability-smoke observability-dev-up observability-dev-info observability-dev-ask observability-dev-burst observability-dev-metrics observability-dev-logs observability-dev-down local-aws-compose local-aws-refresh local-serve-compose local-serve-refresh local-bedrock-compose bedrock-smoke m5-bedrock-smoke m6-bedrock-smoke dashboard tf-dispatch tf-resume tf-park inference-validate inference-sync inference-config inference-secret inference-bootstrap inference-deploy inference-up inference-tunnel inference-connect inference-smoke inference-warmup inference-capacity inference-restart inference-gateway-restart inference-serve-smoke inference-run inference-pull-evidence inference-teardown replay-fanout replay-multi-turn replay-compare-strategies replay-strategy-manual replay-strategy-crewai
+.PHONY: help check-bootstrap dev app-serve-dev mcp-dev mcp-smoke dataset-test dataset-smoke smoke test mcp-test infra-test web-test compose-smoke observability-up observability-down observability-smoke observability-dev-up observability-dev-info observability-dev-ask observability-dev-burst observability-dev-metrics observability-dev-logs observability-dev-down local-aws-compose local-aws-refresh local-serve-compose local-serve-refresh local-bedrock-compose bedrock-smoke m5-bedrock-smoke m6-bedrock-smoke dashboard tf-dispatch tf-resume tf-park inference-validate inference-sync inference-config inference-secret inference-bootstrap inference-deploy inference-up inference-tunnel inference-connect inference-smoke inference-warmup inference-capacity inference-restart inference-gateway-restart inference-serve-smoke inference-run inference-pull-evidence inference-teardown replay-fanout replay-multi-turn replay-compare-strategies replay-strategy-manual replay-strategy-crewai replay-e3-least-loaded replay-e3-prefix-then-load replay-e4-admission-on replay-e4-admission-off
 
 
 help: ## Show available commands
@@ -284,3 +284,18 @@ replay-strategy-manual: ## Replay strategy_comparison with manual strategy (app 
 
 replay-strategy-crewai: ## Replay strategy_comparison with crewai strategy (app booted with AGENT_STRATEGY=crewai)
 	uv run --project services/app python services/app/scripts/run_scenario.py --scenario strategy_comparison --strategy crewai --target-url $(TARGET_URL) $(if $(METRICS_URL),--metrics-url $(METRICS_URL)) $(REPLAYER_FLAGS)
+
+# E3/E4 controlled runs (#123): the gateway must run with ALLOW_EXPERIMENT_CONTROLS=1 (test-only); E4 also needs
+# TENANT_ALLOWLIST=tenant_interactive,tenant_noisy,tenant_batch. See docs/inference-testing-guide.md.
+
+replay-e3-least-loaded: ## Replay E3 routing trace under least_loaded (usage: make replay-e3-least-loaded TARGET_URL=http://127.0.0.1:18080)
+	uv run --project services/app python services/app/scripts/run_scenario.py --scenario e3_routing_mixed --endpoint-type gateway_chat --policy-override least_loaded --label e3-least_loaded --target-url $(TARGET_URL) $(if $(METRICS_URL),--metrics-url $(METRICS_URL)) $(REPLAYER_FLAGS)
+
+replay-e3-prefix-then-load: ## Replay E3 routing trace under prefix_then_load (usage: make replay-e3-prefix-then-load TARGET_URL=http://127.0.0.1:18080)
+	uv run --project services/app python services/app/scripts/run_scenario.py --scenario e3_routing_mixed --endpoint-type gateway_chat --policy-override prefix_then_load --label e3-prefix_then_load --target-url $(TARGET_URL) $(if $(METRICS_URL),--metrics-url $(METRICS_URL)) $(REPLAYER_FLAGS)
+
+replay-e4-admission-on: ## Replay E4 overload trace with admission on (usage: make replay-e4-admission-on TARGET_URL=http://127.0.0.1:18080)
+	uv run --project services/app python services/app/scripts/run_scenario.py --scenario e4_admission_overload --endpoint-type gateway_chat --admission-mode on --label e4-admission_on --target-url $(TARGET_URL) $(if $(METRICS_URL),--metrics-url $(METRICS_URL)) $(REPLAYER_FLAGS)
+
+replay-e4-admission-off: ## Replay E4 overload trace with admission off (capacity/deadline shedding skipped) (usage: make replay-e4-admission-off TARGET_URL=http://127.0.0.1:18080)
+	uv run --project services/app python services/app/scripts/run_scenario.py --scenario e4_admission_overload --endpoint-type gateway_chat --admission-mode off --label e4-admission_off --target-url $(TARGET_URL) $(if $(METRICS_URL),--metrics-url $(METRICS_URL)) $(REPLAYER_FLAGS)

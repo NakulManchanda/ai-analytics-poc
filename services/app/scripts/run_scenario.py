@@ -176,6 +176,11 @@ async def async_main(args: argparse.Namespace) -> int:
             "the strategy configured by its AGENT_STRATEGY env var at boot).",
             config.strategy,
         )
+    # Test-only gateway controls; the gateway ignores them unless ALLOW_EXPERIMENT_CONTROLS=1.
+    if getattr(args, "policy_override", None) is not None:
+        config.policy_override = args.policy_override
+    if getattr(args, "admission_mode", None) is not None:
+        config.admission_mode = args.admission_mode
     endpoint_type = getattr(args, "endpoint_type", None)
     if endpoint_type is not None:
         config.target_endpoint_type = endpoint_type
@@ -344,6 +349,8 @@ async def async_main(args: argparse.Namespace) -> int:
                 "sha256": hashlib.sha256(scenario_json.encode()).hexdigest(),
             },
             "policy_under_test": getattr(args, "label", None),
+            "policy_override": config.policy_override,
+            "admission_mode": config.admission_mode,
             "slos": slos.model_dump(),
             "topology": getattr(args, "topology", None)
             or os.environ.get("INFERENCE_TOPOLOGY")
@@ -429,6 +436,18 @@ def main() -> int:
     )
     parser.add_argument(
         "--label", default=None, help="Policy under test (informational)"
+    )
+    parser.add_argument(
+        "--policy-override",
+        choices=["round_robin", "least_loaded", "p2c", "prefix_then_load"],
+        default=None,
+        help="Send x-placement-policy-override (gateway needs ALLOW_EXPERIMENT_CONTROLS=1)",
+    )
+    parser.add_argument(
+        "--admission-mode",
+        choices=["on", "off"],
+        default=None,
+        help="Send x-admission-mode (gateway needs ALLOW_EXPERIMENT_CONTROLS=1)",
     )
     parser.add_argument(
         "--ttft-slo-ms",

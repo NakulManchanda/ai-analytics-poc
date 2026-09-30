@@ -63,6 +63,8 @@ def test_load_all_canned_scenarios():
         ("growing_multi_turn", 1, 5),
         ("strategy_comparison", 1, 3),
         ("concurrent_contention", 4, 12),
+        ("e3_routing_mixed", 10, 39),
+        ("e4_admission_overload", 22, 48),
     ]
 
     for name, expected_convs, expected_turns in expected:
@@ -103,3 +105,23 @@ def test_catalogue_alignment_warnings():
 def test_load_scenario_not_found():
     with pytest.raises(FileNotFoundError):
         load_scenario("non_existent_scenario_xyz")
+
+
+def test_e3_e4_scenarios_are_gateway_scenarios_with_documented_tenants():
+    e3 = load_scenario("e3_routing_mixed", scenarios_dir=Path("config/scenarios"))
+    assert e3.target_endpoint_type == "gateway_chat" and e3.system_prefix
+    assert all(3 <= len(c.turns) <= 5 for c in e3.conversations)
+    assert (
+        e3.total_conversations >= 8 and e3.policy_override is None
+    )  # set per run by the CLI
+
+    e4 = load_scenario("e4_admission_overload", scenarios_dir=Path("config/scenarios"))
+    assert e4.target_endpoint_type == "gateway_chat" and e4.admission_mode is None
+    tenants = {c.tenant_id for c in e4.conversations}
+    assert tenants == {"tenant_interactive", "tenant_noisy", "tenant_batch"}
+    by_tenant = {t: [c for c in e4.conversations if c.tenant_id == t] for t in tenants}
+    assert len(by_tenant["tenant_noisy"]) > len(by_tenant["tenant_interactive"])
+    assert all(c.workload_class == "batch" for c in by_tenant["tenant_batch"])
+    tight = max(t.deadline_ms for c in by_tenant["tenant_interactive"] for t in c.turns)
+    loose = min(t.deadline_ms for c in by_tenant["tenant_batch"] for t in c.turns)
+    assert tight < loose

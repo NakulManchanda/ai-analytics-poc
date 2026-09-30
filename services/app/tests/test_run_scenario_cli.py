@@ -264,6 +264,8 @@ async def test_async_main_writes_run_directory_with_sweep(tmp_path: Path, monkey
         e2e_slo_ms = 3500.0
         topology = None
         engine_flags = "--max-num-seqs 8"
+        policy_override = "p2c"
+        admission_mode = "off"
 
     assert await async_main(Args()) == 0
     runs = [p for p in (tmp_path / "evidence").iterdir() if p.is_dir()]
@@ -273,6 +275,7 @@ async def test_async_main_writes_run_directory_with_sweep(tmp_path: Path, monkey
     assert manifest["scenario"]["name"] == "gw"
     assert len(manifest["scenario"]["sha256"]) == 64
     assert manifest["policy_under_test"] == "least_loaded"
+    assert (manifest["policy_override"], manifest["admission_mode"]) == ("p2c", "off")
     assert manifest["slos"]["interactive_ttft_slo_ms"] == 100.0
     assert "A100" in manifest["topology"]
     assert manifest["model_revision"] == "rev123"

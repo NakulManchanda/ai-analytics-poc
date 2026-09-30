@@ -656,3 +656,96 @@ async def test_gateway_connect_error_keeps_generated_request_id():
     assert r.status == "client_exception"
     assert r.request_id and r.request_id.startswith("gw_stream-")
     assert r.gateway_headers is None
+
+
+@pytest.mark.anyio
+async def test_gateway_system_prefix_grows_history_and_sends_stable_prefix_id():
+    cfg = ScenarioConfig(
+        name="gw_prefix",
+        description="d",
+        target_endpoint_type="gateway_chat",
+        system_prefix="SHARED RULES",
+        policy_override="least_loaded",
+        admission_mode="off",
+        conversations=[
+            ScenarioConversation(
+                turns=[ScenarioTurn(question="q1"), ScenarioTurn(question="q2")]
+            ),
+            ScenarioConversation(turns=[ScenarioTurn(question="q3")]),
+        ],
+    )
+    sent: list[tuple[list[dict], httpx.Headers]] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        sent.append((body["messages"], request.headers))
+        return httpx.Response(
+            200,
+            headers={"x-admission-mode": "off"},
+            json={"choices": [{"message": {"content": f"a{len(sent)}"}}]},
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        summary = await ScenarioReplayer(
+            cfg, "http://gw", client=client, gateway_stream=False
+        ).run()
+
+    by_last = {m[-1]["content"]: (m, h) for m, h in sent}
+    m1, h1 = by_last["q1"]
+    m2, h2 = by_last["q2"]
+    m3, h3 = by_last["q3"]
+    assert m1 == [
+        {"role": "system", "content": "SHARED RULES"},
+        {"role": "user", "content": "q1"},
+    ]
+    assert m2[:3] == m1[:1] + [
+        m1[1],
+        {"role": "assistant", "content": m2[2]["content"]},
+    ]
+    assert m2[2]["content"].startswith("a") and len(m2) == 4  # grows: sys, q1, a, q2
+    assert len(m3) == 2  # a new conversation does not inherit history
+    assert h1["x-prefix-id"] == h2["x-prefix-id"] == h3["x-prefix-id"]
+    assert len(h1["x-prefix-id"]) == 16
+    assert h1["x-placement-policy-override"] == "least_loaded"
+    assert h1["x-admission-mode"] == "off"
+    r = summary.turn_results[0]
+    assert (r.policy_override, r.admission_mode) == ("least_loaded", "off")
+    assert r.gateway_headers == {"x-admission-mode": "off"}
+
+
+@pytest.mark.anyio
+async def test_gateway_without_prefix_or_controls_sends_bare_question():
+    seen: list[tuple[dict, httpx.Headers]] = []
+
+    async def handler(request):
+        seen.append((json.loads(request.content), request.headers))
+        return httpx.Response(200, json={"id": "x"})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        await ScenarioReplayer(
+            _gw_cfg(), "http://gw", client=client, gateway_stream=False
+        ).run()
+    body, headers = seen[0]
+    assert body["messages"] == [{"role": "user", "content": "q"}]
+    for h in ("x-prefix-id", "x-placement-policy-override", "x-admission-mode"):
+        assert h not in headers
+
+
+@pytest.mark.anyio
+async def test_gateway_stream_history_uses_streamed_text():
+    cfg = _gw_cfg().model_copy(update={"system_prefix": "P"})
+    cfg.conversations[0].turns.append(ScenarioTurn(question="q2"))
+    bodies: list[list[dict]] = []
+    sse = (
+        'data: {"choices":[{"delta":{"content":"Hel"}}]}\n\n'
+        'data: {"choices":[{"delta":{"content":"lo"}}]}\n\n'
+        "data: [DONE]\n\n"
+    )
+
+    async def handler(request):
+        bodies.append(json.loads(request.content)["messages"])
+        return httpx.Response(200, headers=_SSE, text=sse)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        await ScenarioReplayer(cfg, "http://gw", client=client).run()
+    assert bodies[1][2] == {"role": "assistant", "content": "Hello"}

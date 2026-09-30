@@ -122,6 +122,8 @@ The scenario runner (`services/app/scripts/run_scenario.py`) executes declarativ
 2. `config/scenarios/growing_multi_turn.json`: 5 sequential turns testing conversational history prefix retention.
 3. `config/scenarios/concurrent_contention.json`: 4 concurrent multi-turn conversations competing for engine slots.
 4. `config/scenarios/strategy_comparison.json`: Comparative sequence across agent strategies.
+5. `config/scenarios/e3_routing_mixed.json`: 10 multi-turn taxi conversations sharing one system prefix (E3, gateway_chat).
+6. `config/scenarios/e4_admission_overload.json`: interactive, noisy-tenant and batch long-context traffic (E4, gateway_chat).
 
 ### Running a Scenario via Make Targets:
 ```bash
@@ -146,12 +148,32 @@ uv run --project services/app python services/app/scripts/run_scenario.py \
   --output-dir metrics/evidence
 ```
 
+### Running E3/E4 Controlled Runs (test-only gateway controls)
+
+E3 (`e3_routing_mixed`) and E4 (`e4_admission_overload`) replay the *same* trace under two settings, chosen per run by the replayer instead of redeploying. The gateway honors the control headers `x-placement-policy-override` (`round_robin|least_loaded|p2c|prefix_then_load`), `x-admission-mode` (`on|off`) and `x-tenant-quota-mode` (`on|off`) **only** when it runs with `ALLOW_EXPERIMENT_CONTROLS=1`; otherwise they are ignored. With controls enabled, an invalid value returns `400 invalid_experiment_control`. Applied overrides are echoed as `x-policy-override-applied` / `x-admission-mode` response headers, recorded per request by the replayer, and written to the run manifest and the gateway decision log.
+
+- **Test-only.** The shipped manifest sets `ALLOW_EXPERIMENT_CONTROLS=0`. Enable it only for the duration of an experiment (`kubectl set env deploy/... ALLOW_EXPERIMENT_CONTROLS=1`, or edit the manifest), and turn it back off afterwards. Never trust these headers from production traffic.
+- `x-admission-mode: off` skips only `should_shed` (capacity/deadline). The guard and the tenant quota still run, so E4's noisy tenant still exercises fairness; add `x-tenant-quota-mode: off` (not sent by the replayer) to disable that too. The forced-worker header keeps precedence over a policy override.
+- **E4 tenants.** Set `TENANT_ALLOWLIST=tenant_interactive,tenant_noisy,tenant_batch` (unknown tenants share one `other` bucket). `TENANT_MAX_CONCURRENCY` (default 4) and `TENANT_TOKEN_BUDGET` control how hard `tenant_noisy` (12 conversations) is limited. Tune the admission thresholds (`MAX_DECODE_SLOTS`, `KV_FREE_MIN`, `PREFILL_TOKENS_PER_S`, `QUEUE_WAIT_PER_WAITING_S`; see `AdmitConfig.from_env`) so the trace actually overloads the two workers.
+- **Prompts.** A scenario/conversation `system_prefix` makes `gateway_chat` send `[system prefix, prior turns (incl. streamed replies), question]` with a stable `x-prefix-id` (SHA-256 prefix of the shared prefix). Without it the bare question is sent as before.
+
+```bash
+make replay-e3-least-loaded        # same E3 trace, --policy-override least_loaded, --label e3-least_loaded
+make replay-e3-prefix-then-load    # same E3 trace, --policy-override prefix_then_load
+make replay-e4-admission-on        # E4 trace with --admission-mode on
+make replay-e4-admission-off       # E4 trace with --admission-mode off
+# all take TARGET_URL=... METRICS_URL=... REPLAYER_FLAGS="--sweep-concurrency 4,8,16"
+```
+
+Compare `summary.json` goodput (`by_worker`, `by_tenant`, `by_workload_class`) between the paired runs; `manifest.json` records `policy_override`, `admission_mode` and `policy_under_test` (the label).
+
 ### Scenario CLI Parameters:
 - `--scenario`: Scenario name (without `.json`) or path to custom JSON scenario.
 - `--target-url`: Target server (`http://localhost:18080` for Gateway, `http://localhost:8000` for App).
 - `--metrics-url`: Prometheus metrics endpoint (`http://localhost:18001/metrics` for Worker A).
 - `--concurrency`: Override concurrency semaphore limit.
 - `--endpoint-type`: `gateway_chat` (direct OpenAI `/v1/chat/completions`) or `app_runs` (FastAPI `/api/runs` with SSE).
+- `--policy-override` / `--admission-mode`: send the test-only gateway control headers (gateway needs `ALLOW_EXPERIMENT_CONTROLS=1`).
 - `--no-sse`: Fall back to conversation polling instead of SSE event streaming.
 - `--output-dir`: Destination directory for timestamped JSON results and Markdown reports.
 

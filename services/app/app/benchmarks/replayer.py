@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import time
 import uuid
+from dataclasses import dataclass, field
 from typing import Any
 
 import httpx
@@ -25,6 +27,8 @@ GATEWAY_DECISION_HEADERS = (
     "x-overflow",
     "x-overflow-reason",
     "x-guard-decision",
+    "x-policy-override-applied",
+    "x-admission-mode",
 )
 
 
@@ -70,6 +74,9 @@ class TurnResult(BaseModel):
     workload_class: str | None = None
     tenant_id: str | None = None
     deadline_ms: int | None = None
+    # Experiment controls sent with this request (gateway_chat only).
+    policy_override: str | None = None
+    admission_mode: str | None = None
     # Raw gateway decision headers; None when headers are not visible (app_runs).
     gateway_headers: dict[str, str] | None = None
 
@@ -79,6 +86,22 @@ def _defaults(conv: ScenarioConversation, turn: ScenarioTurn) -> dict[str, Any]:
         "workload_class": turn.workload_class or conv.workload_class,
         "tenant_id": turn.tenant_id or conv.tenant_id,
     }
+
+
+@dataclass
+class _GatewayConv:
+    """Per-conversation prompt state for gateway_chat when a system_prefix is configured."""
+
+    prefix: str | None = None
+    history: list[dict[str, str]] = field(default_factory=list)
+
+    @property
+    def prefix_id(self) -> str | None:
+        return (
+            hashlib.sha256(self.prefix.encode()).hexdigest()[:16]
+            if self.prefix
+            else None
+        )
 
 
 class ConversationResult(BaseModel):
@@ -122,6 +145,7 @@ class ScenarioReplayer:
         self.timeout = timeout
         self.use_sse = use_sse
         self.gateway_stream = gateway_stream
+        self._gw_convs: dict[str, _GatewayConv] = {}
 
     async def run(self) -> ReplaySummary:
         start_time = time.perf_counter()
@@ -196,6 +220,10 @@ class ScenarioReplayer:
             conv_id = (
                 conv_label if self.config.target_endpoint_type == "gateway_chat" else ""
             )
+            if self.config.target_endpoint_type == "gateway_chat":
+                self._gw_convs[conv_id] = _GatewayConv(
+                    conv.system_prefix or self.config.system_prefix
+                )
             conv_start = time.perf_counter()
             results: list[TurnResult] = []
             all_success = True
@@ -243,6 +271,9 @@ class ScenarioReplayer:
         result.workload_class = turn.workload_class or "interactive"
         result.tenant_id = turn.tenant_id
         result.deadline_ms = turn.deadline_ms
+        if self.config.target_endpoint_type == "gateway_chat":
+            result.policy_override = self.config.policy_override
+            result.admission_mode = self.config.admission_mode
         return result
 
     async def _execute_app_turn(
@@ -511,9 +542,28 @@ class ScenarioReplayer:
             f"{self.config.name}-{conversation_id}-{turn_index}-{uuid.uuid4().hex[:8]}"
         )
         url = f"{self.target_base_url}/v1/chat/completions"
+        # Without a system_prefix the bare question is sent (legacy behaviour). With one, the
+        # prompt is [shared system prefix, prior turns, question] so later turns extend the
+        # earlier prompt (growing conversation) and share a stable prefix across conversations.
+        state = self._gw_convs.get(conversation_id) or _GatewayConv()
+        user_msg = {"role": "user", "content": turn.question}
+        messages = (
+            [{"role": "system", "content": state.prefix}, *state.history, user_msg]
+            if state.prefix
+            else [user_msg]
+        )
+        reply: list[str] = []
+
+        def remember() -> None:
+            if state.prefix:
+                state.history += [
+                    user_msg,
+                    {"role": "assistant", "content": "".join(reply)},
+                ]
+
         payload = {
             "model": "Qwen/Qwen3-0.6B",
-            "messages": [{"role": "user", "content": turn.question}],
+            "messages": messages,
             "max_tokens": 512,
             "temperature": 0.0,
         }
@@ -529,7 +579,9 @@ class ScenarioReplayer:
             ("x-request-priority", turn.workload_class),
             ("x-tenant-id", turn.tenant_id),
             ("x-deadline-ms", turn.deadline_ms),
-            ("x-prefix-id", turn.prefix_id),
+            ("x-prefix-id", turn.prefix_id or state.prefix_id),
+            ("x-placement-policy-override", self.config.policy_override),
+            ("x-admission-mode", self.config.admission_mode),
         ):
             if value is not None:
                 headers[name] = str(value)
@@ -564,6 +616,9 @@ class ScenarioReplayer:
                         )
                     data = json.loads(body)
                     usage = data.get("usage") or {}
+                    for choice in data.get("choices") or []:
+                        reply.append((choice.get("message") or {}).get("content") or "")
+                    remember()
                     return TurnResult(
                         conversation_id=conversation_id,
                         turn_index=turn_index,
@@ -601,10 +656,13 @@ class ScenarioReplayer:
                     run_id = run_id or chunk.get("id")
                     usage = chunk.get("usage") or usage
                     for choice in chunk.get("choices") or []:
-                        if (choice.get("delta") or {}).get("content"):
+                        if piece := (choice.get("delta") or {}).get("content"):
+                            reply.append(piece)
                             if ttft is None:
                                 ttft = (time.perf_counter() - t_start) * 1000.0
                 duration_ms = (time.perf_counter() - t_start) * 1000.0
+                if done and not error:
+                    remember()
                 return TurnResult(
                     conversation_id=conversation_id,
                     turn_index=turn_index,
