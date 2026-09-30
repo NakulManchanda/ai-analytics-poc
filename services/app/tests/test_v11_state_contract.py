@@ -174,15 +174,23 @@ def test_two_ask_turns_persist_and_reload_the_durable_conversation() -> None:
         "JFK Airport has the most trips.",
     ]
     assert reloaded.status_code == 200
-    assert [
-        message["content"]
-        for message in reloaded.json()["messages"]
-        if message["role"] != "tool"
-    ] == [
+    # M2: role="tool" messages are internal durable-history plumbing for the
+    # prefix renderer (D18); the web UI has no notion of a tool bubble and
+    # pairs assistant bubbles to runs by adjacency to the preceding user
+    # message, so the reload endpoint must never send them at all -- not
+    # merely be filtered out by the test.
+    assert "tool" not in {message["role"] for message in reloaded.json()["messages"]}
+    assert [message["content"] for message in reloaded.json()["messages"]] == [
         "First question.",
         "JFK Airport has the most trips.",
         "Second question.",
         "JFK Airport has the most trips.",
+    ]
+    assert [message["role"] for message in reloaded.json()["messages"]] == [
+        "user",
+        "assistant",
+        "user",
+        "assistant",
     ]
     assert [run["run_id"] for run in reloaded.json()["runs"]] == [
         first_payload["run_id"],

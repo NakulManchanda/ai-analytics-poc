@@ -106,6 +106,13 @@ def create_conversations_router(state_repository: StateRepository) -> APIRouter:
             messages=[
                 _message_response(message)
                 for message in state_repository.list_messages(conversation_id)
+                # role="tool" messages are internal durable-history plumbing for
+                # the prefix renderer (D18); the web UI only ever expects
+                # user/assistant turns and pairs an assistant bubble to its run
+                # by adjacency to the preceding user message, so a raw tool
+                # message would both render as a stray JSON bubble and break
+                # that adjacency (M2). Never sent to the frontend.
+                if message.role != "tool"
             ],
             runs=[
                 _run_response(run, state_repository.list_run_steps(run.run_id))

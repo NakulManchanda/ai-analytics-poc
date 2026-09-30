@@ -97,14 +97,14 @@ def test_v11_local_api_smoke_recovers_two_turn_conversation_and_sse_contract() -
     assert second["run_id"] != first["run_id"]
     assert conversation_response.status_code == 200
     conversation = conversation_response.json()
-    # user -> tool (persisted governed tool observation, D18) -> assistant,
-    # repeated per turn.
+    # Durable storage is user -> tool (D18) -> assistant per turn, but the
+    # reload endpoint the web UI calls excludes role="tool" messages (M2):
+    # they're internal prefix-renderer plumbing, not chat turns, and the UI
+    # has no notion of a tool bubble.
     assert [message["role"] for message in conversation["messages"]] == [
         "user",
-        "tool",
         "assistant",
         "user",
-        "tool",
         "assistant",
     ]
     assert [run["run_id"] for run in conversation["runs"]] == [
