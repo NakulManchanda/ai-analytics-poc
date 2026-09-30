@@ -4,7 +4,7 @@ Reads a run directory written by ``run_scenario.py`` (``requests.jsonl``, ``summ
 ``manifest.json``) plus an optional pulled gateway log (JSON decision lines, e.g. from
 ``kubectl logs``) and builds a stage timeline for ONE request_id:
 
-    app -> guard -> admission -> placement -> queue -> hop -> engine -> TTFT/decode
+    app -> guard -> admission -> placement -> queue -> hop -> engine -> TTFT/post-first-token
         -> tool call -> next agent step
 
 Every stage carries a ``status`` and a ``scope``. ``per-request`` values come from that request's
@@ -22,8 +22,50 @@ from typing import Any
 from app.benchmarks.goodput import Slos, is_good
 from app.benchmarks.replayer import TurnResult
 
-# hop_result values from the #133 transfer contract that mean blocks really moved.
-CONFIRMED_HOP_RESULTS = ("transferred",)
+# Confirmed-hop proof schema. FIELD NAMES ARE AN ASSUMPTION until #133 lands (derived from the
+# #133 "Evidence and metrics" list and the #123 real-hop criteria); the REQUIRED EVIDENCE is
+# not: provenance (source + destination), compatible prefix identity/namespace, tokens AND
+# bytes moved, duration, result, and destination availability/consumption. A hop stage is
+# ``confirmed`` only when EVERY field below validates; otherwise the missing ones are named.
+CONFIRMED_HOP_RESULT = "transferred"
+HOP_PROOF_FIELDS = {
+    "source_worker_or_store": "provenance: where the reusable blocks came from",
+    "destination_worker": "provenance: where they became available",
+    "prefix_identity": "versioned prefix identity of the reusable token region",
+    "compatibility_namespace": "model/tokenizer/template/dtype/layout compatibility namespace",
+    "transferred_tokens": "tokens moved (> 0)",
+    "transferred_bytes": "bytes moved (> 0)",
+    "transfer_ms": "transfer duration",
+    "hop_result": f"must equal {CONFIRMED_HOP_RESULT!r}",
+    "confirm_result": "destination confirm step must equal 'available'",
+    "destination_reused_tokens": "observed destination consumption: reused tokens (> 0)",
+}
+
+
+def hop_missing_fields(rec: dict[str, Any]) -> list[str]:
+    """Names of proof fields absent or failing validation (empty list = complete proof)."""
+    missing = []
+    for name in HOP_PROOF_FIELDS:
+        v = rec.get(name)
+        if name == "hop_result":
+            ok = v == CONFIRMED_HOP_RESULT
+        elif name == "confirm_result":
+            ok = v == "available"
+        elif name in (
+            "transferred_tokens",
+            "transferred_bytes",
+            "destination_reused_tokens",
+        ):
+            ok = isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0
+        elif name == "transfer_ms":
+            ok = isinstance(v, (int, float)) and not isinstance(v, bool) and v >= 0
+        else:
+            ok = isinstance(v, str) and bool(v.strip())
+        if not ok:
+            missing.append(name)
+    return missing
+
+
 WINDOW_KEYS = (
     "prefix_cache_hits",
     "prefix_cache_queries",
@@ -47,7 +89,7 @@ STAGE_ORDER = (
     "queue",
     "hop",
     "engine",
-    "ttft_decode",
+    "ttft_post_first_token",
     "tool_call",
     "next_agent_step",
 )
@@ -382,29 +424,34 @@ def build_trace(
     # hop (only a logged, confirmed transfer counts)
     intended = (place or {}).get("intended_action") or hdr.get("x-intended-action")
     hops = [r for r in recs if r.get("stage") == "hop"]
-    done = next((r for r in hops if r.get("hop_result") in CONFIRMED_HOP_RESULTS), None)
-    if done:
-        stages.append(
-            _stage(
-                "hop",
-                "confirmed",
-                duration_ms=done.get("transfer_ms"),
-                details={k: v for k, v in done.items() if k not in ("stage",)},
-                note="confirmed transfer record from the gateway hop log (#133 contract)",
+    if hops:
+        # Judge the most complete record: the one with the fewest missing proof fields.
+        best = min(hops, key=lambda r: len(hop_missing_fields(r)))
+        missing = hop_missing_fields(best)
+        if not missing:
+            stages.append(
+                _stage(
+                    "hop",
+                    "confirmed",
+                    duration_ms=best.get("transfer_ms"),
+                    details={k: v for k, v in best.items() if k not in ("stage",)},
+                    note="all proof fields present (field names assumed until #133 lands)",
+                )
             )
-        )
-    elif hops:
-        stages.append(
-            _stage(
-                "hop",
-                "attempted_not_confirmed",
-                details={
-                    "intended_action": intended,
-                    "hop_result": hops[-1].get("hop_result"),
-                },
-                note="a hop was attempted but no confirmed transfer: NOT a KV hop",
+        else:
+            stages.append(
+                _stage(
+                    "hop",
+                    "attempted_not_confirmed",
+                    details={
+                        "intended_action": intended,
+                        "hop_result": best.get("hop_result"),
+                        "missing_proof_fields": missing,
+                    },
+                    note="hop record lacks required proof (missing_proof_fields): NOT a "
+                    "confirmed KV hop",
+                )
             )
-        )
     else:
         stages.append(
             _stage(
@@ -450,16 +497,16 @@ def build_trace(
         )
         if window:
             stages[-1]["scope"] = "per-request + window"
-    # TTFT / decode
+    # TTFT / post-first-token (client-observed)
     ttft, e2e = rec.get("server_ttft_ms"), rec.get("client_duration_ms")
     stages.append(
         _stage(
-            "ttft_decode",
+            "ttft_post_first_token",
             "observed" if ttft is not None else "partial",
             duration_ms=e2e,
             details={
                 "ttft_ms": ttft,
-                "decode_ms_derived": (
+                "post_first_token_ms": (
                     round(e2e - ttft, 1)
                     if ttft is not None and e2e is not None
                     else None
@@ -467,7 +514,10 @@ def build_trace(
                 "tokens_in": rec.get("tokens_in"),
                 "tokens_out": rec.get("tokens_out"),
             },
-            note="ttft/e2e are client-observed; decode = e2e - ttft (derived). "
+            note="ttft/e2e are client-observed; post_first_token_ms = e2e - ttft is client-"
+            "observed time from first content to completion (streaming transport, gateway work, "
+            "usage/[DONE], cleanup), NOT vLLM decode. Per-request engine prefill/decode timing is "
+            "UNAVAILABLE (window-level only). "
             + (
                 ""
                 if ttft is not None

@@ -143,34 +143,81 @@ def test_full_join(tmp_path):
     eng = _st(t, "engine")
     assert eng["duration_ms"] == 838.0 and "NOT attributable" in eng["note"]
     assert eng["details"]["vllm_window_aggregate"]["prefix_cache_hits"] == 10.0
-    assert _st(t, "ttft_decode")["details"]["decode_ms_derived"] == 840.0
+    assert _st(t, "ttft_post_first_token")["details"]["post_first_token_ms"] == 840.0
     assert _st(t, "next_agent_step")["details"]["request_id"] == "r2"
     assert abs(_st(t, "next_agent_step")["duration_ms"] - 1100.0) < 1
     hop = _st(t, "hop")
     assert hop["status"] == "not_attempted" and "#133" in hop["note"]
     assert _st(t, "tool_call")["status"] == "unavailable"
     assert "SLO MET" in render_text(t)
+    note = _st(t, "ttft_post_first_token")["note"]
+    assert "NOT vLLM decode" in note and "UNAVAILABLE" in note
+    assert "decode_ms_derived" not in _st(t, "ttft_post_first_token")["details"]
 
 
-def test_hop_only_when_confirmed(tmp_path):
+GOOD_HOP = {
+    "hop_result": "transferred",
+    "source_worker_or_store": "worker_a",
+    "destination_worker": "worker_b",
+    "prefix_identity": "pfx-v1-abc",
+    "compatibility_namespace": "qwen3-0.6b/rev/tpl1/bf16",
+    "transferred_tokens": 2048,
+    "transferred_bytes": 234881024,
+    "transfer_ms": 12.0,
+    "confirm_result": "available",
+    "destination_reused_tokens": 2048,
+}
+
+
+def _hop(tmp_path, rec):
     run = _run_dir(tmp_path)
-    (run / "gateway.log").write_text(_log("r1", {"hop_result": "timeout"}))
-    assert (
-        _st(build_trace(run, "r1", run / "gateway.log"), "hop")["status"]
-        == "attempted_not_confirmed"
-    )
-    (run / "gateway.log").write_text(
-        _log(
-            "r1",
-            {
-                "hop_result": "transferred",
-                "transfer_ms": 12.0,
-                "transferred_tokens": 2048,
-            },
-        )
-    )
-    hop = _st(build_trace(run, "r1", run / "gateway.log"), "hop")
+    (run / "gateway.log").write_text(_log("r1", rec))
+    return _st(build_trace(run, "r1", run / "gateway.log"), "hop")
+
+
+def test_complete_hop_record_is_confirmed(tmp_path):
+    hop = _hop(tmp_path, GOOD_HOP)
     assert hop["status"] == "confirmed" and hop["duration_ms"] == 12.0
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "source_worker_or_store",
+        "destination_worker",
+        "transferred_bytes",
+        "transferred_tokens",
+        "confirm_result",
+        "destination_reused_tokens",
+        "prefix_identity",
+        "compatibility_namespace",
+        "transfer_ms",
+    ],
+)
+def test_incomplete_transferred_hop_is_not_confirmed(tmp_path, field):
+    rec = {k: v for k, v in GOOD_HOP.items() if k != field}
+    hop = _hop(tmp_path, rec)
+    assert hop["status"] == "attempted_not_confirmed"
+    assert hop["details"]["missing_proof_fields"] == [field]
+
+
+def test_unconfirmed_destination_or_zero_bytes_not_confirmed(tmp_path):
+    assert (
+        _hop(tmp_path, {**GOOD_HOP, "confirm_result": "missing"})["status"]
+        != "confirmed"
+    )
+    assert _hop(tmp_path, {**GOOD_HOP, "transferred_bytes": 0})["status"] != "confirmed"
+
+
+def test_non_transferred_result_is_not_confirmed(tmp_path):
+    hop = _hop(tmp_path, {**GOOD_HOP, "hop_result": "timeout"})
+    assert hop["status"] == "attempted_not_confirmed"
+    assert hop["details"]["missing_proof_fields"] == ["hop_result"]
+
+
+def test_no_hop_record_is_not_attempted(tmp_path):
+    hop = _hop(tmp_path, None)
+    assert hop["status"] == "not_attempted" and "not attempted (#133)" in hop["note"]
 
 
 def test_missing_log_and_window_degrade_gracefully(tmp_path):
