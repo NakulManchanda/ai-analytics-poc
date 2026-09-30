@@ -144,7 +144,13 @@ class ScenarioReplayer:
         client: httpx.AsyncClient,
     ) -> ConversationResult:
         async with semaphore:
-            conv_id = f"{conv.conversation_id_prefix}_{int(time.time())}_{conv_idx}"
+            conv_label = f"{conv.conversation_id_prefix}_{time.time_ns()}_{conv_idx}"
+            # /api/runs can create a new conversation only when conversation_id is omitted.
+            # Start with an empty id (omit it in _execute_app_turn), then adopt the
+            # server-returned id.
+            conv_id = (
+                conv_label if self.config.target_endpoint_type == "gateway_chat" else ""
+            )
             conv_start = time.perf_counter()
             results: list[TurnResult] = []
             all_success = True
@@ -155,11 +161,12 @@ class ScenarioReplayer:
 
                 turn_res = await self._execute_turn(conv_id, turn_idx, turn, client)
                 results.append(turn_res)
+                conv_id = turn_res.conversation_id or conv_label
                 if turn_res.status != "completed":
                     all_success = False
 
             return ConversationResult(
-                conversation_id=conv_id,
+                conversation_id=conv_id or conv_label,
                 turns=results,
                 success=all_success,
                 total_duration_ms=(time.perf_counter() - conv_start) * 1000.0,
@@ -187,7 +194,9 @@ class ScenarioReplayer:
     ) -> TurnResult:
         t_start = time.perf_counter()
         url = f"{self.target_base_url}/api/runs"
-        payload = {"prompt": turn.question, "conversation_id": conversation_id}
+        payload: dict[str, Any] = {"prompt": turn.question}
+        if conversation_id:
+            payload["conversation_id"] = conversation_id
 
         try:
             resp = await client.post(url, json=payload, timeout=self.timeout)

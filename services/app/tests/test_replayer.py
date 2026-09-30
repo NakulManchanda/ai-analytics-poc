@@ -48,11 +48,24 @@ async def test_replayer_sse_path():
         ],
     )
 
+    known_conversations: set[str] = set()
+
     async def mock_handler(request: httpx.Request) -> httpx.Response:
         url_str = str(request.url)
         if request.method == "POST" and url_str.endswith("/api/runs"):
             body = json.loads(request.content.decode("utf-8"))
-            conv_id = body.get("conversation_id", "conv_default")
+            client_conv_id = body.get("conversation_id")
+            if client_conv_id is not None:
+                if client_conv_id not in known_conversations:
+                    return httpx.Response(
+                        404,
+                        json={"detail": {"code": "conversation_not_found"}},
+                    )
+                conv_id = client_conv_id
+            else:
+                conv_id = f"server_conv_{len(known_conversations) + 1}"
+                known_conversations.add(conv_id)
+
             run_id = f"run_{hash(body['prompt']) & 0xffff}"
             return httpx.Response(
                 202,
@@ -69,7 +82,7 @@ async def test_replayer_sse_path():
                     "event_id": "evt_3",
                     "event_type": "run.completed",
                     "run_id": "run_test",
-                    "conversation_id": "c1",
+                    "conversation_id": "server_conv_1",
                     "sequence": 3,
                     "payload": {
                         "status": "completed",
@@ -115,6 +128,8 @@ async def test_replayer_sse_path():
         assert summary.total_prompt_tokens == 300
         assert summary.total_completion_tokens == 100
         assert summary.ttft_ms["p50"] == pytest.approx(45.2)
+        assert len(known_conversations) == 1
+        assert "server_conv_1" in known_conversations
 
 
 @pytest.mark.anyio
@@ -135,14 +150,28 @@ async def test_replayer_polling_fallback():
         ],
     )
 
+    known_conversations: set[str] = set()
+
     async def mock_handler(request: httpx.Request) -> httpx.Response:
         url_str = str(request.url)
         if request.method == "POST" and url_str.endswith("/api/runs"):
             body = json.loads(request.content.decode("utf-8"))
+            client_conv_id = body.get("conversation_id")
+            if client_conv_id is not None:
+                if client_conv_id not in known_conversations:
+                    return httpx.Response(
+                        404,
+                        json={"detail": {"code": "conversation_not_found"}},
+                    )
+                conv_id = client_conv_id
+            else:
+                conv_id = "poll_c1"
+                known_conversations.add(conv_id)
+
             return httpx.Response(
                 202,
                 json={
-                    "conversation_id": body.get("conversation_id"),
+                    "conversation_id": conv_id,
                     "message_id": "msg_poll",
                     "run_id": "run_poll_1",
                     "events_url": "/api/runs/run_poll_1/events",
@@ -254,13 +283,28 @@ async def test_replayer_multiline_sse_payload():
         ],
     )
 
+    known_conversations: set[str] = set()
+
     async def mock_handler(request: httpx.Request) -> httpx.Response:
         url_str = str(request.url)
         if request.method == "POST" and url_str.endswith("/api/runs"):
+            body = json.loads(request.content.decode("utf-8"))
+            client_conv_id = body.get("conversation_id")
+            if client_conv_id is not None:
+                if client_conv_id not in known_conversations:
+                    return httpx.Response(
+                        404,
+                        json={"detail": {"code": "conversation_not_found"}},
+                    )
+                conv_id = client_conv_id
+            else:
+                conv_id = "ml_c1"
+                known_conversations.add(conv_id)
+
             return httpx.Response(
                 202,
                 json={
-                    "conversation_id": "ml_c1",
+                    "conversation_id": conv_id,
                     "message_id": "msg_ml",
                     "run_id": "run_ml_1",
                     "events_url": "/api/runs/run_ml_1/events",
