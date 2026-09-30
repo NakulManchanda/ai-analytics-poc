@@ -54,4 +54,6 @@ def render_conversation_prompt(
         for stored in repo.list_messages(conversation_id):
             messages.append({"role": stored.role, "content": stored.content})
     messages.append({"role": "user", "content": new_question})
-    return RenderedPrompt(messages=messages, prefix_contract_version=PREFIX_CONTRACT_VERSION)
+    return RenderedPrompt(
+        messages=messages, prefix_contract_version=PREFIX_CONTRACT_VERSION
+    )

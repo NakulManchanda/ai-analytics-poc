@@ -11,7 +11,9 @@ from app.prefix_render import PREFIX_CONTRACT_VERSION, render_conversation_promp
 from app.state import InMemoryStateRepository, Message
 
 
-def _add(repo: InMemoryStateRepository, conv_id: str, seq: int, role: str, content: str) -> None:
+def _add(
+    repo: InMemoryStateRepository, conv_id: str, seq: int, role: str, content: str
+) -> None:
     repo.add_message(
         Message(
             message_id=f"msg-{conv_id}-{seq}",
@@ -53,7 +55,11 @@ def test_turn_two_sees_turn_one_tool_result() -> None:
         "role": "user",
         "content": "Compare that with the second highest zone.",
     }
-    assert rendered.prefix_contract_version == PREFIX_CONTRACT_VERSION == "v2-conversational"
+    assert (
+        rendered.prefix_contract_version
+        == PREFIX_CONTRACT_VERSION
+        == "v2-conversational"
+    )
 
 
 def test_two_conversations_do_not_leak_history() -> None:

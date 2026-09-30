@@ -547,7 +547,9 @@ def test_orchestration_loop_serve_mode_no_tool_call_keeps_served_model_and_finis
 class ExtendedFakeMCPClient(FakeMCPClient):
     """Adds the slice A extended governed tools for the catalogue/dispatch tests."""
 
-    def describe_taxi_dataset(self, *, include_column_stats: bool = False) -> dict[str, Any]:
+    def describe_taxi_dataset(
+        self, *, include_column_stats: bool = False
+    ) -> dict[str, Any]:
         return {
             "query_class": "describe",
             "row_count": 12345,
@@ -586,7 +588,9 @@ def test_catalogue_hit_skips_model_and_records_tool_source_catalogue() -> None:
 
     class ExplodingProposalLLMClient(LocalFakeLLMClient):
         def propose_taxi_query(self, prompt, schema, **kwargs):  # type: ignore[no-untyped-def]
-            raise AssertionError("model tool proposal must not be called on a catalogue hit")
+            raise AssertionError(
+                "model tool proposal must not be called on a catalogue hit"
+            )
 
     repo = InMemoryStateRepository()
     loop = OrchestrationLoop(
