@@ -80,6 +80,15 @@ QUEUE_WAIT = Histogram(
 QUEUE_ERRORS = Counter(
     "queue_error_total", "Queue rejections", ["reason", "class"], registry=REGISTRY
 )
+OVERFLOW = Counter(
+    "orch_overflow_total",
+    "Overflow attempts (reason = original local reason; provider/model from config)",
+    ["reason", "provider", "model", "outcome"],
+    registry=REGISTRY,
+)
+OVERFLOW_ERROR = Counter(
+    "overflow_error_total", "Overflow attempts that failed", ["reason"], registry=REGISTRY
+)
 STAGE_DURATION = Histogram(
     "gateway_request_duration_seconds",
     "Time spent per gateway pipeline stage",
