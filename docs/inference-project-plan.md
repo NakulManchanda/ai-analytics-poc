@@ -5,20 +5,19 @@ NYC Taxi Analytics Agent on a GPU-Aware Inference Cluster**
 
 **Primary thesis: prove that admission, placement, queueing, prefix/KV locality, and hop decisions improve a real multi-step agent workload under constrained GPU memory.**
 
-## Current status (2026-09-30)
+## Current status (2026-10-01)
 
-- **#140 (Slice C')**: Merged. Real conversation-history prefix contract (`render_conversation_prompt`), tool-result history (`role="tool"` messages), and pre-canned query catalogue.
-- **#142 (Slice D')**: Implemented and benchmarked live on remote Lambda A100-SXM4 GPU. Automated benchmark scenario generator (`config/scenarios/`), asynchronous concurrent replayer (`ScenarioReplayer`), and zero-dependency Prometheus metrics scraper (`compute_metrics_delta`).
-- **Cluster Telemetry Baseline Established**: Live runs on dual HAMi 20GB vLLM workers confirmed Worker A active processing (KV cache hit rate stepped from 0% to **29.6%**) while Worker B remained at 0% (confirming the #121 single-worker passthrough baseline as a clean control group for upcoming routing experiments). Prefill vs decode analysis proved the workload is $> 98\%$ decode-bound with sub-60 ms TTFT.
-- **Next Milestone**: **#122** (GPU-aware guard/admission/placement/queue control plane) — implements `prefix_then_load` vs `least_loaded` routing and admission deadline shedding. See `docs/inference-testing-guide.md` for test procedures.
+- **#115 (Slices C'/D')**: Merged. Conversation-history prefix contract, tool-result history, scenario generator, asynchronous replayer and Prometheus delta scraper. Live baseline on the dual 20GB HAMi vLLM workers: Worker A active (prefix-cache hit rate 0% to 29.6%), Worker B at 0% as a clean control; workload is > 98% decode-bound with sub-60 ms TTFT.
+- **#122 (control plane)**: Closed (PRs #144-#147): guard, admission, placement, per-worker gateway queues and overflow.
+- **#123 (evidence matrix)**: All code/docs PRs merged (#148-#153): harness, dashboards and four alerts, E3/E4 scenarios and test-only controls, E5 recompute control and locality matrix, single-request trace, evidence index, analysis toolkit, notebook scaffold and run playbook. The issue stays open until real evidence from cluster runs is committed.
+- **Next**: a cluster session following [inference-run-playbook.md](inference-run-playbook.md) (E1, E2, E3, E4, E0 and the memory proof), then #133.
 
 ## Next-session priorities (in order)
 
-1. **Merge #142 (Slice D')** — All 4 benchmark scenarios executed live, PR description updated with telemetry, all Copilot review comments resolved, CI passing.
-2. **#122** (GPU-aware guard/admission/placement/queue control plane) — the central milestone implementing the gateway pipeline: `app -> guard.inspect() -> should_shed() -> place.pick() -> per-worker gateway queue -> hop check -> vLLM`.
-3. **#133** (KV hop store integration / Mooncake/LMCache) — evaluating recompute vs network hop.
-4. **#123** (Controlled experiments E0–E5 & Evidence Matrix) — final experimental proof with Jupyter notebook artifacts.
-5. **#139** (Configurable agent strategy / CrewAI) — comparative evaluation of agent orchestration strategies.
+1. **Cluster session for #123 E0-E4 + memory proof** - follow `docs/inference-run-playbook.md`; commit the resulting evidence and notebook.
+2. **#133** (real KV hop store: Mooncake/LMCache) - not started; no transfer backend in the stack yet. Unblocks the E5 real-hop treatment.
+3. **#123 completion** - E5 real-hop treatment, single-request trace and final write-up once #133 lands.
+4. **#139** (configurable agent strategy / CrewAI) - comparative evaluation of agent orchestration strategies.
 
 # 1. Project thesis and success criteria
 
