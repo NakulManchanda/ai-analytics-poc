@@ -1,4 +1,4 @@
-"""Offline analysis of #123 run artifacts (stdlib only). See docs/inference-run-playbook.md."""
+"""Offline analysis of #123 run artifacts (stdlib only). See docs/inference-experiments/inference-run-playbook.md."""
 
 from experiments.analysis.compare import (
     check_manifests,

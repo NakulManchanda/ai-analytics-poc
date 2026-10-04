@@ -106,7 +106,7 @@ CELLS = [
     (
         MD,
         "# #123 evidence notebook\n\nThin view over `experiments/analysis`; contains no results. Point `RUNS` "
-        "at pulled run directories (see `docs/inference-run-playbook.md`). Every output states its evidence "
+        "at pulled run directories (see `docs/inference-experiments/inference-run-playbook.md`). Every output states its evidence "
         "scope: **per-request** (requests.jsonl) or **WINDOW-level** (Prometheus; never per request).",
     ),
     ("code", SETUP),

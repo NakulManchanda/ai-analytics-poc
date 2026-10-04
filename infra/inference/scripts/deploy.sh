@@ -8,6 +8,9 @@ load_local_env; require_connection
 ssh_cmd "
   set -eu
   export KUBECONFIG="${KUBECONFIG:-/etc/rancher/k3s/k3s.yaml}"
+  RDIR=$(remote_dir)
+  ALERTS_VALUES=\$(mktemp)
+  { echo 'serverFiles:'; echo '  alerting_rules.yml:'; sed 's/^/    /' \"\$RDIR/observability/prometheus/alerts.yaml\"; } > \"\$ALERTS_VALUES\"
   kubectl apply -f $(remote_dir)/k8s/namespace.yaml
   kubectl apply -R -f $(remote_dir)/k8s
   kubectl apply -f $(remote_dir)/observability/dcgm/dcgm-exporter.yaml
@@ -17,7 +20,7 @@ ssh_cmd "
     --namespace '$INFERENCE_NAMESPACE' \
     --version '25.27.0' \
     -f $(remote_dir)/observability/prometheus/values.yaml \
-    --set-file 'serverFiles.alerting_rules\\.yml=$(remote_dir)/observability/prometheus/alerts.yaml' \
+    -f \"\$ALERTS_VALUES\" \
     --wait --timeout 10m
   helm repo add grafana https://grafana.github.io/helm-charts >/dev/null 2>&1 || true
   helm repo update grafana >/dev/null 2>&1 || true
@@ -28,13 +31,13 @@ ssh_cmd "
     --wait --timeout 10m
   if [[ -d $(remote_dir)/observability/grafana/dashboards ]]; then
     kubectl -n '$INFERENCE_NAMESPACE' create configmap inference-dashboards \
-      --from-file=$(remote_dir)/observability/grafana/dashboards \
+      --from-file=\"\$RDIR/observability/grafana/dashboards\" \
       --dry-run=client -o yaml | kubectl apply -f -
     kubectl -n '$INFERENCE_NAMESPACE' label configmap inference-dashboards grafana_dashboard=1 --overwrite
   fi
   if [[ -d $(remote_dir)/gateway ]]; then
     kubectl -n '$INFERENCE_NAMESPACE' create configmap inference-gateway-code \
-      --from-file=$(remote_dir)/gateway \
+      --from-file=\"\$RDIR/gateway\" \
       --dry-run=client -o yaml | kubectl apply -f -
   fi
 

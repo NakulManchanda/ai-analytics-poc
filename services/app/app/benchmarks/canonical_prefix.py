@@ -18,7 +18,7 @@ CANONICAL_TAXI_SCHEMA = {
         "passenger_count",
         "trip_distance",
         "RatecodeID",
-        "store_and_forward_flag",
+        "store_and_fwd_flag",
         "PULocationID",
         "DOLocationID",
         "payment_type",

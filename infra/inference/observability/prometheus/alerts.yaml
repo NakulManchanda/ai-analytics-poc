@@ -1,5 +1,5 @@
 # Prometheus alerting rules for the inference lab (#123 slice B).
-# Loaded by deploy.sh via `--set-file serverFiles.alerting_rules\.yml=...`; alertmanager stays
+# Loaded by deploy.sh, which nests this file under serverFiles.alerting_rules.yml in a values file; alertmanager stays
 # disabled, so these are visible/firing in the Prometheus UI only. Rationale: README "Alerts".
 groups:
   - name: inference-lab

@@ -3,7 +3,7 @@
 Ordered commands for a cluster session that produce the artifacts the local analysis toolkit
 (`experiments/analysis`) and notebook (`experiments/123_evidence.ipynb`) consume. Background and
 experiment meaning: [inference-testing-guide.md](inference-testing-guide.md) section 4 and
-[inference-project-plan.md](inference-project-plan.md) sections 8-9 and "Final-run evidence rules".
+[inference-project-plan.md](../inference-project-plan.md) sections 8-9 and "Final-run evidence rules".
 All commands run from the repository root (or the active worktree) unless noted.
 
 ## 0. Conventions
