@@ -131,7 +131,10 @@ makes the pair unproven. Controls requested in neither run need nothing.
  `e3_routing_mixed` under
 `least_loaded` (spreads traffic so both workers build the prefix).
 ```bash
-export RUN_ID=d123-$(date +%Y%m%d)-e2
+# Prerequisites (both restart the gateway; wait for /health 200 on 18080 afterwards):
+#   make inference-controls-on      # the replay sends a policy override; with controls off the gateway does not echo it
+#   ssh lambda 'sudo k3s kubectl -n inference-lab set env deploy/inference-gateway TENANT_MAX_CONCURRENCY=64'   # replay runs at concurrency 8; default 4 returns 429
+source infra/inference/experiments/manifest/e2-prefix-reuse.env   # ONCE; sets RUN_ID=d123-<date>-e2-<HHMM>, do not re-source between arms
 # 1. section 2 restart of BOTH workers, then the declared warm-up so only the PREFIX cache is cold:
 python3 infra/inference/experiments/warmup.py --output-dir metrics/inference/$RUN_ID/warmup
 # 2. cold run (metrics-url = one worker's window; repeat with 18002 if you need worker B)
@@ -150,7 +153,8 @@ For a fully cache-free reference restart before each run and use `--concurrency 
 ### E3 Routing: least_loaded vs prefix_then_load
 
 ```bash
-export RUN_ID=d123-$(date +%Y%m%d)-e3
+# Prerequisites: controls on and tenant quota 64, exactly as in E2 (make inference-controls-on; set env TENANT_MAX_CONCURRENCY=64).
+source infra/inference/experiments/manifest/e3-routing.env   # ONCE; sets RUN_ID=d123-<date>-e3-<HHMM>, both arms share the folder
 # restart both workers (section 2) before EACH run so both start with identical cache state
 make replay-e3-least-loaded     TARGET_URL=http://127.0.0.1:18080 METRICS_URL=http://127.0.0.1:18001/metrics \
   REPLAYER_FLAGS="--output-dir metrics/inference/$RUN_ID"
@@ -166,7 +170,10 @@ proves `ALLOW_EXPERIMENT_CONTROLS=1`. Compare with `e3_compare` (checks manifest
 ### E4 Admission on vs off
 
 ```bash
-export RUN_ID=d123-$(date +%Y%m%d)-e4
+# Prerequisites: make inference-controls-on (also sets TENANT_ALLOWLIST), and restore the default tenant quota so admission can
+# shed: ssh lambda 'sudo k3s kubectl -n inference-lab set env deploy/inference-gateway TENANT_MAX_CONCURRENCY-' (trailing dash unsets it).
+# Tune admission thresholds so the trace actually overloads the workers; otherwise on and off look the same.
+source infra/inference/experiments/manifest/e4-admission.env   # ONCE; sets RUN_ID=d123-<date>-e4-<HHMM>
 make replay-e4-admission-off TARGET_URL=http://127.0.0.1:18080 REPLAYER_FLAGS="--output-dir metrics/inference/$RUN_ID"
 make replay-e4-admission-on  TARGET_URL=http://127.0.0.1:18080 REPLAYER_FLAGS="--output-dir metrics/inference/$RUN_ID"
 make inference-pull-range RUN_ID=$RUN_ID START=<epoch-before-first-run> END=<epoch-after-last-run>

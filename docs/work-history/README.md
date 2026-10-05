@@ -79,3 +79,4 @@ Monotonically numbered log of every post-bootstrap task. Each entry records the 
 - [0081 — #123 E5 recompute control, locality scenarios, trace tool, evidence index](0081-e5-recompute-control-trace-evidence.md) — E5 control, trace, evidence index
 - [0082 — #123 E6: Dynamo comparison plan](0082-e6-dynamo-comparison-plan.md) — ADR 0011, protocol, --router-label
 - [0083 — #123 cluster pre-flight: deploy/script fixes, schema pin, manifest inputs, experiment docs folder](0083-123-cluster-preflight-fixes-and-experiment-docs.md) — deploy.sh/gateway-restart fixes, controls targets, docs/inference-experiments/
+- [0084 — #123 cluster runs E0-E3: results, follow-up fixes, playbook prerequisites](0084-123-cluster-runs-e0-e3-results.md) — E0-E3 findings, open items, per-experiment prerequisites
