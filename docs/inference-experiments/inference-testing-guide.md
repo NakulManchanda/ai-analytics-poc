@@ -51,7 +51,7 @@ Before running benchmarks, ensure the Lambda GPU instance is running and the tun
 
 ```bash
 # 1. From repository root (or worktree)
-make inference-status     # Verify remote host connectivity
+make inference-verify-workers   # Read-only: confirm the remote workers match the run manifest
 
 # 2. Deploy or update cluster manifests if necessary
 make inference-deploy

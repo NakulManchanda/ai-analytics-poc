@@ -13,7 +13,7 @@ Time budget: about 3-4 hours of instance time if nothing breaks. Write down the 
 - [ ] `cd` to the repo root (main checkout is fine; nothing here changes code), `git pull --rebase`, confirm HEAD includes PR #153.
 - [ ] `uv run --project services/app pytest tests/experiments -q` passes (stdlib analysis toolkit).
 - [ ] Optional but useful: `uv run --project experiments pytest tests/experiments -q` (slow first install; verifies the notebook environment, never verified yet).
-- [ ] Session date token and run ids: sourcing an experiment file from `infra/inference/experiments/manifest/` (section below) sets `RUN_ID=d123-<date>-<exp>` for you; use `D=<yyyymmdd> source ...` to pin the date. Run ids below are `d123-$D-<exp>`.
+- [ ] Run ids: sourcing an experiment file from `infra/inference/experiments/manifest/` (section below) sets `RUN_ID=d123-<date>-<exp>-<HHMM>` (local time), so every rerun gets its own folder and nothing is overwritten. Source the file **once per experiment** and do not re-source it between the two arms of a comparison (E2, E3, E4), or the arms land in different folders. `make inference-e1` sources it itself, so each run gets a new id. Pin with `D=<yyyymmdd> T=<HHMM> source ...`. Run ids below are `d123-$D-<exp>-<HHMM>`.
 - [ ] Decide the manifest inputs once and reuse them for EVERY run (comparisons are void if they differ or are `unknown`):
 
 ```bash
@@ -22,17 +22,15 @@ Time budget: about 3-4 hours of instance time if nothing breaks. Write down the 
 #   source infra/inference/experiments/manifest/e1-warmup.env       # also: e0-capacity, e2-prefix-reuse, e3-routing, e4-admission, e5-recompute
 # (the block below is the same content as common.env, kept for reference; keep both in sync)
 export MODEL_REVISION=c1899de289a04d12100db370d81485cdf75e47ca      # worker --revision (k8s/workers/worker-a.yaml)
-export TOKENIZER_REVISION=$MODEL_REVISION                           # ASSUMPTION: no --tokenizer flag, so vLLM uses the model repo at the same revision
+export TOKENIZER_REVISION=$MODEL_REVISION                           # confirmed in the vLLM 0.11.0 startup log (tokenizer_revision == revision)
 export CHAT_TEMPLATE_REVISION=$MODEL_REVISION                       # ASSUMPTION: template ships with the tokenizer in the model repo
 export ENGINE_FLAGS="--dtype bfloat16 --kv-cache-dtype auto --max-model-len 8192 --max-num-seqs 8 --max-num-batched-tokens 8192 --block-size 16 --enable-prefix-caching --enable-auto-tool-choice --tool-call-parser hermes --gpu-memory-utilization 0.45"
 export VLLM_VERSION=0.11.0                                          # image vllm/vllm-openai:v0.11.0
 export KV_BLOCK_SIZE=16                                             # worker --block-size
 export INFERENCE_TOPOLOGY="two vLLM replicas/HAMi slices on one physical A100"
-# `kll` is a personal zsh helper that runs `kubectl -n inference-lab <args>` on the instance over SSH (define your own or use ssh + kubectl).
-# Verify these against the LIVE workers (read-only), both workers should print the same args and image:
-#   kll get deploy inference-worker-a inference-worker-b -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.spec.template.spec.containers[0].image}{" "}{.spec.template.spec.containers[0].args}{"\n"}{end}'
-# Block size and revision as the engine saw them (check the startup log):
-#   kll logs deploy/inference-worker-a | grep -i -E 'block_size|revision|non-default args' | head
+# Verify these against the LIVE workers (read-only; prints image/args for both workers, whether they match, and the engine
+# settings from each startup log: vLLM version, revision, tokenizer_revision, block_size, dtype, kv_cache_dtype, max_seq_len):
+#   make inference-verify-workers
 # Same exports must be set in EVERY terminal that runs make replay-* / run_scenario.py (they are not persisted).
 # optional SLO overrides (defaults: TTFT 100 ms, E2E 3500 ms)
 # export INTERACTIVE_TTFT_SLO_MS=100 E2E_SLO_MS=3500
@@ -44,6 +42,17 @@ export INFERENCE_TOPOLOGY="two vLLM replicas/HAMi slices on one physical A100"
 - [ ] Dedicated terminal: `make inference-tunnel` (keep it open). Ports: gateway 18080, worker A 18001, worker B 18002, Prometheus 19090, Grafana 13000.
 - [ ] `make inference-deploy` only if manifests/dashboards/alerts changed since the last deploy. This run needs the merged dashboards, alert rules and gateway, so do run it once if the cluster was last deployed before PRs #144-#153. Note: deploy resets gateway env to manifest defaults (controls OFF).
 - [ ] `make inference-gateway-restart` if only gateway code changed (the gateway files ship as a ConfigMap).
+
+### Fresh-instance rehearsal (planned after E1-E4)
+
+To prove the whole process works on a new instance: launch it, put the new IP in `~/.ssh/config` (`Host lambda`) and `LAMBDA_SSH_HOST` in `infra/inference/.env`, then from the repo root:
+
+```bash
+make inference-fresh-up      # sync, bootstrap, config, deploy, controls on, verify workers (long; the deploy waits up to 15 min per worker)
+make inference-tmux-start    # session with run / tunnel / watch windows
+make inference-e1            # in the run window; then the other experiments
+make inference-tmux-end      # when finished; also terminate the instance to stop billing
+```
 
 ## 2. Pre-flight checks (stop and fix before any run)
 
@@ -78,16 +87,40 @@ make evidence-analyze RUN="metrics/inference/$RUN_ID/<run_dir>" RANGE=metrics/in
 ```
 Read `comparable: true/false` and `manifest_check` first. Before this, export the manifest env vars (section 0) so runs are not `unknown`.
 
-### E1 Warmup (cold vs declared-warm) — `RUN_ID=d123-$D-e1`
+### E1 Warmup (cold vs declared-warm) — `RUN_ID=d123-$D-e1-<HHMM>`
+**One command:** with `make inference-tunnel` running in another terminal, `make inference-e1` does everything below (loads the E1 manifest, asks to confirm, restarts workers B then A, waits for the tunnel to re-attach, runs the cold run, waits `WARM_WAIT_S` (default 300 s), runs the warm run, pulls evidence). Options: `WARM_WAIT_S=600`, `YES=1` to skip the prompt, `D=<yyyymmdd>` to pin the run date. It stops if the cold run measures nothing. The manual steps follow for reference.
+
+**Known trap (hit on 2026-10-04):** the tunnel reaches each worker through `kubectl port-forward svc/...`, which dies when the pod is replaced and re-attaches about a second later. A cold run started right after the restart got `Remote end closed connection` from both workers and wrote `{}`; poll `/health` on 18001 and 18002 until 200 before step 2. Do not run the cold and warm runs back to back: the warm run's first request is then effectively the first request after the restart. Client-side TTFT here includes the SSH tunnel (about 250-350 ms floor), which can hide a small cold-start penalty.
+
+0. Load the manifest inputs and `RUN_ID` for this experiment (in the terminal you will run E1 from; it prints nothing). Expect `d123-<date>-e1 16 0.11.0`:
+
+   ```bash
+   source infra/inference/experiments/manifest/e1-warmup.env
+   echo $RUN_ID $KV_BLOCK_SIZE $VLLM_VERSION
+   ```
+
 1. Restart workers: `make inference-restart` (worker B) and `bash infra/inference/scripts/restart-test.sh inference-worker-a metrics/inference/$RUN_ID`.
 2. Immediately: `python3 infra/inference/experiments/warmup.py --output-dir metrics/inference/$RUN_ID/cold`
 3. After several minutes of normal operation: `python3 infra/inference/experiments/warmup.py --output-dir metrics/inference/$RUN_ID/warm`
 4. `make inference-pull-evidence RUN_ID=$RUN_ID`
 - Checkpoint: `cold/warmup_summary.json` TTFT for the first request is visibly higher than `warm` p50/p95. If not, the restart did not go cold (check pod restart time).
 
-### E0 Capacity and first limiter — `RUN_ID=d123-$D-e0`
-1. `make inference-capacity RUN_ID=$RUN_ID` (synthetic, preliminary).
-2. Application-shaped sweep (no policy override):
+### E0 Capacity and first limiter — `RUN_ID=d123-$D-e0-<HHMM>`
+0. Load the manifest inputs and `RUN_ID` for this experiment (in the terminal you will run E0 from; it prints nothing). Expect `d123-<date>-e0 16 0.11.0`:
+
+   ```bash
+   source infra/inference/experiments/manifest/e0-capacity.env
+   echo $RUN_ID $KV_BLOCK_SIZE $VLLM_VERSION
+   ```
+
+1. Confirm the live workers match the manifest (read-only). Expect `args identical across workers: yes`, vLLM `v0.11.0`, `block_size: 16`, matching `revision`/`tokenizer_revision`, and `chunked_prefill_enabled=True`:
+
+   ```bash
+   make inference-verify-workers
+   ```
+
+2. `make inference-capacity RUN_ID=$RUN_ID` (synthetic, preliminary).
+3. Application-shaped sweep (no policy override):
 ```bash
 uv run --project services/app python services/app/scripts/run_scenario.py --scenario e3_routing_mixed \
   --endpoint-type gateway_chat --target-url http://127.0.0.1:18080 --output-dir metrics/inference/$RUN_ID \
@@ -97,7 +130,14 @@ make evidence-analyze RUN="metrics/inference/$RUN_ID/<run_dir>" RANGE=metrics/in
 ```
 - Checkpoint: `sweep.csv` shows goodput flattening or falling while throughput still rises (the knee). Token-rate columns may be `n/a` if the gateway does not return usage; that is expected, not an error. The memory range tells you whether KV, decode slots or queue hit first. Record the answer to "what limited this GPU for this app?".
 
-### E2 Prefix reuse (cold vs reused) — `RUN_ID=d123-$D-e2`
+### E2 Prefix reuse (cold vs reused) — `RUN_ID=d123-$D-e2-<HHMM>`
+**Step 0:** load the manifest inputs and `RUN_ID` for this experiment (in the terminal you will run E2 from; it prints nothing). Expect `d123-<date>-e2 16 0.11.0`:
+
+```bash
+source infra/inference/experiments/manifest/e2-prefix-reuse.env
+echo $RUN_ID $KV_BLOCK_SIZE $VLLM_VERSION
+```
+
 Same scenario and same policy in both runs; only cache state differs.
 ```bash
 # restart BOTH workers (section E1 step 1), run the declared warm-up so only the prefix cache is cold:
@@ -111,7 +151,14 @@ make inference-pull-range RUN_ID=$RUN_ID
 ```
 - Checkpoint: the analysis reports `comparable: true` for the pair (same scenario hash, policy, SLOs, topology, revisions, flags, prefix size, concurrency; controls verified). If `comparable: false`, read `manifest_check` and fix the env/flags, then rerun. Remember: "first pass vs fully warm", not "no cache vs cache". Prefix-cache deltas are window-level, one worker.
 
-### E3 Routing headline — `RUN_ID=d123-$D-e3`
+### E3 Routing headline — `RUN_ID=d123-$D-e3-<HHMM>`
+**Step 0:** load the manifest inputs and `RUN_ID` for this experiment (in the terminal you will run E3 from; it prints nothing). Expect `d123-<date>-e3 16 0.11.0`:
+
+```bash
+source infra/inference/experiments/manifest/e3-routing.env
+echo $RUN_ID $KV_BLOCK_SIZE $VLLM_VERSION
+```
+
 Restart BOTH workers before EACH run so both start with identical cache state.
 ```bash
 make replay-e3-least-loaded     TARGET_URL=http://127.0.0.1:18080 METRICS_URL=http://127.0.0.1:18001/metrics \
@@ -124,7 +171,14 @@ make inference-pull-range RUN_ID=$RUN_ID
 - Optional synthetic large-prefix treatment afterwards: `make replay-e3-large-prefix-least-loaded` / `replay-e3-large-prefix-prefix-then-load` (same pattern). It is a separate, clearly labelled experiment; the headline answer comes from `e3_routing_mixed`.
 - Checkpoint: the replayer exits 2 immediately if the gateway does not echo the policy control. That means `ALLOW_EXPERIMENT_CONTROLS` is off: fix and rerun, nothing is wasted. With the real ~272-token prefix, `prefix_then_load` is EXPECTED to stick on turn 1 and spill to load-based placement from turn 2 (`placement_reason_by_turn` shows `prefix_affinity` then `prefix_overlap_low`). That is a finding, not a bug.
 
-### E4 Admission on vs off — `RUN_ID=d123-$D-e4`
+### E4 Admission on vs off — `RUN_ID=d123-$D-e4-<HHMM>`
+**Step 0:** load the manifest inputs and `RUN_ID` for this experiment (in the terminal you will run E4 from; it prints nothing). Expect `d123-<date>-e4 16 0.11.0`:
+
+```bash
+source infra/inference/experiments/manifest/e4-admission.env
+echo $RUN_ID $KV_BLOCK_SIZE $VLLM_VERSION
+```
+
 Needs `TENANT_ALLOWLIST` (set in pre-flight). Tune thresholds first so the trace really overloads two workers (`MAX_DECODE_SLOTS`, `KV_FREE_MIN`, `PREFILL_TOKENS_PER_S`, `QUEUE_WAIT_PER_WAITING_S` via `kubectl set env`); write down the values used.
 ```bash
 make replay-e4-admission-off TARGET_URL=http://127.0.0.1:18080 REPLAYER_FLAGS="--output-dir metrics/inference/$RUN_ID"
@@ -133,7 +187,14 @@ make inference-pull-range RUN_ID=$RUN_ID START=<epoch-before-first-run> END=<epo
 ```
 - Checkpoint: with admission off, interactive p99/goodput degrade under overload; with it on, sheds appear by reason (`kv_pressure`, `decode_slots`, `deadline_unachievable`, `timeout_queue`) and interactive goodput is preserved. Jain fairness across tenants and batch starvation are in `e4_compare`. Also watch the four alerts fire (queue/shed surge, KV pressure if reached) and record that. Note `x-admission-mode: off` skips only capacity/deadline shedding; tenant quota still runs.
 
-### E5 Recompute control (no #133) — `RUN_ID=d123-$D-e5`
+### E5 Recompute control (no #133) — `RUN_ID=d123-$D-e5-<HHMM>`
+**Step 0:** load the manifest inputs and `RUN_ID` for this experiment (in the terminal you will run E5 from; it prints nothing). Expect `d123-<date>-e5 16 0.11.0`:
+
+```bash
+source infra/inference/experiments/manifest/e5-recompute.env
+echo $RUN_ID $KV_BLOCK_SIZE $VLLM_VERSION
+```
+
 Needs `ALLOW_FORCED_PLACEMENT=1` on the gateway (add with `kubectl set env`, then rollout).
 - Restart both workers before each scenario so earlier caches cannot leak (cold state matters here).
 - Run the three cases at each size (1k, 2k, 4k, 7k): `e5_local_reuse_<size>` (A to A), `e5_recompute_control_<size>` (A to B, no transfer), `e5_destination_hit_<size>` (B warmed separately, then A-origin continuation to B), using `make replay-e5 E5_SCENARIO=<name>` (check the Makefile for the exact variables: target URL, metrics URL, output dir).

@@ -43,7 +43,7 @@ ssh_cmd "kubectl rollout restart deployment/'$DEPLOYMENT' -n '$INFERENCE_NAMESPA
 
 # 4. Wait for rollout status to finish
 echo "  Waiting for new pod to reach Ready status..."
-ssh_cmd "kubectl rollout status deployment/'$DEPLOYMENT' -n '$INFERENCE_NAMESPACE' --timeout=120s"
+ssh_cmd "kubectl rollout status deployment/'$DEPLOYMENT' -n '$INFERENCE_NAMESPACE' --timeout=300s"
 T_READY_EPOCH=$(date +%s)
 READY_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 

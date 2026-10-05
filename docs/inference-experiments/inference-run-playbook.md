@@ -8,7 +8,7 @@ All commands run from the repository root (or the active worktree) unless noted.
 
 ## 0. Conventions
 
-- **Run id:** `RUN_ID=d123-<YYYYMMDD>-<experiment>` (for example `d123-20261001-e3`). Everything for one
+- **Run id:** `RUN_ID=d123-<YYYYMMDD>-<experiment>` (for example `d123-20261001-e3`). The manifest env files in `infra/inference/experiments/manifest/` add a rerun suffix, `d123-<YYYYMMDD>-<experiment>-<HHMM>` (local time), so reruns do not overwrite; the `export RUN_ID=...` lines below are the plain form. Everything for one
   experiment lands under `metrics/inference/$RUN_ID/` (gitignored):
   - `metrics/inference/$RUN_ID/<scenario>_<strategy>_<timestamp>/` one directory per replayer run:
     `requests.jsonl` (per-request), `summary.json` (per-level summary plus `prometheus_window`),

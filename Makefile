@@ -10,7 +10,7 @@ OBSERVABILITY_PROMETHEUS_PORT ?= 19090
 OBSERVABILITY_BURST_COUNT ?= 10
 OBSERVABILITY_LOG_TAIL ?= 200
 
-.PHONY: help check-bootstrap dev app-serve-dev mcp-dev mcp-smoke dataset-test dataset-smoke smoke test mcp-test infra-test web-test compose-smoke observability-up observability-down observability-smoke observability-dev-up observability-dev-info observability-dev-ask observability-dev-burst observability-dev-metrics observability-dev-logs observability-dev-down local-aws-compose local-aws-refresh local-serve-compose local-serve-refresh local-bedrock-compose bedrock-smoke m5-bedrock-smoke m6-bedrock-smoke dashboard tf-dispatch tf-resume tf-park inference-validate inference-sync inference-config inference-secret inference-bootstrap inference-deploy inference-up inference-tunnel inference-connect inference-smoke inference-warmup inference-capacity inference-restart inference-gateway-restart inference-controls-on inference-controls-off inference-serve-smoke inference-run inference-pull-evidence inference-pull-range evidence-analyze evidence-notebook inference-teardown replay-fanout replay-multi-turn replay-compare-strategies replay-strategy-manual replay-strategy-crewai replay-e3-least-loaded replay-e3-prefix-then-load replay-e4-admission-on replay-e4-admission-off replay-e3-large-prefix-least-loaded replay-e3-large-prefix-prefix-then-load replay-e5 trace-request
+.PHONY: help check-bootstrap dev app-serve-dev mcp-dev mcp-smoke dataset-test dataset-smoke smoke test mcp-test infra-test web-test compose-smoke observability-up observability-down observability-smoke observability-dev-up observability-dev-info observability-dev-ask observability-dev-burst observability-dev-metrics observability-dev-logs observability-dev-down local-aws-compose local-aws-refresh local-serve-compose local-serve-refresh local-bedrock-compose bedrock-smoke m5-bedrock-smoke m6-bedrock-smoke dashboard tf-dispatch tf-resume tf-park inference-validate inference-sync inference-config inference-secret inference-bootstrap inference-deploy inference-up inference-tunnel inference-connect inference-smoke inference-warmup inference-capacity inference-restart inference-gateway-restart inference-controls-on inference-controls-off inference-verify-workers inference-e1 inference-fresh-up inference-tmux-start inference-tmux-end inference-serve-smoke inference-run inference-pull-evidence inference-pull-range evidence-analyze evidence-notebook inference-teardown replay-fanout replay-multi-turn replay-compare-strategies replay-strategy-manual replay-strategy-crewai replay-e3-least-loaded replay-e3-prefix-then-load replay-e4-admission-on replay-e4-admission-off replay-e3-large-prefix-least-loaded replay-e3-large-prefix-prefix-then-load replay-e5 trace-request
 
 
 help: ## Show available commands
@@ -58,6 +58,11 @@ inference-dashboards: ## Regenerate the #115 slice E Grafana dashboards (stdlib-
 
 inference-up: inference-sync inference-bootstrap inference-config inference-deploy ## Provision the #120 cluster lab
 
+inference-fresh-up: ## Fresh Lambda instance (new IP already in .env and ~/.ssh/config): up + controls on + verify workers. Long; state-changing
+	@$(MAKE) inference-up
+	@$(MAKE) inference-controls-on
+	@$(MAKE) inference-verify-workers
+
 inference-tunnel: ## Open loopback-only SSH forwards to workers and Grafana
 	bash infra/inference/scripts/tunnel.sh
 
@@ -91,6 +96,18 @@ inference-controls-on: ## Enable test-only gateway experiment controls + E4 tena
 
 inference-controls-off: ## Disable experiment controls and forced placement (restarts gateway pod)
 	@bash infra/inference/scripts/controls.sh off
+
+inference-verify-workers: ## Read-only: compare worker image/args/startup log with the run manifest (experiments/manifest/common.env)
+	@bash infra/inference/scripts/verify-workers.sh
+
+inference-tmux-start: ## Start a tmux session (windows: run, tunnel, watch) and attach; use inference-tmux-end to finish
+	@bash infra/inference/scripts/tmux-session.sh start
+
+inference-tmux-end: ## Kill the tmux session, the local tunnel, and leftover port-forward loops on the instance
+	@bash infra/inference/scripts/tmux-session.sh end
+
+inference-e1: ## Run E1 end to end: restarts BOTH workers, cold run, wait, warm run, pull evidence (usage: make inference-e1 [WARM_WAIT_S=300 YES=1 D=<yyyymmdd>]; needs make inference-tunnel)
+	@WARM_WAIT_S='$(WARM_WAIT_S)' YES='$(YES)' bash infra/inference/scripts/run-e1.sh
 
 inference-serve-smoke: ## Smoke check the end-to-end serve path through gateway to vLLM worker
 	uv run --project services/app python scripts/smoke/17_inference_serve.py

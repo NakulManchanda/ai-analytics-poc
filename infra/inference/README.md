@@ -203,7 +203,7 @@ request rate, preemptions, prefix hit ratio on one time axis), and a text-only *
 
 #### Alerts (#123 slice B)
 Five rules live in `observability/prometheus/alerts.yaml` (standard rule-group format) and are
-loaded by `deploy.sh` via `--set-file`; Alertmanager stays disabled, so they show in the Prometheus
+loaded by `deploy.sh`, which nests them under `serverFiles.alerting_rules.yml` in a temporary values file passed with `-f`; Alertmanager stays disabled, so they show in the Prometheus
 UI only. Four are the required production alerts, plus one supplemental engine alert:
 - `InferenceKVPressureSustained`: KV usage > 85% for 5m; above this vLLM starts queueing/preempting.
 - `GatewayInteractiveTTFTSLOBreach` (the TTFT SLO alert): p99 of

@@ -332,7 +332,11 @@ def prefill_decode() -> dict:
             " next to small prefill/decode times means requests are waiting for "
             "a free slot, not for GPU compute. Large `iteration_tokens_total` "
             "values mean an engine step processed a prefill-heavy batch; small "
-            "values mean a decode-only (token-at-a-time) step."
+            "values mean a decode-only (token-at-a-time) step. Caution: vLLM's "
+            "time histograms start at 0.3 s (ITL: 10 ms), so for fast requests "
+            "p50/p95 are interpolated inside the first bucket (about 150/285 ms) "
+            "and say only \"under 0.3 s\"; read the mean series instead. TTFT "
+            "has fine buckets and is reliable."
         ),
         x=0,
         y=0,
@@ -341,14 +345,19 @@ def prefill_decode() -> dict:
         note,
         _panel(
             2,
-            "Prefill time p50/p95 per worker",
+            "Prefill time p50/p95/mean per worker",
             "histogram_quantile(0.50, sum by (le, instance) (rate(vllm:request_prefill_time_seconds_bucket[5m])))",
             legend="p50 {{instance}}",
             extra=[
                 (
                     "histogram_quantile(0.95, sum by (le, instance) (rate(vllm:request_prefill_time_seconds_bucket[5m])))",
                     "p95 {{instance}}",
-                )
+                ),
+                (
+                    "sum by (instance) (rate(vllm:request_prefill_time_seconds_sum[5m])) / "
+                    "clamp_min(sum by (instance) (rate(vllm:request_prefill_time_seconds_count[5m])), 1e-9)",
+                    "mean {{instance}}",
+                ),
             ],
             x=0,
             y=3,
@@ -358,14 +367,19 @@ def prefill_decode() -> dict:
         ),
         _panel(
             3,
-            "Decode time p50/p95 per worker",
+            "Decode time p50/p95/mean per worker",
             "histogram_quantile(0.50, sum by (le, instance) (rate(vllm:request_decode_time_seconds_bucket[5m])))",
             legend="p50 {{instance}}",
             extra=[
                 (
                     "histogram_quantile(0.95, sum by (le, instance) (rate(vllm:request_decode_time_seconds_bucket[5m])))",
                     "p95 {{instance}}",
-                )
+                ),
+                (
+                    "sum by (instance) (rate(vllm:request_decode_time_seconds_sum[5m])) / "
+                    "clamp_min(sum by (instance) (rate(vllm:request_decode_time_seconds_count[5m])), 1e-9)",
+                    "mean {{instance}}",
+                ),
             ],
             x=12,
             y=3,
@@ -375,14 +389,19 @@ def prefill_decode() -> dict:
         ),
         _panel(
             4,
-            "Queue time p50/p95 per worker",
+            "Queue time p50/p95/mean per worker",
             "histogram_quantile(0.50, sum by (le, instance) (rate(vllm:request_queue_time_seconds_bucket[5m])))",
             legend="p50 {{instance}}",
             extra=[
                 (
                     "histogram_quantile(0.95, sum by (le, instance) (rate(vllm:request_queue_time_seconds_bucket[5m])))",
                     "p95 {{instance}}",
-                )
+                ),
+                (
+                    "sum by (instance) (rate(vllm:request_queue_time_seconds_sum[5m])) / "
+                    "clamp_min(sum by (instance) (rate(vllm:request_queue_time_seconds_count[5m])), 1e-9)",
+                    "mean {{instance}}",
+                ),
             ],
             x=0,
             y=11,
@@ -392,14 +411,19 @@ def prefill_decode() -> dict:
         ),
         _panel(
             5,
-            "Inference time p50/p95 per worker",
+            "Inference time p50/p95/mean per worker",
             "histogram_quantile(0.50, sum by (le, instance) (rate(vllm:request_inference_time_seconds_bucket[5m])))",
             legend="p50 {{instance}}",
             extra=[
                 (
                     "histogram_quantile(0.95, sum by (le, instance) (rate(vllm:request_inference_time_seconds_bucket[5m])))",
                     "p95 {{instance}}",
-                )
+                ),
+                (
+                    "sum by (instance) (rate(vllm:request_inference_time_seconds_sum[5m])) / "
+                    "clamp_min(sum by (instance) (rate(vllm:request_inference_time_seconds_count[5m])), 1e-9)",
+                    "mean {{instance}}",
+                ),
             ],
             x=12,
             y=11,
@@ -426,14 +450,19 @@ def prefill_decode() -> dict:
         ),
         _panel(
             7,
-            "ITL (time per output token) p50/p95 per worker",
+            "ITL (time per output token) p50/p95/mean per worker",
             "histogram_quantile(0.50, sum by (le, instance) (rate(vllm:time_per_output_token_seconds_bucket[5m])))",
             legend="p50 {{instance}}",
             extra=[
                 (
                     "histogram_quantile(0.95, sum by (le, instance) (rate(vllm:time_per_output_token_seconds_bucket[5m])))",
                     "p95 {{instance}}",
-                )
+                ),
+                (
+                    "sum by (instance) (rate(vllm:time_per_output_token_seconds_sum[5m])) / "
+                    "clamp_min(sum by (instance) (rate(vllm:time_per_output_token_seconds_count[5m])), 1e-9)",
+                    "mean {{instance}}",
+                ),
             ],
             x=12,
             y=19,

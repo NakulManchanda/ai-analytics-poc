@@ -199,7 +199,7 @@ two-worker picture use the Prometheus range export. Run nothing else during a me
 
 ### What each step records
 
-1. **Run id and directory.** `RUN_ID=d123-<YYYYMMDD>-<experiment>`; everything lands in `metrics/inference/$RUN_ID/`
+1. **Run id and directory.** `RUN_ID=d123-<YYYYMMDD>-<experiment>-<HHMM>` (the `-<HHMM>` rerun suffix is added by the manifest env files); everything lands in `metrics/inference/$RUN_ID/`
    (gitignored).
 2. **Manifest inputs** (exported before the run, reused for every run in a comparison): `MODEL_REVISION`,
    `TOKENIZER_REVISION`, `CHAT_TEMPLATE_REVISION`, `ENGINE_FLAGS`, `VLLM_VERSION`, `KV_BLOCK_SIZE`,

@@ -61,6 +61,14 @@ spec:
                 optional: true
           ports:
             - containerPort: 8000
+          # vLLM startup (weights + torch.compile + CUDA graphs) takes about 100 s and was seen to exceed the 120 s
+          # liveness kill window; readiness and liveness are held off until this succeeds (30 x 10 s = 300 s budget).
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            periodSeconds: 10
+            failureThreshold: 30
           readinessProbe:
             httpGet:
               path: /health

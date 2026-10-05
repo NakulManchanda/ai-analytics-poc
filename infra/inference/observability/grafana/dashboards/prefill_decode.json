@@ -21,7 +21,7 @@
       },
       "id": 1,
       "options": {
-        "content": "Prefill time scales with prompt length; decode time scales with generation length and step count. A large p95 `request_queue_time` next to small prefill/decode times means requests are waiting for a free slot, not for GPU compute. Large `iteration_tokens_total` values mean an engine step processed a prefill-heavy batch; small values mean a decode-only (token-at-a-time) step.",
+        "content": "Prefill time scales with prompt length; decode time scales with generation length and step count. A large p95 `request_queue_time` next to small prefill/decode times means requests are waiting for a free slot, not for GPU compute. Large `iteration_tokens_total` values mean an engine step processed a prefill-heavy batch; small values mean a decode-only (token-at-a-time) step. Caution: vLLM's time histograms start at 0.3 s (ITL: 10 ms), so for fast requests p50/p95 are interpolated inside the first bucket (about 150/285 ms) and say only \"under 0.3 s\"; read the mean series instead. TTFT has fine buckets and is reliable.",
         "mode": "markdown"
       },
       "title": "How to read this",
@@ -75,9 +75,18 @@
           "expr": "histogram_quantile(0.95, sum by (le, instance) (rate(vllm:request_prefill_time_seconds_bucket[5m])))",
           "legendFormat": "p95 {{instance}}",
           "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (instance) (rate(vllm:request_prefill_time_seconds_sum[5m])) / clamp_min(sum by (instance) (rate(vllm:request_prefill_time_seconds_count[5m])), 1e-9)",
+          "legendFormat": "mean {{instance}}",
+          "refId": "C"
         }
       ],
-      "title": "Prefill time p50/p95 per worker",
+      "title": "Prefill time p50/p95/mean per worker",
       "type": "timeseries"
     },
     {
@@ -128,9 +137,18 @@
           "expr": "histogram_quantile(0.95, sum by (le, instance) (rate(vllm:request_decode_time_seconds_bucket[5m])))",
           "legendFormat": "p95 {{instance}}",
           "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (instance) (rate(vllm:request_decode_time_seconds_sum[5m])) / clamp_min(sum by (instance) (rate(vllm:request_decode_time_seconds_count[5m])), 1e-9)",
+          "legendFormat": "mean {{instance}}",
+          "refId": "C"
         }
       ],
-      "title": "Decode time p50/p95 per worker",
+      "title": "Decode time p50/p95/mean per worker",
       "type": "timeseries"
     },
     {
@@ -181,9 +199,18 @@
           "expr": "histogram_quantile(0.95, sum by (le, instance) (rate(vllm:request_queue_time_seconds_bucket[5m])))",
           "legendFormat": "p95 {{instance}}",
           "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (instance) (rate(vllm:request_queue_time_seconds_sum[5m])) / clamp_min(sum by (instance) (rate(vllm:request_queue_time_seconds_count[5m])), 1e-9)",
+          "legendFormat": "mean {{instance}}",
+          "refId": "C"
         }
       ],
-      "title": "Queue time p50/p95 per worker",
+      "title": "Queue time p50/p95/mean per worker",
       "type": "timeseries"
     },
     {
@@ -234,9 +261,18 @@
           "expr": "histogram_quantile(0.95, sum by (le, instance) (rate(vllm:request_inference_time_seconds_bucket[5m])))",
           "legendFormat": "p95 {{instance}}",
           "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (instance) (rate(vllm:request_inference_time_seconds_sum[5m])) / clamp_min(sum by (instance) (rate(vllm:request_inference_time_seconds_count[5m])), 1e-9)",
+          "legendFormat": "mean {{instance}}",
+          "refId": "C"
         }
       ],
-      "title": "Inference time p50/p95 per worker",
+      "title": "Inference time p50/p95/mean per worker",
       "type": "timeseries"
     },
     {
@@ -340,9 +376,18 @@
           "expr": "histogram_quantile(0.95, sum by (le, instance) (rate(vllm:time_per_output_token_seconds_bucket[5m])))",
           "legendFormat": "p95 {{instance}}",
           "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (instance) (rate(vllm:time_per_output_token_seconds_sum[5m])) / clamp_min(sum by (instance) (rate(vllm:time_per_output_token_seconds_count[5m])), 1e-9)",
+          "legendFormat": "mean {{instance}}",
+          "refId": "C"
         }
       ],
-      "title": "ITL (time per output token) p50/p95 per worker",
+      "title": "ITL (time per output token) p50/p95/mean per worker",
       "type": "timeseries"
     },
     {
