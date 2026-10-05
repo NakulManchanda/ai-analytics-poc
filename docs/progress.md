@@ -87,13 +87,16 @@ current local and public UAT guides for this release's verification boundaries.
 
 ## Isolated inference-course track
 
-Issue #120 and draft PR #130 defined the boundary for an isolated Lambda/k3s inference lab. A
+Issue #120 and PR #130 defined the boundary for an isolated Lambda/k3s inference lab. A
 real Lambda A100 k3s cluster with two `Qwen/Qwen3-0.6B` vLLM workers was launched and run on
-2026-09-27/28 (see `docs/work-history/0063-lambda-inference-cluster.md`). The next sequence is
-#115, #122, #133, then #123, with two prerequisites before #115: fixing tool calling on the
-fresh deploy, and fixing the `inference-pull-evidence` remote-path bug (in progress on branch
-`fix/pull-evidence-remote-dir`, draft PR). This track does not change the AWS-only product
-deployment boundary; see `docs/inference-project-plan.md` and ADR 0010.
+2026-09-27/28 (see `docs/work-history/0063-lambda-inference-cluster.md`). #120, #121, #115
+(including the tool-calling and `inference-pull-evidence` fixes) and #122 are merged and closed.
+#123 (evidence matrix) has all its code and docs merged (PRs #148-#153), and its first cluster
+session ran E0-E3 plus the memory proof on 2026-10-04/05 (see the Inference Track list below and
+`docs/work-history/0084-123-cluster-runs-e0-e3-results.md`); E4, E5 and a fresh-instance
+rehearsal still need a new instance. #133 (real cross-worker KV transfer) is open. This track
+does not change the AWS-only product deployment boundary; see `docs/inference-project-plan.md`
+and ADR 0010.
 
 
 ## Demo cost control
@@ -133,4 +136,4 @@ export.
 - **#120 — Real-GPU vLLM Cluster Foundation**: Merged via PR #131 (`7c2c26c`). Created isolated `infra/inference/` bundle on Lambda with two symmetric `Qwen/Qwen3-0.6B` workers, HAMi 50/50 GPU slicing (20 GiB per worker), ClusterIP isolation, Prometheus/Grafana/DCGM observability, fail-closed restart recovery, and empirical capacity sweeps under `metrics/inference/run-20260927_215112/`.
 - **#121 — Owned Serve Path Wiring & Prefix Contract**: Merged via PR #132 (`f1b3be9`). Implemented `ServeLLMClient` in `services/app/app/llm.py` forwarding model calls through gateway `/serve`, established Prefix Token Contract (`prefix.py`, `docs/prefix-contract.md`), request correlation headers (`x-prefix-id`, `x-agent-step`, etc.), thin remote gateway service (`infra/inference/gateway/`), K8s manifests, and comprehensive anti-bypass/MCP isolation tests. Direct follow-up commits on `main` added a local serve Compose overlay (`6b08d68`: `docker-compose.serve.yml`, `make local-serve-compose` / `local-serve-refresh`), a 60s timeout increase plus `make local-serve-app` (`2d3515c`), and voice disabled / `STT_PROVIDER` configuration in the serve overlay (`275b169`, `e303aa9`). Known issue: `6b08d68`'s retry in `ServeLLMClient` silently strips `tools`/`tool_choice` on HTTP 400 because the worker manifests lack the vLLM `--enable-auto-tool-choice`/`--tool-call-parser` flags; this must be fixed before #115 measurements.
 - **Evidence-matrix acceptance gate**: `bf140e5` added the Section 15 evidence-matrix acceptance gate to `docs/inference-project-plan.md` and fit the E5 prefix sizes to the 8,192-token worker context (1K/2K/4K/7K). The #120 run `metrics/inference/run-20260927_215112/` referenced above is not present locally and could not be recovered from the remote; its numbers survive only in `docs/work-history/0063-lambda-inference-cluster.md`. A final cluster snapshot plus the Prometheus TSDB archive were pulled locally (gitignored) to `metrics/inference/lambda-final-20260928/` before the instance reset; Worker B was healthy at pull time, and an apparent outage was a stale local port-forward after its pod was recreated. The Lambda instance is being torn down 2026-09-28 to save cost, so the next session starts from a fresh instance.
-
+- **#123 — Evidence matrix, cluster session 1 (2026-10-04/05)**: harness, scenarios, controls, analysis toolkit and notebook were merged earlier (PRs #148-#153); the first real Lambda A100 / k3s session then ran E0 (capacity and saturation), E1 (cold vs declared-warm), E2 (prefix reuse) and E3 (`least_loaded` vs `prefix_then_load`) plus the memory proof, and the instance was torn down. E4 (admission), E5 and the fresh-instance rehearsal are not run and need a new instance. Findings: the first limiter is the 8-slot scheduler cap, not KV (46% peak); a warm prefix cache cut turn-1 TTFT about 3x (cold 2,132 ms vs reused 681 ms); prefix-aware routing was a trade-off (worse turn-1 p95, better later turns). Limits: replay through the SSH tunnel, 10-11 s runs, one run per arm, empty warm-up summaries in E3. Details and open items: `docs/work-history/0084-123-cluster-runs-e0-e3-results.md`. The raw evidence is gitignored (`metrics/inference/`), so it is not in the repository.
