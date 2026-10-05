@@ -355,7 +355,7 @@ def prefill_decode() -> dict:
                 ),
                 (
                     "sum by (instance) (rate(vllm:request_prefill_time_seconds_sum[5m])) / "
-                    "clamp_min(sum by (instance) (rate(vllm:request_prefill_time_seconds_count[5m])), 1e-9)",
+                    "sum by (instance) (rate(vllm:request_prefill_time_seconds_count[5m]))",
                     "mean {{instance}}",
                 ),
             ],
@@ -377,7 +377,7 @@ def prefill_decode() -> dict:
                 ),
                 (
                     "sum by (instance) (rate(vllm:request_decode_time_seconds_sum[5m])) / "
-                    "clamp_min(sum by (instance) (rate(vllm:request_decode_time_seconds_count[5m])), 1e-9)",
+                    "sum by (instance) (rate(vllm:request_decode_time_seconds_count[5m]))",
                     "mean {{instance}}",
                 ),
             ],
@@ -399,7 +399,7 @@ def prefill_decode() -> dict:
                 ),
                 (
                     "sum by (instance) (rate(vllm:request_queue_time_seconds_sum[5m])) / "
-                    "clamp_min(sum by (instance) (rate(vllm:request_queue_time_seconds_count[5m])), 1e-9)",
+                    "sum by (instance) (rate(vllm:request_queue_time_seconds_count[5m]))",
                     "mean {{instance}}",
                 ),
             ],
@@ -421,7 +421,7 @@ def prefill_decode() -> dict:
                 ),
                 (
                     "sum by (instance) (rate(vllm:request_inference_time_seconds_sum[5m])) / "
-                    "clamp_min(sum by (instance) (rate(vllm:request_inference_time_seconds_count[5m])), 1e-9)",
+                    "sum by (instance) (rate(vllm:request_inference_time_seconds_count[5m]))",
                     "mean {{instance}}",
                 ),
             ],
@@ -460,7 +460,7 @@ def prefill_decode() -> dict:
                 ),
                 (
                     "sum by (instance) (rate(vllm:time_per_output_token_seconds_sum[5m])) / "
-                    "clamp_min(sum by (instance) (rate(vllm:time_per_output_token_seconds_count[5m])), 1e-9)",
+                    "sum by (instance) (rate(vllm:time_per_output_token_seconds_count[5m]))",
                     "mean {{instance}}",
                 ),
             ],

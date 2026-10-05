@@ -81,7 +81,11 @@ must start from a clean placement state. Wait for `worker_warm == 1` before meas
 ### E0 Capacity and saturation
 
 ```bash
-export RUN_ID=d123-$(date +%Y%m%d)-e0
+# Step 0: the sweep sends no tenant, so it lands in the `other` bucket (max concurrency 4 by default). Raise it for E0 only,
+# or the sweep above 4 concurrent returns 429 tenant_concurrency. Gateway restarts (~30 s); check /health on 18080 afterwards.
+# Restore before E4: `... set env deploy/inference-gateway TENANT_MAX_CONCURRENCY-` (trailing dash unsets it).
+ssh lambda 'sudo k3s kubectl -n inference-lab set env deploy/inference-gateway TENANT_MAX_CONCURRENCY=64'
+source infra/inference/experiments/manifest/e0-capacity.env   # once per experiment; sets RUN_ID=d123-<date>-e0-<HHMM>
 make inference-capacity RUN_ID=$RUN_ID            # preliminary synthetic capacity: capacity_summary.json
 # Application-shaped offered-load sweep through the gateway (taxi-shaped multi-turn trace, no policy override):
 uv run --project services/app python services/app/scripts/run_scenario.py --scenario e3_routing_mixed \

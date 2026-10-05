@@ -122,6 +122,7 @@ echo "== 4/6 wait ${WARM_WAIT_S}s with no other traffic, then warm run =="
 for ((s = WARM_WAIT_S; s > 0; s -= 30)); do echo "  ${s}s left"; sleep $((s < 30 ? s : 30)); done
 python3 infra/inference/experiments/warmup.py --output-dir "$OUT/warm"
 
+sleep 30   # Prometheus scrapes every 15 s and the TTFT query uses a 1 m rate: without this the warm run is missing from the export
 END_EPOCH=$(date +%s)
 echo "== 5/6 pull Prometheus range ($START_EPOCH .. $END_EPOCH) =="
 make inference-pull-range RUN_ID="$RUN_ID" START="$START_EPOCH" END="$END_EPOCH"
