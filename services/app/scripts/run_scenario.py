@@ -194,7 +194,9 @@ def generate_markdown_report(
     )
     if summary.arrival_rate is not None:
         dist = summary.arrival_distribution or "poisson"
-        lines.append(f"| **Arrival Rate Mode** | {summary.arrival_rate:.2f} conv/s ({dist}) |")
+        lines.append(
+            f"| **Arrival Rate Mode** | {summary.arrival_rate:.2f} conv/s ({dist}) |"
+        )
     lines.extend(
         [
             "",

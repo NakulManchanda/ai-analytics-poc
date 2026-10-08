@@ -434,4 +434,3 @@ def test_worker_kv_hop_event_in_worker_log_is_confirmed(tmp_path):
     assert hop["status"] == "confirmed"
     assert hop["duration_ms"] == 15.2
     assert hop["details"]["transferred_tokens"] == 2048
-

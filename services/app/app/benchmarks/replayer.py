@@ -264,7 +264,9 @@ class ScenarioReplayer:
             tokens_measured_turns=len(successful_turns) - unmeasured,
             tokens_unmeasured_turns=unmeasured,
             arrival_rate=self.arrival_rate,
-            arrival_distribution=self.arrival_distribution if self.arrival_rate else None,
+            arrival_distribution=(
+                self.arrival_distribution if self.arrival_rate else None
+            ),
             turn_results=all_turns,
         )
 

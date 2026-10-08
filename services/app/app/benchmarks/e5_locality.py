@@ -131,7 +131,8 @@ def estimated_tokens(text: str) -> int:
 def synthetic_prefix(tag: str, target_tokens: int) -> str:
     """Plain-ASCII padded prefix whose gateway estimate is ``target_tokens``. ``tag`` leads the
     text so different cases never share a KV block chain. Content is built from real NYC TLC
-    yellow taxi domain material (schema, tool contracts, retrieved DuckDB observations)."""
+    yellow taxi domain material (schema, tool contracts, retrieved DuckDB observations).
+    """
     want = target_tokens * 4 - _SYSTEM_WRAP
     out = (
         f"SYNTHETIC E5 PREFIX case {tag} size {target_tokens}. "

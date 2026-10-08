@@ -270,7 +270,9 @@ def build_trace(
     else:
         for candidate in ("worker.log", "worker_a.log", "worker_b.log", "kv_hop.log"):
             p = run_dir / candidate
-            if p.is_file() and (gateway_log is None or p.resolve() != gateway_log.resolve()):
+            if p.is_file() and (
+                gateway_log is None or p.resolve() != gateway_log.resolve()
+            ):
                 worker_logs.append(p)
 
     for w_log in worker_logs:
@@ -282,7 +284,6 @@ def build_trace(
 
     if log_recs is not None and not recs:
         unavailable.append(f"gateway log has no lines for request_id {request_id!r}")
-
 
     admit = _first(recs, "admit", "decision")
     place = _first(recs, "place", "chosen_worker")

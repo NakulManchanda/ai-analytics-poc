@@ -933,4 +933,3 @@ async def test_replayer_arrival_rate_uniform_and_poisson():
     assert s_poisson.arrival_distribution == "poisson"
     assert s_poisson.successful_turns == 3
     assert len(dispatch_times) == 3
-
