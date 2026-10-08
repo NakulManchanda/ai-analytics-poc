@@ -52,9 +52,9 @@ block identity, lifecycle contract, hop telemetry or real-hop proof runner.
 
 ## Verification
 
-- `uv run --project services/app pytest infra/inference/tests tests/inference -q` — 298 passed
+- `uv run --project services/app pytest infra/inference/tests tests/inference -q` — 299 passed
 - `uv run --project services/app ruff check ...` — passed
-- Independent review fixes: filtered intermediate `kv_hop_available` events in metrics to avoid double-counting, aligned gateway reasons (`local_prefix_present`, `experiment_on`, `experiment_off`) with runtime/metrics allow-lists, and removed pre-retrieval deadline abort in `retrieve()` to avoid dropping multi-request forward batches after external blocks are committed.
+- Independent review fixes: filtered intermediate `kv_hop_available` events in metrics to avoid double-counting, aligned gateway reasons (`local_prefix_present`, `no_prior_worker`, `experiment_on`, `experiment_off`) with runtime/metrics allow-lists, removed pre-retrieval deadline abort in `retrieve()` to avoid dropping multi-request forward batches after external blocks are committed, and added a test for post-schedule deadline behavior.
 - Live two-worker GPU proof: pending a new inference instance.
 
 ## Pull request

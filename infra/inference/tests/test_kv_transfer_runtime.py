@@ -355,6 +355,33 @@ def _identity_params() -> dict:
     }
 
 
+def test_retrieval_with_elapsed_deadline_proceeds_without_aborting_batch() -> None:
+    events: list[dict] = []
+    runtime = KVHopRuntime(
+        enabled=True,
+        compatibility=_compatibility(),
+        destination_worker="worker_b",
+        emit=events.append,
+        wall_clock=lambda: 2_000_000_001.0,
+        synchronize=lambda: None,
+    )
+    engine = _FakeEngine(retrieved=4, transferred_bytes=4096)
+    runtime.instrument_engine(engine)
+
+    # deadline_epoch_s in _request is 2_000_000_000.0, earlier than wall_clock
+    mask = engine.retrieve(
+        [11, 12, 13, 14],
+        _Mask(4),
+        req_id="req-7",
+        request_configs=_request(load=True).sampling_params.extra_args["kv_transfer_params"]
+        | _identity_params(),
+    )
+    assert mask.sum().item() == 4
+    runtime.confirm_forward_consumption()
+    assert events[-1]["destination_consumed"] is True
+
+
+
 class _Scalar:
     def __init__(self, value: int):
         self._value = value

@@ -44,7 +44,7 @@ def test_no_prior_worker_does_not_request_external_load(monkeypatch):
     payload, event = prepare({}, no_prior, HEADERS, 3)
 
     assert payload["kv_transfer_params"]["lmcache.hop.load"] is False
-    assert event == {"hop_decision_reason": "transfer_disabled", "hop_result": "recompute"}
+    assert event == {"hop_decision_reason": "no_prior_worker", "hop_result": "recompute"}
 
 
 def test_deadline_selects_recompute_and_override_is_gated(monkeypatch):

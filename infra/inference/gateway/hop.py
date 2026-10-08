@@ -35,7 +35,7 @@ def prepare(
     elif decision.prior_worker is not None:
         reason = "remote_prefix_candidate"
     else:
-        reason = "transfer_disabled"
+        reason = "no_prior_worker"
     load = (
         allowed
         and decision.prior_worker is not None

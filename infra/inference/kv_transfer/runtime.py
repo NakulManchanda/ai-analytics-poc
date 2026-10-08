@@ -343,6 +343,7 @@ class KVHopRuntime:
         if params.get("lmcache.hop.reason") not in {
             "local",
             "local_prefix_present",
+            "no_prior_worker",
             "transfer_disabled",
             "independently_warmed_destination",
             "remote_prefix_candidate",
