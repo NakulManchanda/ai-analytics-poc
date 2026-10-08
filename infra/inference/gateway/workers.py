@@ -62,6 +62,7 @@ class WorkerSnapshot:
     inflight: int = 0
     inflight_tokens: int = 0
     queued: int = 0  # requests waiting in this gateway's per-worker queue (#122 slice 3)
+    pending: int = 0  # requests placed here that have not reached the queue yet (anti-herding)
     prefixes: dict[str, PrefixBelief] = field(default_factory=dict)
 
     @property

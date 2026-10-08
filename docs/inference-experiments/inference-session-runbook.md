@@ -57,6 +57,7 @@ make inference-tmux-end      # when finished; also terminate the instance to sto
 ## 2. Pre-flight checks (stop and fix before any run)
 
 - [ ] Health: `curl -s http://127.0.0.1:18001/health`, `:18002/health`, `:18080/health` all OK.
+- [ ] Engine then serve smoke, in this order: `make inference-smoke` (each worker directly), then `make inference-serve-smoke` (gateway `/serve`: stage headers on an accepted request, one tool-calling agent step, oversized-prompt and over-window rejects). Stop on any failure.
 - [ ] Gateway metrics: `curl -s http://127.0.0.1:18080/metrics | head` is non-empty; includes `worker_health`, `worker_warm`, `orch_admit_total`, `gateway_ttft_seconds`.
 - [ ] Prometheus scrapes the gateway: `curl -s http://127.0.0.1:19090/api/v1/targets | grep -c inference-gateway` is at least 1 and the target is `up`.
 - [ ] Both workers warm: `curl -s http://127.0.0.1:19090/api/v1/query --data-urlencode 'query=worker_warm'` shows 1 for worker_a and worker_b.

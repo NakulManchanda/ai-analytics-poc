@@ -39,6 +39,10 @@ All commands run from the repository root (or the active worktree) unless noted.
 2. Workers healthy and warm: `curl -s http://127.0.0.1:18001/health`, `:18002/health`, `:18080/health`;
    gateway `worker_warm` and `worker_health` are 1 for both workers (Grafana overview, or
    `curl -s http://127.0.0.1:19090/api/v1/query --data-urlencode 'query=worker_warm'`).
+   Then smoke the engine before debugging the serve path, in this order, and stop on any failure:
+   `make inference-smoke` (probes each worker directly), then `make inference-serve-smoke` (gateway
+   `/serve`: stage headers `x-guard-decision`, `x-admit-decision`, `x-place-decision`,
+   `x-queue-decision` on an accepted request, one tool-calling agent step, and two guard rejects).
 3. Dashboards and alerts: Grafana at `http://127.0.0.1:13000` shows Overview, Gateway+admission, Router,
    Queues, Overflow and Memory Proof with live data; Prometheus `/alerts` lists the four alerts.
    (`make inference-dashboards` regenerates dashboards locally if they drifted.)

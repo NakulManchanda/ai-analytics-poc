@@ -415,3 +415,39 @@ def test_capacity_shed_does_not_burn_tenant_budget(gw) -> None:
         post.assert_not_called()
     bucket = q._buckets[q.bucket_name("acme")]
     assert (bucket.tokens, bucket.active, len(bucket.window)) == (0, 0, 0)
+
+
+# --- class-aware admission: batch is shed before interactive -------------------------------
+
+
+def test_batch_slot_limit_keeps_the_reserved_fraction_free() -> None:
+    assert CFG.slot_limit("interactive") == 4
+    assert CFG.slot_limit("batch") == 3  # ceil(4 * 0.25) = 1 slot reserved
+    assert AdmitConfig(max_decode_slots=8).slot_limit("batch") == 6
+    assert AdmitConfig(max_decode_slots=1).slot_limit("batch") == 1  # never below one slot
+    assert AdmitConfig(max_decode_slots=8, batch_reserve=0.0).slot_limit("batch") == 8
+
+
+def test_batch_is_shed_when_only_the_reserved_slots_are_left() -> None:
+    both = [snap("a", running=3), snap("b", running=3)]
+    batch = decide(*both, workload_class="batch")
+    assert isinstance(batch, Shed) and (batch.code, batch.reason) == (503, "decode_slots")
+    assert batch.inputs["class"] == "batch"
+    assert isinstance(decide(*both, workload_class="interactive"), Admit)
+
+
+def test_batch_is_admitted_while_a_worker_has_batch_capacity() -> None:
+    result = decide(snap("a", running=3), snap("b", running=2), workload_class="batch")
+    assert isinstance(result, Admit)
+
+
+def test_interactive_is_still_shed_when_every_slot_is_taken() -> None:
+    both = [snap("a", running=4), snap("b", running=4)]
+    shed = decide(*both, workload_class="interactive")
+    assert isinstance(shed, Shed) and shed.reason == "decode_slots"
+
+
+def test_batch_reserve_comes_from_the_environment(monkeypatch) -> None:
+    monkeypatch.setenv("MAX_DECODE_SLOTS", "8")
+    monkeypatch.setenv("BATCH_SLOT_RESERVE", "0.5")
+    assert AdmitConfig.from_env().slot_limit("batch") == 4

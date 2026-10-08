@@ -6,7 +6,26 @@ import sys
 import time
 
 import httpx
+from app.benchmarks.canonical_prefix import CANONICAL_TAXI_SCHEMA
+from app.benchmarks.serve_smoke import problems_for_accepted, problems_for_rejected
 from app.llm import ServeLLMClient
+
+
+def _post_gateway(gateway_url: str, body: dict, request_id: str) -> httpx.Response:
+    headers = {
+        "x-request-id": request_id,
+        "x-conversation-id": f"conv-{request_id}",
+        "x-agent-step": "1",
+        "x-prefix-id": "prefix-serve-smoke",
+    }
+    return httpx.post(gateway_url, json=body, headers=headers, timeout=60.0)
+
+
+def _fail_on(label: str, problems: list[str]) -> None:
+    if problems:
+        print(f"[FAIL] {label}: " + "; ".join(problems))
+        sys.exit(1)
+    print(f"[OK] {label}")
 
 
 def main() -> None:
@@ -97,6 +116,66 @@ def main() -> None:
     except Exception as exc:
         print(f"[FAIL] Streaming failed: {exc}")
         sys.exit(1)
+
+    # 4. Every stage ran: the gateway stamps one decision header per stage on an accepted request.
+    print("\n--- Test 3: Stage headers on an accepted request ---")
+    ok_body = {
+        "model": model_id,
+        "messages": [{"role": "user", "content": "Reply with the word OK."}],
+        "max_tokens": 8,
+        "stream": False,
+    }
+    resp = _post_gateway(gateway_url, ok_body, f"smoke-ok-{int(time.time())}")
+    problems = (
+        [] if resp.status_code == 200 else [f"status {resp.status_code}, expected 200"]
+    )
+    _fail_on("accepted request", problems + problems_for_accepted(dict(resp.headers)))
+
+    # 5. A tool-using agent step goes through the same path and comes back with a tool call.
+    print("\n--- Test 4: Tool-calling agent step ---")
+    try:
+        proposal = client.propose_taxi_query(
+            "Which pickup zones have the most trips?", CANONICAL_TAXI_SCHEMA
+        )
+    except Exception as exc:
+        print(f"[FAIL] Tool proposal failed: {exc}")
+        sys.exit(1)
+    _fail_on(
+        "tool call returned",
+        (
+            []
+            if proposal.name and proposal.arguments
+            else ["empty tool name or arguments"]
+        ),
+    )
+
+    # 6. Rejections are stamped at the stage that made them, and never reach a worker.
+    print("\n--- Test 5: Guard rejects ---")
+    too_long = {**ok_body, "messages": [{"role": "user", "content": "x" * 200_000}]}
+    resp = _post_gateway(gateway_url, too_long, f"smoke-long-{int(time.time())}")
+    _fail_on(
+        "oversized prompt rejected",
+        problems_for_rejected(
+            resp.status_code,
+            dict(resp.headers),
+            expected_status=413,
+            decision_prefix="reject:",
+        ),
+    )
+    over_window = {**ok_body, "messages": [{"role": "user", "content": "x" * 32_000}]}
+    over_window["max_tokens"] = (
+        500  # about 8,000 prompt + 500 completion tokens > 8,192 window
+    )
+    resp = _post_gateway(gateway_url, over_window, f"smoke-window-{int(time.time())}")
+    _fail_on(
+        "prompt + max_tokens over the context window rejected",
+        problems_for_rejected(
+            resp.status_code,
+            dict(resp.headers),
+            expected_status=413,
+            decision_prefix="reject:",
+        ),
+    )
 
     print("\n== Inference Serve Path Smoke Passed Successfully ==")
 
