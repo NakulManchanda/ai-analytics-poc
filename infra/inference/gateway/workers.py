@@ -63,6 +63,8 @@ class WorkerSnapshot:
     inflight_tokens: int = 0
     queued: int = 0  # requests waiting in this gateway's per-worker queue (#122 slice 3)
     pending: int = 0  # requests placed here that have not reached the queue yet (anti-herding)
+    scrape_seq: int = 0  # successful scrapes so far (generation for dispatch accounting)
+    unobserved: int = 0  # dispatched since the last scrape and still running
     prefixes: dict[str, PrefixBelief] = field(default_factory=dict)
 
     @property
@@ -71,8 +73,27 @@ class WorkerSnapshot:
 
     @property
     def occupied(self) -> int:
-        """Decode slots in use; the scrape lags, so never below what this gateway dispatched."""
-        return max(self.running, self.inflight)
+        """Decode slots in use: what the last scrape saw plus what was dispatched after it.
+
+        Adding only the dispatches the scrape cannot have seen (``unobserved``) avoids both
+        undercounting (a stale scrape) and double counting (work the scrape already includes).
+        """
+        return self.running + self.unobserved
+
+    def note_dispatch(self) -> int:
+        """Count a dispatch the latest scrape has not seen; returns the scrape generation."""
+        self.unobserved += 1
+        return self.scrape_seq
+
+    def note_finish(self, seq: int) -> None:
+        """Stop counting a finished dispatch unless a newer scrape already absorbed it."""
+        if seq == self.scrape_seq and self.unobserved > 0:
+            self.unobserved -= 1
+
+    def note_scrape(self) -> None:
+        """A successful scrape now reflects earlier dispatches, so start counting afresh."""
+        self.scrape_seq += 1
+        self.unobserved = 0
 
     def age(self, now: float | None = None) -> float:
         if self.observed_at is None:
@@ -161,6 +182,7 @@ class Registry:
             snap.ramp_cap = None
             return
         snap.running, snap.waiting = int(vals["running"]), int(vals["waiting"])
+        snap.note_scrape()
         snap.kv_free_ratio = max(0.0, 1.0 - vals["kv_used"])
         snap.observed_at = time.monotonic()
         snap.healthy = True

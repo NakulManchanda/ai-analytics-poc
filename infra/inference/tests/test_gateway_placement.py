@@ -288,7 +288,9 @@ def test_gateway_picks_either_worker_and_reports_it(gw) -> None:
     assert post.call_args_list[1].args[0].startswith("http://worker-b:8000")
     assert r2.headers["x-placement-policy"] == "least_loaded"
     assert r2.headers["x-intended-action"] == "recompute"
-    assert all(s.inflight == 0 and s.pending == 0 for s in reg.snapshots.values())
+    assert all(
+        s.inflight == 0 and s.pending == 0 and s.unobserved == 0 for s in reg.snapshots.values()
+    )
 
 
 def test_gateway_forced_header_gated_by_env(gw, monkeypatch) -> None:
@@ -506,16 +508,40 @@ def test_batch_with_every_worker_at_its_cap_is_a_placement_error() -> None:
     assert isinstance(d, PlacementError) and d.reason == "batch_slot_cap"
 
 
-def test_batch_cap_counts_what_the_gateway_has_dispatched_not_only_the_scrape() -> None:
-    ws = two(a={"running": 0}, b={"running": 6})
-    ws[0].inflight = 6  # scrape is stale: nothing running yet, but 6 dispatched
-    d = pick(
-        PlacementRequest(workload_class="batch"),
-        ws,
-        policy="least_loaded",
-        batch_slot_limit=6,
-    )
+def test_batch_cap_counts_dispatches_the_scrape_has_not_seen() -> None:
+    # Review case: the scrape shows 5 running and the gateway dispatched 3 more since. Real use may
+    # be 8, so a batch cap of 6 must not allow another batch placement there.
+    ws = two(a={"running": 5}, b={"running": 6})
+    ws[0].unobserved = 3
+    batch = PlacementRequest(workload_class="batch")
+    d = pick(batch, ws, policy="least_loaded", batch_slot_limit=6)
     assert isinstance(d, PlacementError) and d.reason == "batch_slot_cap"
+
+
+def test_batch_cap_does_not_double_count_dispatches_the_scrape_already_shows() -> None:
+    ws = two(a={"running": 5}, b={"running": 6})
+    ws[0].inflight = 5  # all five are in the scrape's running count already
+    batch = PlacementRequest(workload_class="batch")
+    d = pick(batch, ws, policy="least_loaded", batch_slot_limit=6)
+    assert isinstance(d, PlacementDecision) and d.chosen_worker == "worker_a"
+
+
+def test_occupancy_follows_dispatch_finish_and_scrape_generations() -> None:
+    s = snap("worker_a", running=5)
+    first = s.note_dispatch()
+    s.note_dispatch()
+    assert s.occupied == 7
+    s.note_finish(first)  # dispatched after the latest scrape and now done
+    assert s.occupied == 6
+    old = s.note_dispatch()
+    s.running = 8  # a new scrape arrives and now includes everything dispatched so far
+    s.note_scrape()
+    assert s.occupied == 8 and s.unobserved == 0
+    s.note_finish(old)  # finished work that the new scrape already absorbed is not subtracted again
+    assert s.occupied == 8
+    after = s.note_dispatch()
+    s.note_finish(after)
+    assert s.occupied == 8
 
 
 def test_no_batch_cap_when_no_limit_is_given() -> None:
