@@ -54,6 +54,7 @@ class PlacementDecision:
     intended_action: Literal["local_reuse", "destination_hit", "recompute", "hop"]
     snapshot_age: float
     fallback: str | None = None
+    prior_reusable_tokens: int = 0  # tokens the prior owner is believed to hold (hop size)
 
 
 @dataclass(frozen=True)
@@ -96,8 +97,18 @@ def pick(
         else:
             action = "local_reuse" if snap.id == prior else "destination_hit"
             reusable = belief.tokens
+        owner = by_id.get(prior) if prior else None
+        owner_belief = owner.prefixes.get(req.prefix_id) if owner and req.prefix_id else None
         return PlacementDecision(
-            snap.id, prior, pol, reason, reusable, action, snap.age(now), fallback
+            snap.id,
+            prior,
+            pol,
+            reason,
+            reusable,
+            action,
+            snap.age(now),
+            fallback,
+            owner_belief.tokens if owner_belief else 0,
         )
 
     if req.forced_worker and allow_forced:

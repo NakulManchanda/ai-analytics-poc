@@ -84,3 +84,4 @@ Monotonically numbered log of every post-bootstrap task. Each entry records the 
 - [0086 — Gateway hardening, step 1](0086-inference-gateway-hardening-step1.md) — limits tied to engine flags, warm gate, guard context_window_exceeded, smoke warm-up and alternating legs
 - [0087 — Gateway hardening, step 2](0087-inference-gateway-hardening-step2.md) — returning-worker ramp, strict hardware evidence checks, verify-workers exit code
 - [0088 — Gateway hardening, step 3](0088-inference-gateway-hardening-step3.md) — sticky owner placement, anti-herding, class-aware admission, serve smoke stage checks
+- [0089 — Gateway hardening, step 5](0089-inference-gateway-hardening-step5.md) — hop minimum-token rule, slice_oom detection, warm context in evidence, eviction documentation

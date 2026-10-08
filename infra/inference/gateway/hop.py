@@ -9,6 +9,10 @@ from __future__ import annotations
 import os
 import time
 
+# Placeholder until E5 gives the crossover: below this many reusable tokens recomputing on the
+# destination is assumed cheaper than moving the KV (override with KV_HOP_MIN_TOKENS).
+DEFAULT_MIN_TOKENS = 1024
+
 EXPERIMENT_CASES = {
     "same_worker_local_reuse",
     "cross_worker_recompute_transfer_disabled",
@@ -30,14 +34,17 @@ def prepare(
     if os.getenv("KV_HOP_ENABLED") != "1":
         return payload, {"hop_decision_reason": "disabled", "hop_result": "not_attempted"}
     allowed = remaining_s is None or remaining_s >= 1.5
+    min_tokens = int(os.getenv("KV_HOP_MIN_TOKENS", str(DEFAULT_MIN_TOKENS)))
+    worth_moving = decision.prior_reusable_tokens >= min_tokens
     if decision.prior_worker == decision.chosen_worker:
         reason = "local_prefix_present"
     elif decision.prior_worker is not None:
-        reason = "remote_prefix_candidate"
+        reason = "remote_prefix_candidate" if worth_moving else "below_min_tokens"
     else:
         reason = "no_prior_worker"
     load = (
         allowed
+        and worth_moving
         and decision.prior_worker is not None
         and decision.prior_worker != decision.chosen_worker
     )

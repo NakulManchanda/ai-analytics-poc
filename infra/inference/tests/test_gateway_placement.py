@@ -595,3 +595,16 @@ def test_gateway_never_routes_admitted_batch_to_the_owner_at_the_batch_cap(
         )
     assert interactive.headers["x-place-decision"] == "worker_a"
     assert batch.status_code == 200 and batch.headers["x-place-decision"] == "worker_b"
+
+
+def test_decision_carries_the_size_of_the_prior_owners_prefix() -> None:
+    ws = two(a={"running": 5})  # a owns the prefix but is busy; least_loaded moves to b
+    _with_prefix(ws, "worker_a", tokens=1500)
+    d = pick(PlacementRequest("p1", 2000), ws, policy="least_loaded")
+    assert d.chosen_worker == "worker_b" and d.prior_worker == "worker_a"
+    assert d.prior_reusable_tokens == 1500 and d.estimated_reusable_tokens == 0
+
+
+def test_decision_has_no_prior_size_without_a_known_owner() -> None:
+    d = pick(PlacementRequest("p1", 2000), two(), policy="least_loaded", rng=random.Random(0))
+    assert d.prior_worker is None and d.prior_reusable_tokens == 0
