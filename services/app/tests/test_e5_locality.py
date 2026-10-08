@@ -24,6 +24,9 @@ def test_committed_e5_scenarios_match_generator():
 
 
 def test_prefix_sizes_and_labels():
+    from infra.inference.kv_transfer.prefix_sizes import E5_PREFIX_SIZES
+
+    assert e5.SIZES == E5_PREFIX_SIZES
     for label, size in e5.SIZES.items():
         cfg = load_scenario(f"e5_recompute_control_{label}", scenarios_dir=SCEN)
         assert e5.estimated_tokens(cfg.system_prefix) == size

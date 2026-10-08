@@ -29,8 +29,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from infra.inference.kv_transfer.prefix_sizes import E5_PREFIX_SIZES as SIZES
-
+SIZES = {"1k": 1024, "2k": 2048, "4k": 4096, "7k": 7000}
 MAX_TOKENS = 32
 WINDOW, MARGIN = 8192, 256  # worker --max-model-len and the estimate-error margin
 FILLER_COUNT, FILLER_TOKENS = 10, 7000

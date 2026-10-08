@@ -224,6 +224,16 @@ def test_run_rejects_missing_topology_or_version_namespace_inputs(missing: str) 
         validate_run(manifest, _four_cases())
 
 
+def test_manifest_rejects_topology_without_workers_list() -> None:
+    manifest = _manifest()
+    manifest["topology"] = {
+        "worker_a": {"gpu_core_percentage": 50},
+        "worker_b": {"gpu_core_percentage": 50},
+    }
+    with pytest.raises(ValueError, match="manifest topology must list at least two workers"):
+        validate_run(manifest, _four_cases())
+
+
 def test_run_rejects_missing_control_isolation_statement() -> None:
     manifest = _manifest()
     manifest["control_isolation_statement"] = ""
