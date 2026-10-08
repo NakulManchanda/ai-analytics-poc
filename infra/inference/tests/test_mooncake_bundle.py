@@ -1,6 +1,7 @@
 """Opt-in bundle retains HAMi slices and uses host TCP storage, never applies itself."""
 
 import json
+from pathlib import Path
 
 import pytest
 import yaml
@@ -36,3 +37,16 @@ def test_bundle_is_pinned_and_retains_hami():
 def test_unpinned_image_rejected():
     with pytest.raises(ValueError):
         render("lab/kv:latest", "lab", "v1", "v1", "v1")
+
+
+def test_example_topology_workers_match_rendered_worker_ids():
+    root = Path(__file__).resolve().parents[1] / "mooncake"
+    topology = json.loads((root / "topology.example.json").read_text())
+    docs = render("lab/kv:v1", "inference-lab", "smoke-001", "template-v1", "prefix-v1")
+    rendered_worker_ids = [
+        item["value"]
+        for worker in docs[:2]
+        for item in worker["spec"]["template"]["spec"]["containers"][0]["env"]
+        if item["name"] == "KV_WORKER_ID"
+    ]
+    assert topology["workers"] == rendered_worker_ids

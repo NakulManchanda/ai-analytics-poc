@@ -1,9 +1,10 @@
 {
+  "_note": "workers holds the emitted KV_WORKER_ID values (e.g. worker_a, worker_b) configured on worker pods",
   "gpu_hosts": 1,
   "gpu_model": "REPLACE_WITH_NVIDIA_SMI_MODEL",
   "hami_scheduler": true,
   "mooncake_protocol": "tcp",
-  "workers": ["inference-worker-a", "inference-worker-b"],
+  "workers": ["worker_a", "worker_b"],
   "worker_a": {
     "gpu_core_percentage": 50,
     "gpu_memory_percentage": 50,

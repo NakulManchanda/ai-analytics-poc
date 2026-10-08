@@ -109,7 +109,7 @@ def test_example_evidence_inputs_cover_required_version_fields() -> None:
     versions = json.loads((root / "versions.example.json").read_text())
 
     assert topology["hami_scheduler"] is True
-    assert topology["workers"] == ["inference-worker-a", "inference-worker-b"]
+    assert topology["workers"] == ["worker_a", "worker_b"]
     assert topology["worker_a"]["gpu_core_percentage"] == 50
     assert topology["worker_b"]["gpu_core_percentage"] == 50
     assert versions["engine_version"] == "0.11.0"
