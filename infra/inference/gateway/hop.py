@@ -30,9 +30,12 @@ def prepare(
     if os.getenv("KV_HOP_ENABLED") != "1":
         return payload, {"hop_decision_reason": "disabled", "hop_result": "not_attempted"}
     allowed = remaining_s is None or remaining_s >= 1.5
-    reason = (
-        "remote_prefix_candidate" if decision.prior_worker != decision.chosen_worker else "local"
-    )
+    if decision.prior_worker == decision.chosen_worker:
+        reason = "local_prefix_present"
+    elif decision.prior_worker is not None:
+        reason = "remote_prefix_candidate"
+    else:
+        reason = "transfer_disabled"
     load = (
         allowed
         and decision.prior_worker is not None

@@ -34,7 +34,17 @@ def test_same_worker_belief_does_not_request_external_load(monkeypatch):
     payload, event = prepare({}, same_worker, HEADERS, 3)
 
     assert payload["kv_transfer_params"]["lmcache.hop.load"] is False
-    assert event == {"hop_decision_reason": "local", "hop_result": "recompute"}
+    assert event == {"hop_decision_reason": "local_prefix_present", "hop_result": "recompute"}
+
+
+def test_no_prior_worker_does_not_request_external_load(monkeypatch):
+    monkeypatch.setenv("KV_HOP_ENABLED", "1")
+    no_prior = SimpleNamespace(prior_worker=None, chosen_worker="worker_a")
+
+    payload, event = prepare({}, no_prior, HEADERS, 3)
+
+    assert payload["kv_transfer_params"]["lmcache.hop.load"] is False
+    assert event == {"hop_decision_reason": "transfer_disabled", "hop_result": "recompute"}
 
 
 def test_deadline_selects_recompute_and_override_is_gated(monkeypatch):

@@ -190,28 +190,6 @@ class KVHopRuntime:
         def retrieve(tokens: Any, mask: Any = None, **kwargs: Any):
             request_configs = kwargs.get("request_configs") or {}
             identity = self._validate_runtime_identity(request_configs)
-            deadline = request_configs.get("lmcache.hop.deadline_epoch_s")
-            if (
-                deadline is not None
-                and _as_float(deadline, "deadline_epoch_s") <= self._wall_clock()
-            ):
-                self._emit(
-                    self._retrieval_evidence(
-                        request_configs,
-                        identity,
-                        retrieved_tokens=0,
-                        transferred_bytes=0,
-                        transfer_ms=0.0,
-                        confirm_ms=0.0,
-                        hop_result="timeout",
-                        confirm_result="missing",
-                        destination_consumed=False,
-                        fallback_action="fail_request_deadline_expired_after_schedule",
-                    )
-                )
-                raise KVTransferIntegrityError(
-                    "KV transfer deadline expired after vLLM committed external blocks"
-                )
             expected_tokens = _mask_count(mask, len(tokens))
             self._thread_state.transferred_bytes = 0
             started = self._clock()
@@ -363,11 +341,14 @@ class KVHopRuntime:
         params["lmcache.hop.destination_worker"] = self.destination_worker
         params.setdefault("lmcache.hop.source_worker_or_store", self.source_worker_or_store)
         if params.get("lmcache.hop.reason") not in {
+            "local",
             "local_prefix_present",
             "transfer_disabled",
             "independently_warmed_destination",
             "remote_prefix_candidate",
             "deadline_recompute",
+            "experiment_on",
+            "experiment_off",
         }:
             params["lmcache.hop.reason"] = "unspecified"
         return params, identity

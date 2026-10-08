@@ -21,16 +21,21 @@ _RESULTS = {
     "failed",
 }
 _REASONS = {
+    "local",
     "local_prefix_present",
     "transfer_disabled",
     "independently_warmed_destination",
     "remote_prefix_candidate",
     "deadline_recompute",
+    "experiment_on",
+    "experiment_off",
     "unspecified",
 }
 
 
 def record(event: dict[str, Any]) -> None:
+    if event.get("event") == "kv_hop_available":
+        return
     result = str(event.get("hop_result", "failed"))
     if result not in _RESULTS:
         result = "failed"
