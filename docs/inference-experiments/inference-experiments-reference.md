@@ -1,8 +1,8 @@
 # Experiments E0-E5 reference (#123)
 
 Quick "what is each one" sheet. Sources: [inference-testing-guide.md](inference-testing-guide.md) s.3-4, [inference-run-playbook.md](inference-run-playbook.md), and the
-session runbook [inference-session-runbook.md](inference-session-runbook.md) (run order and checkpoints). Planned run order: E1, E2, E3, E4, then E0 + memory proof. E5 is
-partly out of scope (real KV hop is blocked on #133).
+session runbook [inference-session-runbook.md](inference-session-runbook.md) (run order and checkpoints). Planned run order: E1, E2, E3, E4, then E0 + memory proof. E5 has two
+legs: the no-transfer controls, and the real KV hop (#133, merged in PR #154) which needs a separate GPU session on the KV bundle.
 
 **Naming caveat:** the testing guide s.3 and the runbook/playbook describe E0 and E2 differently (below). The runbook and
 playbook are what you actually run, so follow those.
@@ -16,7 +16,7 @@ playbook are what you actually run, so follow those.
 | E2 | Prefix reuse | Does a reused prefix cache cut TTFT? | first pass (cold cache) vs second pass (reused), same trace | no |
 | E3 | Routing | `least_loaded` vs `prefix_then_load`: does prefix affinity help? | same trace, two placement policies | yes (`ALLOW_EXPERIMENT_CONTROLS=1`) |
 | E4 | Admission on vs off | Does shedding under overload protect interactive goodput? | same overload trace, admission on vs off | yes, plus `TENANT_ALLOWLIST` |
-| E5 | Recompute vs hop | At what prefix size would transferring KV beat recomputing? | local reuse vs recompute control vs destination hit (no transfer) | yes (`ALLOW_FORCED_PLACEMENT=1`) |
+| E5 | Recompute vs hop | At what prefix size would transferring KV beat recomputing? | local reuse vs recompute control vs destination hit (no transfer), then the real hop via `inference-kv-smoke` | yes (`ALLOW_FORCED_PLACEMENT=1`) |
 
 ## E0: capacity and first limiter
 
@@ -69,14 +69,16 @@ playbook are what you actually run, so follow those.
 
 ## E5: recompute vs hop
 
-- **What can be done now (no #133):** a control with no KV transfer, at sizes 1k, 2k, 4k, 7k (chars/4 estimate; exact tokens
+- **Control legs (no transfer):** a control with no KV transfer, at sizes 1k, 2k, 4k, 7k (chars/4 estimate; exact tokens
   are in each manifest):
   - `e5_local_reuse_<size>`: A to A, local reuse possible.
   - `e5_recompute_control_<size>`: A to B with no transfer, so B must prefill it itself. This is the control.
   - `e5_destination_hit_<size>`: B warmed separately, then continued from A to B. B hits its own cache; not a hop.
   - `e5_local_eviction_4k`: inconclusive unless vLLM evidence shows eviction happened.
 - **Run:** `make replay-e5 E5_SCENARIO=<name> ...`. Restart both workers before each scenario.
-- **Not possible yet:** the real hop (transfer KV across workers) is blocked on #133. Never claim a hop from a worker change or a
+- **Real hop (#133, merged):** `make inference-kv-smoke PREFIX_SIZES="1k 2k 4k 7k"` on the LMCache/Mooncake bundle, run in the same
+  session as the controls (see the playbook E5 section). It writes `crossover.json` with recompute vs transfer TTFT/E2E per size.
+  The live GPU run has not happened yet, so there is no hop evidence until it retains a passing `validation.json`. Never claim a hop from a worker change or a
   lower latency. A 7k case can be rejected (prompt + `max_tokens` over 8192); drop to a smaller size.
 
 ## Memory proof

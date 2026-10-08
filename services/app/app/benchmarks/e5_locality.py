@@ -15,7 +15,7 @@ Cases (worker_a -> worker_b are the gateway's worker ids, forced with ``x-force-
 * ``e5_local_reuse_<size>``: A -> A. Populate on A, continue on A. Local reuse is *possible*;
   observed reuse (prefix-cache hits window counters, TTFT) must confirm it.
 * ``e5_recompute_control_<size>``: A -> B with NO transfer. B must prefill the prefix itself.
-  This is the E5 control the real-transfer treatment (#133, not implemented) will be compared
+  This is the E5 control the real-transfer treatment (#133, `make inference-kv-smoke`) is compared
   against at the SAME prefix sizes.
 * ``e5_destination_hit_<size>``: B is warmed separately with the same prefix, then an
   A-origin continuation goes to B. B hits its OWN cache; no hop occurred.

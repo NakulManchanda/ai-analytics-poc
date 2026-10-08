@@ -10,16 +10,17 @@ NYC Taxi Analytics Agent on a GPU-Aware Inference Cluster**
 - **#115 (Slices C'/D')**: Merged. Conversation-history prefix contract, tool-result history, scenario generator, asynchronous replayer and Prometheus delta scraper. Live baseline on the dual 20GB HAMi vLLM workers: Worker A active (prefix-cache hit rate 0% to 29.6%), Worker B at 0% as a clean control; workload is > 98% decode-bound with sub-60 ms TTFT.
 - **#122 (control plane)**: Closed (PRs #144-#147): guard, admission, placement, per-worker gateway queues and overflow.
 - **#123 (evidence matrix)**: All code/docs PRs merged (#148-#153): harness, dashboards and four alerts, E3/E4 scenarios and test-only controls, E5 recompute control and locality matrix, single-request trace, evidence index, analysis toolkit, notebook scaffold and run playbook. The issue stays open until real evidence from cluster runs is committed.
-- **Next**: a cluster session following [inference-run-playbook.md](inference-experiments/inference-run-playbook.md) (E1, E2, E3, E4, E0 and the memory proof), then #133.
+- **#133 (real KV transfer)**: Code merged (PR #154): LMCache/Mooncake connector, compatibility identity, lifecycle contract, bounded metrics, opt-in HAMi bundle and a multi-size `make inference-kv-smoke` runner. The live two-worker GPU proof is still outstanding, so #133 stays open and no hop is claimed yet.
+- **Next**: a cluster session following [inference-run-playbook.md](inference-experiments/inference-run-playbook.md) (E4, E5 on the KV bundle, and reruns as needed), then close #133 and #123 on retained evidence.
 
 ## Next-session priorities (in order)
 
-1. **Cluster session for #123 E0-E4 + memory proof** - follow `docs/inference-experiments/inference-run-playbook.md`; commit the resulting evidence and notebook.
-2. **#133** (real KV hop store: Mooncake/LMCache) - implementation is active: a pinned
-   LMCache 0.3.9/vLLM 0.11.0 connector, CPU/TCP Mooncake bundle, compatibility identity,
-   lifecycle contract, bounded metrics and four-case smoke exist. A new two-worker GPU session
-   is still required before real transfer and destination consumption can be claimed.
-3. **#123 completion** - E5 real-hop treatment, single-request trace and final write-up once #133 lands.
+1. **Cluster session for #123 E4, E5 and the remaining runs** - follow `docs/inference-experiments/inference-run-playbook.md`; commit the resulting evidence and notebook.
+2. **#133 live proof** (real KV hop store: Mooncake/LMCache) - the pinned LMCache 0.3.9/vLLM 0.11.0
+   connector, CPU/TCP Mooncake bundle, compatibility identity, lifecycle contract, bounded metrics
+   and multi-size smoke runner are merged. A two-worker GPU session on the KV bundle is still
+   required before real transfer and destination consumption can be claimed; close #133 on that evidence.
+3. **#123 completion** - E5 real-hop treatment from `crossover.json`, single-request trace and final write-up.
 4. **#139** (configurable agent strategy / CrewAI) - comparative evaluation of agent orchestration strategies.
 
 # 1. Project thesis and success criteria

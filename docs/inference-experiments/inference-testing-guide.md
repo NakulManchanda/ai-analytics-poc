@@ -74,7 +74,7 @@ curl -s http://127.0.0.1:18002/health
 curl -s http://127.0.0.1:18080/health
 ```
 
-For the ordered cluster-session commands that produce E0-E4 evidence (run ids, cold-start recipe, required gateway env, artifact locations, analysis and notebook), follow [inference-run-playbook.md](inference-run-playbook.md).
+For the ordered cluster-session commands that produce E0-E5 evidence (run ids, cold-start recipe, required gateway env, artifact locations, analysis and notebook), follow [inference-run-playbook.md](inference-run-playbook.md).
 
 ---
 
@@ -192,7 +192,7 @@ Sizes are `1k|2k|4k|7k` (gateway estimate, chars/4, inside the 8192 context with
 make replay-e5 E5_SCENARIO=e5_recompute_control_2k TARGET_URL=http://127.0.0.1:18080 METRICS_URL=http://127.0.0.1:18002/metrics
 ```
 
-The real-transfer treatment is **not implemented** and is blocked on #133; it must reuse exactly these four sizes and conditions. No transfer backend is configured, and a worker change or lower latency is never evidence of a hop.
+The real-transfer treatment is implemented by #133 (PR #154: LMCache/Mooncake connector, opt-in bundle and `make inference-kv-smoke`) and reuses exactly these four sizes. It is not enabled in the default stack and has not yet been run live; follow the playbook's E5 section on the KV bundle. A worker change or lower latency is never evidence of a hop.
 
 ### Tracing one request end to end
 

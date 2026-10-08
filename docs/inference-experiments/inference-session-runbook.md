@@ -2,7 +2,7 @@
 
 Operator script for the first real evidence session. The detailed reference is `docs/inference-experiments/inference-run-playbook.md`
 (merged in PR #153); this file is the ordered, checkbox version with checkpoints and triage. Pass criteria are the per-experiment checkpoints below and
-the "Final-run evidence rules" in `docs/inference-project-plan.md`. Nothing here needs #133; the real-hop part of E5 is out of scope.
+the "Final-run evidence rules" in `docs/inference-project-plan.md`. Nothing in this sitting needs #133: the real-hop leg of E5 (merged in PR #154) is a separate GPU session on the KV bundle, described in the playbook's E5 section.
 
 Time budget: about 3-4 hours of instance time if nothing breaks. Write down the run ids as you go.
 
@@ -187,7 +187,7 @@ make inference-pull-range RUN_ID=$RUN_ID START=<epoch-before-first-run> END=<epo
 ```
 - Checkpoint: with admission off, interactive p99/goodput degrade under overload; with it on, sheds appear by reason (`kv_pressure`, `decode_slots`, `deadline_unachievable`, `timeout_queue`) and interactive goodput is preserved. Jain fairness across tenants and batch starvation are in `e4_compare`. Also watch the four alerts fire (queue/shed surge, KV pressure if reached) and record that. Note `x-admission-mode: off` skips only capacity/deadline shedding; tenant quota still runs.
 
-### E5 Recompute control (no #133) — `RUN_ID=d123-$D-e5-<HHMM>`
+### E5 Recompute control (no transfer) — `RUN_ID=d123-$D-e5-<HHMM>`
 **Step 0:** load the manifest inputs and `RUN_ID` for this experiment (in the terminal you will run E5 from; it prints nothing). Expect `d123-<date>-e5 16 0.11.0`:
 
 ```bash
@@ -200,7 +200,7 @@ Needs `ALLOW_FORCED_PLACEMENT=1` on the gateway (add with `kubectl set env`, the
 - Run the three cases at each size (1k, 2k, 4k, 7k): `e5_local_reuse_<size>` (A to A), `e5_recompute_control_<size>` (A to B, no transfer), `e5_destination_hit_<size>` (B warmed separately, then A-origin continuation to B), using `make replay-e5 E5_SCENARIO=<name>` (check the Makefile for the exact variables: target URL, metrics URL, output dir).
 - `e5_local_eviction_4k` is inconclusive unless vLLM evidence shows eviction actually happened; report it that way.
 - Checkpoint: forced turns are verified (`force_worker_verified: true`); a `control_not_applied` turn means forced placement was not honored. Sizes are chars/4 estimates; the exact token count is in each manifest (`system_prefix.exact_tokens`). If a 7k case is rejected (prompt + max_tokens over 8192), note it and drop to a smaller size.
-- Real-hop treatment is NOT done here (blocked on #133). Do not claim a hop from a worker change or a latency drop.
+- Real-hop treatment is NOT done here. The #133 code is merged, but the hop leg needs the KV bundle and `make inference-kv-smoke` (playbook E5 section), and the controls must be re-run on that same bundle for a like-for-like comparison. Do not claim a hop from a worker change or a latency drop.
 
 ### Single-request trace (once, after E3 or E4)
 ```bash
@@ -222,7 +222,7 @@ Pick one interactive request that was queued or placed interestingly. The trace 
 
 1. `make evidence-analyze RUN="..." RANGE=...` for each experiment; fill the notebook: `make evidence-notebook` then set `RUNS` in the first code cell.
 2. Commit the notebook and selected raw snapshots (keep `metrics/` gitignored, copy only what the evidence index points to).
-3. Fill `docs/inference-experiments/inference-evidence-index.md` rows with real artifact paths; change status from pending-run to available. The two hop rows stay blocked-on-#133.
+3. Fill `docs/inference-experiments/inference-evidence-index.md` rows with real artifact paths; change status from pending-run to available. The two hop rows stay merged-pending-live-run until a KV-bundle run retains passing `validation.json` and `crossover.json`.
 4. Decide: prefix-identity follow-up (history-aware), calibration of gateway defaults and alert thresholds, and whether to approve E6 (needs a verified Dynamo version; see ADR 0011 and `python -m app.benchmarks.parity`).
 
 ## 6. Quick triage

@@ -1,4 +1,4 @@
-# Inference evidence run playbook (#123 E0-E4 + memory proof)
+# Inference evidence run playbook (#123 E0-E5 + memory proof)
 
 Ordered commands for a cluster session that produce the artifacts the local analysis toolkit
 (`experiments/analysis`) and notebook (`experiments/123_evidence.ipynb`) consume. Background and
@@ -183,6 +183,60 @@ shedding; the tenant quota still runs. Compare with `e4_compare`: goodput, p99, 
 `timeout_queue`, per-tenant Jain index and batch starvation. Also screenshot/record the Grafana Gateway+admission
 and Queues dashboards for the same window. Restart workers between runs if you want identical cache state.
 
+### E5 Recompute vs real KV hop (#133)
+
+E5 asks at which prefix size moving KV from Worker A to Worker B beats recomputing it on B. It has two legs
+that must be comparable, so run both in ONE session on the SAME worker image and bundle:
+
+- **Control legs (no transfer):** `e5_local_reuse_<size>`, `e5_recompute_control_<size>` and
+  `e5_destination_hit_<size>` for `1k 2k 4k 7k` (plus `e5_local_eviction_4k`), run with `make replay-e5`.
+  A destination hit is B's OWN cache; it is not a hop.
+- **Real-hop leg:** `make inference-kv-smoke`, which runs the four controlled cases per prefix size and writes
+  `crossover.json`. Only this leg can show transferred tokens/bytes and destination consumption.
+
+Do not compare a hop measured on the LMCache/Mooncake image against controls measured on the plain
+image: the engine differs. Apply the KV bundle first, then run both legs on it (the bundle's
+`cross_worker_recompute_transfer_disabled` case is the in-bundle recompute reference).
+
+```bash
+# 1. Build, push and render the bundle (nothing is applied by these). Fresh CACHE_NAMESPACE per session:
+make inference-kv-image KV_IMAGE=<registry>/ai-inference-kv:0.11.0-lmcache0.3.9 && docker push <same tag>
+make inference-kv-render KV_IMAGE=<same tag> CACHE_NAMESPACE=e5-$(date +%Y%m%d)-01 \
+  TEMPLATE_VERSION=taxi-chat-v1 PREFIX_CONTRACT_VERSION=prefix-v1 OUT=work/kv-hop.yaml
+# 2. Review work/kv-hop.yaml, sync, apply it on the isolated host (authorized GPU session only), wait for both
+#    workers and the gateway to be healthy. The bundle enables forced placement and experiment headers.
+# 3. Copy mooncake/topology.example.json and versions.example.json to work/kv-topology.json and
+#    work/kv-versions.json; replace every placeholder from the deployed cluster. topology "workers" must stay
+#    ["worker_a","worker_b"] (the emitted KV_WORKER_ID values) and the namespace must equal the rendered one.
+source infra/inference/experiments/manifest/e5-recompute.env   # ONCE; sets RUN_ID=d123-<date>-e5-<HHMM>
+# 4. Control legs, one scenario per size (needs make inference-controls-on, ALLOW_FORCED_PLACEMENT=1 and quota 64
+#    as in E2; restart both workers per section 2 before each scenario so cache state is identical):
+make replay-e5 E5_SCENARIO=e5_recompute_control_4k TARGET_URL=http://127.0.0.1:18080 \
+  METRICS_URL=http://127.0.0.1:18002/metrics REPLAYER_FLAGS="--output-dir metrics/inference/$RUN_ID"
+#    repeat for e5_local_reuse_<size>, e5_destination_hit_<size> and each size 1k 2k 4k 7k
+# 5. Real-hop leg, all four sizes in one run:
+make inference-kv-smoke GATEWAY_URL=http://127.0.0.1:18080 WORKER_A_URL=http://127.0.0.1:18001 \
+  WORKER_B_URL=http://127.0.0.1:18002 TOPOLOGY=work/kv-topology.json VERSIONS=work/kv-versions.json \
+  PREFIX_SIZES="1k 2k 4k 7k" OUT=metrics/inference/$RUN_ID/kv-hop
+make inference-pull-range RUN_ID=$RUN_ID
+```
+
+What counts as passing: `validation.json` is `valid` and `cases.json` holds all four cases for EVERY size
+(`<case>@<size>`). The run fails closed if any case lacks positive tokens and bytes or
+`destination_consumed: true` after the forward pass. A worker header or lower latency is not proof.
+
+Reading `crossover.json` (one entry per size): `actual_reusable_tokens` is the real x-axis (the size label is
+nominal); compare `recompute_ttft_ms` / `recompute_e2e_ms` with `transfer_ttft_ms` / `transfer_e2e_ms`, and read
+`transfer_ms`, `lookup_ms`, `confirm_ms`, `transferred_bytes` for the cost of the hop. A TTFT is `null` unless
+exactly one request landed on that worker during its window, so rerun with nothing else hitting the cluster.
+Scopes: event fields are per-request; TTFT here is a one-request vLLM window, and the prefix-hit counter
+deltas are WINDOW-level. The notebook's E5 cell currently shows only the control run (`E5_RUN`); read
+`crossover.json` directly (or add a notebook cell) for the crossover until the notebook consumes it.
+
+Report the crossover where it is: if the hop never wins at any measured size, or only above 7k, say so. The
+size ceiling is the 8,192-token worker context. Keep the hardware in the write-up; a crossover from a
+different GPU than E0-E4 is not directly comparable.
+
 ### Memory proof
 
 `make inference-pull-range RUN_ID=<id> START=<epoch> END=<epoch> STEP=15s` over the busiest window (the E0
@@ -208,5 +262,7 @@ range series. Report negative or neutral results as found (plan completion check
 ## 5. After the session
 
 Turn controls back off (`kubectl set env deploy/inference-gateway ALLOW_EXPERIMENT_CONTROLS=0` or
-`make inference-deploy`), run `make inference-pull-evidence RUN_ID=<id>` once more, then stop the tunnel and
+`make inference-deploy`). After E5, also restore the normal gateway and worker manifests (the KV bundle
+enables forced placement and experiment headers; `make inference-deploy` resets them), and leave Mooncake
+unexposed outside the lab. Run `make inference-pull-evidence RUN_ID=<id>` once more, then stop the tunnel and
 the instance (`make inference-teardown` / Lambda console).
