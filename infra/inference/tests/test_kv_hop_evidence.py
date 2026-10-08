@@ -252,3 +252,36 @@ def test_run_rejects_missing_or_duplicate_control_case() -> None:
     cases[-1]["name"] = "same_worker_local_reuse"
     with pytest.raises(ValueError, match="duplicate case"):
         validate_run(_manifest(), cases)
+
+
+def test_validate_case_accepts_tagged_case_names() -> None:
+    real_case = _four_cases()[-1]
+    summary = validate_case("real_mooncake_transfer_consumed@7k", real_case["events"])
+    assert summary["case"] == "real_mooncake_transfer_consumed@7k"
+    assert summary["event_count"] == 1
+
+
+def test_validate_run_accepts_multi_size_cases_with_size_tags() -> None:
+    manifest = _manifest()
+    cases = []
+    for size in ("1k", "2k", "4k", "7k"):
+        for base in _four_cases():
+            cases.append(_case(f"{base['name']}@{size}", deepcopy(base["events"][0])))
+    res = validate_run(manifest, cases)
+    assert res["valid"] is True
+    assert res["case_count"] == 16
+    assert len(res["cases"]) == 16
+
+
+def test_validate_run_fails_if_any_size_is_incomplete() -> None:
+    manifest = _manifest()
+    cases = []
+    for size in ("1k", "2k"):
+        for base in _four_cases():
+            cases.append(_case(f"{base['name']}@{size}", deepcopy(base["events"][0])))
+    # Drop one case from 2k to verify fail-closed multi-size enforcement
+    cases.pop()
+    with pytest.raises(
+        ValueError, match="run prefix size 2k must contain exactly the four controlled cases"
+    ):
+        validate_run(manifest, cases)

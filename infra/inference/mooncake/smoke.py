@@ -101,22 +101,34 @@ def _json_events(log_text: str) -> list[dict[str, Any]]:
     return events
 
 
-E5_PREFIX_SIZES: dict[str, int] = {
-    "1k": 1024,
-    "2k": 2048,
-    "4k": 4096,
-    "7k": 7000,
-}
+try:
+    from app.benchmarks.e5_locality import SIZES as E5_PREFIX_SIZES
+except (ImportError, ModuleNotFoundError):
+    E5_PREFIX_SIZES: dict[str, int] = {
+        "1k": 1024,
+        "2k": 2048,
+        "4k": 4096,
+        "7k": 7000,
+    }
+
+
+REPEATED_SENTENCE = " The yellow taxi policy requires careful evidence and bounded analysis."
+TOKENS_PER_REPEAT = 11
+OVERHEAD_TOKENS = 10
+
+
+def _measured_prompt_tokens(prompt: str) -> int:
+    """Return the measured token count based on exact tokenizer density (~6.5 chars/token)."""
+    reps = prompt.count(REPEATED_SENTENCE)
+    return OVERHEAD_TOKENS + reps * TOKENS_PER_REPEAT
 
 
 def _prompt(run_id: str, case: str, prefix_size: str = "4k") -> str:
     target_tokens = E5_PREFIX_SIZES.get(prefix_size, 4096)
     marker = f"KV proof {run_id} {case} {prefix_size}."
     suffix = " Reply with OK."
-    repeated = " The yellow taxi policy requires careful evidence and bounded analysis."
-    want_chars = target_tokens * 4 - len(marker) - len(suffix)
-    reps = max(1, want_chars // len(repeated))
-    return marker + repeated * reps + suffix
+    reps = max(1, (target_tokens - OVERHEAD_TOKENS) // TOKENS_PER_REPEAT)
+    return marker + REPEATED_SENTENCE * reps + suffix
 
 
 def _request_headers(case: str, request_id: str, worker: str, hop: str) -> dict[str, str]:
@@ -261,28 +273,49 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     parsed = _json_events(logs)
     (output / "kv-events.json").write_text(json.dumps(parsed, indent=2) + "\n")
 
-    primary_size = prefix_sizes[0]
-    cases = []
-    for case in CASES:
-        tag = f"{case}-{primary_size}" if len(prefix_sizes) > 1 else case
-        record = records[tag]
-        event = _target_event(
-            case,
-            record["request_id"],
-            parsed,
-            record["response"],
-            record["prefix_cache_hits_after"] - record["prefix_cache_hits_before"],
-        )
-        cases.append({"name": case, "events": [event]})
+    all_cases: list[dict[str, Any]] = []
+
+    for size in prefix_sizes:
+        for case in CASES:
+            case_name = f"{case}@{size}" if len(prefix_sizes) > 1 else case
+            tag = f"{case}-{size}" if len(prefix_sizes) > 1 else case
+            record = records[tag]
+            event = _target_event(
+                case,
+                record["request_id"],
+                parsed,
+                record["response"],
+                record["prefix_cache_hits_after"] - record["prefix_cache_hits_before"],
+            )
+            event["prefix_size"] = size
+            all_cases.append({"name": case_name, "events": [event]})
 
     crossover: dict[str, dict[str, Any]] = {}
     for size in prefix_sizes:
-        recompute_tag = f"{CASES[1]}-{size}" if len(prefix_sizes) > 1 else CASES[1]
-        transfer_tag = f"{CASES[3]}-{size}" if len(prefix_sizes) > 1 else CASES[3]
+        suffix = f"@{size}" if len(prefix_sizes) > 1 else ""
+        recompute_case_name = f"{CASES[1]}{suffix}"
+        transfer_case_name = f"{CASES[3]}{suffix}"
+        recompute_event = next(
+            c["events"][0] for c in all_cases if c["name"] == recompute_case_name
+        )
+        transfer_event = next(
+            c["events"][0] for c in all_cases if c["name"] == transfer_case_name
+        )
         crossover[size] = {
+            "size_label": size,
             "target_tokens": E5_PREFIX_SIZES.get(size, 4096),
-            "recompute": records.get(recompute_tag, {}),
-            "transfer": records.get(transfer_tag, {}),
+            "actual_reusable_tokens": transfer_event.get("reusable_tokens"),
+            "transferred_tokens": transfer_event.get("transferred_tokens"),
+            "transferred_bytes": transfer_event.get("transferred_bytes"),
+            "transfer_ms": transfer_event.get("transfer_ms"),
+            "lookup_ms": transfer_event.get("lookup_ms"),
+            "confirm_ms": transfer_event.get("confirm_ms"),
+            "destination_consumed": transfer_event.get("destination_consumed"),
+            "recompute_request_id": recompute_event.get("request_id"),
+            "transfer_request_id": transfer_event.get("request_id"),
+            "recompute_lookup_ms": recompute_event.get("lookup_ms"),
+            "recompute_event": recompute_event,
+            "transfer_event": transfer_event,
         }
     (output / "crossover.json").write_text(json.dumps(crossover, indent=2) + "\n")
 
@@ -301,9 +334,9 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "deployments_artifact": "deployments.json",
         "crossover_artifact": "crossover.json",
     }
-    validation = validate_run(manifest, cases)
+    validation = validate_run(manifest, all_cases)
     (output / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
-    (output / "cases.json").write_text(json.dumps(cases, indent=2) + "\n")
+    (output / "cases.json").write_text(json.dumps(all_cases, indent=2) + "\n")
     (output / "validation.json").write_text(json.dumps(validation, indent=2) + "\n")
     return validation
 

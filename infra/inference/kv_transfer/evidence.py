@@ -175,9 +175,12 @@ def _case_name(case: object) -> str:
         candidate = case.get("name", case.get("case"))
     else:
         _fail("case must be a name or mapping")
-    if not _is_text(candidate) or candidate not in _CASE_ALIASES:
+    if not _is_text(candidate):
         _fail("unknown controlled evidence case")
-    return _CASE_ALIASES[str(candidate)]
+    base = str(candidate).split("@")[0] if "@" in str(candidate) else str(candidate)
+    if base not in _CASE_ALIASES:
+        _fail("unknown controlled evidence case")
+    return _CASE_ALIASES[base]
 
 
 def _validate_correlations(events: Sequence[Mapping[str, Any]]) -> None:
@@ -287,7 +290,8 @@ def validate_case(
     validator = _CASE_VALIDATORS[name]
     for event in normalized:
         validator(event)
-    return {"case": name, "event_count": len(normalized), "evidence_scope": scopes.pop()}
+    raw_name = case.get("name", case.get("case", name)) if isinstance(case, Mapping) else str(case)
+    return {"case": raw_name, "event_count": len(normalized), "evidence_scope": scopes.pop()}
 
 
 def _manifest_versions(manifest: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -356,11 +360,26 @@ def validate_run(manifest: Mapping[str, Any], cases: object) -> dict[str, Any]:
 
     entries = _iter_cases(cases)
     seen: list[str] = []
+    cases_by_size: dict[str, set[str]] = {}
+    has_size_tags = False
+
     for case, raw_events in entries:
-        name = _case_name(case)
-        if name in seen:
+        raw_name = case.get("name") if isinstance(case, Mapping) else str(case)
+        if not _is_text(raw_name):
+            _fail("case name must be non-empty string")
+        if raw_name in seen:
             _fail("duplicate case in evidence run")
-        seen.append(name)
+        seen.append(raw_name)
+
+        if "@" in raw_name:
+            has_size_tags = True
+            base_name, size_tag = raw_name.split("@", 1)
+        else:
+            base_name, size_tag = raw_name, ""
+
+        name = _case_name(base_name)
+        cases_by_size.setdefault(size_tag, set()).add(name)
+
         validate_case(case, raw_events)
 
         # Repeat the small normalization pass to check the evidence against run provenance.
@@ -373,9 +392,14 @@ def validate_run(manifest: Mapping[str, Any], cases: object) -> dict[str, Any]:
             if event["prefix_version"] != versions["prefix_identity_version"]:
                 _fail("event prefix identity version does not match manifest")
 
-    if set(seen) != set(REQUIRED_CASES) or len(seen) != len(REQUIRED_CASES):
-        _fail("run must contain exactly the four controlled cases")
-    return {"valid": True, "case_count": 4, "cases": list(REQUIRED_CASES)}
+    if has_size_tags:
+        for size_tag, group_cases in cases_by_size.items():
+            if set(group_cases) != set(REQUIRED_CASES) or len(group_cases) != len(REQUIRED_CASES):
+                _fail(f"run prefix size {size_tag} must contain exactly the four controlled cases")
+    else:
+        if set(seen) != set(REQUIRED_CASES) or len(seen) != len(REQUIRED_CASES):
+            _fail("run must contain exactly the four controlled cases")
+    return {"valid": True, "case_count": len(seen), "cases": seen}
 
 
 __all__ = [
