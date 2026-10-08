@@ -276,6 +276,7 @@ def _ok(url, **_):
 def test_gateway_picks_either_worker_and_reports_it(gw) -> None:
     client, reg = gw
     body = {"messages": MSG}
+    reg.snapshots["worker_b"].running = 1  # not tied, so the first pick is deterministic
     with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as post:
         post.side_effect = _ok
         r1 = client.post("/serve", json=body)
@@ -287,11 +288,15 @@ def test_gateway_picks_either_worker_and_reports_it(gw) -> None:
     assert post.call_args_list[1].args[0].startswith("http://worker-b:8000")
     assert r2.headers["x-placement-policy"] == "least_loaded"
     assert r2.headers["x-intended-action"] == "recompute"
-    assert all(s.inflight == 0 for s in reg.snapshots.values())
+    assert all(
+        s.inflight == 0 and s.pending == 0 and not s.recent_dispatches
+        for s in reg.snapshots.values()
+    )
 
 
 def test_gateway_forced_header_gated_by_env(gw, monkeypatch) -> None:
-    client, _ = gw
+    client, reg = gw
+    reg.snapshots["worker_b"].running = 1  # not tied, so least_loaded picks worker_a
     with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as post:
         post.side_effect = _ok
         r = client.post("/serve", json={"messages": MSG}, headers={"x-force-worker": "worker_b"})
@@ -405,19 +410,188 @@ def test_prefix_tokens_clamped_and_legacy_path(gw) -> None:
 
 
 @pytest.mark.parametrize(
-    "belief,est,reason",
+    "belief,est",
     [
-        (900, 1000, "prefix_affinity"),
-        (800, 1000, "prefix_affinity"),  # boundary: exactly 0.8 is sticky
-        (799, 1000, "prefix_overlap_low"),
-        (100, 1000, "prefix_overlap_low"),  # small system prefix vs large current prefill
-        (5000, 1000, "prefix_affinity"),  # overlap bounded to [0, 1]
+        (900, 1000),
+        (800, 1000),
+        (799, 1000),
+        (100, 1000),  # small system prefix vs a prompt that has grown large
+        (100, 8000),
+        (5000, 1000),
     ],
 )
-def test_overlap_is_fraction_of_current_prefill(belief, est, reason) -> None:
+def test_conversation_stays_on_its_owner_however_the_prompt_grows(belief, est) -> None:
     ws = two()
     _with_prefix(ws, "worker_a", tokens=belief)
-    d = pick(PlacementRequest("p1", est), ws, policy="prefix_then_load", rng=random.Random(1))
-    assert d.placement_reason == reason
-    if reason == "prefix_affinity":
-        assert d.chosen_worker == "worker_a"
+    for seed in range(5):
+        rng = random.Random(seed)
+        d = pick(PlacementRequest("p1", est), ws, policy="prefix_then_load", rng=rng)
+        assert (d.chosen_worker, d.placement_reason) == ("worker_a", "prefix_affinity")
+
+
+def test_owner_queue_saturation_moves_only_to_a_less_loaded_worker() -> None:
+    req = PlacementRequest("p1", 1000)
+    ws = two(a={"waiting": 4}, b={})  # owner has 4 waiting (>= spill_queue), b is idle
+    _with_prefix(ws, "worker_a")
+    d = pick(req, ws, policy="prefix_then_load", spill_queue=4)
+    assert (d.chosen_worker, d.placement_reason) == ("worker_b", "prefix_owner_saturated")
+
+    ws = two(a={"waiting": 4}, b={"waiting": 4})  # b is just as loaded: moving would lose the KV
+    _with_prefix(ws, "worker_a")
+    d = pick(req, ws, policy="prefix_then_load", spill_queue=4)
+    assert (d.chosen_worker, d.placement_reason) == ("worker_a", "prefix_affinity")
+
+
+def test_below_the_spill_threshold_the_owner_keeps_the_conversation() -> None:
+    ws = two(a={"waiting": 3}, b={})
+    _with_prefix(ws, "worker_a")
+    d = pick(PlacementRequest("p1", 1000), ws, policy="prefix_then_load", spill_queue=4)
+    assert (d.chosen_worker, d.placement_reason) == ("worker_a", "prefix_affinity")
+
+
+def test_pending_and_queued_requests_count_toward_the_owner_saturation() -> None:
+    ws = two(b={})
+    _with_prefix(ws, "worker_a")
+    ws[0].queued, ws[0].pending = 2, 2
+    d = pick(PlacementRequest("p1", 1000), ws, policy="prefix_then_load", spill_queue=4)
+    assert d.chosen_worker == "worker_b" and d.placement_reason == "prefix_owner_saturated"
+
+
+def test_equal_load_ties_are_broken_randomly_not_always_toward_the_first_worker() -> None:
+    ws = two()
+    chosen = {
+        pick(PlacementRequest(), ws, policy="least_loaded", rng=random.Random(i)).chosen_worker
+        for i in range(20)
+    }
+    assert chosen == {"worker_a", "worker_b"}
+
+
+def test_pending_placements_spread_a_burst_across_workers() -> None:
+    ws = two()
+    picks = []
+    for i in range(8):
+        d = pick(PlacementRequest(), ws, policy="least_loaded", rng=random.Random(i))
+        next(w for w in ws if w.id == d.chosen_worker).pending += 1  # what the gateway does
+        picks.append(d.chosen_worker)
+    assert picks.count("worker_a") == picks.count("worker_b") == 4
+
+
+# --- batch slot cap is enforced on the worker actually chosen -------------------------------
+
+
+def test_batch_is_not_placed_on_a_worker_at_its_slot_cap_even_when_it_owns_the_conversation() -> (
+    None
+):
+    ws = two(a={"running": 6}, b={})
+    _with_prefix(ws, "worker_a")
+    batch = PlacementRequest("p1", 1000, workload_class="batch")
+    d = pick(
+        batch, ws, policy="prefix_then_load", batch_slot_limit=6, rng=random.Random(0)
+    )
+    assert d.chosen_worker == "worker_b"
+    interactive = pick(
+        PlacementRequest("p1", 1000), ws, policy="prefix_then_load", batch_slot_limit=6
+    )
+    assert (interactive.chosen_worker, interactive.placement_reason) == (
+        "worker_a",
+        "prefix_affinity",
+    )
+
+
+def test_batch_with_every_worker_at_its_cap_is_a_placement_error() -> None:
+    ws = two(a={"running": 6}, b={"running": 7})
+    d = pick(
+        PlacementRequest(workload_class="batch"),
+        ws,
+        policy="least_loaded",
+        batch_slot_limit=6,
+    )
+    assert isinstance(d, PlacementError) and d.reason == "batch_slot_cap"
+
+
+def test_batch_cap_counts_dispatches_the_scrape_has_not_seen() -> None:
+    # Review case: the scrape shows 5 running and the gateway dispatched 3 more since. Real use may
+    # be 8, so a batch cap of 6 must not allow another batch placement there.
+    ws = two(a={"running": 5}, b={"running": 6})
+    for _ in range(3):
+        ws[0].note_dispatch()
+    batch = PlacementRequest(workload_class="batch")
+    d = pick(batch, ws, policy="least_loaded", batch_slot_limit=6)
+    assert isinstance(d, PlacementError) and d.reason == "batch_slot_cap"
+
+
+def test_a_scrape_that_does_not_show_a_dispatch_does_not_drop_it() -> None:
+    # Review case: 5 running, a 6th is dispatched, and the next scrape (vLLM has not scheduled the
+    # 6th yet) still shows 5. The 6th must stay counted until a scrape a full grace window later.
+    s = snap("worker_a", running=5)
+    t0 = s.observed_at
+    s.note_dispatch(now=t0 + 0.1)
+    assert s.occupied == 6
+    s.observed_at = t0 + 1.0  # next scrape, still 5 running
+    assert s.occupied == 6
+    s.observed_at = t0 + 3.0  # a scrape more than the grace window after the dispatch
+    assert s.occupied == 5
+    batch = PlacementRequest(workload_class="batch")
+    s.observed_at = t0 + 1.0
+    blocked = pick(batch, [s], policy="least_loaded", batch_slot_limit=6)
+    assert isinstance(blocked, PlacementError) and blocked.reason == "batch_slot_cap"
+
+
+def test_dispatches_long_before_a_scrape_are_not_double_counted() -> None:
+    ws = two(a={"running": 5}, b={"running": 6})
+    for _ in range(5):
+        ws[0].note_dispatch(now=ws[0].observed_at - 10)  # long since in the scrape's running count
+    batch = PlacementRequest(workload_class="batch")
+    d = pick(batch, ws, policy="least_loaded", batch_slot_limit=6)
+    assert isinstance(d, PlacementDecision) and d.chosen_worker == "worker_a"
+
+
+def test_a_finished_dispatch_is_no_longer_counted() -> None:
+    s = snap("worker_a", running=5)
+    first = s.note_dispatch(now=s.observed_at + 0.1)
+    s.note_dispatch(now=s.observed_at + 0.2)
+    assert s.occupied == 7
+    s.note_finish(first)
+    assert s.occupied == 6
+    s.note_finish(first)  # idempotent
+    assert s.occupied == 6
+
+
+def test_a_never_scraped_worker_counts_every_dispatch() -> None:
+    s = snap("worker_a", running=0)
+    s.observed_at = None
+    s.note_dispatch(now=1.0)
+    s.note_dispatch(now=2.0)
+    assert s.occupied == 2
+
+
+def test_no_batch_cap_when_no_limit_is_given() -> None:
+    ws = two(a={"running": 7}, b={"running": 7})
+    d = pick(PlacementRequest(workload_class="batch"), ws, policy="least_loaded")
+    assert isinstance(d, PlacementDecision)
+
+
+def test_gateway_never_routes_admitted_batch_to_the_owner_at_the_batch_cap(
+    gw, monkeypatch
+) -> None:
+    from infra.inference.gateway.admission import AdmitConfig
+
+    client, reg = gw
+    monkeypatch.setattr(gateway_main, "PLACEMENT_POLICY", "prefix_then_load")
+    monkeypatch.setattr(
+        gateway_main, "ADMIT_CFG", AdmitConfig(max_decode_slots=8)
+    )  # batch cap 6
+    reg.snapshots["worker_a"].running = 6
+    reg.record_prefix("worker_a", "p1", 1000)
+    body = {"messages": MSG}
+    with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as post:
+        post.side_effect = _ok
+        # Interactive first: placing the batch request on worker_b moves the prefix belief there.
+        interactive = client.post("/serve", json=body, headers={"x-prefix-id": "p1"})
+        batch = client.post(
+            "/serve",
+            json=body,
+            headers={"x-prefix-id": "p1", "x-request-priority": "batch"},
+        )
+    assert interactive.headers["x-place-decision"] == "worker_a"
+    assert batch.status_code == 200 and batch.headers["x-place-decision"] == "worker_b"

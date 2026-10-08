@@ -62,11 +62,40 @@ class WorkerSnapshot:
     inflight: int = 0
     inflight_tokens: int = 0
     queued: int = 0  # requests waiting in this gateway's per-worker queue (#122 slice 3)
+    pending: int = 0  # requests placed here that have not reached the queue yet (anti-herding)
+    dispatch_grace_s: float = 2.0  # how long a scrape may lag a dispatch (see ``occupied``)
+    recent_dispatches: dict[int, float] = field(default_factory=dict)  # token -> monotonic time
+    _dispatch_id: int = 0
     prefixes: dict[str, PrefixBelief] = field(default_factory=dict)
 
     @property
     def id(self) -> str:
         return self.worker.id
+
+    @property
+    def occupied(self) -> int:
+        """Decode slots in use, as a safe upper bound.
+
+        The last scrape's ``running`` plus every dispatch of ours that is still running and was
+        made within ``dispatch_grace_s`` of that scrape (or after it). A scrape cannot be shown to
+        include a request vLLM has not scheduled yet, so a dispatch is only dropped once a scrape
+        was taken a full grace window after it. Inside the window a request the scrape already
+        includes is counted twice: the error is on the safe side (batch gets slightly less).
+        """
+        horizon = float("-inf") if self.observed_at is None else self.observed_at
+        return self.running + sum(
+            1 for dispatched_at in self.recent_dispatches.values()
+            if dispatched_at > horizon - self.dispatch_grace_s
+        )
+
+    def note_dispatch(self, now: float | None = None) -> int:
+        """Count a dispatch; returns the token to pass to ``note_finish``."""
+        self._dispatch_id += 1
+        self.recent_dispatches[self._dispatch_id] = time.monotonic() if now is None else now
+        return self._dispatch_id
+
+    def note_finish(self, token: int) -> None:
+        self.recent_dispatches.pop(token, None)
 
     def age(self, now: float | None = None) -> float:
         if self.observed_at is None:
@@ -104,8 +133,11 @@ class Registry:
         ramp_step_s: float = 30.0,
         ramp_min_kv_free: float = 0.2,
         clock: Callable[[], float] = time.monotonic,
+        dispatch_grace_s: float = 2.0,
     ) -> None:
-        self.snapshots = {w.id: WorkerSnapshot(w) for w in workers}
+        self.snapshots = {
+            w.id: WorkerSnapshot(w, dispatch_grace_s=dispatch_grace_s) for w in workers
+        }
         self._rr = 0
         self.require_warm = require_warm
         self.warm_min_scrapes = max(1, warm_min_scrapes)
@@ -251,4 +283,5 @@ def build_registry() -> Registry:
         probe_model=os.getenv("WARM_PROBE_MODEL", "Qwen/Qwen3-0.6B"),
         ramp_steps=tuple(int(x) for x in os.getenv("WARM_RAMP_STEPS", "").split(",") if x.strip()),
         ramp_step_s=float(os.getenv("WARM_RAMP_STEP_S", "30")),
+        dispatch_grace_s=float(os.getenv("DISPATCH_GRACE_S", "2")),
     )

@@ -38,6 +38,7 @@ log = logging.getLogger("inference.gateway")
 logging.basicConfig(level=logging.INFO)
 
 PLACEMENT_POLICY = os.getenv("PLACEMENT_POLICY", "prefix_then_load")
+PLACEMENT_SPILL_QUEUE = int(os.getenv("PLACEMENT_SPILL_QUEUE", "4"))
 SNAPSHOT_REFRESH_S = float(os.getenv("SNAPSHOT_REFRESH_S", "1.0"))
 SNAPSHOT_STALE_S = float(os.getenv("SNAPSHOT_STALE_S", "5.0"))
 
@@ -506,6 +507,8 @@ async def serve_completion(
             stale_after=SNAPSHOT_STALE_S,
             rr_index=registry.next_rr(),
             allow_forced=os.getenv("ALLOW_FORCED_PLACEMENT") == "1",
+            spill_queue=PLACEMENT_SPILL_QUEUE,
+            batch_slot_limit=ADMIT_CFG.slot_limit("batch"),
         )
     if isinstance(decision, placement.PlacementError):
         metrics.PLACEMENT_ERRORS.labels(decision.reason).inc()
@@ -535,9 +538,13 @@ async def serve_completion(
 
     deadline_at = now + deadline_ms / 1000 if deadline_ms is not None else None
     queue_enter = time.time()
+    snap.pending += 1  # counted in the load score from the pick until the queue answers
     try:
         with metrics.timed("queue", klass):
-            ticket = await queues.acquire(snap.id, klass, est_tokens, deadline_at)
+            try:
+                ticket = await queues.acquire(snap.id, klass, est_tokens, deadline_at)
+            finally:
+                snap.pending -= 1
     except QueueRejected as exc:
         metrics.QUEUE_ERRORS.labels(exc.reason, klass).inc()
         if resp := await try_overflow(503, exc.reason, "queue"):
@@ -588,6 +595,7 @@ async def serve_completion(
     target_url = f"{snap.worker.url}/v1/chat/completions"
     snap.inflight += 1
     snap.inflight_tokens += est_tokens
+    dispatch_token = snap.note_dispatch()
 
     proxy_start = time.perf_counter()
 
@@ -601,6 +609,7 @@ async def serve_completion(
         metrics.STAGE_DURATION.labels("proxy", klass).observe(time.perf_counter() - proxy_start)
         snap.inflight -= 1
         snap.inflight_tokens -= est_tokens
+        snap.note_finish(dispatch_token)
         ticket.release()
         log.info(json.dumps({**log_fields, "stage": "queue", "queue_release": time.time()}))
 

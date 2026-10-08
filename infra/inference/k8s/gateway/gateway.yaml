@@ -36,11 +36,20 @@ spec:
               value: "http://inference-worker-b.inference-lab.svc.cluster.local:8000"
             - name: PLACEMENT_POLICY
               value: "prefix_then_load"
+            # A conversation stays on its KV owner until waiting + queued + just-placed requests there reach this.
+            - name: PLACEMENT_SPILL_QUEUE
+              value: "4"
             # Gateway limits tied to the engine flags in k8s/workers/*.yaml (a test enforces the match):
             # decode slots = --max-num-seqs; dispatch slots per worker = --max-num-seqs so excess work
             # waits in the gateway queue, not in vLLM's; prompt + completion must fit --max-model-len.
             - name: MAX_DECODE_SLOTS
               value: "8"
+            # Batch work may use at most MAX_DECODE_SLOTS minus this fraction; the rest stays free for interactive.
+            - name: BATCH_SLOT_RESERVE
+              value: "0.25"
+            # A dispatch stays counted as occupying a slot until a scrape taken this long after it can include it.
+            - name: DISPATCH_GRACE_S
+              value: "2"
             - name: WORKER_MAX_INFLIGHT
               value: "8"
             - name: MAX_MODEL_LEN

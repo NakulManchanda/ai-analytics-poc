@@ -216,5 +216,8 @@ def test_gateway_sets_every_admission_threshold_explicitly() -> None:
         "WARM_PROBE_MODEL",
         "WARM_RAMP_STEPS",
         "WARM_RAMP_STEP_S",
+        "BATCH_SLOT_RESERVE",
+        "DISPATCH_GRACE_S",
+        "PLACEMENT_SPILL_QUEUE",
     ):
         assert gateway_env.get(name), f"gateway manifest must set {name}"

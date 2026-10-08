@@ -26,9 +26,14 @@ except ImportError:
 
 Policy = Literal["round_robin", "least_loaded", "p2c", "prefix_then_load"]
 POLICIES = ("round_robin", "least_loaded", "p2c", "prefix_then_load")
-PLACEMENT_ERRORS = ("no_healthy_worker", "unknown_forced_worker", "unknown_policy")
-STICKY_OVERLAP = 0.8
+PLACEMENT_ERRORS = (
+    "no_healthy_worker",
+    "batch_slot_cap",
+    "unknown_forced_worker",
+    "unknown_policy",
+)
 STICKY_MAX_INFLIGHT_TOKENS = 10_000
+SPILL_QUEUE = 4  # waiting + gateway-queued + just-placed requests that make an owner "saturated"
 
 
 @dataclass(frozen=True)
@@ -57,10 +62,10 @@ class PlacementError:
 
 
 def load(s: WorkerSnapshot) -> tuple[bool, float]:
-    """Worker queue depth (waiting, weighted) and the gateway's own queue (queued) participate
-    alongside running and in-flight work;
+    """Worker queue depth (waiting, weighted), the gateway's own queue (queued) and requests placed
+    but not yet queued (pending) participate alongside running and in-flight work;
     a never-observed worker sorts last."""
-    return (s.observed_at is None, 2 * s.waiting + s.running + s.inflight + s.queued)
+    return (s.observed_at is None, 2 * s.waiting + s.running + s.inflight + s.queued + s.pending)
 
 
 def pick(
@@ -75,6 +80,8 @@ def pick(
     kv_used_max: float = 0.70,
     min_kv_free: float = 0.20,
     allow_forced: bool = False,
+    spill_queue: int = SPILL_QUEUE,
+    batch_slot_limit: int | None = None,
 ) -> PlacementDecision | PlacementError:
     now = time.monotonic() if now is None else now
     by_id = {w.id: w for w in workers}
@@ -105,11 +112,19 @@ def pick(
     if not eligible:
         eligible, fallback = healthy, "stale_snapshot"
     eligible = [w for w in eligible if w.kv_free_ratio >= min_kv_free] or eligible
+    if req.workload_class == "batch" and batch_slot_limit is not None:
+        # Batch may only use slots below its cap, on the worker actually chosen (admission only
+        # checks that SOME worker has room); the reserved slots stay free for interactive work.
+        eligible = [w for w in eligible if w.occupied < batch_slot_limit]
+        if not eligible:
+            return PlacementError("batch_slot_cap")
 
     if policy == "round_robin":
         return decide(eligible[rr_index % len(eligible)], policy, "round_robin")
     if policy == "least_loaded":
-        return decide(min(eligible, key=load), policy, "least_loaded")
+        best = min(load(w) for w in eligible)
+        ties = [w for w in eligible if load(w) == best]
+        return decide((rng or random).choice(ties), policy, "least_loaded")
     if policy == "p2c":
         return decide(_p2c(eligible, rng), policy, "p2c")
     if policy == "prefix_then_load":
@@ -118,24 +133,29 @@ def pick(
             return decide(_p2c(eligible, rng), policy, "no_prefix_known")
         if owner not in eligible:
             return decide(_p2c(eligible, rng), policy, "prefix_owner_unavailable")
-        # Fraction of the CURRENT prefill that is believed reusable (belief may be a bounded
-        # x-prefix-tokens region, e.g. system prefix only).
-        held = owner.prefixes[req.prefix_id].tokens
-        overlap = min(1.0, held / req.est_tokens) if req.est_tokens > 0 else 1.0
-        if 1.0 - owner.kv_free_ratio >= kv_used_max and len(eligible) > 1:
-            return decide(
-                _p2c([w for w in eligible if w is not owner], rng),
-                policy,
-                "prefix_owner_kv_pressure",
-            )
-        if overlap < STICKY_OVERLAP:
-            return decide(_p2c(eligible, rng), policy, "prefix_overlap_low")
-        if owner.inflight_tokens >= STICKY_MAX_INFLIGHT_TOKENS and len(eligible) > 1:
-            return decide(
-                _p2c([w for w in eligible if w is not owner], rng), policy, "prefix_owner_busy"
-            )
+        # Sticky owner: a conversation that has a KV owner stays there, however much its prompt has
+        # grown. It moves only when the owner is saturated (KV, in-flight tokens, or queue) and
+        # another eligible worker can take it; a queue-only saturation also needs that worker to be
+        # less loaded, otherwise moving would only throw the KV away.
+        others = [w for w in eligible if w is not owner]
+        why = _owner_saturated(owner, kv_used_max, spill_queue)
+        if others and why:
+            target = min(others, key=load)
+            if why != "prefix_owner_saturated" or load(target) < load(owner):
+                return decide(target, policy, why)
         return decide(owner, policy, "prefix_affinity")
     return PlacementError("unknown_policy")
+
+
+def _owner_saturated(owner: WorkerSnapshot, kv_used_max: float, spill_queue: int) -> str | None:
+    """Reason the prefix owner should be left, or None when the conversation should stay."""
+    if 1.0 - owner.kv_free_ratio >= kv_used_max:
+        return "prefix_owner_kv_pressure"
+    if owner.inflight_tokens >= STICKY_MAX_INFLIGHT_TOKENS:
+        return "prefix_owner_busy"
+    if owner.waiting + owner.queued + owner.pending >= spill_queue:
+        return "prefix_owner_saturated"
+    return None
 
 
 def _p2c(cands: Sequence[WorkerSnapshot], rng: random.Random | None) -> WorkerSnapshot:

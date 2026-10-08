@@ -83,3 +83,4 @@ Monotonically numbered log of every post-bootstrap task. Each entry records the 
 - [0085 — #133 real cross-worker KV transfer](0085-real-kv-transfer.md) — LMCache/Mooncake connector, lifecycle contract, HAMi bundle and four-case proof
 - [0086 — Gateway hardening, step 1](0086-inference-gateway-hardening-step1.md) — limits tied to engine flags, warm gate, guard context_window_exceeded, smoke warm-up and alternating legs
 - [0087 — Gateway hardening, step 2](0087-inference-gateway-hardening-step2.md) — returning-worker ramp, strict hardware evidence checks, verify-workers exit code
+- [0088 — Gateway hardening, step 3](0088-inference-gateway-hardening-step3.md) — sticky owner placement, anti-herding, class-aware admission, serve smoke stage checks
