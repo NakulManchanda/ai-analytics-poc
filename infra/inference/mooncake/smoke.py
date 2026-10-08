@@ -1,0 +1,291 @@
+"""Run and retain the four controlled KV reuse cases against a live lab.
+
+Run this on the k3s host after deploying the opt-in Mooncake bundle.  The
+script never applies Kubernetes resources.  It fails closed when worker logs,
+vLLM counters, or response evidence cannot prove a case.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import subprocess
+import sys
+import time
+import urllib.request
+import uuid
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
+
+try:
+    from infra.inference.kv_transfer.evidence import validate_run
+    from infra.inference.kv_transfer.identity import CompatibilitySpec
+except ModuleNotFoundError as exc:
+    # ``make inference-sync`` copies only infra/inference to the GPU host. Keep
+    # the proof runner executable there as ``python mooncake/smoke.py`` while
+    # preserving normal package imports in the repository and tests.
+    if exc.name != "infra":
+        raise
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from kv_transfer.evidence import validate_run
+    from kv_transfer.identity import CompatibilitySpec
+
+CASES = (
+    "same_worker_local_reuse",
+    "cross_worker_recompute_transfer_disabled",
+    "independently_warmed_destination_local_hit",
+    "real_mooncake_transfer_consumed",
+)
+PREFIX_HITS = re.compile(
+    r"^vllm:(?:gpu_)?prefix_cache_hits(?:_total)?(?:\{[^}]*\})?\s+([0-9.eE+-]+)$"
+)
+
+
+def _get(url: str) -> str:
+    with urllib.request.urlopen(url, timeout=15) as response:  # noqa: S310 - operator URL
+        if response.status != 200:
+            raise RuntimeError(f"GET failed with status {response.status}")
+        return response.read().decode("utf-8")
+
+
+def _post(url: str, body: dict[str, Any], headers: dict[str, str]) -> dict[str, Any]:
+    request = urllib.request.Request(
+        url,
+        data=json.dumps(body).encode(),
+        headers={"content-type": "application/json", **headers},
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=60) as response:  # noqa: S310 - operator URL
+        payload = response.read().decode("utf-8")
+        if response.status != 200:
+            raise RuntimeError(f"request failed with status {response.status}")
+        return {
+            "status": response.status,
+            "headers": dict(response.headers.items()),
+            "body": json.loads(payload),
+        }
+
+
+def _kubectl(namespace: str, *args: str) -> str:
+    result = subprocess.run(  # noqa: S603 - fixed executable and separated arguments
+        ["kubectl", "-n", namespace, *args],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout
+
+
+def _prefix_hits(metrics: str) -> float:
+    return sum(
+        float(match.group(1))
+        for line in metrics.splitlines()
+        if (match := PREFIX_HITS.match(line.strip()))
+    )
+
+
+def _json_events(log_text: str) -> list[dict[str, Any]]:
+    events = []
+    for line in log_text.splitlines():
+        start = line.find("{")
+        if start < 0:
+            continue
+        try:
+            value = json.loads(line[start:])
+        except json.JSONDecodeError:
+            continue
+        if isinstance(value, dict) and str(value.get("event", "")).startswith("kv_hop"):
+            events.append(value)
+    return events
+
+
+def _prompt(run_id: str, case: str) -> str:
+    marker = f"KV proof {run_id} {case}."
+    repeated = " The yellow taxi policy requires careful evidence and bounded analysis."
+    return marker + repeated * 500 + " Reply with OK."
+
+
+def _request_headers(case: str, request_id: str, worker: str, hop: str) -> dict[str, str]:
+    return {
+        "x-request-id": request_id,
+        "x-conversation-id": f"conv-{request_id}",
+        "x-agent-step": "1",
+        "x-prefix-id": f"prefix-{case}",
+        "x-force-worker": worker,
+        "x-kv-hop-mode": hop,
+        "x-kv-hop-case": case,
+        "x-admission-mode": "off",
+        "x-tenant-quota-mode": "off",
+        "x-deadline-ms": "30000",
+    }
+
+
+def _target_event(
+    case: str,
+    request_id: str,
+    events: list[dict[str, Any]],
+    response: dict[str, Any],
+    hit_delta: float,
+) -> dict[str, Any]:
+    matching = [
+        event
+        for event in events
+        if event.get("request_id") == request_id and event.get("event") == "kv_hop"
+    ]
+    if not matching:
+        raise RuntimeError(f"no final KV event for {case}")
+    event = dict(matching[-1])
+    if case != "real_mooncake_transfer_consumed":
+        if case != "cross_worker_recompute_transfer_disabled":
+            if hit_delta <= 0 or event.get("reusable_tokens", 0) <= 0:
+                raise RuntimeError(f"no isolated local-prefix hit evidence for {case}")
+            event.update(
+                source_worker_or_store=event["destination_worker"],
+                consumed=response["status"] == 200,
+                destination_consumed=response["status"] == 200,
+                evidence_scope="isolated_window",
+            )
+        else:
+            event["consumed"] = False
+    if event.get("destination_consumed") is True:
+        event["consumed"] = True
+    return event
+
+
+def run(args: argparse.Namespace) -> dict[str, Any]:
+    output = Path(args.output_dir).resolve()
+    output.mkdir(parents=True, exist_ok=False)
+    topology = json.loads(Path(args.topology_file).read_text())
+    versions = json.loads(Path(args.versions_file).read_text())
+    compatibility = CompatibilitySpec(
+        **{key: versions[key] for key in CompatibilitySpec.__dataclass_fields__}
+    )
+    versions = {**versions, "prefix_identity_version": "kv-prefix-identity-v1"}
+    run_id = args.run_id or datetime.now(UTC).strftime("kv-hop-%Y%m%dT%H%M%SZ")
+    started = datetime.now(UTC).isoformat().replace("+00:00", "Z")
+
+    for url in (args.worker_a_url, args.worker_b_url):
+        health = json.loads(_get(f"{url.rstrip('/')}/health"))
+        if health.get("status") not in {"ok", "healthy"}:
+            raise RuntimeError("both workers must be healthy before the smoke")
+
+    deployments = json.loads(
+        _kubectl(
+            args.namespace,
+            "get",
+            "deploy/inference-worker-a",
+            "deploy/inference-worker-b",
+            "deploy/mooncake",
+            "-o",
+            "json",
+        )
+    )
+    (output / "deployments.json").write_text(json.dumps(deployments, indent=2) + "\n")
+
+    records: dict[str, dict[str, Any]] = {}
+
+    def invoke(case: str, worker: str, hop: str, *, target: bool) -> str:
+        request_id = f"{run_id}-{case}-{'target' if target else uuid.uuid4().hex[:8]}"
+        worker_url = args.worker_a_url if worker == "worker_a" else args.worker_b_url
+        before = _get(f"{worker_url.rstrip('/')}/metrics")
+        response = _post(
+            f"{args.gateway_url.rstrip('/')}/v1/chat/completions",
+            {
+                "model": versions["model_id"],
+                "messages": [{"role": "user", "content": _prompt(run_id, case)}],
+                "temperature": 0,
+                "max_tokens": 1,
+                "stream": False,
+            },
+            _request_headers(case, request_id, worker, hop),
+        )
+        after = _get(f"{worker_url.rstrip('/')}/metrics")
+        record = {
+            "request_id": request_id,
+            "worker": worker,
+            "hop_mode": hop,
+            "response": response,
+            "prefix_cache_hits_before": _prefix_hits(before),
+            "prefix_cache_hits_after": _prefix_hits(after),
+        }
+        (output / f"{request_id}.json").write_text(json.dumps(record, indent=2) + "\n")
+        (output / f"{request_id}.metrics.before.prom").write_text(before)
+        (output / f"{request_id}.metrics.after.prom").write_text(after)
+        if target:
+            records[case] = record
+        return request_id
+
+    invoke(CASES[0], "worker_a", "off", target=False)
+    invoke(CASES[0], "worker_a", "off", target=True)
+    invoke(CASES[1], "worker_a", "off", target=False)
+    invoke(CASES[1], "worker_b", "off", target=True)
+    invoke(CASES[2], "worker_a", "off", target=False)
+    invoke(CASES[2], "worker_b", "off", target=False)
+    invoke(CASES[2], "worker_b", "off", target=True)
+    invoke(CASES[3], "worker_a", "off", target=False)
+    invoke(CASES[3], "worker_b", "on", target=True)
+
+    time.sleep(1)
+    logs = ""
+    for deployment in ("inference-worker-a", "inference-worker-b"):
+        text = _kubectl(
+            args.namespace,
+            "logs",
+            f"deployment/{deployment}",
+            "-c",
+            "vllm",
+            f"--since-time={started}",
+        )
+        (output / f"{deployment}.log").write_text(text)
+        logs += text + "\n"
+    parsed = _json_events(logs)
+    (output / "kv-events.json").write_text(json.dumps(parsed, indent=2) + "\n")
+
+    cases = []
+    for case in CASES:
+        record = records[case]
+        event = _target_event(
+            case,
+            record["request_id"],
+            parsed,
+            record["response"],
+            record["prefix_cache_hits_after"] - record["prefix_cache_hits_before"],
+        )
+        cases.append({"name": case, "events": [event]})
+
+    manifest = {
+        "run_id": run_id,
+        "started_at": started,
+        "topology": topology,
+        "versions": versions,
+        "compatibility_namespace": compatibility.namespace,
+        "control_isolation_statement": (
+            "Each case used a unique leading marker; each metrics window contained one target "
+            "request, and worker placement plus hop mode were forced by gated lab controls."
+        ),
+        "deployments_artifact": "deployments.json",
+    }
+    validation = validate_run(manifest, cases)
+    (output / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+    (output / "cases.json").write_text(json.dumps(cases, indent=2) + "\n")
+    (output / "validation.json").write_text(json.dumps(validation, indent=2) + "\n")
+    return validation
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--gateway-url", required=True)
+    parser.add_argument("--worker-a-url", required=True)
+    parser.add_argument("--worker-b-url", required=True)
+    parser.add_argument("--output-dir", required=True)
+    parser.add_argument("--topology-file", required=True)
+    parser.add_argument("--versions-file", required=True)
+    parser.add_argument("--namespace", default="inference-lab")
+    parser.add_argument("--run-id")
+    print(json.dumps(run(parser.parse_args()), indent=2))
+
+
+if __name__ == "__main__":
+    main()

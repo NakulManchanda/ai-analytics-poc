@@ -332,8 +332,6 @@ def test_future_scope_resources_are_not_present() -> None:
     assert BUNDLE.is_dir(), "infra/inference bundle must exist"
     forbidden_path_parts = {
         "keda",
-        "mooncake",
-        "lmcache",
         "open-webui",
         "ui",
     }

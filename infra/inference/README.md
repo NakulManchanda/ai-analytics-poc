@@ -224,6 +224,54 @@ rest of the inference test suite:
 uv run --project services/app pytest infra/inference/tests tests/inference -q
 ```
 
+### 7c. Opt-in real KV transfer (#133)
+
+The #133 path keeps the two HAMi workers and adds LMCache 0.3.9 inside the pinned vLLM 0.11.0
+image. Mooncake contributes a shared host-memory pool and transports blocks over TCP. The worker
+connector derives its cache namespace from exact rendered token IDs, immutable model/tokenizer
+revisions, the prompt contracts, dtypes, adapter namespace and vLLM block layout. Client labels
+never become cache keys.
+
+Build and push an immutable image tag, then render the bundle for review:
+
+```bash
+make inference-kv-image KV_IMAGE=registry.example/ai-inference-kv:0.11.0-lmcache0.3.9
+docker push registry.example/ai-inference-kv:0.11.0-lmcache0.3.9
+make inference-kv-render \
+  KV_IMAGE=registry.example/ai-inference-kv:0.11.0-lmcache0.3.9 \
+  CACHE_NAMESPACE=e5-20261008-01 \
+  TEMPLATE_VERSION=taxi-chat-v1 \
+  PREFIX_CONTRACT_VERSION=prefix-v1 \
+  OUT=work/kv-hop.yaml
+```
+
+The render command does not apply anything. Inspect `work/kv-hop.yaml`, sync it to the isolated
+host, and apply it only during an authorized GPU session. It enables forced placement and the
+bounded experiment headers for the four-case proof; restore the normal gateway manifest after
+the experiment. Mooncake remains a ClusterIP service and must not be exposed outside the lab.
+
+The proof runner requires explicit topology and version JSON files. Copy
+`mooncake/topology.example.json` and `mooncake/versions.example.json` into `work/`, replace every
+placeholder from the deployed cluster, and keep the cache namespace identical to the rendered
+bundle. Run it on a host where `kubectl` addresses the lab and the gateway plus both worker
+endpoints are reachable. After `make inference-sync`, the equivalent remote command is
+`python mooncake/smoke.py ...` from the synced `infra/inference` directory.
+
+```bash
+make inference-kv-smoke \
+  GATEWAY_URL=http://127.0.0.1:18080 \
+  WORKER_A_URL=http://127.0.0.1:18001 \
+  WORKER_B_URL=http://127.0.0.1:18002 \
+  TOPOLOGY=work/kv-topology.json \
+  VERSIONS=work/kv-versions.json \
+  OUT=metrics/inference/kv-hop-20261008-01
+```
+
+The runner retains deployment state, request metadata, raw pre/post metrics and worker logs. It
+passes only when it distinguishes same-worker reuse, cross-worker recompute with transfer off,
+an independently warmed destination hit, and a real Mooncake retrieval with positive tokens,
+bytes and post-forward destination consumption. A worker header or lower latency cannot pass.
+
 ### 8. Teardown
 When finished, tear down the remote cluster resources to stop GPU resource usage:
 ```bash
