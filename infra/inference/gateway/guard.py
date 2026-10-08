@@ -10,7 +10,8 @@ from dataclasses import dataclass
 MALFORMED_PAYLOAD = "malformed_payload"
 MISSING_MESSAGES = "missing_messages"
 PROMPT_TOO_LONG = "prompt_too_long"
-GUARD_REASONS = (MALFORMED_PAYLOAD, MISSING_MESSAGES, PROMPT_TOO_LONG)
+CONTEXT_TOO_LONG = "context_window_exceeded"
+GUARD_REASONS = (MALFORMED_PAYLOAD, MISSING_MESSAGES, PROMPT_TOO_LONG, CONTEXT_TOO_LONG)
 
 
 @dataclass(frozen=True)
@@ -21,17 +22,37 @@ class Guard:
 
     @property
     def http_status(self) -> int:
-        return 200 if self.ok else (413 if self.code == PROMPT_TOO_LONG else 400)
+        return 200 if self.ok else (413 if self.code in (PROMPT_TOO_LONG, CONTEXT_TOO_LONG) else 400)
 
 
 def estimate_prompt_tokens(payload: dict, header_value: str | None = None) -> int:
-    """Use the caller's x-estimated-prompt-tokens when valid, else ~4 chars/token."""
+    """~4 chars/token from the payload; a valid caller header can only raise the estimate.
+
+    The header is caller-controlled, so it must never lower the gateway's own estimate
+    (otherwise ``x-estimated-prompt-tokens: 0`` bypasses every limit built on this number).
+    """
+    own = len(json.dumps(payload.get("messages", []))) // 4
     try:
         if header_value is not None and int(header_value) >= 0:
-            return int(header_value)
+            return max(own, int(header_value))
     except ValueError:
         pass
-    return len(json.dumps(payload.get("messages", []))) // 4
+    return own
+
+
+def requested_completion_tokens(payload: dict) -> int:
+    """Completion budget the caller asked for (0 when absent or not a non-negative integer)."""
+    for key in ("max_completion_tokens", "max_tokens"):
+        value = payload.get(key)
+        if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+            return value
+    return 0
+
+
+def max_model_len() -> int | None:
+    """The engine's --max-model-len; None (unset or 0) disables the context-window check."""
+    value = int(os.getenv("MAX_MODEL_LEN", "0"))
+    return value or None
 
 
 def max_prompt_tokens() -> int:
@@ -43,6 +64,7 @@ def inspect(
     *,
     estimated_tokens_header: str | None = None,
     max_tokens: int | None = None,
+    model_len: int | None = None,
 ) -> Guard:
     if not isinstance(payload, dict):
         return Guard(False, MALFORMED_PAYLOAD, "payload must be a JSON object")
@@ -55,4 +77,12 @@ def inspect(
     tokens = estimate_prompt_tokens(payload, estimated_tokens_header)
     if tokens > limit:
         return Guard(False, PROMPT_TOO_LONG, f"estimated {tokens} tokens exceeds limit {limit}")
+    window = max_model_len() if model_len is None else model_len
+    completion = requested_completion_tokens(payload)
+    if window is not None and tokens + completion > window:
+        return Guard(
+            False,
+            CONTEXT_TOO_LONG,
+            f"estimated prompt {tokens} + max_tokens {completion} exceeds context window {window}",
+        )
     return Guard(True)
