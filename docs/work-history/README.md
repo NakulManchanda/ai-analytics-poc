@@ -82,3 +82,4 @@ Monotonically numbered log of every post-bootstrap task. Each entry records the 
 - [0084 — #123 cluster runs E0-E3: results, follow-up fixes, playbook prerequisites](0084-123-cluster-runs-e0-e3-results.md) — E0-E3 findings, open items, per-experiment prerequisites
 - [0085 — #133 real cross-worker KV transfer](0085-real-kv-transfer.md) — LMCache/Mooncake connector, lifecycle contract, HAMi bundle and four-case proof
 - [0086 — Gateway hardening, step 1](0086-inference-gateway-hardening-step1.md) — limits tied to engine flags, warm gate, guard context_window_exceeded, smoke warm-up and alternating legs
+- [0087 — Gateway hardening, step 2](0087-inference-gateway-hardening-step2.md) — returning-worker ramp, strict hardware evidence checks, verify-workers exit code

@@ -21,14 +21,18 @@ MSG = [{"role": "user", "content": "hello"}]
 class FakeClient:
     """Stands in for httpx.AsyncClient: scrapes and probes are scripted per test."""
 
-    def __init__(self, *, scrape_ok=True, probe_ok=True) -> None:
-        self.scrape_ok, self.probe_ok = scrape_ok, probe_ok
+    def __init__(self, *, scrape_ok=True, probe_ok=True, waiting=0) -> None:
+        self.scrape_ok, self.probe_ok, self.waiting = scrape_ok, probe_ok, waiting
         self.posts: list[dict] = []
 
     async def get(self, url, **_):
         if not self.scrape_ok:
             raise httpx.ConnectError("down")
-        return httpx.Response(200, text=PROM, request=httpx.Request("GET", url))
+        text = PROM.replace(
+            'num_requests_waiting{engine="0",model_name="Qwen/Qwen3-0.6B"} 0.0',
+            f'num_requests_waiting{{engine="0",model_name="Qwen/Qwen3-0.6B"}} {self.waiting}.0',
+        )
+        return httpx.Response(200, text=text, request=httpx.Request("GET", url))
 
     async def post(self, url, json=None, **_):
         self.posts.append({"url": url, "json": json})
@@ -217,3 +221,136 @@ def test_worker_receives_traffic_once_warm(cold_gw) -> None:
     with patch("httpx.AsyncClient.post", ok):
         resp = client.post("/serve", json={"messages": MSG})
     assert resp.status_code == 200
+
+
+# --- ramping a returning worker ------------------------------------------------------------
+
+
+class Clock:
+    def __init__(self) -> None:
+        self.now = 1000.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+def ramp_reg(clock: Clock, *, workers=("worker_a",), steps=(2, 4), step_s=30.0) -> Registry:
+    return Registry(
+        [Worker(w, f"http://{w}:8000") for w in workers],
+        require_warm=True,
+        warm_min_scrapes=1,
+        ramp_steps=steps,
+        ramp_step_s=step_s,
+        clock=clock,
+    )
+
+
+async def make_warm(r: Registry, client: FakeClient) -> None:
+    await r.refresh(client)
+    await settle(r)
+
+
+async def go_cold_then_warm(r: Registry, client: FakeClient) -> None:
+    client.scrape_ok = False
+    await r.refresh(client)
+    client.scrape_ok = True
+    await make_warm(r, client)
+
+
+@sync
+async def test_first_warm_up_is_not_ramped() -> None:
+    clock = Clock()
+    r, client = ramp_reg(clock), FakeClient()
+    await make_warm(r, client)
+    snap = r.snapshots["worker_a"]
+    assert snap.warm and snap.warm_count == 1 and snap.ramp_cap is None
+
+
+@sync
+async def test_returning_worker_starts_under_a_cap() -> None:
+    clock = Clock()
+    r, client = ramp_reg(clock), FakeClient()
+    await make_warm(r, client)
+    await go_cold_then_warm(r, client)
+    snap = r.snapshots["worker_a"]
+    assert snap.warm_count == 2 and snap.ramp_cap == 2
+
+
+@sync
+async def test_cap_rises_in_steps_then_lifts() -> None:
+    clock = Clock()
+    r, client = ramp_reg(clock, step_s=30), FakeClient()
+    await make_warm(r, client)
+    await go_cold_then_warm(r, client)
+    snap = r.snapshots["worker_a"]
+    clock.now += 29
+    await r.refresh(client)
+    assert snap.ramp_cap == 2  # not due yet
+    clock.now += 2
+    await r.refresh(client)
+    assert snap.ramp_cap == 4
+    clock.now += 31
+    await r.refresh(client)
+    assert snap.ramp_cap is None
+
+
+@sync
+async def test_cap_holds_while_the_worker_has_waiting_requests() -> None:
+    clock = Clock()
+    r, client = ramp_reg(clock, step_s=30), FakeClient()
+    await make_warm(r, client)
+    await go_cold_then_warm(r, client)
+    snap = r.snapshots["worker_a"]
+    client.waiting = 3
+    clock.now += 31
+    await r.refresh(client)
+    assert snap.ramp_cap == 2  # held: under pressure
+    client.waiting = 0
+    clock.now += 31
+    await r.refresh(client)
+    assert snap.ramp_cap == 4
+
+
+@sync
+async def test_failed_scrape_clears_the_ramp() -> None:
+    clock = Clock()
+    r, client = ramp_reg(clock), FakeClient()
+    await make_warm(r, client)
+    await go_cold_then_warm(r, client)
+    client.scrape_ok = False
+    await r.refresh(client)
+    assert r.snapshots["worker_a"].ramp_cap is None
+
+
+@sync
+async def test_capped_worker_is_skipped_only_while_another_worker_is_open() -> None:
+    clock = Clock()
+    r = ramp_reg(clock, workers=("worker_a", "worker_b"))
+    client = FakeClient()
+    await make_warm(r, client)
+    a, b = r.snapshots["worker_a"], r.snapshots["worker_b"]
+    a.ramp_cap, a.inflight, a.queued = 2, 1, 1  # capped out
+    assert r.serving_snapshots() == [b]
+    a.inflight = 0  # room under the cap
+    assert sorted(x.id for x in r.serving_snapshots()) == ["worker_a", "worker_b"]
+    a.inflight = 2
+    b.ramp_cap, b.inflight = 2, 2  # everyone capped out: ignore the caps, do not shed
+    assert sorted(x.id for x in r.serving_snapshots()) == ["worker_a", "worker_b"]
+
+
+@sync
+async def test_no_ramp_without_steps() -> None:
+    clock = Clock()
+    r, client = ramp_reg(clock, steps=()), FakeClient()
+    await make_warm(r, client)
+    await go_cold_then_warm(r, client)
+    assert r.snapshots["worker_a"].ramp_cap is None
+
+
+def test_build_registry_reads_ramp_env(monkeypatch) -> None:
+    monkeypatch.setenv("WARM_RAMP_STEPS", "2, 4")
+    monkeypatch.setenv("WARM_RAMP_STEP_S", "10")
+    r = build_registry()
+    assert (r.ramp_steps, r.ramp_step_s) == ((2, 4), 10.0)
+    monkeypatch.delenv("WARM_RAMP_STEPS")
+    assert build_registry().ramp_steps == ()

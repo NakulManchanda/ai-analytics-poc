@@ -5,7 +5,9 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -81,6 +83,41 @@ def write_run_manifest(output_dir: str | Path, manifest: Mapping[str, Any]) -> P
     return destination
 
 
+_MIB = 1024 * 1024
+
+
+def _has_sample(text: str, metric: str) -> bool:
+    """True when the Prometheus text carries at least one finite numeric sample of ``metric``.
+
+    Header-only text (# HELP / # TYPE lines) or the name appearing in a comment is not a
+    measurement. Stdlib only: this module also runs where prometheus_client is not installed.
+    """
+    pattern = re.compile(rf"^{re.escape(metric)}(?:\{{[^}}]*\}})?\s+(\S+)(?:\s+-?\d+)?\s*$")
+    for line in text.splitlines():
+        if line.startswith("#"):
+            continue
+        match = pattern.match(line.strip())
+        if match:
+            try:
+                if math.isfinite(float(match.group(1))):
+                    return True
+            except ValueError:
+                continue
+    return False
+
+
+def _gpu_csv_row(path: Path) -> tuple[str, int]:
+    """(GPU name, total memory in bytes) from an nvidia-smi CSV; ValueError if unusable."""
+    try:
+        rows = [line for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+        name, total = (part.strip() for part in rows[1].split(",")[:2])
+        if not name or "MiB" not in total:
+            raise ValueError("unexpected columns")
+        return name, int(total.replace("MiB", "").strip()) * _MIB
+    except (OSError, IndexError, ValueError) as exc:
+        raise ValueError(f"{path.name} is not a valid nvidia-smi CSV") from exc
+
+
 def _compute_bundle_digest(bundle_dir: Path) -> str:
     hasher = hashlib.sha256()
     for p in sorted(bundle_dir.rglob("*")):
@@ -99,82 +136,69 @@ def build_run_manifest(
     physical_hbm_bytes: int | None = None,
     concurrency: int = 8,
     context_lengths: tuple[int, ...] | list[int] = (512, 2048, 8192),
+    slice_fraction: float = 0.5,
+    slice_tolerance: float = 0.15,
 ) -> dict[str, Any]:
-    """Build a complete, validated manifest payload with explicit provenance."""
+    """Build a complete, validated manifest payload with explicit provenance.
+
+    Hardware comes from the pulled nvidia-smi CSVs, or from an explicit ``gpu_name`` and
+    ``physical_hbm_bytes`` (recorded as ``source: declared``); otherwise this raises.
+    """
     out_dir = Path(output_dir)
 
     sha = commit_sha
     if not sha:
         try:
-            sha = subprocess.check_output(
-                ["git", "rev-parse", "HEAD"], text=True
-            ).strip()
-        except Exception:
-            sha = os.environ.get("GIT_COMMIT_SHA", "0123456789abcdef0123456789abcdef01234567")
+            sha = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+        except (OSError, subprocess.CalledProcessError):
+            sha = os.environ.get("GIT_COMMIT_SHA", "")
+    if not sha:
+        raise ValueError("commit SHA unavailable: run inside the repository or set GIT_COMMIT_SHA")
 
-    gpu = gpu_name or "NVIDIA A100-SXM4-40GB"
-    hbm = physical_hbm_bytes or 42_949_672_960
-    csv_path = out_dir / "hardware" / "nvidia-smi.csv"
-    if csv_path.is_file():
-        try:
-            lines = csv_path.read_text(encoding="utf-8").strip().splitlines()
-            if len(lines) > 1:
-                parts = [p.strip() for p in lines[1].split(",")]
-                if parts and parts[0]:
-                    gpu = parts[0]
-                if len(parts) > 1 and "MiB" in parts[1]:
-                    mb = int(parts[1].replace("MiB", "").strip())
-                    hbm = mb * 1024 * 1024
-        except Exception:
-            pass
-
-    # Extract inside-pod measured GPU and visible memory for each worker
-    workers_hardware: dict[str, Any] = {}
-    pod_a_hbm = None
-    pod_a_csv = out_dir / "hardware" / "pod-worker-a-nvidia-smi.csv"
-    if pod_a_csv.is_file():
-        try:
-            for line in pod_a_csv.read_text(encoding="utf-8").strip().splitlines():
-                if "MiB" in line and not line.lower().startswith("name"):
-                    parts = [p.strip() for p in line.split(",")]
-                    if len(parts) >= 2:
-                        gpu = parts[0]
-                        pod_a_hbm = int(parts[1].replace("MiB", "").strip()) * 1024 * 1024
-                        workers_hardware["inference-worker-a"] = {
-                            "gpu": parts[0],
-                            "pod_visible_hbm_bytes": pod_a_hbm,
-                        }
-                        break
-        except Exception:
-            pass
-
-    pod_b_csv = out_dir / "hardware" / "pod-worker-b-nvidia-smi.csv"
-    if pod_b_csv.is_file():
-        try:
-            for line in pod_b_csv.read_text(encoding="utf-8").strip().splitlines():
-                if "MiB" in line and not line.lower().startswith("name"):
-                    parts = [p.strip() for p in line.split(",")]
-                    if len(parts) >= 2:
-                        b_hbm = int(parts[1].replace("MiB", "").strip()) * 1024 * 1024
-                        workers_hardware["inference-worker-b"] = {
-                            "gpu": parts[0],
-                            "pod_visible_hbm_bytes": b_hbm,
-                        }
-                        break
-        except Exception:
-            pass
-
-    if (out_dir / "hardware").is_dir() and (
-        pod_a_hbm is None or "inference-worker-b" not in workers_hardware
-    ):
+    # Hardware must be measured (nvidia-smi CSVs) or explicitly declared; never silently assumed.
+    hardware_dir = out_dir / "hardware"
+    host_csv = hardware_dir / "nvidia-smi.csv"
+    if host_csv.is_file():
+        gpu, hbm = _gpu_csv_row(host_csv)
+        hardware_source = "nvidia-smi"
+    elif gpu_name and physical_hbm_bytes:
+        gpu, hbm, hardware_source = gpu_name, physical_hbm_bytes, "declared"
+    else:
         raise ValueError(
-            "Hardware evidence directory is present but missing valid inside-pod "
-            "nvidia-smi measurements for both workers"
+            "hardware evidence missing: need hardware/nvidia-smi.csv or an explicit "
+            "gpu_name and physical_hbm_bytes"
         )
-    fallback_hbm = (
-        physical_hbm_bytes // 2 if physical_hbm_bytes else hbm // 2
+    if "nvidia" not in gpu.lower():
+        raise ValueError(f"GPU '{gpu}' is not an NVIDIA device")
+
+    # Inside-pod view of each worker's slice.
+    workers_hardware: dict[str, Any] = {}
+    for worker, csv_name in (
+        ("inference-worker-a", "pod-worker-a-nvidia-smi.csv"),
+        ("inference-worker-b", "pod-worker-b-nvidia-smi.csv"),
+    ):
+        pod_csv = hardware_dir / csv_name
+        if pod_csv.is_file():
+            pod_gpu, pod_bytes = _gpu_csv_row(pod_csv)
+            expected = hbm * slice_fraction
+            if abs(pod_bytes - expected) > slice_tolerance * expected:
+                raise ValueError(
+                    f"{worker} sees {pod_bytes // _MIB} MiB, expected about "
+                    f"{int(expected) // _MIB} MiB (slice fraction {slice_fraction})"
+                )
+            workers_hardware[worker] = {"gpu": pod_gpu, "pod_visible_hbm_bytes": pod_bytes}
+    if hardware_source == "nvidia-smi" and set(workers_hardware) != {
+        "inference-worker-a",
+        "inference-worker-b",
+    }:
+        raise ValueError(
+            "hardware evidence is missing valid inside-pod nvidia-smi measurements for both workers"
+        )
+    pod_hbm = (
+        workers_hardware["inference-worker-a"]["pod_visible_hbm_bytes"]
+        if workers_hardware
+        else int(hbm * slice_fraction)
     )
-    pod_hbm = pod_a_hbm if pod_a_hbm is not None else fallback_hbm
 
     # Extract dynamic workload dimensions from executed capacity summary if available
     cap_summary_path = out_dir / "capacity_summary.json"
@@ -300,6 +324,7 @@ def build_run_manifest(
             break
 
     hardware_payload: dict[str, Any] = {
+        "source": hardware_source,
         "gpu": gpu,
         "physical_hbm_bytes": hbm,
         "pod_visible_hbm_bytes": pod_hbm,
@@ -385,30 +410,22 @@ def validate_evidence_integrity(output_dir: Path, manifest: Mapping[str, Any]) -
                     f"Scrape '{s_name}' does not contain Prometheus metric definitions"
                 )
 
-    # Validate Prometheus vLLM metrics for worker a and b
+    # Both workers' vLLM scrapes and the DCGM scrape are required and must carry the real
+    # metric families (a Python client metric such as python_gc_* proves nothing about vLLM).
     for p_name in ("prometheus/vllm-worker-a.prom", "prometheus/vllm-worker-b.prom"):
         p_path = output_dir / p_name
-        if p_path.is_file():
-            p_text = p_path.read_text(encoding="utf-8")
-            if not any(
-                k in p_text
-                for k in (
-                    "vllm:num_requests_running",
-                    "vllm:kv_cache_usage_perc",
-                    "vllm:prompt_tokens_total",
-                    "python_gc_objects_collected_total",
-                )
-            ):
-                raise ValueError(
-                    f"Scrape '{p_name}' does not contain expected vLLM metric families"
-                )
+        if not p_path.is_file():
+            raise ValueError(f"Scrape '{p_name}' is missing")
+        if not _has_sample(p_path.read_text(encoding="utf-8"), "vllm:num_requests_running"):
+            raise ValueError(
+                f"Scrape '{p_name}' has no numeric sample for vllm:num_requests_running"
+            )
 
-    # Validate Prometheus DCGM metrics
     dcgm_path = output_dir / "prometheus" / "dcgm.prom"
-    if dcgm_path.is_file():
-        dcgm_text = dcgm_path.read_text(encoding="utf-8")
-        if "DCGM_FI_DEV_GPU_UTIL" not in dcgm_text and "DCGM_" not in dcgm_text:
-            raise ValueError("dcgm.prom does not contain expected DCGM metric families")
+    if not dcgm_path.is_file():
+        raise ValueError("prometheus/dcgm.prom is missing")
+    if not _has_sample(dcgm_path.read_text(encoding="utf-8"), "DCGM_FI_DEV_FB_USED"):
+        raise ValueError("dcgm.prom has no numeric sample for DCGM_FI_DEV_FB_USED")
 
     # Validate Kubernetes resource files
     for k8s_name in ("pods.json", "deployments.json", "services.json"):
@@ -438,16 +455,18 @@ def validate_evidence_integrity(output_dir: Path, manifest: Mapping[str, Any]) -
                         "kubectl/deployments.json must contain both worker deployments"
                     )
 
-    # Validate inside-pod GPU hardware files for both workers
-    for pod_csv_name in (
-        "hardware/pod-worker-a-nvidia-smi.csv",
-        "hardware/pod-worker-b-nvidia-smi.csv",
-    ):
-        pod_csv = output_dir / pod_csv_name
-        if pod_csv.is_file():
-            csv_text = pod_csv.read_text(encoding="utf-8")
-            if "MiB" not in csv_text:
-                raise ValueError(f"{pod_csv_name} does not contain valid GPU memory info")
+    # Measured runs must carry the inside-pod nvidia-smi view of both workers.
+    if manifest.get("hardware", {}).get("source") == "nvidia-smi":
+        for pod_csv_name in (
+            "hardware/pod-worker-a-nvidia-smi.csv",
+            "hardware/pod-worker-b-nvidia-smi.csv",
+        ):
+            pod_csv = output_dir / pod_csv_name
+            if not pod_csv.is_file():
+                raise ValueError(f"{pod_csv_name} is missing")
+            pod_gpu, _bytes = _gpu_csv_row(pod_csv)
+            if "nvidia" not in pod_gpu.lower():
+                raise ValueError(f"{pod_csv_name} does not name an NVIDIA GPU")
 
     # Validate worker logs
     for log_name in ("worker-a.log", "worker-b.log"):
