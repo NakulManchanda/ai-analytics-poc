@@ -152,6 +152,11 @@ def _prompt(run_id: str, case: str, prefix_size: str = "4k") -> str:
     return marker + REPEATED_SENTENCE * reps + suffix
 
 
+def _leg_order(index: int) -> str:
+    """Alternate which comparison leg runs first so order effects do not favour one side."""
+    return "recompute_first" if index % 2 == 0 else "transfer_first"
+
+
 def _request_headers(case: str, request_id: str, worker: str, hop: str) -> dict[str, str]:
     return {
         "x-request-id": request_id,
@@ -232,7 +237,9 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     prefix_sizes = getattr(args, "prefix_sizes", None) or [getattr(args, "prefix_size", "4k")]
     records: dict[str, dict[str, Any]] = {}
 
-    def invoke(case: str, worker: str, hop: str, *, target: bool, size: str = "4k") -> str:
+    def invoke(
+        case: str, worker: str, hop: str, *, target: bool, size: str = "4k"
+    ) -> dict[str, Any]:
         tag = f"{case}-{size}" if len(prefix_sizes) > 1 else case
         request_id = f"{run_id}-{tag}-{'target' if target else uuid.uuid4().hex[:8]}"
         worker_url = args.worker_a_url if worker == "worker_a" else args.worker_b_url
@@ -269,18 +276,50 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         (output / f"{request_id}.metrics.after.prom").write_text(after)
         if target:
             records[tag] = record
-        return request_id
+        return record
 
-    for size in prefix_sizes:
+    # Warm both workers first so the recompute leg is not the first request a fresh engine sees.
+    # The first request's TTFT is kept as the cold figure; later ones are the warmed figures.
+    warmup_requests = getattr(args, "warmup_requests", 3)
+    warmup: dict[str, Any] = {}
+    for worker in ("worker_a", "worker_b"):
+        ttfts = [
+            invoke(
+                f"warmup-{worker}-{i}",
+                worker,
+                "off",
+                target=False,
+                size=prefix_sizes[i % len(prefix_sizes)],
+            )["ttft_ms"]
+            for i in range(warmup_requests)
+        ]
+        if ttfts:
+            warmup[worker] = {
+                "requests": warmup_requests,
+                "first_request_ttft_ms": ttfts[0],
+                "warm_ttft_ms": ttfts[1:],
+            }
+
+    leg_orders: dict[str, str] = {}
+    for index, size in enumerate(prefix_sizes):
+        leg_orders[size] = _leg_order(index)
+
+        def recompute_leg(size: str = size) -> None:
+            invoke(CASES[1], "worker_a", "off", target=False, size=size)
+            invoke(CASES[1], "worker_b", "off", target=True, size=size)
+
+        def transfer_leg(size: str = size) -> None:
+            invoke(CASES[3], "worker_a", "off", target=False, size=size)
+            invoke(CASES[3], "worker_b", "on", target=True, size=size)
+
         invoke(CASES[0], "worker_a", "off", target=False, size=size)
         invoke(CASES[0], "worker_a", "off", target=True, size=size)
-        invoke(CASES[1], "worker_a", "off", target=False, size=size)
-        invoke(CASES[1], "worker_b", "off", target=True, size=size)
+        legs = (recompute_leg, transfer_leg)
+        for leg in legs if leg_orders[size] == "recompute_first" else reversed(legs):
+            leg()
         invoke(CASES[2], "worker_a", "off", target=False, size=size)
         invoke(CASES[2], "worker_b", "off", target=False, size=size)
         invoke(CASES[2], "worker_b", "off", target=True, size=size)
-        invoke(CASES[3], "worker_a", "off", target=False, size=size)
-        invoke(CASES[3], "worker_b", "on", target=True, size=size)
 
     time.sleep(1)
     logs = ""
@@ -332,6 +371,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         )
         crossover[size] = {
             "size_label": size,
+            "leg_order": leg_orders[size],
             "target_tokens": E5_PREFIX_SIZES.get(size, 4096),
             "actual_reusable_tokens": transfer_event.get("reusable_tokens"),
             "transferred_tokens": transfer_event.get("transferred_tokens"),
@@ -359,6 +399,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "versions": versions,
         "compatibility_namespace": compatibility.namespace,
         "prefix_sizes": prefix_sizes,
+        "warmup": warmup,
+        "leg_order_policy": "recompute_first on even size index, transfer_first on odd",
         "target_prefix_tokens": {s: E5_PREFIX_SIZES[s] for s in prefix_sizes},
         "control_isolation_statement": (
             "Each case used a unique leading marker; each metrics window contained one target "
@@ -394,6 +436,12 @@ def main() -> None:
         nargs="+",
         choices=list(E5_PREFIX_SIZES.keys()),
         help="Evaluate multiple E5 prefix sizes (1k, 2k, 4k, 7k) for crossover analysis",
+    )
+    parser.add_argument(
+        "--warmup-requests",
+        type=int,
+        default=3,
+        help="Warm-up requests per worker before measuring (0 disables); first = cold TTFT",
     )
     parser.add_argument("--run-id")
     print(json.dumps(run(parser.parse_args()), indent=2))

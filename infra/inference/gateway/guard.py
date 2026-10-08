@@ -22,7 +22,9 @@ class Guard:
 
     @property
     def http_status(self) -> int:
-        return 200 if self.ok else (413 if self.code in (PROMPT_TOO_LONG, CONTEXT_TOO_LONG) else 400)
+        if self.ok:
+            return 200
+        return 413 if self.code in (PROMPT_TOO_LONG, CONTEXT_TOO_LONG) else 400
 
 
 def estimate_prompt_tokens(payload: dict, header_value: str | None = None) -> int:

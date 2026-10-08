@@ -47,7 +47,7 @@ SNAPSHOT_AGE = Gauge(
 )
 WORKER_WARM = Gauge(
     "worker_warm",
-    "1 once the worker passed the warm gate (N healthy scrapes + a probe request); healthy but cold = 0",
+    "1 once the worker passed the warm gate (healthy scrapes + a probe); healthy but cold = 0",
     ["worker"],
     registry=REGISTRY,
 )

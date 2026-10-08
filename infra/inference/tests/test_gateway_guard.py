@@ -1,4 +1,4 @@
-"""Guard tests: caller headers cannot lower the estimate; prompt + max_tokens must fit the window."""
+"""Guard tests: a caller header cannot lower the estimate; prompt + max_tokens must fit."""
 
 import pytest
 

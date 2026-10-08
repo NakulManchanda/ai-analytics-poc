@@ -191,7 +191,7 @@ def _worker_arg(doc: dict[str, Any], flag: str) -> str:
 
 
 def test_gateway_limits_match_worker_engine_flags() -> None:
-    """Admission, queue and guard limits must be derived from the engine, not left at code defaults."""
+    """Admission, queue and guard limits come from the engine flags, not from code defaults."""
     deployments = {doc["metadata"]["name"]: doc for _p, doc in _find_kind("Deployment")}
     gateway_env = _container_env(deployments["inference-gateway"])
     for worker in ("inference-worker-a", "inference-worker-b"):
