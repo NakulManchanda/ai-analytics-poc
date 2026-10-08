@@ -11,7 +11,8 @@ from infra.inference.experiments.evidence import build_run_manifest, validate_ev
 
 HOST = "name, memory.total [MiB], memory.used [MiB]\nNVIDIA A100-SXM4-40GB, 40960 MiB, 1 MiB\n"
 POD = "name, memory.total [MiB], memory.used [MiB]\nNVIDIA A100-SXM4-40GB, 20480 MiB, 1 MiB\n"
-VLLM = "# HELP vllm:num_requests_running r\n# TYPE vllm:num_requests_running gauge\n"
+VLLM_HEADER = "# HELP vllm:num_requests_running r\n# TYPE vllm:num_requests_running gauge\n"
+VLLM = VLLM_HEADER + 'vllm:num_requests_running{engine="0",model_name="m"} 0.0\n'
 DCGM = "# HELP DCGM_FI_DEV_FB_USED fb\n# TYPE DCGM_FI_DEV_FB_USED gauge\nDCGM_FI_DEV_FB_USED 1\n"
 
 
@@ -121,3 +122,45 @@ def test_dcgm_scrape_must_carry_framebuffer_used(run_dir: Path) -> None:
     write(run_dir / "prometheus" / "dcgm.prom", "# HELP DCGM_FI_DEV_GPU_UTIL u\n# TYPE x gauge\n")
     with pytest.raises(ValueError, match="DCGM_FI_DEV_FB_USED"):
         validate_evidence_integrity(run_dir, manifest(run_dir))
+
+
+def test_header_only_vllm_scrape_is_not_a_measurement(run_dir: Path) -> None:
+    write(run_dir / "prometheus" / "vllm-worker-a.prom", VLLM_HEADER)
+    with pytest.raises(ValueError, match="no numeric sample for vllm:num_requests_running"):
+        validate_evidence_integrity(run_dir, manifest(run_dir))
+
+
+def test_header_only_dcgm_scrape_is_not_a_measurement(run_dir: Path) -> None:
+    write(
+        run_dir / "prometheus" / "dcgm.prom",
+        "# HELP DCGM_FI_DEV_FB_USED fb\n# TYPE DCGM_FI_DEV_FB_USED gauge\n",
+    )
+    with pytest.raises(ValueError, match="no numeric sample for DCGM_FI_DEV_FB_USED"):
+        validate_evidence_integrity(run_dir, manifest(run_dir))
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "# vllm:num_requests_running 3\n",  # the name in a comment
+        "vllm:num_requests_running NaN\n",
+        "vllm:num_requests_running +Inf\n",
+        "vllm:num_requests_running_total 3\n",  # a different metric
+        'vllm:num_requests_running{engine="0"} notanumber\n',
+        "",
+    ],
+)
+def test_samples_must_be_finite_numbers_of_exactly_that_metric(text: str) -> None:
+    assert not evidence._has_sample(text, "vllm:num_requests_running")
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "vllm:num_requests_running 0\n",
+        'vllm:num_requests_running{engine="0",model_name="m"} 2.0\n',
+        'vllm:num_requests_running{engine="0"} 1.5e0 1760000000000\n',
+    ],
+)
+def test_real_samples_are_accepted(text: str) -> None:
+    assert evidence._has_sample(text, "vllm:num_requests_running")

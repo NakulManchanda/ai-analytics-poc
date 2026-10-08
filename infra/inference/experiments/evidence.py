@@ -5,7 +5,9 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -82,6 +84,26 @@ def write_run_manifest(output_dir: str | Path, manifest: Mapping[str, Any]) -> P
 
 
 _MIB = 1024 * 1024
+
+
+def _has_sample(text: str, metric: str) -> bool:
+    """True when the Prometheus text carries at least one finite numeric sample of ``metric``.
+
+    Header-only text (# HELP / # TYPE lines) or the name appearing in a comment is not a
+    measurement. Stdlib only: this module also runs where prometheus_client is not installed.
+    """
+    pattern = re.compile(rf"^{re.escape(metric)}(?:\{{[^}}]*\}})?\s+(\S+)(?:\s+-?\d+)?\s*$")
+    for line in text.splitlines():
+        if line.startswith("#"):
+            continue
+        match = pattern.match(line.strip())
+        if match:
+            try:
+                if math.isfinite(float(match.group(1))):
+                    return True
+            except ValueError:
+                continue
+    return False
 
 
 def _gpu_csv_row(path: Path) -> tuple[str, int]:
@@ -394,14 +416,16 @@ def validate_evidence_integrity(output_dir: Path, manifest: Mapping[str, Any]) -
         p_path = output_dir / p_name
         if not p_path.is_file():
             raise ValueError(f"Scrape '{p_name}' is missing")
-        if "vllm:num_requests_running" not in p_path.read_text(encoding="utf-8"):
-            raise ValueError(f"Scrape '{p_name}' does not contain vllm:num_requests_running")
+        if not _has_sample(p_path.read_text(encoding="utf-8"), "vllm:num_requests_running"):
+            raise ValueError(
+                f"Scrape '{p_name}' has no numeric sample for vllm:num_requests_running"
+            )
 
     dcgm_path = output_dir / "prometheus" / "dcgm.prom"
     if not dcgm_path.is_file():
         raise ValueError("prometheus/dcgm.prom is missing")
-    if "DCGM_FI_DEV_FB_USED" not in dcgm_path.read_text(encoding="utf-8"):
-        raise ValueError("dcgm.prom does not contain DCGM_FI_DEV_FB_USED")
+    if not _has_sample(dcgm_path.read_text(encoding="utf-8"), "DCGM_FI_DEV_FB_USED"):
+        raise ValueError("dcgm.prom has no numeric sample for DCGM_FI_DEV_FB_USED")
 
     # Validate Kubernetes resource files
     for k8s_name in ("pods.json", "deployments.json", "services.json"):
