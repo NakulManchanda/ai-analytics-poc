@@ -11,7 +11,7 @@ OBSERVABILITY_BURST_COUNT ?= 10
 OBSERVABILITY_LOG_TAIL ?= 200
 KV_BUNDLE_OUT = $(or $(OUT),work/kv-hop.yaml)
 
-.PHONY: help check-bootstrap dev app-serve-dev mcp-dev mcp-smoke dataset-test dataset-smoke smoke test mcp-test infra-test web-test compose-smoke observability-up observability-down observability-smoke observability-dev-up observability-dev-info observability-dev-ask observability-dev-burst observability-dev-metrics observability-dev-logs observability-dev-down local-aws-compose local-aws-refresh local-serve-compose local-serve-refresh local-bedrock-compose bedrock-smoke m5-bedrock-smoke m6-bedrock-smoke dashboard tf-dispatch tf-resume tf-park inference-validate inference-sync inference-config inference-secret inference-bootstrap inference-deploy inference-up inference-tunnel inference-connect inference-smoke inference-warmup inference-capacity inference-restart inference-gateway-restart inference-controls-on inference-controls-off inference-verify-workers inference-e1 inference-fresh-up inference-tmux-start inference-tmux-end inference-serve-smoke inference-run inference-pull-evidence inference-pull-range inference-kv-image inference-kv-render inference-kv-smoke evidence-analyze evidence-notebook inference-teardown replay-fanout replay-multi-turn replay-compare-strategies replay-strategy-manual replay-strategy-crewai replay-e3-least-loaded replay-e3-prefix-then-load replay-e4-admission-on replay-e4-admission-off replay-e3-large-prefix-least-loaded replay-e3-large-prefix-prefix-then-load replay-e5 trace-request
+.PHONY: help check-bootstrap dev app-serve-dev mcp-dev mcp-smoke dataset-test dataset-smoke smoke test mcp-test infra-test web-test compose-smoke observability-up observability-down observability-smoke observability-dev-up observability-dev-info observability-dev-ask observability-dev-burst observability-dev-metrics observability-dev-logs observability-dev-down local-aws-compose local-aws-refresh local-serve-compose local-serve-refresh local-bedrock-compose bedrock-smoke m5-bedrock-smoke m6-bedrock-smoke dashboard tf-dispatch tf-resume tf-park inference-validate inference-sync inference-config inference-secret inference-bootstrap inference-deploy inference-up inference-tunnel inference-connect inference-smoke inference-warmup inference-capacity inference-restart inference-gateway-restart inference-controls-on inference-controls-off inference-verify-workers inference-e1 inference-fresh-up inference-tmux-start inference-tmux-end inference-serve-smoke inference-run inference-pull-evidence inference-pull-range inference-kv-image inference-kv-render inference-kv-smoke evidence-analyze evidence-notebook evidence-notebook-open inference-teardown replay-fanout replay-multi-turn replay-compare-strategies replay-strategy-manual replay-strategy-crewai replay-e3-least-loaded replay-e3-prefix-then-load replay-e4-admission-on replay-e4-admission-off replay-e3-large-prefix-least-loaded replay-e3-large-prefix-prefix-then-load replay-e5 trace-request
 
 
 help: ## Show available commands
@@ -157,8 +157,10 @@ inference-pull-range: ## Export Prometheus range series for the memory proof (us
 evidence-analyze: ## Text summary of pulled run dirs (usage: make evidence-analyze RUN="metrics/inference/<id>/<run_dir> ..." [RANGE=metrics/inference/<id>/prometheus_range])
 	uv run --project services/app python -m experiments.analysis $(RUN) $(if $(RANGE),--range $(RANGE))
 
-evidence-notebook: ## Regenerate experiments/123_evidence.ipynb from its generator and open Jupyter
-	uv run --project experiments python experiments/build_notebook.py
+evidence-notebook: ## Regenerate clean notebook; render evidence with RUNS_JSON=path WRITEUP_DIR=path HTML=path
+	uv run --project experiments python experiments/build_notebook.py $(if $(RUNS_JSON),--runs-json "$(RUNS_JSON)") $(if $(WRITEUP_DIR),--writeup-dir "$(WRITEUP_DIR)") $(if $(HTML),--html "$(HTML)")
+
+evidence-notebook-open: ## Open the evidence notebook in Jupyter Lab
 	uv run --project experiments jupyter lab experiments/123_evidence.ipynb
 
 inference-teardown: ## Remove only issue-owned inference resources

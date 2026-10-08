@@ -83,3 +83,31 @@ def test_notebook_executes_offline_against_fixtures() -> None:
         "flat_at_max",
     ):
         assert needle in out
+
+
+def test_export_embeds_charts_tables_and_writeup(tmp_path: Path) -> None:
+    import pytest
+
+    pytest.importorskip("nbclient")
+    pytest.importorskip("nbconvert")
+    pytest.importorskip("matplotlib")
+    config = tmp_path / "runs.json"
+    config.write_text(json.dumps({"E0_SWEEP": str(FIX / "sweep_run")}))
+    (tmp_path / "e0.md").write_text("# Session interpretation\n\nA measured result with caveats.")
+    html = tmp_path / "report.html"
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "experiments/build_notebook.py"),
+         "--runs-json", str(config), "--writeup-dir", str(tmp_path), "--html", str(html)],
+        cwd=ROOT, text=True, capture_output=True,
+    )
+    assert result.returncode == 0, result.stderr
+    report = html.read_text()
+    assert "data:image/png;base64," in report
+    assert "<table>" in report
+    assert "Session interpretation" in report
+    nb = json.loads(html.with_suffix(".ipynb").read_text())
+    outputs = [o for c in nb["cells"] for o in c.get("outputs", [])]
+    assert not any(o["output_type"] == "error" for o in outputs)
+    assert any("image/png" in o.get("data", {}) for o in outputs)
+    assert all(c["outputs"] == [] for c in json.loads(NB.read_text())["cells"]
+               if c["cell_type"] == "code")
