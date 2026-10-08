@@ -142,8 +142,6 @@ def test_hami_worker_slices_spec_is_present() -> None:
 def test_future_scope_resources_are_not_present() -> None:
     forbidden_path_parts = {
         "keda",
-        "mooncake",
-        "lmcache",
         "open-webui",
         "ui",
     }

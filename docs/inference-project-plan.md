@@ -15,7 +15,10 @@ NYC Taxi Analytics Agent on a GPU-Aware Inference Cluster**
 ## Next-session priorities (in order)
 
 1. **Cluster session for #123 E0-E4 + memory proof** - follow `docs/inference-experiments/inference-run-playbook.md`; commit the resulting evidence and notebook.
-2. **#133** (real KV hop store: Mooncake/LMCache) - not started; no transfer backend in the stack yet. Unblocks the E5 real-hop treatment.
+2. **#133** (real KV hop store: Mooncake/LMCache) - implementation is active: a pinned
+   LMCache 0.3.9/vLLM 0.11.0 connector, CPU/TCP Mooncake bundle, compatibility identity,
+   lifecycle contract, bounded metrics and four-case smoke exist. A new two-worker GPU session
+   is still required before real transfer and destination consumption can be claimed.
 3. **#123 completion** - E5 real-hop treatment, single-request trace and final write-up once #133 lands.
 4. **#139** (configurable agent strategy / CrewAI) - comparative evaluation of agent orchestration strategies.
 

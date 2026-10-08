@@ -9,8 +9,9 @@ OBSERVABILITY_GRAFANA_PORT ?= 13001
 OBSERVABILITY_PROMETHEUS_PORT ?= 19090
 OBSERVABILITY_BURST_COUNT ?= 10
 OBSERVABILITY_LOG_TAIL ?= 200
+KV_BUNDLE_OUT = $(or $(OUT),work/kv-hop.yaml)
 
-.PHONY: help check-bootstrap dev app-serve-dev mcp-dev mcp-smoke dataset-test dataset-smoke smoke test mcp-test infra-test web-test compose-smoke observability-up observability-down observability-smoke observability-dev-up observability-dev-info observability-dev-ask observability-dev-burst observability-dev-metrics observability-dev-logs observability-dev-down local-aws-compose local-aws-refresh local-serve-compose local-serve-refresh local-bedrock-compose bedrock-smoke m5-bedrock-smoke m6-bedrock-smoke dashboard tf-dispatch tf-resume tf-park inference-validate inference-sync inference-config inference-secret inference-bootstrap inference-deploy inference-up inference-tunnel inference-connect inference-smoke inference-warmup inference-capacity inference-restart inference-gateway-restart inference-controls-on inference-controls-off inference-verify-workers inference-e1 inference-fresh-up inference-tmux-start inference-tmux-end inference-serve-smoke inference-run inference-pull-evidence inference-pull-range evidence-analyze evidence-notebook inference-teardown replay-fanout replay-multi-turn replay-compare-strategies replay-strategy-manual replay-strategy-crewai replay-e3-least-loaded replay-e3-prefix-then-load replay-e4-admission-on replay-e4-admission-off replay-e3-large-prefix-least-loaded replay-e3-large-prefix-prefix-then-load replay-e5 trace-request
+.PHONY: help check-bootstrap dev app-serve-dev mcp-dev mcp-smoke dataset-test dataset-smoke smoke test mcp-test infra-test web-test compose-smoke observability-up observability-down observability-smoke observability-dev-up observability-dev-info observability-dev-ask observability-dev-burst observability-dev-metrics observability-dev-logs observability-dev-down local-aws-compose local-aws-refresh local-serve-compose local-serve-refresh local-bedrock-compose bedrock-smoke m5-bedrock-smoke m6-bedrock-smoke dashboard tf-dispatch tf-resume tf-park inference-validate inference-sync inference-config inference-secret inference-bootstrap inference-deploy inference-up inference-tunnel inference-connect inference-smoke inference-warmup inference-capacity inference-restart inference-gateway-restart inference-controls-on inference-controls-off inference-verify-workers inference-e1 inference-fresh-up inference-tmux-start inference-tmux-end inference-serve-smoke inference-run inference-pull-evidence inference-pull-range inference-kv-image inference-kv-render inference-kv-smoke evidence-analyze evidence-notebook inference-teardown replay-fanout replay-multi-turn replay-compare-strategies replay-strategy-manual replay-strategy-crewai replay-e3-least-loaded replay-e3-prefix-then-load replay-e4-admission-on replay-e4-admission-off replay-e3-large-prefix-least-loaded replay-e3-large-prefix-prefix-then-load replay-e5 trace-request
 
 
 help: ## Show available commands
@@ -114,6 +115,36 @@ inference-serve-smoke: ## Smoke check the end-to-end serve path through gateway 
 
 inference-run: inference-smoke inference-warmup inference-capacity inference-pull-evidence ## Run #120 measurements and pull evidence
 	@python3 infra/inference/experiments/evidence.py --run-id $(INFERENCE_RUN_ID) --output-dir $(INFERENCE_RUN_DIR)
+
+inference-kv-image: ## Build pinned vLLM+LMCache+Mooncake image (usage: make inference-kv-image KV_IMAGE=registry/image:tag)
+	@test -n "$(KV_IMAGE)" || { echo "KV_IMAGE is required"; exit 2; }
+	docker build --platform linux/amd64 -f infra/inference/mooncake/Dockerfile -t "$(KV_IMAGE)" .
+
+inference-kv-render: ## Render opt-in HAMi/Mooncake YAML (requires KV_IMAGE, CACHE_NAMESPACE, TEMPLATE_VERSION, PREFIX_CONTRACT_VERSION)
+	@test -n "$(KV_IMAGE)" || { echo "KV_IMAGE is required"; exit 2; }
+	@test -n "$(CACHE_NAMESPACE)" || { echo "CACHE_NAMESPACE is required"; exit 2; }
+	@test -n "$(TEMPLATE_VERSION)" || { echo "TEMPLATE_VERSION is required"; exit 2; }
+	@test -n "$(PREFIX_CONTRACT_VERSION)" || { echo "PREFIX_CONTRACT_VERSION is required"; exit 2; }
+	@mkdir -p "$(dir $(KV_BUNDLE_OUT))"
+	uv run --project services/app python -m infra.inference.mooncake.render \
+		--image "$(KV_IMAGE)" --cache-namespace "$(CACHE_NAMESPACE)" \
+		--template-version "$(TEMPLATE_VERSION)" \
+		--prefix-contract-version "$(PREFIX_CONTRACT_VERSION)" \
+		> "$(KV_BUNDLE_OUT)"
+
+inference-kv-smoke: ## Run four-case live proof (requires gateway/worker URLs, topology, versions, output; optional PREFIX_SIZES="1k 2k 4k 7k" or PREFIX_SIZE=7k)
+	@test -n "$(GATEWAY_URL)" || { echo "GATEWAY_URL is required"; exit 2; }
+	@test -n "$(WORKER_A_URL)" || { echo "WORKER_A_URL is required"; exit 2; }
+	@test -n "$(WORKER_B_URL)" || { echo "WORKER_B_URL is required"; exit 2; }
+	@test -n "$(TOPOLOGY)" || { echo "TOPOLOGY is required"; exit 2; }
+	@test -n "$(VERSIONS)" || { echo "VERSIONS is required"; exit 2; }
+	@test -n "$(OUT)" || { echo "OUT is required"; exit 2; }
+	uv run --project services/app python -m infra.inference.mooncake.smoke \
+		--gateway-url "$(GATEWAY_URL)" --worker-a-url "$(WORKER_A_URL)" \
+		--worker-b-url "$(WORKER_B_URL)" --topology-file "$(TOPOLOGY)" \
+		--versions-file "$(VERSIONS)" --output-dir "$(OUT)" \
+		$(if $(PREFIX_SIZES),--prefix-sizes $(PREFIX_SIZES)) \
+		$(if $(PREFIX_SIZE),--prefix-size $(PREFIX_SIZE))
 
 inference-pull-evidence: ## Pull run evidence into metrics/inference
 	@mkdir -p $(INFERENCE_LOG_DIR)

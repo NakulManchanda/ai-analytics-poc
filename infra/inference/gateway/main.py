@@ -16,7 +16,7 @@ from starlette.background import BackgroundTask
 
 try:  # package import (tests) or flat import (ConfigMap mounted at /app, `uvicorn main:app`)
     from . import guard as guard_mod
-    from . import metrics, placement
+    from . import hop, metrics, placement
     from .admission import AdmitConfig, AdmitRequest, Shed, should_shed
     from .overflow import Overflow, OverflowConfig, decide
     from .queueing import CLASSES, QueueConfig, QueueRejected, WorkerQueues
@@ -24,6 +24,7 @@ try:  # package import (tests) or flat import (ConfigMap mounted at /app, `uvico
     from .workers import build_registry
 except ImportError:
     import guard as guard_mod
+    import hop
     import placement
     from admission import AdmitConfig, AdmitRequest, Shed, should_shed
     from overflow import Overflow, OverflowConfig, decide
@@ -295,6 +296,8 @@ async def serve_completion(
     x_placement_policy_override: str | None = Header(None),
     x_admission_mode: str | None = Header(None),
     x_tenant_quota_mode: str | None = Header(None),
+    x_kv_hop_mode: str | None = Header(None),
+    x_kv_hop_case: str | None = Header(None),
 ) -> Response:
     try:
         body = await request.json()
@@ -570,6 +573,17 @@ async def serve_completion(
         )
     )
 
+    remaining_s = None if deadline_at is None else deadline_at - time.monotonic()
+    body, hop_fields = hop.prepare(
+        body,
+        decision,
+        correlation_headers,
+        remaining_s,
+        x_kv_hop_mode,
+        x_kv_hop_case,
+    )
+    log.info(json.dumps({**log_fields, "stage": "hop", "ts": time.time(), **hop_fields}))
+    correlation_headers["x-hop-decision"] = hop_fields["hop_decision_reason"]
     target_url = f"{snap.worker.url}/v1/chat/completions"
     snap.inflight += 1
     snap.inflight_tokens += est_tokens
