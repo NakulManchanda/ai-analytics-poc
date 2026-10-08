@@ -5,7 +5,13 @@ from pathlib import Path
 
 import pytest
 
-from infra.inference.mooncake.smoke import _json_events, _prefix_hits, _target_event
+from infra.inference.mooncake.smoke import (
+    E5_PREFIX_SIZES,
+    _json_events,
+    _prefix_hits,
+    _prompt,
+    _target_event,
+)
 
 
 def _event(**updates):
@@ -106,3 +112,17 @@ def test_example_evidence_inputs_cover_required_version_fields() -> None:
     assert versions["engine_version"] == "0.11.0"
     assert versions["prefix_identity_version"] == "kv-prefix-identity-v1"
     assert versions["model_revision"] == versions["tokenizer_revision"]
+
+
+def test_prompt_scales_to_e5_prefix_sizes() -> None:
+    p1k = _prompt("run-1", "case", "1k")
+    p2k = _prompt("run-1", "case", "2k")
+    p4k = _prompt("run-1", "case", "4k")
+    p7k = _prompt("run-1", "case", "7k")
+
+    assert len(p1k) < len(p2k) < len(p4k) < len(p7k)
+    assert set(E5_PREFIX_SIZES.keys()) == {"1k", "2k", "4k", "7k"}
+    for size, target in E5_PREFIX_SIZES.items():
+        prompt = _prompt("run-1", "case", size)
+        tokens = len(prompt) // 4
+        assert abs(tokens - target) <= 50

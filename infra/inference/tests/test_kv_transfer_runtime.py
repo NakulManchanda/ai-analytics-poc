@@ -381,7 +381,6 @@ def test_retrieval_with_elapsed_deadline_proceeds_without_aborting_batch() -> No
     assert events[-1]["destination_consumed"] is True
 
 
-
 class _Scalar:
     def __init__(self, value: int):
         self._value = value

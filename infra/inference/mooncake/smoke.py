@@ -101,10 +101,22 @@ def _json_events(log_text: str) -> list[dict[str, Any]]:
     return events
 
 
-def _prompt(run_id: str, case: str) -> str:
-    marker = f"KV proof {run_id} {case}."
+E5_PREFIX_SIZES: dict[str, int] = {
+    "1k": 1024,
+    "2k": 2048,
+    "4k": 4096,
+    "7k": 7000,
+}
+
+
+def _prompt(run_id: str, case: str, prefix_size: str = "4k") -> str:
+    target_tokens = E5_PREFIX_SIZES.get(prefix_size, 4096)
+    marker = f"KV proof {run_id} {case} {prefix_size}."
+    suffix = " Reply with OK."
     repeated = " The yellow taxi policy requires careful evidence and bounded analysis."
-    return marker + repeated * 500 + " Reply with OK."
+    want_chars = target_tokens * 4 - len(marker) - len(suffix)
+    reps = max(1, want_chars // len(repeated))
+    return marker + repeated * reps + suffix
 
 
 def _request_headers(case: str, request_id: str, worker: str, hop: str) -> dict[str, str]:
@@ -184,17 +196,19 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     )
     (output / "deployments.json").write_text(json.dumps(deployments, indent=2) + "\n")
 
+    prefix_sizes = getattr(args, "prefix_sizes", None) or [getattr(args, "prefix_size", "4k")]
     records: dict[str, dict[str, Any]] = {}
 
-    def invoke(case: str, worker: str, hop: str, *, target: bool) -> str:
-        request_id = f"{run_id}-{case}-{'target' if target else uuid.uuid4().hex[:8]}"
+    def invoke(case: str, worker: str, hop: str, *, target: bool, size: str = "4k") -> str:
+        tag = f"{case}-{size}" if len(prefix_sizes) > 1 else case
+        request_id = f"{run_id}-{tag}-{'target' if target else uuid.uuid4().hex[:8]}"
         worker_url = args.worker_a_url if worker == "worker_a" else args.worker_b_url
         before = _get(f"{worker_url.rstrip('/')}/metrics")
         response = _post(
             f"{args.gateway_url.rstrip('/')}/v1/chat/completions",
             {
                 "model": versions["model_id"],
-                "messages": [{"role": "user", "content": _prompt(run_id, case)}],
+                "messages": [{"role": "user", "content": _prompt(run_id, case, size)}],
                 "temperature": 0,
                 "max_tokens": 1,
                 "stream": False,
@@ -204,6 +218,9 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         after = _get(f"{worker_url.rstrip('/')}/metrics")
         record = {
             "request_id": request_id,
+            "case": case,
+            "prefix_size": size,
+            "target_tokens": E5_PREFIX_SIZES.get(size, 4096),
             "worker": worker,
             "hop_mode": hop,
             "response": response,
@@ -214,18 +231,19 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         (output / f"{request_id}.metrics.before.prom").write_text(before)
         (output / f"{request_id}.metrics.after.prom").write_text(after)
         if target:
-            records[case] = record
+            records[tag] = record
         return request_id
 
-    invoke(CASES[0], "worker_a", "off", target=False)
-    invoke(CASES[0], "worker_a", "off", target=True)
-    invoke(CASES[1], "worker_a", "off", target=False)
-    invoke(CASES[1], "worker_b", "off", target=True)
-    invoke(CASES[2], "worker_a", "off", target=False)
-    invoke(CASES[2], "worker_b", "off", target=False)
-    invoke(CASES[2], "worker_b", "off", target=True)
-    invoke(CASES[3], "worker_a", "off", target=False)
-    invoke(CASES[3], "worker_b", "on", target=True)
+    for size in prefix_sizes:
+        invoke(CASES[0], "worker_a", "off", target=False, size=size)
+        invoke(CASES[0], "worker_a", "off", target=True, size=size)
+        invoke(CASES[1], "worker_a", "off", target=False, size=size)
+        invoke(CASES[1], "worker_b", "off", target=True, size=size)
+        invoke(CASES[2], "worker_a", "off", target=False, size=size)
+        invoke(CASES[2], "worker_b", "off", target=False, size=size)
+        invoke(CASES[2], "worker_b", "off", target=True, size=size)
+        invoke(CASES[3], "worker_a", "off", target=False, size=size)
+        invoke(CASES[3], "worker_b", "on", target=True, size=size)
 
     time.sleep(1)
     logs = ""
@@ -243,9 +261,11 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     parsed = _json_events(logs)
     (output / "kv-events.json").write_text(json.dumps(parsed, indent=2) + "\n")
 
+    primary_size = prefix_sizes[0]
     cases = []
     for case in CASES:
-        record = records[case]
+        tag = f"{case}-{primary_size}" if len(prefix_sizes) > 1 else case
+        record = records[tag]
         event = _target_event(
             case,
             record["request_id"],
@@ -255,17 +275,31 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         )
         cases.append({"name": case, "events": [event]})
 
+    crossover: dict[str, dict[str, Any]] = {}
+    for size in prefix_sizes:
+        recompute_tag = f"{CASES[1]}-{size}" if len(prefix_sizes) > 1 else CASES[1]
+        transfer_tag = f"{CASES[3]}-{size}" if len(prefix_sizes) > 1 else CASES[3]
+        crossover[size] = {
+            "target_tokens": E5_PREFIX_SIZES.get(size, 4096),
+            "recompute": records.get(recompute_tag, {}),
+            "transfer": records.get(transfer_tag, {}),
+        }
+    (output / "crossover.json").write_text(json.dumps(crossover, indent=2) + "\n")
+
     manifest = {
         "run_id": run_id,
         "started_at": started,
         "topology": topology,
         "versions": versions,
         "compatibility_namespace": compatibility.namespace,
+        "prefix_sizes": prefix_sizes,
+        "target_prefix_tokens": {s: E5_PREFIX_SIZES[s] for s in prefix_sizes},
         "control_isolation_statement": (
             "Each case used a unique leading marker; each metrics window contained one target "
             "request, and worker placement plus hop mode were forced by gated lab controls."
         ),
         "deployments_artifact": "deployments.json",
+        "crossover_artifact": "crossover.json",
     }
     validation = validate_run(manifest, cases)
     (output / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
@@ -283,6 +317,18 @@ def main() -> None:
     parser.add_argument("--topology-file", required=True)
     parser.add_argument("--versions-file", required=True)
     parser.add_argument("--namespace", default="inference-lab")
+    parser.add_argument(
+        "--prefix-size",
+        default="4k",
+        choices=list(E5_PREFIX_SIZES.keys()),
+        help="Default E5 prefix size for the four-case proof",
+    )
+    parser.add_argument(
+        "--prefix-sizes",
+        nargs="+",
+        choices=list(E5_PREFIX_SIZES.keys()),
+        help="Evaluate multiple E5 prefix sizes (1k, 2k, 4k, 7k) for crossover analysis",
+    )
     parser.add_argument("--run-id")
     print(json.dumps(run(parser.parse_args()), indent=2))
 
