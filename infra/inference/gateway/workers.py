@@ -20,6 +20,7 @@ import asyncio
 import logging
 import os
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import NamedTuple
 
@@ -54,6 +55,10 @@ class WorkerSnapshot:
     healthy_streak: int = 0  # consecutive successful scrapes (warm gate)
     health_epoch: int = 0  # bumped on every failed scrape; a probe only counts within its epoch
     warmed_at: float | None = None
+    warm_count: int = 0  # times this worker has passed the warm gate (2+ means it returned)
+    ramp_cap: int | None = None  # max in-flight + queued while ramping a returning worker
+    ramp_stage: int = 0
+    ramp_next_at: float = 0.0
     inflight: int = 0
     inflight_tokens: int = 0
     queued: int = 0  # requests waiting in this gateway's per-worker queue (#122 slice 3)
@@ -95,6 +100,10 @@ class Registry:
         warm_min_scrapes: int = 3,
         probe_model: str = "Qwen/Qwen3-0.6B",
         probe_timeout_s: float = 30.0,
+        ramp_steps: tuple[int, ...] = (),
+        ramp_step_s: float = 30.0,
+        ramp_min_kv_free: float = 0.2,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self.snapshots = {w.id: WorkerSnapshot(w) for w in workers}
         self._rr = 0
@@ -103,6 +112,10 @@ class Registry:
         self.probe_model = probe_model
         self.probe_timeout_s = probe_timeout_s
         self._probes: dict[str, asyncio.Task] = {}
+        self.ramp_steps = ramp_steps
+        self.ramp_step_s = ramp_step_s
+        self.ramp_min_kv_free = ramp_min_kv_free
+        self._clock = clock
         self.on_probe = None  # optional callback(worker_id, result) for metrics
 
     def next_rr(self) -> int:
@@ -110,8 +123,17 @@ class Registry:
         return self._rr - 1
 
     def serving_snapshots(self) -> list[WorkerSnapshot]:
-        """Snapshots placement and admission may use: warm only when the warm gate is on."""
-        return [s for s in self.snapshots.values() if not self.require_warm or s.warm]
+        """Snapshots placement and admission may use.
+
+        Warm workers only when the warm gate is on. A returning worker that is still ramping is
+        left out once its in-flight + queued work reaches its cap, as long as another warm worker
+        remains; if every warm worker is capped out the cap is ignored rather than shedding.
+        """
+        warm = [s for s in self.snapshots.values() if not self.require_warm or s.warm]
+        if not self.ramp_steps:
+            return warm
+        open_ = [s for s in warm if s.ramp_cap is None or s.inflight + s.queued < s.ramp_cap]
+        return open_ or warm
 
     async def refresh(self, client: httpx.AsyncClient) -> None:
         await asyncio.gather(*(self._scrape(client, s) for s in self.snapshots.values()))
@@ -130,16 +152,41 @@ class Registry:
             if self.require_warm and snap.warm:
                 snap.warm, snap.warmed_at = False, None
                 log.info("worker %s went cold (scrape failed)", snap.id)
+            snap.ramp_cap = None
             return
         snap.running, snap.waiting = int(vals["running"]), int(vals["waiting"])
         snap.kv_free_ratio = max(0.0, 1.0 - vals["kv_used"])
         snap.observed_at = time.monotonic()
         snap.healthy = True
         snap.healthy_streak += 1
+        self._advance_ramp(snap)
         if not self.require_warm:
             snap.warm = True  # legacy: one good scrape
         elif not snap.warm and snap.healthy_streak >= self.warm_min_scrapes:
             self._start_probe(client, snap)
+
+    def _start_ramp(self, snap: WorkerSnapshot) -> None:
+        """A worker that returns after being cold starts under a cap (the first warm-up does not)."""
+        if self.ramp_steps and snap.warm_count > 1:
+            snap.ramp_stage, snap.ramp_cap = 0, self.ramp_steps[0]
+            snap.ramp_next_at = self._clock() + self.ramp_step_s
+            log.info("worker %s ramping, cap=%d", snap.id, snap.ramp_cap)
+
+    def _advance_ramp(self, snap: WorkerSnapshot) -> None:
+        """Raise the cap one step per interval while the worker is not under pressure."""
+        if snap.ramp_cap is None or self._clock() < snap.ramp_next_at:
+            return
+        snap.ramp_next_at = self._clock() + self.ramp_step_s
+        if snap.waiting > 0 or snap.kv_free_ratio < self.ramp_min_kv_free:
+            log.info("worker %s ramp held at cap=%d (under pressure)", snap.id, snap.ramp_cap)
+            return
+        snap.ramp_stage += 1
+        if snap.ramp_stage >= len(self.ramp_steps):
+            snap.ramp_cap = None
+            log.info("worker %s ramp complete", snap.id)
+        else:
+            snap.ramp_cap = self.ramp_steps[snap.ramp_stage]
+            log.info("worker %s ramp cap raised to %d", snap.id, snap.ramp_cap)
 
     def _start_probe(self, client: httpx.AsyncClient, snap: WorkerSnapshot) -> None:
         """Probe in the background so a slow first request cannot make other snapshots go stale."""
@@ -175,6 +222,8 @@ class Registry:
             result = "stale"
         if result == "ok":
             snap.warm, snap.warmed_at = True, time.monotonic()
+            snap.warm_count += 1
+            self._start_ramp(snap)
             log.info("worker %s is warm (scrapes=%d, probe ok)", snap.id, snap.healthy_streak)
         if self.on_probe is not None:
             self.on_probe(snap.id, result)
@@ -187,8 +236,9 @@ class Registry:
 def build_registry() -> Registry:
     """WORKER_A_URL (falls back to DEFAULT_WORKER_URL) and optional WORKER_B_URL.
 
-    WARM_GATE=1 enables the warm gate (WARM_MIN_SCRAPES, WARM_PROBE_MODEL); off by default so
-    local runs behave as before.
+    WARM_GATE=1 enables the warm gate (WARM_MIN_SCRAPES, WARM_PROBE_MODEL); WARM_RAMP_STEPS
+    ("2,4") caps a returning worker and raises the cap every WARM_RAMP_STEP_S while it is not
+    under pressure. Both are off by default so local runs behave as before.
     """
     a_url = os.getenv("WORKER_A_URL") or os.getenv("DEFAULT_WORKER_URL") or DEFAULT_A_URL
     workers = [Worker("worker_a", a_url.rstrip("/"))]
@@ -199,4 +249,6 @@ def build_registry() -> Registry:
         require_warm=os.getenv("WARM_GATE", "0") == "1",
         warm_min_scrapes=int(os.getenv("WARM_MIN_SCRAPES", "3")),
         probe_model=os.getenv("WARM_PROBE_MODEL", "Qwen/Qwen3-0.6B"),
+        ramp_steps=tuple(int(x) for x in os.getenv("WARM_RAMP_STEPS", "").split(",") if x.strip()),
+        ramp_step_s=float(os.getenv("WARM_RAMP_STEP_S", "30")),
     )

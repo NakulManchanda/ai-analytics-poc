@@ -52,6 +52,12 @@ WORKER_WARM = Gauge(
     registry=REGISTRY,
 )
 
+WORKER_RAMP_CAP = Gauge(
+    "worker_ramp_cap",
+    "In-flight + queued cap while a returning worker ramps up (0 = no cap)",
+    ["worker"],
+    registry=REGISTRY,
+)
 WARM_PROBE = Counter(
     "warm_probe_total",
     "Warm-up probe requests sent to a worker by the gateway",
@@ -134,6 +140,7 @@ def observe_snapshots(snaps, stale_after: float) -> None:
         for st in HEALTH_STATES:
             WORKER_HEALTH.labels(s.id, st).set(1 if st == state else 0)
         WORKER_WARM.labels(s.id).set(1 if s.warm else 0)
+        WORKER_RAMP_CAP.labels(s.id).set(s.ramp_cap or 0)
         SNAPSHOT_AGE.labels(s.id).set(min(s.age(), 1e9))
 
 

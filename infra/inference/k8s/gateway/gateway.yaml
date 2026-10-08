@@ -61,6 +61,12 @@ spec:
               value: "3"
             - name: WARM_PROBE_MODEL
               value: "Qwen/Qwen3-0.6B"
+            # A worker that returns after being cold is capped (in-flight + queued) and the cap is
+            # raised every WARM_RAMP_STEP_S while it has no waiting requests and enough free KV.
+            - name: WARM_RAMP_STEPS
+              value: "2,4"
+            - name: WARM_RAMP_STEP_S
+              value: "30"
             # Test-only experiment headers (#123): keep "0" outside controlled E3/E4 runs.
             - name: ALLOW_EXPERIMENT_CONTROLS
               value: "0"
