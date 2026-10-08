@@ -36,6 +36,31 @@ spec:
               value: "http://inference-worker-b.inference-lab.svc.cluster.local:8000"
             - name: PLACEMENT_POLICY
               value: "prefix_then_load"
+            # Gateway limits tied to the engine flags in k8s/workers/*.yaml (a test enforces the match):
+            # decode slots = --max-num-seqs; dispatch slots per worker = --max-num-seqs so excess work
+            # waits in the gateway queue, not in vLLM's; prompt + completion must fit --max-model-len.
+            - name: MAX_DECODE_SLOTS
+              value: "8"
+            - name: WORKER_MAX_INFLIGHT
+              value: "8"
+            - name: MAX_MODEL_LEN
+              value: "8192"
+            - name: MAX_PROMPT_TOKENS
+              value: "8192"
+            - name: KV_FREE_MIN
+              value: "0.10"
+            # Placeholders until the on-host calibration run (playbook): measured values replace these.
+            - name: PREFILL_TOKENS_PER_S
+              value: "4000"
+            - name: QUEUE_WAIT_PER_WAITING_S
+              value: "0.25"
+            # Warm gate: a worker takes traffic only after N healthy scrapes and one probe request.
+            - name: WARM_GATE
+              value: "1"
+            - name: WARM_MIN_SCRAPES
+              value: "3"
+            - name: WARM_PROBE_MODEL
+              value: "Qwen/Qwen3-0.6B"
             # Test-only experiment headers (#123): keep "0" outside controlled E3/E4 runs.
             - name: ALLOW_EXPERIMENT_CONTROLS
               value: "0"

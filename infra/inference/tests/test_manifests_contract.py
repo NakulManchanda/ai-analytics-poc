@@ -178,3 +178,41 @@ def test_gateway_manifests_contract() -> None:
     ports = svc_docs.get("spec", {}).get("ports", [])
     assert any(p.get("port") == 8080 for p in ports)
 
+
+
+def _container_env(doc: dict[str, Any]) -> dict[str, str]:
+    container = doc["spec"]["template"]["spec"]["containers"][0]
+    return {item["name"]: item.get("value", "") for item in container.get("env", [])}
+
+
+def _worker_arg(doc: dict[str, Any], flag: str) -> str:
+    args = doc["spec"]["template"]["spec"]["containers"][0]["args"]
+    return str(args[args.index(flag) + 1])
+
+
+def test_gateway_limits_match_worker_engine_flags() -> None:
+    """Admission, queue and guard limits come from the engine flags, not from code defaults."""
+    deployments = {doc["metadata"]["name"]: doc for _p, doc in _find_kind("Deployment")}
+    gateway_env = _container_env(deployments["inference-gateway"])
+    for worker in ("inference-worker-a", "inference-worker-b"):
+        doc = deployments[worker]
+        max_seqs = _worker_arg(doc, "--max-num-seqs")
+        max_len = _worker_arg(doc, "--max-model-len")
+        assert gateway_env["MAX_DECODE_SLOTS"] == max_seqs, worker
+        assert gateway_env["WORKER_MAX_INFLIGHT"] == max_seqs, worker
+        assert gateway_env["MAX_MODEL_LEN"] == max_len, worker
+        assert int(gateway_env["MAX_PROMPT_TOKENS"]) <= int(max_len), worker
+
+
+def test_gateway_sets_every_admission_threshold_explicitly() -> None:
+    deployments = {doc["metadata"]["name"]: doc for _p, doc in _find_kind("Deployment")}
+    gateway_env = _container_env(deployments["inference-gateway"])
+    for name in (
+        "KV_FREE_MIN",
+        "PREFILL_TOKENS_PER_S",
+        "QUEUE_WAIT_PER_WAITING_S",
+        "WARM_GATE",
+        "WARM_MIN_SCRAPES",
+        "WARM_PROBE_MODEL",
+    ):
+        assert gateway_env.get(name), f"gateway manifest must set {name}"

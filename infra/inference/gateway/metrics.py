@@ -47,11 +47,17 @@ SNAPSHOT_AGE = Gauge(
 )
 WORKER_WARM = Gauge(
     "worker_warm",
-    "1 once at least one scrape of the worker has ever succeeded (healthy but cold = 0)",
+    "1 once the worker passed the warm gate (healthy scrapes + a probe); healthy but cold = 0",
     ["worker"],
     registry=REGISTRY,
 )
 
+WARM_PROBE = Counter(
+    "warm_probe_total",
+    "Warm-up probe requests sent to a worker by the gateway",
+    ["worker", "result"],
+    registry=REGISTRY,
+)
 STALE_FALLBACK = Counter(
     "stale_snapshot_fallback_total",
     "Placements made on stale snapshots",

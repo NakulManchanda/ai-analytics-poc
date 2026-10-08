@@ -6,8 +6,10 @@ import pytest
 
 from infra.inference.mooncake import smoke
 from infra.inference.mooncake.smoke import (
+    CASES,
     E5_PREFIX_SIZES,
     _json_events,
+    _leg_order,
     _nominal_prompt_tokens,
     _prefix_hits,
     _prompt,
@@ -363,3 +365,34 @@ vllm:time_to_first_token_seconds_sum {metrics_calls * 0.25}
         assert entry["transfer_e2e_ms"] is not None
         assert entry["recompute_ttft_ms"] == 250.0
         assert entry["transfer_ttft_ms"] == 250.0
+
+    # Warm-up happens before anything is measured: 3 throwaway requests on each worker.
+    cases_seen = [case for _req, case in recorded_requests]
+    first_measured = next(i for i, c in enumerate(cases_seen) if not c.startswith("warmup"))
+    assert first_measured == 6 and all(c.startswith("warmup") for c in cases_seen[:first_measured])
+    manifest = json.loads((out_dir / "manifest.json").read_text())
+    assert set(manifest["warmup"]) == {"worker_a", "worker_b"}
+    b_warmup = manifest["warmup"]["worker_b"]
+    assert b_warmup["first_request_ttft_ms"] == 250.0 and len(b_warmup["warm_ttft_ms"]) == 2
+
+    # The two comparison legs alternate by size: 1k recompute first, 2k transfer first.
+    ids = [req for req, _case in recorded_requests]
+
+    def position(case: str, size: str) -> int:
+        return next(i for i, rid in enumerate(ids) if rid.endswith(f"{case}-{size}-target"))
+
+    recompute, transfer = CASES[1], CASES[3]
+    assert position(recompute, "1k") < position(transfer, "1k")
+    assert position(transfer, "2k") < position(recompute, "2k")
+    assert (crossover["1k"]["leg_order"], crossover["2k"]["leg_order"]) == (
+        "recompute_first",
+        "transfer_first",
+    )
+
+
+@pytest.mark.parametrize(
+    "index,expected",
+    [(0, "recompute_first"), (1, "transfer_first"), (2, "recompute_first"), (3, "transfer_first")],
+)
+def test_leg_order_alternates(index: int, expected: str) -> None:
+    assert _leg_order(index) == expected

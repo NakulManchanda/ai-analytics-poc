@@ -44,6 +44,7 @@ SNAPSHOT_STALE_S = float(os.getenv("SNAPSHOT_STALE_S", "5.0"))
 ADMIT_CFG = AdmitConfig.from_env()
 quota = TenantQuota.from_env()
 registry = build_registry()
+registry.on_probe = lambda wid, result: metrics.WARM_PROBE.labels(wid, result).inc()
 queues = WorkerQueues(QueueConfig.from_env())
 OVERFLOW_CFG = OverflowConfig.from_env()
 DEFAULT_WORKER_URL = registry.snapshots["worker_a"].worker.url  # /tokenize goes to A
@@ -450,7 +451,7 @@ async def serve_completion(
                 if admission_off
                 else should_shed(
                     AdmitRequest(est_tokens, _int_or_none(x_deadline_ms), klass),
-                    list(registry.snapshots.values()),
+                    registry.serving_snapshots(),
                     now=now,
                     cfg=ADMIT_CFG,
                 )
@@ -500,7 +501,7 @@ async def serve_completion(
     with metrics.timed("place", klass):
         decision = placement.pick(
             placement.PlacementRequest(x_prefix_id, est_tokens, klass, x_force_worker),
-            list(registry.snapshots.values()),
+            registry.serving_snapshots(),
             policy=policy_override or PLACEMENT_POLICY,
             stale_after=SNAPSHOT_STALE_S,
             rr_index=registry.next_rr(),
