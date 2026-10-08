@@ -19,11 +19,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from app.benchmarks.e5_locality import SIZES as E5_PREFIX_SIZES
-
 try:
     from infra.inference.kv_transfer.evidence import validate_run
     from infra.inference.kv_transfer.identity import CompatibilitySpec
+    from infra.inference.kv_transfer.prefix_sizes import E5_PREFIX_SIZES
 except ModuleNotFoundError as exc:
     # ``make inference-sync`` copies only infra/inference to the GPU host. Keep
     # the proof runner executable there as ``python mooncake/smoke.py`` while
@@ -33,6 +32,7 @@ except ModuleNotFoundError as exc:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     from kv_transfer.evidence import validate_run
     from kv_transfer.identity import CompatibilitySpec
+    from kv_transfer.prefix_sizes import E5_PREFIX_SIZES
 
 CASES = (
     "same_worker_local_reuse",
@@ -112,8 +112,9 @@ def _ttft_ms(before: str, after: str) -> float | None:
     sum_before, count_before = _ttft_stats(before)
     sum_after, count_after = _ttft_stats(after)
     count_delta = count_after - count_before
-    if count_delta > 0:
-        return round(((sum_after - sum_before) / count_delta) * 1000.0, 2)
+    # Exactly one request occurred in the isolated target window; fail closed otherwise.
+    if count_delta == 1:
+        return round((sum_after - sum_before) * 1000.0, 2)
     return None
 
 

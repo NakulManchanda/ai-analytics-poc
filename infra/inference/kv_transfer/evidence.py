@@ -309,6 +309,8 @@ def _manifest_workers(manifest: Mapping[str, Any]) -> set[str]:
     if not isinstance(topology, Mapping) or not topology:
         _fail("manifest topology must be a non-empty mapping")
     raw_workers = topology.get("workers")
+    if raw_workers is None and ("worker_a" in topology and "worker_b" in topology):
+        raw_workers = ["worker_a", "worker_b"]
     if isinstance(raw_workers, (str, bytes)) or not isinstance(raw_workers, Sequence):
         _fail("manifest topology must list at least two workers")
 
