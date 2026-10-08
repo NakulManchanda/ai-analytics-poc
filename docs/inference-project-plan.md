@@ -268,7 +268,7 @@ Show a time-series panel with:
 
 | Category | Examples | Expected metric |
 |---|---|---|
-| Guardrail errors | prompt_too_long, injection, malformed payload | guard_reject_total{reason} |
+| Guardrail errors | prompt_too_long, injection, malformed payload, context_window_exceeded | guard_reject_total{reason} |
 | Admission sheds | tenant_tokens, timeout_queue, kv_free, decode_slots | orch_shed_total{reason} |
 | Placement errors | no_eligible_worker, stale_snapshot, placement_timeout | placement_error_total{reason} |
 | Queue errors | queue_timeout, client_aborted | queue_error_total{reason} |

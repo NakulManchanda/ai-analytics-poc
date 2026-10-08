@@ -54,6 +54,9 @@ All commands run from the repository root (or the active worktree) unless noted.
    `make inference-deploy` resets these to the manifest values. E4 also needs admission thresholds tuned so the
    trace really overloads two workers (`MAX_DECODE_SLOTS`, `KV_FREE_MIN`, `PREFILL_TOKENS_PER_S`,
    `QUEUE_WAIT_PER_WAITING_S`; see the testing guide).
+   The gateway manifest now sets the admission, queue, guard and warm-gate limits from the engine flags
+   (see `docs/work-history/0086-inference-gateway-hardening-step1.md`), and a worker takes traffic only after it
+   passes the warm gate, so wait for `worker_warm == 1` before measuring.
 5. Schema/prefix check (manual): start the local MCP (`make mcp-dev`), read its dataset-schema resource and
    confirm the column list equals `CANONICAL_TAXI_SCHEMA["columns"]` in
    `services/app/app/benchmarks/canonical_prefix.py`. If it differs, update that file and run
@@ -224,6 +227,9 @@ make inference-pull-range RUN_ID=$RUN_ID
 What counts as passing: `validation.json` is `valid` and `cases.json` holds all four cases for EVERY size
 (`<case>@<size>`). The run fails closed if any case lacks positive tokens and bytes or
 `destination_consumed: true` after the forward pass. A worker header or lower latency is not proof.
+The smoke now sends warm-up requests per worker first (`--warmup-requests`, default 3; the first request's TTFT is
+recorded as the cold figure in `manifest.json` under `warmup`), and alternates which comparison leg runs first by size
+index (`leg_order` in `crossover.json`).
 
 Reading `crossover.json` (one entry per size): `actual_reusable_tokens` is the real x-axis (the size label is
 nominal); compare `recompute_ttft_ms` / `recompute_e2e_ms` with `transfer_ttft_ms` / `transfer_e2e_ms`, and read
