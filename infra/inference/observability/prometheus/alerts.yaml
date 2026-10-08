@@ -50,3 +50,12 @@ groups:
         annotations:
           summary: "Worker, engine or scrape-target integrity problem"
           description: "Worker unhealthy/stale, snapshot older than 15s, preemptions above 0.1/s, a gateway/worker scrape target down or missing, or fewer than 2 workers up."
+      - alert: InferenceHopIntegrity
+        expr: (sum(rate(hop_error_total[5m])) or vector(0)) + (sum(rate(hop_total{result=~"failed|timeout|missing"}[5m])) or vector(0)) > 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "KV hop transfer failure, timeout or missing blocks"
+          description: "Worker-side KV hop transfer failed, timed out, or destination blocks missing."
+

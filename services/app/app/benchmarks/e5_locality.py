@@ -36,15 +36,79 @@ FILLER_COUNT, FILLER_TOKENS = 10, 7000
 EVICTION_SIZE = "4k"
 EVICTION_DELAY_S = 45.0
 _SYSTEM_WRAP = len(json.dumps([{"role": "system", "content": ""}]))
-_SENTENCES = (
-    "The analytics assistant answers questions about taxi trips using governed read only tools.",
-    "Every answer must cite the observation returned by a tool and never invent figures.",
-    "Trip volume is grouped by pickup zone, hour of day, weekday and payment type.",
-    "Fares, tips, tolls and surcharges are reported in US dollars per trip.",
-    "Distances are reported in miles and durations in minutes between pickup and dropoff.",
-    "When a question is ambiguous the assistant states its assumption before answering.",
-    "Row limits bound every query so that responses stay small and cheap to read.",
-    "Airport trips carry a separate fee and are compared against ordinary city trips.",
+REAL_TAXI_SECTIONS = (
+    (
+        "Dataset: nyc-yellow-taxi (2024-01). Pinned Parquet file: "
+        "yellow_tripdata_2024-01.parquet (expected rows: 2964624). Zone lookup: "
+        "taxi_zone_lookup.csv (265 zones across Manhattan, Queens, Brooklyn, Bronx, "
+        "Staten Island, EWR). Pinned columns and types: VendorID (int64), "
+        "tpep_pickup_datetime (timestamp_ntz), tpep_dropoff_datetime (timestamp_ntz), "
+        "passenger_count (int64), trip_distance (float64), RatecodeID (int64), "
+        "store_and_fwd_flag (string), PULocationID (int64), DOLocationID (int64), "
+        "payment_type (int64), fare_amount (float64), extra (float64), "
+        "mta_tax (float64), tip_amount (float64), tolls_amount (float64), "
+        "improvement_surcharge (float64), total_amount (float64), "
+        "congestion_surcharge (float64), Airport_fee (float64)."
+    ),
+    (
+        "Governed MCP Analytics Tools: "
+        "1. describe_taxi_dataset(include_column_stats: bool) yields summary statistics and "
+        "code tables. "
+        "2. list_taxi_dimension_values(dimension, search, limit) yields distinct category values. "
+        "3. query_taxi_data(analysis, limit) runs pre-compiled DuckDB aggregations. "
+        "4. aggregate_taxi_data(dimensions, measures, filters, order_by, limit) runs custom "
+        "group-by queries. "
+        "Governance rule: All queries must stay read-only, execute against pinned parquet, and "
+        "enforce limit <= 20."
+    ),
+    (
+        "Retrieved DuckDB Observation [top_pickup_zones]: "
+        "Row 1: PULocationID=132, Zone=JFK Airport, Borough=Queens, trip_count=154231, "
+        "avg_fare=68.20, avg_tip=11.45. "
+        "Row 2: PULocationID=236, Zone=Upper East Side North, Borough=Manhattan, "
+        "trip_count=142109, avg_fare=13.50, avg_tip=2.80. "
+        "Row 3: PULocationID=161, Zone=Midtown Center, Borough=Manhattan, trip_count=138912, "
+        "avg_fare=14.10, avg_tip=3.05. "
+        "Row 4: PULocationID=237, Zone=Upper East Side South, Borough=Manhattan, "
+        "trip_count=135440, avg_fare=13.20, avg_tip=2.75. "
+        "Row 5: PULocationID=186, Zone=Penn Station/Madison Sq West, Borough=Manhattan, "
+        "trip_count=129885, avg_fare=15.00, avg_tip=3.15."
+    ),
+    (
+        "Retrieved DuckDB Observation [trip_volume_by_hour]: "
+        "Peak evening rush: 18:00 (187420 trips, avg_fare=18.52), 17:00 (179310 trips, "
+        "avg_fare=18.10), 19:00 (171200 trips, avg_fare=17.90). "
+        "Morning peak: 08:00 (145100 trips, avg_fare=16.80), 09:00 (139800 trips, "
+        "avg_fare=17.10). "
+        "Off-peak early morning lull: 04:00 (14200 trips, avg_fare=24.50), "
+        "03:00 (18400 trips, avg_fare=22.15)."
+    ),
+    (
+        "Retrieved DuckDB Observation [average_trip_metrics by borough]: "
+        "Manhattan trips: avg_distance=2.31 miles, avg_duration=14.2 minutes, avg_fare=15.40, "
+        "avg_tip=3.10. "
+        "Queens trips: avg_distance=8.92 miles, avg_duration=28.5 minutes, avg_fare=38.20, "
+        "avg_tip=7.40. "
+        "Brooklyn trips: avg_distance=5.64 miles, avg_duration=22.1 minutes, avg_fare=26.10, "
+        "avg_tip=4.80. "
+        "Bronx trips: avg_distance=7.10 miles, avg_duration=25.0 minutes, avg_fare=31.50, "
+        "avg_tip=3.20."
+    ),
+    (
+        "Taxi Zone Dimension Lookup: "
+        "Covering 265 zones across boroughs Manhattan, Queens, Brooklyn, Bronx, Staten Island, "
+        "and EWR. "
+        "Rate codes: 1=Standard rate, 2=JFK Airport flat rate, 3=Newark, 4=Nassau Westchester, "
+        "5=Negotiated fare, 6=Group ride. "
+        "Payment types: 1=Credit card (82.4 percent), 2=Cash (15.1 percent), 3=No charge, "
+        "4=Dispute."
+    ),
+    (
+        "Assistant Governance Policy: "
+        "Every analytical answer must strictly ground claims in returned DuckDB tool observations "
+        "without speculating. "
+        "Row limits bound every query to keep context windows small and prevent context exhaustion."
+    ),
 )
 QUESTIONS = (
     ("Which pickup zones have the most trips?", "query_taxi_data"),
@@ -66,12 +130,18 @@ def estimated_tokens(text: str) -> int:
 
 def synthetic_prefix(tag: str, target_tokens: int) -> str:
     """Plain-ASCII padded prefix whose gateway estimate is ``target_tokens``. ``tag`` leads the
-    text so different cases never share a KV block chain."""
+    text so different cases never share a KV block chain. Content is built from real NYC TLC
+    yellow taxi domain material (schema, tool contracts, retrieved DuckDB observations).
+    """
     want = target_tokens * 4 - _SYSTEM_WRAP
-    out = f"SYNTHETIC E5 PREFIX case {tag} size {target_tokens}. "
+    out = (
+        f"SYNTHETIC E5 PREFIX case {tag} size {target_tokens}. "
+        "[REAL DOMAIN MATERIAL: NYC TLC Yellow Taxi schema, tool contracts, "
+        "and retrieved observations] "
+    )
     n = 0
     while len(out) < want:
-        out += f"Note {n}. {_SENTENCES[n % len(_SENTENCES)]} "
+        out += f"Record {n}. {REAL_TAXI_SECTIONS[n % len(REAL_TAXI_SECTIONS)]} "
         n += 1
     return out[:want]
 
@@ -97,10 +167,12 @@ def _scenario(
     return {
         "name": name,
         "description": description
-        + " SYNTHETIC prefix-size treatment, not the taxi-agent prefix. Needs the gateway with "
-        "ALLOW_FORCED_PLACEMENT=1 and no KV transfer backend. Real-transfer (#133) treatment "
-        "is NOT implemented; it must reuse these exact prefix sizes. Placement intent "
-        "(x-intended-action) is a belief, never proof; observed reuse comes from vLLM evidence.",
+        + " SYNTHETIC prefix-size treatment, not the taxi-agent prefix. Padding built from real "
+        "NYC TLC yellow taxi domain material (dataset schema, tool contracts, retrieved "
+        "DuckDB observations). Needs the gateway with ALLOW_FORCED_PLACEMENT=1 and no KV "
+        "transfer backend. Real-transfer (#133) treatment is NOT implemented; it must reuse "
+        "these exact prefix sizes. Placement intent (x-intended-action) is a belief, never "
+        "proof; observed reuse comes from vLLM evidence.",
         "concurrency": concurrency,
         "strategy": "manual",
         "target_endpoint_type": "gateway_chat",

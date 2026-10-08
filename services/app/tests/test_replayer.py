@@ -872,3 +872,64 @@ async def test_gateway_sends_scenario_max_tokens():
                 cfg, "http://gw", client=client, gateway_stream=False
             ).run()
     assert seen == [512, 128]
+
+
+@pytest.mark.anyio
+async def test_replayer_arrival_rate_uniform_and_poisson():
+    cfg = ScenarioConfig(
+        name="test_rate_replay",
+        description="Test arrival rate scheduling",
+        concurrency=10,
+        strategy="manual",
+        target_endpoint_type="gateway_chat",
+        conversations=[
+            ScenarioConversation(
+                conversation_id_prefix=f"c{i}",
+                turns=[ScenarioTurn(question=f"q{i}")],
+            )
+            for i in range(3)
+        ],
+    )
+
+    dispatch_times: list[float] = []
+
+    async def handler(request):
+        import time
+
+        dispatch_times.append(time.perf_counter())
+        return httpx.Response(200, json={"id": "x"})
+
+    # Test uniform arrival rate
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        rp_uniform = ScenarioReplayer(
+            cfg,
+            "http://gw",
+            client=client,
+            gateway_stream=False,
+            arrival_rate=100.0,
+            arrival_distribution="uniform",
+        )
+        s_uniform = await rp_uniform.run()
+
+    assert s_uniform.arrival_rate == 100.0
+    assert s_uniform.arrival_distribution == "uniform"
+    assert s_uniform.successful_turns == 3
+    assert len(dispatch_times) == 3
+
+    # Test poisson arrival rate
+    dispatch_times.clear()
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        rp_poisson = ScenarioReplayer(
+            cfg,
+            "http://gw",
+            client=client,
+            gateway_stream=False,
+            arrival_rate=100.0,
+            arrival_distribution="poisson",
+        )
+        s_poisson = await rp_poisson.run()
+
+    assert s_poisson.arrival_rate == 100.0
+    assert s_poisson.arrival_distribution == "poisson"
+    assert s_poisson.successful_turns == 3
+    assert len(dispatch_times) == 3

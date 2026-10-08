@@ -28,7 +28,7 @@ def test_notebook_is_generated_valid_and_has_no_outputs_or_results() -> None:
     headings = " ".join(
         "".join(c["source"]) for c in nb["cells"] if c["cell_type"] == "markdown"
     )
-    for exp in ("E0", "E1", "E2", "E3", "E4", "E5", "Memory proof"):
+    for exp in ("E0", "E1", "E2", "E3", "E4", "E5", "Memory proof", "Gateway queue"):
         assert exp in headings
     try:
         import nbformat
@@ -55,7 +55,7 @@ def _run_cells(env_runs: dict | None) -> str:
 
 def test_notebook_degrades_gracefully_without_runs() -> None:
     out = _run_cells(None)
-    assert out.count("run directory not provided") == 8
+    assert out.count("run directory not provided") == 9
 
 
 def test_notebook_executes_offline_against_fixtures() -> None:
@@ -71,6 +71,7 @@ def test_notebook_executes_offline_against_fixtures() -> None:
         "E4_ADMISSION_ON": FIX / "e4_admission_on",
         "E5_RUN": FIX / "e3_prefix_then_load",
         "MEMORY_RANGE": FIX / "prometheus_range",
+        "QUEUE_RANGE": FIX / "prometheus_range",
     }
     out = _run_cells({k: str(v) for k, v in runs.items()})
     assert "run directory not provided" in out  # only E0_CAPACITY is absent
@@ -81,6 +82,7 @@ def test_notebook_executes_offline_against_fixtures() -> None:
         "WINDOW-level",
         "knee_offered_concurrency: 4",
         "flat_at_max",
+        "Gateway queue vs vLLM waiting",
     ):
         assert needle in out
 

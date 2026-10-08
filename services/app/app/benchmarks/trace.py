@@ -231,7 +231,10 @@ def _slo(rec: dict, slos: Slos) -> dict[str, Any]:
 
 
 def build_trace(
-    run_dir: Path, request_id: str, gateway_log: Path | None = None
+    run_dir: Path,
+    request_id: str,
+    gateway_log: Path | None = None,
+    worker_log: Path | None = None,
 ) -> dict[str, Any]:
     run_dir = Path(run_dir)
     records = load_requests(run_dir)
@@ -259,7 +262,26 @@ def build_trace(
         unavailable.append(
             "no gateway log supplied (--gateway-log): only response headers used"
         )
-    recs = log_recs or []
+    recs: list[dict[str, Any]] = list(log_recs or [])
+
+    worker_logs: list[Path] = []
+    if worker_log is not None:
+        worker_logs.append(Path(worker_log))
+    else:
+        for candidate in ("worker.log", "worker_a.log", "worker_b.log", "kv_hop.log"):
+            p = run_dir / candidate
+            if p.is_file() and (
+                gateway_log is None or p.resolve() != gateway_log.resolve()
+            ):
+                worker_logs.append(p)
+
+    for w_log in worker_logs:
+        try:
+            with open(w_log, encoding="utf-8", errors="replace") as f:
+                recs.extend(parse_gateway_log(f, request_id))
+        except OSError as exc:
+            unavailable.append(f"worker log unreadable ({type(exc).__name__}): {w_log}")
+
     if log_recs is not None and not recs:
         unavailable.append(f"gateway log has no lines for request_id {request_id!r}")
 
@@ -474,7 +496,13 @@ def build_trace(
         )
     # hop (only a logged, confirmed transfer counts)
     intended = (place or {}).get("intended_action") or hdr.get("x-intended-action")
-    hops = [r for r in recs if r.get("stage") == "hop"]
+    hops = [
+        r
+        for r in recs
+        if r.get("stage") == "hop"
+        or r.get("event") == "kv_hop"
+        or str(r.get("event", "")).startswith("kv_hop")
+    ]
     if hops:
         # Judge the most complete record: the one with the fewest missing proof fields.
         def _str(v: Any) -> str | None:
@@ -488,6 +516,13 @@ def build_trace(
             "canonical_identity": _str(manifest.get("canonical_prefix_identity")),
             "canonical_namespace": _str(manifest.get("compatibility_namespace")),
         }
+        for h in hops:
+            if (
+                h.get("event") == "kv_hop"
+                and "router_prefix_id" not in h
+                and check["router_prefix_id"]
+            ):
+                h["router_prefix_id"] = check["router_prefix_id"]
         best = min(hops, key=lambda r: len(hop_missing_fields(r, **check)))
         missing = hop_missing_fields(best, **check)
         if not missing:

@@ -190,6 +190,18 @@ shedding; the tenant quota still runs. Compare with `e4_compare`: goodput, p99, 
 `timeout_queue`, per-tenant Jain index and batch starvation. Also screenshot/record the Grafana Gateway+admission
 and Queues dashboards for the same window. Restart workers between runs if you want identical cache state.
 
+### Soak and 10x demo load (arrival-rate mode)
+
+For soak runs and the 10x load demonstration, use open-loop arrival-rate scheduling instead of pure closed-loop concurrency. The replayer schedules conversation dispatch according to an inter-arrival distribution (Poisson by default, or uniform) while maintaining the concurrency semaphore as a safety ceiling, keeping manifests, control verification, and per-request evidence intact without needing Locust:
+
+```bash
+# Run on the Lambda host against localhost:18080 (or locally through the SSH tunnel):
+make replay-arrival-rate SCENARIO=e4_admission_overload RATE=5.0 DIST=poisson TARGET_URL=http://127.0.0.1:18080 \
+  REPLAYER_FLAGS="--output-dir metrics/inference/$RUN_ID --label soak-poisson-5rps"
+```
+
+The manifest records `arrival_rate` and `arrival_distribution`, and per-request latencies and throughput reflect true open-loop queueing dynamics.
+
 ### E5 Recompute vs real KV hop (#133)
 
 E5 asks at which prefix size moving KV from Worker A to Worker B beats recomputing it on B. It has two legs

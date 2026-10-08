@@ -25,6 +25,13 @@ def main(argv: list[str] | None = None) -> int:
         "<run-dir>/gateway.log if present",
     )
     p.add_argument(
+        "--worker-log",
+        type=Path,
+        default=None,
+        help="pulled worker log (kubectl logs deploy/inference-worker-b); default "
+        "<run-dir>/worker.log if present",
+    )
+    p.add_argument(
         "--json", type=Path, default=None, help="also write the trace as JSON"
     )
     p.add_argument(
@@ -46,7 +53,11 @@ def main(argv: list[str] | None = None) -> int:
         log = args.gateway_log
         if log is None and (args.run_dir / "gateway.log").is_file():
             log = args.run_dir / "gateway.log"
-        trace = build_trace(args.run_dir, args.request_id, log)
+        w_log = args.worker_log
+        if w_log is None and (args.run_dir / "worker.log").is_file():
+            w_log = args.run_dir / "worker.log"
+        trace = build_trace(args.run_dir, args.request_id, log, worker_log=w_log)
+
     except TraceError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2

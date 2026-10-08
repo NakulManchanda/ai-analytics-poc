@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import random
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -143,6 +144,8 @@ class ReplaySummary(BaseModel):
     total_completion_tokens: int | None = None
     tokens_measured_turns: int = 0
     tokens_unmeasured_turns: int = 0
+    arrival_rate: float | None = None
+    arrival_distribution: str | None = None
     turn_results: list[TurnResult] = Field(default_factory=list)
 
 
@@ -159,6 +162,8 @@ class ScenarioReplayer:
         timeout: float = 120.0,
         use_sse: bool = True,
         gateway_stream: bool = True,
+        arrival_rate: float | None = None,
+        arrival_distribution: str = "poisson",
     ) -> None:
         self.config = config
         self.target_base_url = target_base_url.rstrip("/")
@@ -166,6 +171,8 @@ class ScenarioReplayer:
         self.timeout = timeout
         self.use_sse = use_sse
         self.gateway_stream = gateway_stream
+        self.arrival_rate = arrival_rate
+        self.arrival_distribution = arrival_distribution
         self._gw_convs: dict[str, _GatewayConv] = {}
         self._controls_checked: set[str] = (
             set()
@@ -190,11 +197,28 @@ class ScenarioReplayer:
         client = self.client or httpx.AsyncClient(timeout=self.timeout)
 
         try:
-            tasks = [
-                self._run_conversation(conv, idx, semaphore, client)
-                for idx, conv in enumerate(self.config.conversations)
-            ]
-            conv_results = await asyncio.gather(*tasks)
+            if self.arrival_rate and self.arrival_rate > 0:
+                tasks = []
+                for idx, conv in enumerate(self.config.conversations):
+                    if idx > 0:
+                        if self.arrival_distribution == "uniform":
+                            delay = 1.0 / self.arrival_rate
+                        else:  # default "poisson" (exponential inter-arrival)
+                            delay = random.expovariate(self.arrival_rate)
+                        if delay > 0:
+                            await asyncio.sleep(delay)
+                    tasks.append(
+                        asyncio.create_task(
+                            self._run_conversation(conv, idx, semaphore, client)
+                        )
+                    )
+                conv_results = await asyncio.gather(*tasks)
+            else:
+                tasks = [
+                    self._run_conversation(conv, idx, semaphore, client)
+                    for idx, conv in enumerate(self.config.conversations)
+                ]
+                conv_results = await asyncio.gather(*tasks)
         finally:
             if owns_client:
                 await client.aclose()
@@ -239,6 +263,10 @@ class ScenarioReplayer:
             total_completion_tokens=total_comp_tok,
             tokens_measured_turns=len(successful_turns) - unmeasured,
             tokens_unmeasured_turns=unmeasured,
+            arrival_rate=self.arrival_rate,
+            arrival_distribution=(
+                self.arrival_distribution if self.arrival_rate else None
+            ),
             turn_results=all_turns,
         )
 
