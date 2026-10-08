@@ -52,9 +52,9 @@ block identity, lifecycle contract, hop telemetry or real-hop proof runner.
 
 ## Verification
 
-- `uv run --project services/app pytest infra/inference/tests tests/inference -q` — 303 passed
+- `uv run --project services/app pytest infra/inference/tests tests/inference -q` — 304 passed
 - `uv run --project services/app ruff check ...` — passed
-- Independent review fixes: filtered intermediate `kv_hop_available` events in metrics to avoid double-counting, aligned gateway reasons (`local_prefix_present`, `no_prior_worker`, `experiment_on`, `experiment_off`) with runtime/metrics allow-lists, removed pre-retrieval deadline abort in `retrieve()` to avoid dropping multi-request forward batches after external blocks are committed, added a test for post-schedule deadline behavior, parameterized smoke runner prompts with measured token scaling (~6.5 chars/token) and fail-closed validation for all E5 prefix sizes (`1k`, `2k`, `4k`, `7k`) with `@<size>` case tagging, attached timing and event fields to `crossover.json`, and added multi-size tagged evidence checks.
+- Independent review fixes: filtered intermediate `kv_hop_available` events in metrics to avoid double-counting, aligned gateway reasons (`local_prefix_present`, `no_prior_worker`, `experiment_on`, `experiment_off`) with runtime/metrics allow-lists, removed pre-retrieval deadline abort in `retrieve()` to avoid dropping multi-request forward batches after external blocks are committed, added a test for post-schedule deadline behavior, parameterized smoke runner prompts with nominal token scaling (~6.5 chars/token) and fail-closed validation for all E5 prefix sizes (`1k`, `2k`, `4k`, `7k`) with `@<size>` case tagging, derived TTFT and E2E latencies from Prometheus windows and request timers for both legs in `crossover.json`, supported `PREFIX_SIZES` in `make inference-kv-smoke`, used plain import for `E5_PREFIX_SIZES`, and added multi-size tagged evidence checks.
 - Live two-worker GPU proof: pending a new inference instance.
 
 ## Pull request

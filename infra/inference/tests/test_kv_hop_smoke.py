@@ -8,10 +8,11 @@ import pytest
 from infra.inference.mooncake.smoke import (
     E5_PREFIX_SIZES,
     _json_events,
-    _measured_prompt_tokens,
+    _nominal_prompt_tokens,
     _prefix_hits,
     _prompt,
     _target_event,
+    _ttft_ms,
 )
 
 
@@ -125,6 +126,22 @@ def test_prompt_scales_to_e5_prefix_sizes() -> None:
     assert set(E5_PREFIX_SIZES.keys()) == {"1k", "2k", "4k", "7k"}
     for size, target in E5_PREFIX_SIZES.items():
         prompt = _prompt("run-1", "case", size)
-        tokens = _measured_prompt_tokens(prompt)
+        tokens = _nominal_prompt_tokens(prompt)
         assert abs(tokens - target) <= 15
         assert len(prompt) / target >= 6.0
+
+
+def test_ttft_ms_derives_latency_from_prometheus_windows() -> None:
+    before = """
+vllm:time_to_first_token_seconds_count{model="m"} 10
+vllm:time_to_first_token_seconds_sum{model="m"} 1.50
+"""
+    after = """
+vllm:time_to_first_token_seconds_count{model="m"} 11
+vllm:time_to_first_token_seconds_sum{model="m"} 1.75
+"""
+    # 0.25 seconds / 1 request = 250.0 ms
+    assert _ttft_ms(before, after) == 250.0
+
+    # No count advance returns None
+    assert _ttft_ms(before, before) is None

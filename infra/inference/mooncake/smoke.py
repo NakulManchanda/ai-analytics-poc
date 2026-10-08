@@ -19,6 +19,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from app.benchmarks.e5_locality import SIZES as E5_PREFIX_SIZES
+
 try:
     from infra.inference.kv_transfer.evidence import validate_run
     from infra.inference.kv_transfer.identity import CompatibilitySpec
@@ -40,6 +42,12 @@ CASES = (
 )
 PREFIX_HITS = re.compile(
     r"^vllm:(?:gpu_)?prefix_cache_hits(?:_total)?(?:\{[^}]*\})?\s+([0-9.eE+-]+)$"
+)
+TTFT_SUM = re.compile(
+    r"^(?:vllm:)?time_to_first_token_seconds_sum(?:\{[^}]*\})?\s+([0-9.eE+-]+)$"
+)
+TTFT_COUNT = re.compile(
+    r"^(?:vllm:)?time_to_first_token_seconds_count(?:\{[^}]*\})?\s+([0-9.eE+-]+)$"
 )
 
 
@@ -86,6 +94,29 @@ def _prefix_hits(metrics: str) -> float:
     )
 
 
+def _ttft_stats(metrics: str) -> tuple[float, float]:
+    total_sum = sum(
+        float(m.group(1))
+        for line in metrics.splitlines()
+        if (m := TTFT_SUM.match(line.strip()))
+    )
+    total_count = sum(
+        float(m.group(1))
+        for line in metrics.splitlines()
+        if (m := TTFT_COUNT.match(line.strip()))
+    )
+    return total_sum, total_count
+
+
+def _ttft_ms(before: str, after: str) -> float | None:
+    sum_before, count_before = _ttft_stats(before)
+    sum_after, count_after = _ttft_stats(after)
+    count_delta = count_after - count_before
+    if count_delta > 0:
+        return round(((sum_after - sum_before) / count_delta) * 1000.0, 2)
+    return None
+
+
 def _json_events(log_text: str) -> list[dict[str, Any]]:
     events = []
     for line in log_text.splitlines():
@@ -101,24 +132,13 @@ def _json_events(log_text: str) -> list[dict[str, Any]]:
     return events
 
 
-try:
-    from app.benchmarks.e5_locality import SIZES as E5_PREFIX_SIZES
-except (ImportError, ModuleNotFoundError):
-    E5_PREFIX_SIZES: dict[str, int] = {
-        "1k": 1024,
-        "2k": 2048,
-        "4k": 4096,
-        "7k": 7000,
-    }
-
-
 REPEATED_SENTENCE = " The yellow taxi policy requires careful evidence and bounded analysis."
 TOKENS_PER_REPEAT = 11
 OVERHEAD_TOKENS = 10
 
 
-def _measured_prompt_tokens(prompt: str) -> int:
-    """Return the measured token count based on exact tokenizer density (~6.5 chars/token)."""
+def _nominal_prompt_tokens(prompt: str) -> int:
+    """Return nominal estimated prompt tokens based on sentence repetition (~6.5 chars/token)."""
     reps = prompt.count(REPEATED_SENTENCE)
     return OVERHEAD_TOKENS + reps * TOKENS_PER_REPEAT
 
@@ -216,6 +236,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         request_id = f"{run_id}-{tag}-{'target' if target else uuid.uuid4().hex[:8]}"
         worker_url = args.worker_a_url if worker == "worker_a" else args.worker_b_url
         before = _get(f"{worker_url.rstrip('/')}/metrics")
+        t0 = time.perf_counter()
         response = _post(
             f"{args.gateway_url.rstrip('/')}/v1/chat/completions",
             {
@@ -227,6 +248,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             },
             _request_headers(case, request_id, worker, hop),
         )
+        e2e_ms = round((time.perf_counter() - t0) * 1000.0, 2)
         after = _get(f"{worker_url.rstrip('/')}/metrics")
         record = {
             "request_id": request_id,
@@ -236,6 +258,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             "worker": worker,
             "hop_mode": hop,
             "response": response,
+            "e2e_latency_ms": e2e_ms,
+            "ttft_ms": _ttft_ms(before, after),
             "prefix_cache_hits_before": _prefix_hits(before),
             "prefix_cache_hits_after": _prefix_hits(after),
         }
@@ -295,6 +319,10 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         suffix = f"@{size}" if len(prefix_sizes) > 1 else ""
         recompute_case_name = f"{CASES[1]}{suffix}"
         transfer_case_name = f"{CASES[3]}{suffix}"
+        recompute_tag = f"{CASES[1]}-{size}" if len(prefix_sizes) > 1 else CASES[1]
+        transfer_tag = f"{CASES[3]}-{size}" if len(prefix_sizes) > 1 else CASES[3]
+        recompute_rec = records.get(recompute_tag, {})
+        transfer_rec = records.get(transfer_tag, {})
         recompute_event = next(
             c["events"][0] for c in all_cases if c["name"] == recompute_case_name
         )
@@ -314,6 +342,10 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             "recompute_request_id": recompute_event.get("request_id"),
             "transfer_request_id": transfer_event.get("request_id"),
             "recompute_lookup_ms": recompute_event.get("lookup_ms"),
+            "recompute_ttft_ms": recompute_rec.get("ttft_ms"),
+            "recompute_e2e_ms": recompute_rec.get("e2e_latency_ms"),
+            "transfer_ttft_ms": transfer_rec.get("ttft_ms"),
+            "transfer_e2e_ms": transfer_rec.get("e2e_latency_ms"),
             "recompute_event": recompute_event,
             "transfer_event": transfer_event,
         }

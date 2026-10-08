@@ -132,7 +132,7 @@ inference-kv-render: ## Render opt-in HAMi/Mooncake YAML (requires KV_IMAGE, CAC
 		--prefix-contract-version "$(PREFIX_CONTRACT_VERSION)" \
 		> "$(KV_BUNDLE_OUT)"
 
-inference-kv-smoke: ## Run four-case live proof (requires gateway/worker URLs, topology, versions, output)
+inference-kv-smoke: ## Run four-case live proof (requires gateway/worker URLs, topology, versions, output; optional PREFIX_SIZES="1k 2k 4k 7k" or PREFIX_SIZE=7k)
 	@test -n "$(GATEWAY_URL)" || { echo "GATEWAY_URL is required"; exit 2; }
 	@test -n "$(WORKER_A_URL)" || { echo "WORKER_A_URL is required"; exit 2; }
 	@test -n "$(WORKER_B_URL)" || { echo "WORKER_B_URL is required"; exit 2; }
@@ -142,7 +142,9 @@ inference-kv-smoke: ## Run four-case live proof (requires gateway/worker URLs, t
 	uv run --project services/app python -m infra.inference.mooncake.smoke \
 		--gateway-url "$(GATEWAY_URL)" --worker-a-url "$(WORKER_A_URL)" \
 		--worker-b-url "$(WORKER_B_URL)" --topology-file "$(TOPOLOGY)" \
-		--versions-file "$(VERSIONS)" --output-dir "$(OUT)"
+		--versions-file "$(VERSIONS)" --output-dir "$(OUT)" \
+		$(if $(PREFIX_SIZES),--prefix-sizes $(PREFIX_SIZES)) \
+		$(if $(PREFIX_SIZE),--prefix-size $(PREFIX_SIZE))
 
 inference-pull-evidence: ## Pull run evidence into metrics/inference
 	@mkdir -p $(INFERENCE_LOG_DIR)
