@@ -26,7 +26,12 @@ except ImportError:
 
 Policy = Literal["round_robin", "least_loaded", "p2c", "prefix_then_load"]
 POLICIES = ("round_robin", "least_loaded", "p2c", "prefix_then_load")
-PLACEMENT_ERRORS = ("no_healthy_worker", "unknown_forced_worker", "unknown_policy")
+PLACEMENT_ERRORS = (
+    "no_healthy_worker",
+    "batch_slot_cap",
+    "unknown_forced_worker",
+    "unknown_policy",
+)
 STICKY_MAX_INFLIGHT_TOKENS = 10_000
 SPILL_QUEUE = 4  # waiting + gateway-queued + just-placed requests that make an owner "saturated"
 
@@ -76,6 +81,7 @@ def pick(
     min_kv_free: float = 0.20,
     allow_forced: bool = False,
     spill_queue: int = SPILL_QUEUE,
+    batch_slot_limit: int | None = None,
 ) -> PlacementDecision | PlacementError:
     now = time.monotonic() if now is None else now
     by_id = {w.id: w for w in workers}
@@ -106,6 +112,12 @@ def pick(
     if not eligible:
         eligible, fallback = healthy, "stale_snapshot"
     eligible = [w for w in eligible if w.kv_free_ratio >= min_kv_free] or eligible
+    if req.workload_class == "batch" and batch_slot_limit is not None:
+        # Batch may only use slots below its cap, on the worker actually chosen (admission only
+        # checks that SOME worker has room); the reserved slots stay free for interactive work.
+        eligible = [w for w in eligible if w.occupied < batch_slot_limit]
+        if not eligible:
+            return PlacementError("batch_slot_cap")
 
     if policy == "round_robin":
         return decide(eligible[rr_index % len(eligible)], policy, "round_robin")

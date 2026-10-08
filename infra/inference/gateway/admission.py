@@ -126,7 +126,7 @@ def should_shed(
         return Shed(503, "no_signal", ra, inputs)
     if max(s.kv_free_ratio for s in eligible) < cfg.kv_free_min:
         return Shed(503, "kv_pressure", ra, inputs)
-    if all(s.running >= cfg.slot_limit(req.workload_class) for s in eligible):
+    if all(s.occupied >= cfg.slot_limit(req.workload_class) for s in eligible):
         return Shed(503, "decode_slots", ra, inputs)
     if req.deadline_ms is not None:
         wait = min(s.waiting for s in eligible) * cfg.queue_wait_per_waiting_s

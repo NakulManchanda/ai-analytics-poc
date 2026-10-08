@@ -508,6 +508,7 @@ async def serve_completion(
             rr_index=registry.next_rr(),
             allow_forced=os.getenv("ALLOW_FORCED_PLACEMENT") == "1",
             spill_queue=PLACEMENT_SPILL_QUEUE,
+            batch_slot_limit=ADMIT_CFG.slot_limit("batch"),
         )
     if isinstance(decision, placement.PlacementError):
         metrics.PLACEMENT_ERRORS.labels(decision.reason).inc()

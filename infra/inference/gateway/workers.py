@@ -69,6 +69,11 @@ class WorkerSnapshot:
     def id(self) -> str:
         return self.worker.id
 
+    @property
+    def occupied(self) -> int:
+        """Decode slots in use; the scrape lags, so never below what this gateway dispatched."""
+        return max(self.running, self.inflight)
+
     def age(self, now: float | None = None) -> float:
         if self.observed_at is None:
             return float("inf")

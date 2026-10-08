@@ -471,3 +471,80 @@ def test_pending_placements_spread_a_burst_across_workers() -> None:
         next(w for w in ws if w.id == d.chosen_worker).pending += 1  # what the gateway does
         picks.append(d.chosen_worker)
     assert picks.count("worker_a") == picks.count("worker_b") == 4
+
+
+# --- batch slot cap is enforced on the worker actually chosen -------------------------------
+
+
+def test_batch_is_not_placed_on_a_worker_at_its_slot_cap_even_when_it_owns_the_conversation() -> (
+    None
+):
+    ws = two(a={"running": 6}, b={})
+    _with_prefix(ws, "worker_a")
+    batch = PlacementRequest("p1", 1000, workload_class="batch")
+    d = pick(
+        batch, ws, policy="prefix_then_load", batch_slot_limit=6, rng=random.Random(0)
+    )
+    assert d.chosen_worker == "worker_b"
+    interactive = pick(
+        PlacementRequest("p1", 1000), ws, policy="prefix_then_load", batch_slot_limit=6
+    )
+    assert (interactive.chosen_worker, interactive.placement_reason) == (
+        "worker_a",
+        "prefix_affinity",
+    )
+
+
+def test_batch_with_every_worker_at_its_cap_is_a_placement_error() -> None:
+    ws = two(a={"running": 6}, b={"running": 7})
+    d = pick(
+        PlacementRequest(workload_class="batch"),
+        ws,
+        policy="least_loaded",
+        batch_slot_limit=6,
+    )
+    assert isinstance(d, PlacementError) and d.reason == "batch_slot_cap"
+
+
+def test_batch_cap_counts_what_the_gateway_has_dispatched_not_only_the_scrape() -> None:
+    ws = two(a={"running": 0}, b={"running": 6})
+    ws[0].inflight = 6  # scrape is stale: nothing running yet, but 6 dispatched
+    d = pick(
+        PlacementRequest(workload_class="batch"),
+        ws,
+        policy="least_loaded",
+        batch_slot_limit=6,
+    )
+    assert isinstance(d, PlacementError) and d.reason == "batch_slot_cap"
+
+
+def test_no_batch_cap_when_no_limit_is_given() -> None:
+    ws = two(a={"running": 7}, b={"running": 7})
+    d = pick(PlacementRequest(workload_class="batch"), ws, policy="least_loaded")
+    assert isinstance(d, PlacementDecision)
+
+
+def test_gateway_never_routes_admitted_batch_to_the_owner_at_the_batch_cap(
+    gw, monkeypatch
+) -> None:
+    from infra.inference.gateway.admission import AdmitConfig
+
+    client, reg = gw
+    monkeypatch.setattr(gateway_main, "PLACEMENT_POLICY", "prefix_then_load")
+    monkeypatch.setattr(
+        gateway_main, "ADMIT_CFG", AdmitConfig(max_decode_slots=8)
+    )  # batch cap 6
+    reg.snapshots["worker_a"].running = 6
+    reg.record_prefix("worker_a", "p1", 1000)
+    body = {"messages": MSG}
+    with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as post:
+        post.side_effect = _ok
+        # Interactive first: placing the batch request on worker_b moves the prefix belief there.
+        interactive = client.post("/serve", json=body, headers={"x-prefix-id": "p1"})
+        batch = client.post(
+            "/serve",
+            json=body,
+            headers={"x-prefix-id": "p1", "x-request-priority": "batch"},
+        )
+    assert interactive.headers["x-place-decision"] == "worker_a"
+    assert batch.status_code == 200 and batch.headers["x-place-decision"] == "worker_b"
