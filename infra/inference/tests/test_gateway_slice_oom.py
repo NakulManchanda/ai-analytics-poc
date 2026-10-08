@@ -124,3 +124,38 @@ def test_mark_cold_is_harmless_when_the_warm_gate_is_off() -> None:
     snap.warm = True
     reg.mark_cold("worker_a", "slice_oom")
     assert snap.warm  # legacy mode: warm only means "scraped once"
+
+
+class _StreamResponse:
+    def __init__(self, status: int, text: str):
+        self.status_code = status
+        self._text = text.encode("utf-8")
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *a):
+        return False
+
+    async def aread(self) -> bytes:
+        return self._text
+
+
+@pytest.mark.parametrize("status", [500, 503])
+def test_streaming_oom_stays_local_and_returns_error_status(gw, status) -> None:
+    client, reg = gw
+    before = _count()
+    stream_calls = []
+
+    def fake_stream(self, method, url, **kw):
+        stream_calls.append(url)
+        return _StreamResponse(status, OOM_BODY)
+
+    with patch.object(httpx.AsyncClient, "stream", fake_stream):
+        r = client.post("/serve", json={"messages": MSG, "model": "local", "stream": True})
+    assert r.status_code == status
+    assert r.headers["x-upstream-reason"] == "slice_oom"
+    assert "x-overflow" not in r.headers and OVERFLOW_URL not in stream_calls
+    assert _count() == before + 1
+    snap = reg.snapshots["worker_a"]
+    assert not snap.warm and snap.healthy_streak == 0

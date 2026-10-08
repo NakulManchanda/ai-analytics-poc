@@ -662,15 +662,21 @@ async def serve_completion(
                 detail=f"Worker unavailable at {snap.worker.url}: {exc}",
                 headers=correlation_headers,
             ) from exc
-        if upstream_resp.status_code in (503, 529):
+        if upstream_resp.status_code != 200:
             err = (await upstream_resp.aread()).decode("utf-8", errors="replace")
             free_worker()
             await cm.__aexit__(None, None, None)
             await client.aclose()
-            reason = classify_error(upstream_resp.status_code, err) or "worker_overloaded"
+            reason = classify_error(upstream_resp.status_code, err)
             if reason == SLICE_OOM:
                 _note_slice_oom(snap.id, correlation_headers)
-            if resp := await try_overflow(upstream_resp.status_code, reason, "upstream"):
+            elif upstream_resp.status_code in (503, 529):
+                reason = reason or "worker_overloaded"
+            if upstream_resp.status_code in (503, 529) and (
+                resp := await try_overflow(
+                    upstream_resp.status_code, reason or "worker_overloaded", "upstream"
+                )
+            ):
                 return resp
             finish(upstream_resp.status_code)
             return JSONResponse(
@@ -680,15 +686,8 @@ async def serve_completion(
             )
 
         async def stream_generator():
-            status = upstream_resp.status_code
+            status = 200
             try:
-                if status != 200:
-                    err_content = await upstream_resp.aread()
-                    decoded_err = err_content.decode("utf-8", errors="replace")
-                    if classify_error(status, decoded_err) == SLICE_OOM:
-                        _note_slice_oom(snap.id, correlation_headers)
-                    yield f"data: {json.dumps({'error': decoded_err})}\n\n"
-                    return
                 async for line in upstream_resp.aiter_lines():
                     if line:
                         if _has_content(line):

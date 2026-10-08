@@ -23,10 +23,10 @@ The hop was requested whenever a prefix owner differed from the chosen worker an
 ## Changes
 
 - `infra/inference/gateway/hop.py`, `placement.py`: the hop is requested only when the prior owner is believed to hold at least `KV_HOP_MIN_TOKENS` (default 1024, a placeholder until the E5 crossover); smaller prefixes are recomputed with the new reason `below_min_tokens` (allow-listed in `kv_transfer/runtime.py` and `kv_transfer/metrics.py`). `PlacementDecision` now carries `prior_reusable_tokens`. An explicit experiment override (`x-kv-hop-mode`) still bypasses the minimum so the E5 proof can force the hop at every size; a short deadline still wins.
-- `infra/inference/gateway/upstream.py`, `main.py`, `workers.py`, `metrics.py`: a 5xx worker response whose body reports a GPU out-of-memory failure is classified `slice_oom`, stays local (no overflow), is counted in `slice_oom_total{worker}`, carries `x-upstream-reason: slice_oom`, and makes the worker requalify (`Registry.mark_cold`, which also invalidates a warm probe in flight).
+- `infra/inference/gateway/upstream.py`, `main.py`, `workers.py`, `metrics.py`: a 5xx worker response whose body reports a GPU out-of-memory failure is classified `slice_oom`, stays local (no overflow), is counted in `slice_oom_total{worker}`, carries `x-upstream-reason: slice_oom`, and makes the worker requalify (`Registry.mark_cold`, which also invalidates a warm probe in flight). Any non-200 streaming response is intercepted and read before constructing `StreamingResponse`, returning a correctly statused JSONResponse with correlation headers rather than committing a 200 SSE stream.
 - `infra/inference/gateway/workers.py`, `main.py`, `services/app/app/benchmarks/replayer.py`: every dispatch stamps `x-worker-warm-age-ms` and `x-worker-requests-since-warm` (0 is the first request after the worker became warm), and the replayer records them, with `x-hop-decision`, in `requests.jsonl`, so a slow first step can be attributed to warm-up instead of to the hop.
 - `infra/inference/README.md` ("Eviction and ghost entries") and the playbook E5 section: eviction lives in vLLM and LMCache/Mooncake, a ghost cannot become a confirmed hop because the worker needs positive bytes/tokens and confirmed consumption, `MetadataDirectory` is a tested library that is not wired in, and the eviction counters the engine and store expose must be listed in the first live session.
-- Tests: `test_gateway_hop.py`, `test_gateway_placement.py`, `test_gateway_slice_oom.py` (new), `test_gateway_warm.py`.
+- Tests: `test_gateway_hop.py`, `test_gateway_placement.py`, `test_gateway_slice_oom.py` (new, covering both standard and streaming 500/503 OOM), `test_gateway_warm.py`.
 
 ## Key decisions
 
@@ -36,13 +36,15 @@ The hop was requested whenever a prefix owner differed from the chosen worker an
 
 ## Verification
 
-- `uv run --project services/app pytest infra/inference/tests tests/inference services/app/tests -q` -> passed.
+- `uv run --project services/app pytest infra/inference/tests tests/inference -q` — 429 passed.
+- `uv run --project services/app pytest services/app/tests -q` — 351 passed.
 - `ruff check` on the touched gateway and test files and `black --check services/app tests` clean.
+- Independent review fix: intercepted non-200 upstream stream responses before committing `StreamingResponse` to preserve error status codes and `x-upstream-reason: slice_oom` header.
 - Nothing ran on a live cluster.
 
 ## Pull request
 
-Draft PR to `main`.
+Draft PR #158 to `main`.
 
 ## Known limitations
 
