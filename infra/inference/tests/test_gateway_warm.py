@@ -357,15 +357,17 @@ def test_build_registry_reads_ramp_env(monkeypatch) -> None:
 
 
 @sync
-async def test_each_successful_scrape_starts_a_new_dispatch_generation() -> None:
+async def test_a_dispatch_stays_counted_after_a_scrape_that_follows_it_closely() -> None:
     r, client = Registry([Worker("worker_a", "http://a:8000")]), FakeClient()
     snap = r.snapshots["worker_a"]
     await r.refresh(client)
-    seq = snap.note_dispatch()
-    assert snap.unobserved == 1 and seq == snap.scrape_seq
-    await r.refresh(client)
-    assert snap.unobserved == 0 and snap.scrape_seq == seq + 1
-    client.scrape_ok = False
-    snap.note_dispatch()
-    await r.refresh(client)  # a failed scrape is not a new baseline
-    assert snap.unobserved == 1
+    token = snap.note_dispatch()
+    await r.refresh(client)  # the scrape cannot be shown to include the request yet
+    assert snap.occupied == snap.running + 1
+    snap.note_finish(token)
+    assert snap.occupied == snap.running
+
+
+def test_build_registry_reads_the_dispatch_grace(monkeypatch) -> None:
+    monkeypatch.setenv("DISPATCH_GRACE_S", "5")
+    assert build_registry().snapshots["worker_a"].dispatch_grace_s == 5.0

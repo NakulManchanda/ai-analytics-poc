@@ -595,7 +595,7 @@ async def serve_completion(
     target_url = f"{snap.worker.url}/v1/chat/completions"
     snap.inflight += 1
     snap.inflight_tokens += est_tokens
-    dispatch_seq = snap.note_dispatch()
+    dispatch_token = snap.note_dispatch()
 
     proxy_start = time.perf_counter()
 
@@ -609,7 +609,7 @@ async def serve_completion(
         metrics.STAGE_DURATION.labels("proxy", klass).observe(time.perf_counter() - proxy_start)
         snap.inflight -= 1
         snap.inflight_tokens -= est_tokens
-        snap.note_finish(dispatch_seq)
+        snap.note_finish(dispatch_token)
         ticket.release()
         log.info(json.dumps({**log_fields, "stage": "queue", "queue_release": time.time()}))
 

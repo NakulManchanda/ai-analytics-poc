@@ -289,7 +289,8 @@ def test_gateway_picks_either_worker_and_reports_it(gw) -> None:
     assert r2.headers["x-placement-policy"] == "least_loaded"
     assert r2.headers["x-intended-action"] == "recompute"
     assert all(
-        s.inflight == 0 and s.pending == 0 and s.unobserved == 0 for s in reg.snapshots.values()
+        s.inflight == 0 and s.pending == 0 and not s.recent_dispatches
+        for s in reg.snapshots.values()
     )
 
 
@@ -512,36 +513,56 @@ def test_batch_cap_counts_dispatches_the_scrape_has_not_seen() -> None:
     # Review case: the scrape shows 5 running and the gateway dispatched 3 more since. Real use may
     # be 8, so a batch cap of 6 must not allow another batch placement there.
     ws = two(a={"running": 5}, b={"running": 6})
-    ws[0].unobserved = 3
+    for _ in range(3):
+        ws[0].note_dispatch()
     batch = PlacementRequest(workload_class="batch")
     d = pick(batch, ws, policy="least_loaded", batch_slot_limit=6)
     assert isinstance(d, PlacementError) and d.reason == "batch_slot_cap"
 
 
-def test_batch_cap_does_not_double_count_dispatches_the_scrape_already_shows() -> None:
+def test_a_scrape_that_does_not_show_a_dispatch_does_not_drop_it() -> None:
+    # Review case: 5 running, a 6th is dispatched, and the next scrape (vLLM has not scheduled the
+    # 6th yet) still shows 5. The 6th must stay counted until a scrape a full grace window later.
+    s = snap("worker_a", running=5)
+    t0 = s.observed_at
+    s.note_dispatch(now=t0 + 0.1)
+    assert s.occupied == 6
+    s.observed_at = t0 + 1.0  # next scrape, still 5 running
+    assert s.occupied == 6
+    s.observed_at = t0 + 3.0  # a scrape more than the grace window after the dispatch
+    assert s.occupied == 5
+    batch = PlacementRequest(workload_class="batch")
+    s.observed_at = t0 + 1.0
+    blocked = pick(batch, [s], policy="least_loaded", batch_slot_limit=6)
+    assert isinstance(blocked, PlacementError) and blocked.reason == "batch_slot_cap"
+
+
+def test_dispatches_long_before_a_scrape_are_not_double_counted() -> None:
     ws = two(a={"running": 5}, b={"running": 6})
-    ws[0].inflight = 5  # all five are in the scrape's running count already
+    for _ in range(5):
+        ws[0].note_dispatch(now=ws[0].observed_at - 10)  # long since in the scrape's running count
     batch = PlacementRequest(workload_class="batch")
     d = pick(batch, ws, policy="least_loaded", batch_slot_limit=6)
     assert isinstance(d, PlacementDecision) and d.chosen_worker == "worker_a"
 
 
-def test_occupancy_follows_dispatch_finish_and_scrape_generations() -> None:
+def test_a_finished_dispatch_is_no_longer_counted() -> None:
     s = snap("worker_a", running=5)
-    first = s.note_dispatch()
-    s.note_dispatch()
+    first = s.note_dispatch(now=s.observed_at + 0.1)
+    s.note_dispatch(now=s.observed_at + 0.2)
     assert s.occupied == 7
-    s.note_finish(first)  # dispatched after the latest scrape and now done
+    s.note_finish(first)
     assert s.occupied == 6
-    old = s.note_dispatch()
-    s.running = 8  # a new scrape arrives and now includes everything dispatched so far
-    s.note_scrape()
-    assert s.occupied == 8 and s.unobserved == 0
-    s.note_finish(old)  # finished work that the new scrape already absorbed is not subtracted again
-    assert s.occupied == 8
-    after = s.note_dispatch()
-    s.note_finish(after)
-    assert s.occupied == 8
+    s.note_finish(first)  # idempotent
+    assert s.occupied == 6
+
+
+def test_a_never_scraped_worker_counts_every_dispatch() -> None:
+    s = snap("worker_a", running=0)
+    s.observed_at = None
+    s.note_dispatch(now=1.0)
+    s.note_dispatch(now=2.0)
+    assert s.occupied == 2
 
 
 def test_no_batch_cap_when_no_limit_is_given() -> None:

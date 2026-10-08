@@ -47,6 +47,9 @@ spec:
             # Batch work may use at most MAX_DECODE_SLOTS minus this fraction; the rest stays free for interactive.
             - name: BATCH_SLOT_RESERVE
               value: "0.25"
+            # A dispatch stays counted as occupying a slot until a scrape taken this long after it can include it.
+            - name: DISPATCH_GRACE_S
+              value: "2"
             - name: WORKER_MAX_INFLIGHT
               value: "8"
             - name: MAX_MODEL_LEN
