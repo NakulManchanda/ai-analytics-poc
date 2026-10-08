@@ -141,6 +141,37 @@ async def test_only_one_probe_in_flight_per_worker() -> None:
 
 
 @sync
+async def test_probe_started_before_an_outage_cannot_warm_the_worker() -> None:
+    """An in-flight probe that survives a failed scrape must not skip re-qualification."""
+    r, client = reg(warm_min_scrapes=2), FakeClient()
+    seen = []
+    r.on_probe = lambda wid, result: seen.append(result)
+    gate = asyncio.Event()
+    orig = client.post
+
+    async def slow(url, json=None, **kw):
+        await gate.wait()
+        return await orig(url, json=json, **kw)
+
+    client.post = slow
+    snap = r.snapshots["worker_a"]
+    await r.refresh(client)
+    await r.refresh(client)  # qualifying scrapes done: probe 1 starts and blocks
+    client.scrape_ok = False
+    await r.refresh(client)  # outage while the probe is in flight
+    client.scrape_ok = True
+    await r.refresh(client)  # healthy again, but the streak restarted at 1
+    assert snap.healthy and snap.healthy_streak == 1 and not snap.warm
+    gate.set()
+    await settle(r)  # the old probe completes now
+    assert not snap.warm and seen == ["stale"]
+    client.post = orig
+    await r.refresh(client)  # second qualifying scrape since the outage: a fresh probe
+    await settle(r)
+    assert snap.warm and seen == ["stale", "ok"]
+
+
+@sync
 async def test_gate_off_keeps_legacy_warm_after_one_scrape() -> None:
     r = Registry([Worker("worker_a", "http://a:8000")])  # require_warm defaults to False
     client = FakeClient()

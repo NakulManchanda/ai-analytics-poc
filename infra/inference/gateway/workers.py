@@ -52,6 +52,7 @@ class WorkerSnapshot:
     healthy: bool = False
     warm: bool = False
     healthy_streak: int = 0  # consecutive successful scrapes (warm gate)
+    health_epoch: int = 0  # bumped on every failed scrape; a probe only counts within its epoch
     warmed_at: float | None = None
     inflight: int = 0
     inflight_tokens: int = 0
@@ -125,6 +126,7 @@ class Registry:
         except (httpx.HTTPError, ValueError):
             snap.healthy = False  # keep last numbers; observed_at is not advanced -> goes stale
             snap.healthy_streak = 0
+            snap.health_epoch += 1
             if self.require_warm and snap.warm:
                 snap.warm, snap.warmed_at = False, None
                 log.info("worker %s went cold (scrape failed)", snap.id)
@@ -149,6 +151,7 @@ class Registry:
     async def _probe(self, client: httpx.AsyncClient, snap: WorkerSnapshot) -> None:
         """One tiny completion straight to the worker: the first request pays the cold cost here."""
         result = "ok"
+        epoch = snap.health_epoch
         try:
             resp = await client.post(
                 f"{snap.worker.url}/v1/chat/completions",
@@ -163,7 +166,14 @@ class Registry:
             resp.raise_for_status()
         except httpx.HTTPError:
             result = "error"
-        if result == "ok" and snap.healthy:
+        if result == "ok" and (
+            not snap.healthy
+            or snap.health_epoch != epoch
+            or snap.healthy_streak < self.warm_min_scrapes
+        ):
+            # An outage happened while the probe was in flight: the worker must re-qualify.
+            result = "stale"
+        if result == "ok":
             snap.warm, snap.warmed_at = True, time.monotonic()
             log.info("worker %s is warm (scrapes=%d, probe ok)", snap.id, snap.healthy_streak)
         if self.on_probe is not None:
