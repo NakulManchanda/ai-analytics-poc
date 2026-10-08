@@ -8,6 +8,7 @@ from experiments.analysis.compare import (
     jain_index,
 )
 from experiments.analysis.memory import memory_proof
+from experiments.analysis.queue import queue_proof
 from experiments.analysis.runs import (
     PER_REQUEST,
     WINDOW,
@@ -30,6 +31,8 @@ __all__ = [
     "jain_index",
     "load_run",
     "memory_proof",
+    "queue_proof",
     "sweep_curve",
     "ttft_by_turn",
 ]
+

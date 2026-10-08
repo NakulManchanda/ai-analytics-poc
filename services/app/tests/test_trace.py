@@ -405,3 +405,33 @@ def test_unknown_request_and_cli(tmp_path, capsys):
     assert json.loads(out.read_text())["request_id"] == "r1"
     assert trace_main(["--run-dir", str(run), "--list"]) == 0
     assert "r2" in capsys.readouterr().out
+
+
+def test_worker_kv_hop_event_in_worker_log_is_confirmed(tmp_path):
+    run = _run_dir(tmp_path)
+    (run / "gateway.log").write_text(_log("r1"))
+    # Real worker event emitted by runtime.py has event="kv_hop", not stage="hop",
+    # and no router_prefix_id (which is correlated from placement/headers).
+    worker_event = {
+        "event": "kv_hop",
+        "request_id": "r1",
+        "conversation_id": "c1",
+        "agent_step": "2",
+        "source_worker_or_store": "worker_a",
+        "destination_worker": "worker_b",
+        "prefix_identity": "canon-7f3a",
+        "compatibility_namespace": NS,
+        "transferred_tokens": 2048,
+        "transferred_bytes": 234881024,
+        "transfer_ms": 15.2,
+        "confirm_result": "available",
+        "destination_reused_tokens": 2048,
+        "hop_result": "transferred",
+    }
+    (run / "worker.log").write_text(json.dumps(worker_event) + "\n")
+    trace = build_trace(run, "r1", run / "gateway.log")
+    hop = _st(trace, "hop")
+    assert hop["status"] == "confirmed"
+    assert hop["duration_ms"] == 15.2
+    assert hop["details"]["transferred_tokens"] == 2048
+

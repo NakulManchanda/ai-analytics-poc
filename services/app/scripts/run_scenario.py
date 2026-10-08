@@ -190,6 +190,13 @@ def generate_markdown_report(
             f"| **Completion Tokens** | {_tok(summary.total_completion_tokens)} |",
             f"| **Token Usage Measured / Unmeasured Turns** | "
             f"{summary.tokens_measured_turns} / {summary.tokens_unmeasured_turns} |",
+        ]
+    )
+    if summary.arrival_rate is not None:
+        dist = summary.arrival_distribution or "poisson"
+        lines.append(f"| **Arrival Rate Mode** | {summary.arrival_rate:.2f} conv/s ({dist}) |")
+    lines.extend(
+        [
             "",
             "## 2. Client Latency & TTFT Percentiles",
             "",
@@ -394,6 +401,8 @@ async def async_main(args: argparse.Namespace) -> int:
             timeout=args.timeout,
             use_sse=not args.no_sse,
             gateway_stream=getattr(args, "gateway_stream", True),
+            arrival_rate=getattr(args, "arrival_rate", None),
+            arrival_distribution=getattr(args, "arrival_distribution", "poisson"),
         )
         try:
             summary = await replayer.run()
@@ -518,6 +527,8 @@ async def async_main(args: argparse.Namespace) -> int:
         "strategy": config.strategy,
         "target_endpoint_type": config.target_endpoint_type,
         "treatment": getattr(args, "label", None),
+        "arrival_rate": getattr(args, "arrival_rate", None),
+        "arrival_distribution": getattr(args, "arrival_distribution", None),
     }
     _write_json(
         run_dir / "manifest.json",
@@ -652,6 +663,18 @@ def main() -> int:
         choices=["on", "off"],
         default=None,
         help="Send x-admission-mode (gateway needs ALLOW_EXPERIMENT_CONTROLS=1)",
+    )
+    parser.add_argument(
+        "--arrival-rate",
+        type=float,
+        default=None,
+        help="Target arrival rate in conv/s for open-loop rate scheduling (soak/10x demo)",
+    )
+    parser.add_argument(
+        "--arrival-distribution",
+        choices=["poisson", "uniform"],
+        default="poisson",
+        help="Arrival interval distribution for --arrival-rate (default: poisson)",
     )
     parser.add_argument(
         "--tokenize-url",

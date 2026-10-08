@@ -138,8 +138,35 @@ def _gateway_metric_names() -> set[str]:
     return names
 
 
+def _kv_transfer_metric_names() -> set[str]:
+    from infra.inference.kv_transfer import metrics as kv_metrics
+
+    names: set[str] = set()
+    for coll in (
+        kv_metrics.HOP,
+        kv_metrics.HOP_TOKENS,
+        kv_metrics.HOP_BYTES,
+        kv_metrics.HOP_DURATION,
+        kv_metrics.HOP_ERROR,
+    ):
+        for metric in coll.collect():
+            names |= {
+                metric.name,
+                f"{metric.name}_total",
+                f"{metric.name}_bucket",
+                f"{metric.name}_sum",
+                f"{metric.name}_count",
+            }
+    return names
+
+
 def _known_names() -> set[str]:
-    return _fixture_metric_names() | ALLOWED_NON_PROM_METRICS | _gateway_metric_names()
+    return (
+        _fixture_metric_names()
+        | ALLOWED_NON_PROM_METRICS
+        | _gateway_metric_names()
+        | _kv_transfer_metric_names()
+    )
 
 
 def test_fixtures_exist_and_are_redacted() -> None:
@@ -247,11 +274,11 @@ def test_slice_b_dashboards_exist_and_cover_gateway_metrics() -> None:
         "queues",
         "overflow",
         "memory_proof",
-        "kv_hop_stub",
+        "kv_hop",
     }
     assert expected <= set(module.DASHBOARDS)
     used: set[str] = set()
-    for name in expected - {"kv_hop_stub"}:
+    for name in expected:
         for panel in module.DASHBOARDS[name]()["panels"]:
             for target in panel.get("targets", []):
                 used |= _extract_metric_identifiers(target["expr"])
@@ -264,11 +291,12 @@ def test_slice_b_dashboards_exist_and_cover_gateway_metrics() -> None:
         "orch_overflow_total",
         "DCGM_FI_DEV_FB_USED",
         "vllm:kv_cache_usage_perc",
+        "hop_total",
+        "hop_tokens_total",
+        "hop_bytes_total",
+        "hop_duration_seconds_bucket",
     ):
         assert metric in used, f"no slice-B panel references {metric}"
-    stub = module.DASHBOARDS["kv_hop_stub"]()
-    assert all(p["type"] == "text" for p in stub["panels"])
-    assert "#133" in json.dumps(stub)
 
 
 def _alert_rules() -> list[dict]:
@@ -278,7 +306,7 @@ def _alert_rules() -> list[dict]:
 
 def test_alert_rules_structure_and_metrics_are_known() -> None:
     rules = _alert_rules()
-    assert len(rules) == 5
+    assert len(rules) == 6
     known = _base_names(_known_names())
     for rule in rules:
         assert rule["alert"] and rule["expr"] and rule["for"]
@@ -296,7 +324,9 @@ def test_alert_rules_structure_and_metrics_are_known() -> None:
         "InferenceEngineTTFTHigh",
         "GatewayQueueShedSurge",
         "InferenceWorkerIntegrity",
+        "InferenceHopIntegrity",
     }
+
 
 
 def test_prometheus_scrapes_gateway_and_loads_alert_rules() -> None:

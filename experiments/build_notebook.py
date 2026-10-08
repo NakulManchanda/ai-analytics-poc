@@ -17,7 +17,7 @@ from pathlib import Path
 ROOT = next(p for p in [Path.cwd(), *Path.cwd().parents] if (p / "experiments" / "analysis").is_dir())
 sys.path.insert(0, str(ROOT))
 from experiments.analysis import (breakdown, e2_prefix_reuse, e3_compare, e4_compare,
-                                  load_run, memory_proof, sweep_curve, ttft_by_turn)
+                                  load_run, memory_proof, queue_proof, sweep_curve, ttft_by_turn)
 from experiments.analysis.display import show as plain_show, flatten
 from html import escape
 try:
@@ -86,6 +86,7 @@ RUNS = {
     "E4_ADMISSION_OFF": None, "E4_ADMISSION_ON": None,
     "E5_RUN": None,            # any gateway run dir (recompute control); shown by turn and worker
     "MEMORY_RANGE": None,      # metrics/inference/<run-id>/prometheus_range
+    "QUEUE_RANGE": None,       # metrics/inference/<run-id>/prometheus_range (gateway queue vs vLLM waiting)
 }
 RUNS.update(json.loads(os.environ.get("EVIDENCE_RUNS_JSON", "{}")))
 
@@ -259,6 +260,42 @@ def plot_memory(res):
     axes[-1].set_xlabel("minutes since window start (idle lead-in and tail trimmed)")
     plt.tight_layout()
     plt.show()
+
+
+def plot_queue(res):
+    if plt is None:
+        return
+    ts, ser = res["timestamps"], res["series"]
+    if not ts:
+        return print("No queue range samples available")
+    t = [(x - ts[0]) / 60 for x in ts]
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(11, 5.5), sharex=True)
+    q_lines = [(name, vals) for name, vals in ser.items() if "orch_replica_queue_depth" in name]
+    w_lines = [(name, vals) for name, vals in ser.items() if "vllm_requests_waiting" in name]
+    for i, (name, vals) in enumerate(q_lines):
+        if vals is not None:
+            ax1.plot(t, vals, color=COLORS[i % len(COLORS)], label=f"gateway queue: {name.split(':', 1)[-1]}", linewidth=1.6)
+    for i, (name, vals) in enumerate(w_lines):
+        if vals is not None:
+            ax1.plot(t, vals, "--", color=ORANGE if i == 0 else MUTED, label=f"vLLM waiting: {name.split(':', 1)[-1]}", linewidth=1.6)
+    ax1.set_ylabel("requests")
+    ax1.set_title("Part 5 scheduler proof: Gateway replica queue vs vLLM waiting requests", loc="left", fontsize=10, color=INK)
+    ax1.legend(frameon=False, fontsize=8, loc="upper left")
+
+    r_lines = [(name, vals) for name, vals in ser.items() if "vllm_requests_running" in name]
+    p_lines = [(name, vals) for name, vals in ser.items() if "vllm_preemption_rate" in name]
+    for i, (name, vals) in enumerate(r_lines):
+        if vals is not None:
+            ax2.plot(t, vals, color=COLORS[i % len(COLORS)], label=f"vLLM running: {name.split(':', 1)[-1]}", linewidth=1.6)
+    for i, (name, vals) in enumerate(p_lines):
+        if vals is not None:
+            ax2.plot(t, vals, ":", color=ORANGE, label=f"preemptions/s: {name.split(':', 1)[-1]}", linewidth=1.6)
+    ax2.set_ylabel("running / rate")
+    ax2.set_title("vLLM active running requests and preemption rate", loc="left", fontsize=10, color=INK)
+    ax2.legend(frameon=False, fontsize=8, loc="upper left")
+    ax2.set_xlabel("minutes since window start")
+    plt.tight_layout()
+    plt.show()
 """
 
 E0 = """\
@@ -341,6 +378,15 @@ if (p := need("MEMORY_RANGE")):
     res = memory_proof(p[0])
     plot_memory(res)
     print("flags:", res["flags"] or "none", "| warnings:", res["warnings"] or "none")
+"""
+
+QUEUE = """\
+if (p := need("QUEUE_RANGE")):
+    res = queue_proof(p[0])
+    show("Gateway queue vs vLLM waiting summary", res["summary"])
+    plot_queue(res)
+    if res["warnings"]:
+        print("warnings:", res["warnings"])
 """
 
 
@@ -479,6 +525,17 @@ not be summed. Samples can miss short bursts. The supplied range may include sev
 restrict the time window before attributing a peak to one experiment.
 
 """,
+    "QUEUE": """**Question:** where does the engine scheduler sit vs the gateway admit/place/queue stages?
+
+**Method:** align gateway replica queue depth (`orch_replica_queue_depth` by worker and class) and
+queue wait (`orch_queue_wait_p95`) against vLLM waiting (`vllm:num_requests_waiting`), running
+(`vllm:num_requests_running`) and preemptions (`vllm:num_preemptions_total`) over the run window.
+
+**Read the chart:** under overload, gateway queues absorb excess work while vLLM waiting remains
+bounded or zero, verifying the gateway preserves engine responsiveness and prevents uncoordinated
+head-of-line blocking. Non-zero preemptions confirm engine-level KV evictions.
+
+""",
 }
 
 EXPECTED = {
@@ -489,6 +546,7 @@ EXPECTED = {
     "E4": "Under genuine overload, early shedding should preserve interactive goodput and limit tail latency while avoiding unacceptable batch starvation. Lower raw throughput can be an intentional trade-off.",
     "E5": "A cached destination may avoid repeated prefill relative to recompute. These controls establish locality costs; a transfer crossover cannot be observed until real KV transfer is implemented and measured.",
     "MEM": "Preallocated HBM can stay flat while KV occupancy and queueing vary. Resource pressure should align in time with workload activity; short bursts may be missed by coarse samples.",
+    "QUEUE": "Gateway replica queues absorb offered load over the concurrency limit while vLLM waiting remains near zero, proving the gateway queue protects the engine scheduler rather than duplicating it.",
 }
 for experiment, hypothesis in EXPECTED.items():
     CONTEXT[experiment] += "**Expected behavior (hypothesis):** " + hypothesis + "\n\n**Observed evidence:** charts and tables below use only supplied run artifacts; the session writeup records interpretation. Missing runs are skipped.\n\n"
@@ -522,7 +580,10 @@ CELLS = [
     ("code", E5),
     (MD, "## Memory proof\n\n" + CONTEXT["MEM"]),
     ("code", MEM),
+    (MD, "## Gateway queue vs engine waiting proof\n\n" + CONTEXT["QUEUE"]),
+    ("code", QUEUE),
 ]
+
 
 
 def build() -> dict:

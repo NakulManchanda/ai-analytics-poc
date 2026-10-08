@@ -104,7 +104,15 @@ METRIC_NAMES = {
         "container_memory_working_set_bytes",
         "up",
     ),
+    "kv_hop": (
+        "hop_total",
+        "hop_tokens_total",
+        "hop_bytes_total",
+        "hop_duration_seconds",
+        "hop_error_total",
+    ),
 }
+
 
 ALLOWED_METRIC_NAMES = frozenset(
     name for group in METRIC_NAMES.values() for name in group
@@ -1194,16 +1202,56 @@ def memory_proof() -> dict:
     )
 
 
-def kv_hop_stub() -> dict:
-    body = (
-        "Placeholder. Real KV-transfer/hop metrics (Mooncake/LMCache-style) arrive with "
-        "**#133**; no hop metrics are exported today, so no panels are drawn here."
-    )
-    return _dash(
+def kv_hop() -> dict:
+    return _grid(
         "inference-kv-hop",
-        "Inference Lab / KV Hop (stub)",
-        [_text_panel(1, "KV hop metrics: not yet available", body, x=0, y=0)],
-        ["inference-lab", "kv-hop", "stub"],
+        "Inference Lab / KV Hop",
+        ["kv-hop", "mooncake", "transfer"],
+        (
+            "Mooncake/LMCache KV hop transfer and cache eviction proof. Transferred tokens and "
+            "bytes measure cross-worker KV movement. Ghost prevention requires positive bytes "
+            "and post-forward confirmation. Eviction is engine- and store-owned (tracked via "
+            "preemptions and missing/failed transfers); MetadataDirectory is a tested reference "
+            "library."
+        ),
+        [
+            (
+                "Hop requests/s by result and reason",
+                "sum by (result, reason) (rate(hop_total[5m]))",
+                "{{result}} ({{reason}})",
+                {},
+            ),
+            (
+                "Hop errors/s by reason",
+                "sum by (reason) (rate(hop_error_total[5m]))",
+                "{{reason}}",
+                {},
+            ),
+            (
+                "Hop tokens moved/s",
+                "sum by (result) (rate(hop_tokens_total[5m]))",
+                "{{result}} tokens/s",
+                {},
+            ),
+            (
+                "Hop throughput (bytes/s)",
+                "sum by (result) (rate(hop_bytes_total[5m]))",
+                "{{result}}",
+                {"unit": "Bps"},
+            ),
+            (
+                "Hop duration p95 (s)",
+                _q("0.95", "hop_duration_seconds", "result"),
+                "{{result}} p95",
+                {"unit": "s"},
+            ),
+            (
+                "Engine cache preemptions/evictions/s",
+                "sum by (instance) (rate(vllm:num_preemptions_total[5m]))",
+                "{{instance}}",
+                {},
+            ),
+        ],
     )
 
 
@@ -1219,8 +1267,9 @@ DASHBOARDS = {
     "queues": queues,
     "overflow": overflow,
     "memory_proof": memory_proof,
-    "kv_hop_stub": kv_hop_stub,
+    "kv_hop": kv_hop,
 }
+
 
 
 def write_dashboards(dest: Path) -> list[Path]:

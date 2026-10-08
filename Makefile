@@ -376,5 +376,9 @@ replay-e3-large-prefix-prefix-then-load: ## SYNTHETIC large-prefix E3 treatment 
 replay-e5: ## Replay an E5 locality/control scenario (usage: make replay-e5 E5_SCENARIO=e5_recompute_control_2k TARGET_URL=http://127.0.0.1:18080; gateway needs ALLOW_FORCED_PLACEMENT=1)
 	uv run --project services/app python services/app/scripts/run_scenario.py --scenario $(E5_SCENARIO) --endpoint-type gateway_chat --label $(E5_SCENARIO) --target-url $(TARGET_URL) $(if $(METRICS_URL),--metrics-url $(METRICS_URL)) $(REPLAYER_FLAGS)
 
+replay-arrival-rate: ## Replay scenario with open-loop Poisson/rate scheduling (usage: make replay-arrival-rate SCENARIO=e4_admission_overload RATE=5.0 [DIST=poisson] TARGET_URL=http://127.0.0.1:18080)
+	uv run --project services/app python services/app/scripts/run_scenario.py --scenario $(SCENARIO) --endpoint-type gateway_chat --arrival-rate $(RATE) $(if $(DIST),--arrival-distribution $(DIST)) --target-url $(TARGET_URL) $(if $(METRICS_URL),--metrics-url $(METRICS_URL)) $(REPLAYER_FLAGS)
+
 trace-request: ## Explain one request end to end (usage: make trace-request RUN_DIR=metrics/evidence/<run> REQUEST_ID=<id> [GATEWAY_LOG=gateway.log])
 	uv run --project services/app python services/app/scripts/trace_request.py --run-dir $(RUN_DIR) --request-id $(REQUEST_ID) $(if $(GATEWAY_LOG),--gateway-log $(GATEWAY_LOG))
+

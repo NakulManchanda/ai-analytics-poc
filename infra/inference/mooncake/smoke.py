@@ -133,13 +133,17 @@ def _json_events(log_text: str) -> list[dict[str, Any]]:
     return events
 
 
-REPEATED_SENTENCE = " The yellow taxi policy requires careful evidence and bounded analysis."
-TOKENS_PER_REPEAT = 11
+# Real TLC yellow taxi schema and DuckDB observation domain material for KV proof prompt padding
+REPEATED_SENTENCE = (
+    " Real taxi schema: VendorID, tpep_pickup_datetime, PULocationID, DOLocationID, "
+    "trip_distance, fare_amount, tip_amount; DuckDB observation."
+)
+TOKENS_PER_REPEAT = 14
 OVERHEAD_TOKENS = 10
 
 
 def _nominal_prompt_tokens(prompt: str) -> int:
-    """Return nominal estimated prompt tokens based on sentence repetition (~6.5 chars/token)."""
+    """Return nominal estimated prompt tokens based on sentence repetition (~10 chars/token)."""
     reps = prompt.count(REPEATED_SENTENCE)
     return OVERHEAD_TOKENS + reps * TOKENS_PER_REPEAT
 
