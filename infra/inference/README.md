@@ -272,6 +272,23 @@ passes only when it distinguishes same-worker reuse, cross-worker recompute with
 an independently warmed destination hit, and a real Mooncake retrieval with positive tokens,
 bytes and post-forward destination consumption. A worker header or lower latency cannot pass.
 
+#### Eviction and ghost entries
+
+Eviction happens in the store and the engine, not in the gateway: vLLM evicts its own prefix-cache
+blocks and LMCache/Mooncake evict by TTL and capacity from a bounded host-memory pool. The gateway's
+placement beliefs (`PrefixBelief`) are time-bounded hints that can outlive the blocks they describe, so
+they are never proof of a cached prefix.
+
+A ghost, metadata claiming a prefix is present after its blocks are gone, cannot become a confirmed hop:
+the worker reports a transfer only when it received positive tokens and bytes and consumption was
+confirmed after the forward pass (`kv_transfer/runtime.py`, validated fail-closed by
+`kv_transfer/evidence.py`); otherwise the request recomputes and the event records the fallback.
+`kv_transfer/directory.py` (`MetadataDirectory`) implements TTL and capacity eviction with worker-generation
+invalidation and is covered by tests, but it is a library: nothing in the gateway or worker path uses it.
+
+No eviction count is exported yet. In the first live session list what the engine and the store expose
+(`curl <worker>/metrics | grep -i evict`) before adding a panel or an alert on it.
+
 ### 8. Teardown
 When finished, tear down the remote cluster resources to stop GPU resource usage:
 ```bash

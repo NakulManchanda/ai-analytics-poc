@@ -371,3 +371,55 @@ async def test_a_dispatch_stays_counted_after_a_scrape_that_follows_it_closely()
 def test_build_registry_reads_the_dispatch_grace(monkeypatch) -> None:
     monkeypatch.setenv("DISPATCH_GRACE_S", "5")
     assert build_registry().snapshots["worker_a"].dispatch_grace_s == 5.0
+
+
+def test_warm_context_counts_requests_since_the_worker_became_warm() -> None:
+    reg_ = Registry([Worker("worker_a", "http://a:8000")])
+    snap = reg_.snapshots["worker_a"]
+    assert snap.warm_context() == (-1, 0)  # never warm: unknown age, first request
+    snap.warm, snap.warmed_at = True, time.monotonic() - 5
+    age, index = snap.warm_context()
+    assert 4900 <= age <= 6000 and index == 1  # counted from the earlier call
+    assert snap.warm_context()[1] == 2
+
+
+@sync
+async def test_becoming_warm_restarts_the_request_index_and_age() -> None:
+    r, client = reg(warm_min_scrapes=1), FakeClient()
+    snap = r.snapshots["worker_a"]
+    await r.refresh(client)
+    await settle(r)
+    snap.warm_context()
+    snap.warm_context()
+    client.scrape_ok = False
+    await r.refresh(client)  # cold again
+    client.scrape_ok = True
+    await r.refresh(client)
+    await settle(r)
+    assert snap.warm and snap.requests_since_warm == 0 and snap.warmed_at is not None
+
+
+@sync
+async def test_legacy_mode_also_records_when_the_worker_became_warm() -> None:
+    r, client = Registry([Worker("worker_a", "http://a:8000")]), FakeClient()
+    await r.refresh(client)
+    snap = r.snapshots["worker_a"]
+    assert snap.warm and snap.warmed_at is not None and snap.requests_since_warm == 0
+    first = snap.warmed_at
+    await r.refresh(client)
+    assert snap.warmed_at == first  # not re-stamped while it stays warm
+
+
+def test_gateway_stamps_warm_age_and_request_index_on_every_dispatch(cold_gw) -> None:
+    client, snap = cold_gw
+    snap.warm, snap.warmed_at = True, time.monotonic() - 3
+
+    async def ok(self, url, **_):
+        return httpx.Response(200, json={"choices": []}, request=httpx.Request("POST", url))
+
+    with patch("httpx.AsyncClient.post", ok):
+        first = client.post("/serve", json={"messages": MSG})
+        second = client.post("/serve", json={"messages": MSG})
+    assert first.headers["x-worker-requests-since-warm"] == "0"
+    assert second.headers["x-worker-requests-since-warm"] == "1"
+    assert 2900 <= int(first.headers["x-worker-warm-age-ms"]) <= 5000

@@ -58,6 +58,12 @@ WORKER_RAMP_CAP = Gauge(
     ["worker"],
     registry=REGISTRY,
 )
+SLICE_OOM = Counter(
+    "slice_oom_total",
+    "Worker error responses that reported a GPU out-of-memory failure on its slice",
+    ["worker"],
+    registry=REGISTRY,
+)
 WARM_PROBE = Counter(
     "warm_probe_total",
     "Warm-up probe requests sent to a worker by the gateway",

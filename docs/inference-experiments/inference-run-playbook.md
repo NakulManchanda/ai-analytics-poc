@@ -235,6 +235,10 @@ The smoke now sends warm-up requests per worker first (`--warmup-requests`, defa
 recorded as the cold figure in `manifest.json` under `warmup`), and alternates which comparison leg runs first by size
 index (`leg_order` in `crossover.json`).
 
+Before the first run, list which eviction counters the engine and the store expose
+(`curl -s http://127.0.0.1:18001/metrics | grep -i evict`) and note them with the run; the gateway exports none
+(see "Eviction and ghost entries" in `infra/inference/README.md`).
+
 Reading `crossover.json` (one entry per size): `actual_reusable_tokens` is the real x-axis (the size label is
 nominal); compare `recompute_ttft_ms` / `recompute_e2e_ms` with `transfer_ttft_ms` / `transfer_e2e_ms`, and read
 `transfer_ms`, `lookup_ms`, `confirm_ms`, `transferred_bytes` for the cost of the hop. A TTFT is `null` unless

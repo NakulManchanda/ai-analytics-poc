@@ -29,6 +29,9 @@ GATEWAY_DECISION_HEADERS = (
     "x-guard-decision",
     "x-policy-override-applied",
     "x-admission-mode",
+    "x-hop-decision",
+    "x-worker-warm-age-ms",
+    "x-worker-requests-since-warm",
 )
 FORCED_POLICY = (
     "forced"  # x-placement-policy the gateway reports for an honored x-force-worker

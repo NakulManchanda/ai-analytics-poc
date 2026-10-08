@@ -56,6 +56,7 @@ class WorkerSnapshot:
     health_epoch: int = 0  # bumped on every failed scrape; a probe only counts within its epoch
     warmed_at: float | None = None
     warm_count: int = 0  # times this worker has passed the warm gate (2+ means it returned)
+    requests_since_warm: int = 0  # requests dispatched here since it last became warm
     ramp_cap: int | None = None  # max in-flight + queued while ramping a returning worker
     ramp_stage: int = 0
     ramp_next_at: float = 0.0
@@ -93,6 +94,18 @@ class WorkerSnapshot:
         self._dispatch_id += 1
         self.recent_dispatches[self._dispatch_id] = time.monotonic() if now is None else now
         return self._dispatch_id
+
+    def warm_context(self, now: float | None = None) -> tuple[int, int]:
+        """(ms since the worker became warm or -1 if never, request index since warm) and count it.
+
+        Lets a slow first step be told apart from hop cost: index 0 is the first request this
+        replica served after it became warm.
+        """
+        index = self.requests_since_warm
+        self.requests_since_warm += 1
+        if self.warmed_at is None:
+            return -1, index
+        return int(((time.monotonic() if now is None else now) - self.warmed_at) * 1000), index
 
     def note_finish(self, token: int) -> None:
         self.recent_dispatches.pop(token, None)
@@ -150,6 +163,15 @@ class Registry:
         self._clock = clock
         self.on_probe = None  # optional callback(worker_id, result) for metrics
 
+    def mark_cold(self, worker_id: str, reason: str) -> None:
+        """Make a worker requalify (scrapes + probe) after it reported a fault such as an OOM."""
+        snap = self.snapshots[worker_id]
+        snap.healthy_streak = 0
+        snap.health_epoch += 1  # a probe in flight must not warm it again
+        if self.require_warm and snap.warm:
+            snap.warm, snap.warmed_at, snap.ramp_cap = False, None, None
+            log.info("worker %s marked cold (%s)", worker_id, reason)
+
     def next_rr(self) -> int:
         self._rr += 1
         return self._rr - 1
@@ -193,7 +215,8 @@ class Registry:
         snap.healthy_streak += 1
         self._advance_ramp(snap)
         if not self.require_warm:
-            snap.warm = True  # legacy: one good scrape
+            if not snap.warm:  # legacy: one good scrape
+                snap.warm, snap.warmed_at, snap.requests_since_warm = True, time.monotonic(), 0
         elif not snap.warm and snap.healthy_streak >= self.warm_min_scrapes:
             self._start_probe(client, snap)
 
@@ -253,7 +276,7 @@ class Registry:
             # An outage happened while the probe was in flight: the worker must re-qualify.
             result = "stale"
         if result == "ok":
-            snap.warm, snap.warmed_at = True, time.monotonic()
+            snap.warm, snap.warmed_at, snap.requests_since_warm = True, time.monotonic(), 0
             snap.warm_count += 1
             self._start_ramp(snap)
             log.info("worker %s is warm (scrapes=%d, probe ok)", snap.id, snap.healthy_streak)

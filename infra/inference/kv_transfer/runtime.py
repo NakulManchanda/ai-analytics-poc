@@ -347,6 +347,7 @@ class KVHopRuntime:
             "transfer_disabled",
             "independently_warmed_destination",
             "remote_prefix_candidate",
+            "below_min_tokens",
             "deadline_recompute",
             "experiment_on",
             "experiment_off",

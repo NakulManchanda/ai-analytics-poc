@@ -21,6 +21,7 @@ try:  # package import (tests) or flat import (ConfigMap mounted at /app, `uvico
     from .overflow import Overflow, OverflowConfig, decide
     from .queueing import CLASSES, QueueConfig, QueueRejected, WorkerQueues
     from .tenants import TenantQuota
+    from .upstream import SLICE_OOM, classify_error
     from .workers import build_registry
 except ImportError:
     import guard as guard_mod
@@ -30,6 +31,7 @@ except ImportError:
     from overflow import Overflow, OverflowConfig, decide
     from queueing import CLASSES, QueueConfig, QueueRejected, WorkerQueues
     from tenants import TenantQuota
+    from upstream import SLICE_OOM, classify_error
     from workers import build_registry
 
     import metrics
@@ -49,6 +51,13 @@ registry.on_probe = lambda wid, result: metrics.WARM_PROBE.labels(wid, result).i
 queues = WorkerQueues(QueueConfig.from_env())
 OVERFLOW_CFG = OverflowConfig.from_env()
 DEFAULT_WORKER_URL = registry.snapshots["worker_a"].worker.url  # /tokenize goes to A
+
+
+def _note_slice_oom(worker_id: str, headers: dict[str, str]) -> None:
+    """A worker reported a GPU OOM: count it, make the worker requalify, and say why."""
+    metrics.SLICE_OOM.labels(worker_id).inc()
+    registry.mark_cold(worker_id, SLICE_OOM)
+    headers["x-upstream-reason"] = SLICE_OOM
 
 
 @contextlib.asynccontextmanager
@@ -596,6 +605,9 @@ async def serve_completion(
     snap.inflight += 1
     snap.inflight_tokens += est_tokens
     dispatch_token = snap.note_dispatch()
+    warm_age_ms, warm_request_index = snap.warm_context()
+    correlation_headers["x-worker-warm-age-ms"] = str(warm_age_ms)
+    correlation_headers["x-worker-requests-since-warm"] = str(warm_request_index)
 
     proxy_start = time.perf_counter()
 
@@ -650,13 +662,20 @@ async def serve_completion(
                 detail=f"Worker unavailable at {snap.worker.url}: {exc}",
                 headers=correlation_headers,
             ) from exc
-        if upstream_resp.status_code in (503, 529):
+        if upstream_resp.status_code != 200:
             err = (await upstream_resp.aread()).decode("utf-8", errors="replace")
             free_worker()
             await cm.__aexit__(None, None, None)
             await client.aclose()
-            if resp := await try_overflow(
-                upstream_resp.status_code, "worker_overloaded", "upstream"
+            reason = classify_error(upstream_resp.status_code, err)
+            if reason == SLICE_OOM:
+                _note_slice_oom(snap.id, correlation_headers)
+            elif upstream_resp.status_code in (503, 529):
+                reason = reason or "worker_overloaded"
+            if upstream_resp.status_code in (503, 529) and (
+                resp := await try_overflow(
+                    upstream_resp.status_code, reason or "worker_overloaded", "upstream"
+                )
             ):
                 return resp
             finish(upstream_resp.status_code)
@@ -667,13 +686,8 @@ async def serve_completion(
             )
 
         async def stream_generator():
-            status = upstream_resp.status_code
+            status = 200
             try:
-                if status != 200:
-                    err_content = await upstream_resp.aread()
-                    decoded_err = err_content.decode("utf-8", errors="replace")
-                    yield f"data: {json.dumps({'error': decoded_err})}\n\n"
-                    return
                 async for line in upstream_resp.aiter_lines():
                     if line:
                         if _has_content(line):
@@ -721,8 +735,13 @@ async def serve_completion(
         await client.aclose()
 
     free_worker()
+    upstream_reason = classify_error(upstream_resp.status_code, upstream_resp.text)
+    if upstream_reason == SLICE_OOM:
+        _note_slice_oom(snap.id, correlation_headers)
     if upstream_resp.status_code in (503, 529) and (
-        resp := await try_overflow(upstream_resp.status_code, "worker_overloaded", "upstream")
+        resp := await try_overflow(
+            upstream_resp.status_code, upstream_reason or "worker_overloaded", "upstream"
+        )
     ):
         return resp
     finish(upstream_resp.status_code)
