@@ -166,7 +166,7 @@ class Registry:
             self._start_probe(client, snap)
 
     def _start_ramp(self, snap: WorkerSnapshot) -> None:
-        """A worker that returns after being cold starts under a cap (the first warm-up does not)."""
+        """A worker returning after being cold starts under a cap; its first warm-up does not."""
         if self.ramp_steps and snap.warm_count > 1:
             snap.ramp_stage, snap.ramp_cap = 0, self.ramp_steps[0]
             snap.ramp_next_at = self._clock() + self.ramp_step_s
