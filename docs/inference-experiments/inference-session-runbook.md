@@ -24,7 +24,7 @@ Time budget: about 3-4 hours of instance time if nothing breaks. Write down the 
 export MODEL_REVISION=c1899de289a04d12100db370d81485cdf75e47ca      # worker --revision (k8s/workers/worker-a.yaml)
 export TOKENIZER_REVISION=$MODEL_REVISION                           # confirmed in the vLLM 0.11.0 startup log (tokenizer_revision == revision)
 export CHAT_TEMPLATE_REVISION=$MODEL_REVISION                       # ASSUMPTION: template ships with the tokenizer in the model repo
-export ENGINE_FLAGS="--dtype bfloat16 --kv-cache-dtype auto --max-model-len 8192 --max-num-seqs 8 --max-num-batched-tokens 8192 --block-size 16 --enable-prefix-caching --enable-auto-tool-choice --tool-call-parser hermes --gpu-memory-utilization 0.45"
+export ENGINE_FLAGS="--dtype bfloat16 --kv-cache-dtype auto --max-model-len 8192 --max-num-seqs 8 --max-num-batched-tokens 2048 --block-size 16 --enable-prefix-caching --enable-auto-tool-choice --tool-call-parser hermes --gpu-memory-utilization 0.45"
 export VLLM_VERSION=0.11.0                                          # image vllm/vllm-openai:v0.11.0
 export KV_BLOCK_SIZE=16                                             # worker --block-size
 export INFERENCE_TOPOLOGY="two vLLM replicas/HAMi slices on one physical A100"

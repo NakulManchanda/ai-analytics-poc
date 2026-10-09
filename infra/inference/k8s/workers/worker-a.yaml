@@ -39,7 +39,7 @@ spec:
             - --max-num-seqs
             - "8"
             - --max-num-batched-tokens
-            - "8192"
+            - "2048"
             - --block-size
             - "16"
             - --enable-prefix-caching
