@@ -120,6 +120,27 @@ The deployed platform operates in AWS `us-east-1` as a coordinated 5-component d
 
 ---
 
+## Inference cluster project (course submission map)
+
+The same repository also holds the inference-cluster work: a tool-using taxi-analytics agent served through a gateway
+(guard, admit, place, queue, hop, overflow) in front of two vLLM workers on one A100. Start with **[DESIGN.md](DESIGN.md)**
+(the design, the questions, the results and the gaps). The code stays where it is; this table maps the brief's names to paths.
+
+| Brief | Where it is |
+|---|---|
+| `app/` | `services/app/app/` (`ServeLLMClient` calls only the gateway `/serve`), `services/mcp/` |
+| `control/` (guard, admit, place, queue, hop) | `infra/inference/gateway/`, `infra/inference/kv_transfer/` |
+| `cluster/` (how the engine comes up) | `infra/inference/k8s/`, `infra/inference/scripts/`, `infra/inference/mooncake/`, `make inference-*` targets |
+| `DESIGN.md` | [DESIGN.md](DESIGN.md) |
+| `plots/` | `docs/inference-experiments/evidence/plots/` (regenerate with `experiments/plot_evidence.py`) |
+| `metrics/` | `docs/inference-experiments/evidence/` (small tracked files); full run data is under `metrics/inference/` (gitignored) |
+| `notebook/` | `experiments/123_evidence.ipynb` (`make evidence-notebook`) |
+| How to run it | [docs/inference-experiments/inference-run-playbook.md](docs/inference-experiments/inference-run-playbook.md); what each experiment means: [inference-experiments-reference.md](docs/inference-experiments/inference-experiments-reference.md) |
+
+Not in this submission: a live KV hop run and a live overflow event (both are built and tested; see DESIGN.md section 10).
+
+---
+
 ## Repository Structure
 
 ```text
