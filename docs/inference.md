@@ -22,21 +22,27 @@ Our application is an enterprise analytics copilot over the NYC Yellow Taxi data
 ## Part 1. Capacity on Paper
 
 ### The Formula
-$$\text{max\_concurrent\_seqs} \approx \frac{\text{HBM} - \text{weights} - \text{activations}}{\text{kv\_bytes\_per\_token} \times \text{max\_len}}$$
+```math
+\text{max\_concurrent\_seqs} \approx \frac{\text{HBM} - \text{weights} - \text{activations}}{\text{kv\_bytes\_per\_token} \times \text{max\_len}}
+```
 
 ### Parameters & Math for Qwen3-0.6B on our 20 GiB GPU Slice:
 - **GPU Slice:** 1 x NVIDIA A100-SXM4-40GB sliced via HAMi to **20 GiB HBM** (50% memory and core slice).
 - **Model Architecture:** Qwen/Qwen3-0.6B, bfloat16, 28 layers, 8 KV heads, head dimension 128.
-- **Weights:** $\approx 1.12\text{ GiB}$.
+- **Weights:** $\approx$ 1.12 GiB.
 - **KV Bytes per Token:**
-  $$\text{kv\_bytes\_per\_token} = 2 \times \text{layers} \times \text{kv\_heads} \times \text{head\_dim} \times \text{bytes\_per\_elem}$$
-  $$= 2 \times 28 \times 8 \times 128 \times 2 = \mathbf{114,688\text{ bytes (112 KiB)}}$$
+```math
+\text{kv\_bytes\_per\_token} = 2 \times \text{layers} \times \text{kv\_heads} \times \text{head\_dim} \times \text{bytes\_per\_elem}
+```
+```math
+= 2 \times 28 \times 8 \times 128 \times 2 = 114,688\text{ bytes (112 KiB)}
+```
 - **KV Pool per Worker:**
-  - With `--max-num-batched-tokens 8192`: $7.61\text{ GiB} = \mathbf{71,200\text{ tokens}}$ ($4,450\text{ blocks} \times 16$).
-  - With `--max-num-batched-tokens 2048`: $7.78\text{ GiB} = \mathbf{72,736\text{ tokens}}$ ($4,546\text{ blocks} \times 16$). Lowering batched tokens reduces peak activation memory allocated during warmup profiling, freeing $\approx 175\text{ MiB}$ (~96 blocks) for the KV pool.
+  - With `--max-num-batched-tokens 8192`: 7.61 GiB = **71,200 tokens** (4,450 blocks $\times$ 16).
+  - With `--max-num-batched-tokens 2048`: 7.78 GiB = **72,736 tokens** (4,546 blocks $\times$ 16). Lowering batched tokens reduces peak activation memory allocated during warmup profiling, freeing $\approx$ 175 MiB (~96 blocks) for the KV pool.
 - **Calculated Concurrency:**
-  - At `max_len` (8,192 tokens): $\frac{71,200}{8,192} = \mathbf{8.69}$ concurrent sequences (or $8.88$ with 72,736 pool).
-  - At app actual lengths (p50 $\approx 541$ tokens, max $\approx 984$ tokens): $\approx \mathbf{130 - 134}$ sequences at p50; $\approx \mathbf{71 - 73}$ sequences at max length.
+  - At `max_len` (8,192 tokens): $71,200 / 8,192 =$ **8.69** concurrent sequences (or **8.88** with 72,736 pool).
+  - At app actual lengths (p50 $\approx$ 541 tokens, max $\approx$ 984 tokens): $\approx$ **130 – 134** sequences at p50; $\approx$ **71 – 73** sequences at max length.
 
 ### Model Switch Comparison Table (Paper Math on 20 GiB Slice):
 
