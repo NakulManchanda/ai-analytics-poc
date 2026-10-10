@@ -6,6 +6,7 @@ services:
       LLM_PROVIDER: bedrock
       AGENT_STRATEGY: "${AGENT_STRATEGY:-manual}"
       STT_PROVIDER: "${STT_PROVIDER:-transcribe}"
+      VOICE_ENABLED: "${VOICE_ENABLED:-false}"
       DYNAMODB_TABLE_NAME: "${DYNAMODB_TABLE_NAME:?Set DYNAMODB_TABLE_NAME to the shared state table}"
       GLOBAL_BEDROCK_MONTHLY_LIMIT_USD: "${GLOBAL_BEDROCK_MONTHLY_LIMIT_USD:-5.00}"
       AWS_REGION: "${AWS_REGION:-us-east-1}"

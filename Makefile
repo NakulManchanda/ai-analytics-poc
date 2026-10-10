@@ -280,6 +280,7 @@ local-aws-compose: ## Start local Compose with opt-in real AWS (Bedrock + Transc
 	AWS_PROFILE=$(or $(AWS_PROFILE),default) \
 	LOCAL_UID=$$(id -u) \
 	WEB_PORT=$(or $(WEB_PORT),3000) \
+	VOICE_ENABLED=$(or $(VOICE_ENABLED),false) \
 	docker compose -f docker-compose.yml -f docker-compose.aws.yml up --build -d
 
 local-aws-refresh: ## Restart local Compose stack from scratch (down then rebuild/up)
