@@ -56,15 +56,15 @@ flowchart TD
     subgraph GW["Inference Gateway (FastAPI)"]
         Guard["1. Guardrails<br/>(malformed JSON · context > 8,192 tokens)"] --> Tenant["2. Tenant Quotas<br/>(cap 10 in-flight · 429 stays local)"]
         Tenant --> Admit["3. Admission Control<br/>(decode slots saturation · KV pressure)"]
-        Admit --> Queue["4. Priority Queue<br/>(interactive > batch · deadline slack)"]
-        Queue --> Router["5. Router & Placement<br/>(prefix_then_load · sticky owner)"]
+        Admit --> Router["4. Router & Placement<br/>(prefix_then_load · sticky owner)"]
+        Router --> Queue["5. Per-Worker Priority Queue<br/>(interactive > batch · deadline slack)"]
     end
 
     Tenant -. "429 tenant_concurrency<br/>(stays local)" .-> Orch
     Admit -- "503 decode_slots<br/>(batch traffic)" --> Overflow["Superlinked Overflow<br/>(Qwen/Qwen3.8-27B-FP8)"]
 
-    Router -- "Sticky Worker A" --> WA
-    Router -- "Sticky Worker B" --> WB
+    Queue -- "Worker A Queue (cap 8)" --> WA
+    Queue -- "Worker B Queue (cap 8)" --> WB
 
     subgraph CLUSTER["K3s Inference Cluster (1 x NVIDIA A100-SXM4-40GB)"]
         subgraph SliceA["HAMi Slice 0: 20 GiB HBM / 50% SMs"]

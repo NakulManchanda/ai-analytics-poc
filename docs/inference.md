@@ -29,8 +29,8 @@ Our application is an enterprise analytics copilot over the NYC Yellow Taxi data
 | **Guard** | Structural JSON & context check (> 8,192 tokens) | Rejects bad payloads (400/413) at the door before consuming GPU compute |
 | **Tenant Quota** | Concurrency cap (`TENANT_MAX_CONCURRENCY=10`) + token budget | Stops single noisy tenant from monopolizing GPU slots; 429 strictly stays local |
 | **Admission** | Decode slots saturation (`MAX_DECODE_SLOTS=8`) + KV pressure check | Protects GPU decode slots from overload; sheds early to preserve interactive tail latency |
-| **Queue** | Class-aware priority queue (interactive over batch) | Prevents background analytics sweeps from head-of-line blocking interactive turns |
 | **Router** | `prefix_then_load` with sticky owner and queue depth anti-herding | Maximizes prefix cache hit rate (72%-98%) while preventing burst congestion on one replica |
+| **Queue** | Class-aware per-worker priority queue (interactive over batch) | Prevents background analytics sweeps from head-of-line blocking interactive turns on the target worker |
 | **Cache** | Local vLLM prefix cache + LMCache/Mooncake TCP store | 3.1x TTFT speedup on turn 1; enables inter-worker KV block reuse |
 | **Engine** | vLLM (v0.11.0) serving Qwen/Qwen3-0.6B (bf16) | Native PagedAttention, continuous batching, and chunked prefill at 2,048 tokens |
 | **Device / Pod** | HAMi GPU slicing (two 20 GiB / 50% SM slices on 1 A100-40GB) | Isolates two worker pods with dedicated KV pools on one physical GPU |
@@ -62,15 +62,15 @@ flowchart TD
     subgraph GW["Inference Gateway (FastAPI)"]
         Guard["1. Guardrails<br/>(malformed JSON · context > 8,192 tokens)"] --> Tenant["2. Tenant Quotas<br/>(cap 10 in-flight · 429 stays local)"]
         Tenant --> Admit["3. Admission Control<br/>(decode slots saturation · KV pressure)"]
-        Admit --> Queue["4. Priority Queue<br/>(interactive > batch · deadline slack)"]
-        Queue --> Router["5. Router & Placement<br/>(prefix_then_load · sticky owner)"]
+        Admit --> Router["4. Router & Placement<br/>(prefix_then_load · sticky owner)"]
+        Router --> Queue["5. Per-Worker Priority Queue<br/>(interactive > batch · deadline slack)"]
     end
 
     Tenant -. "429 tenant_concurrency<br/>(stays local)" .-> Orch
     Admit -- "503 decode_slots<br/>(batch traffic)" --> Overflow["Superlinked Overflow<br/>(Qwen/Qwen3.8-27B-FP8)"]
 
-    Router -- "Sticky Worker A" --> WA
-    Router -- "Sticky Worker B" --> WB
+    Queue -- "Worker A Queue (cap 8)" --> WA
+    Queue -- "Worker B Queue (cap 8)" --> WB
 
     subgraph CLUSTER["K3s Inference Cluster (1 x NVIDIA A100-SXM4-40GB)"]
         subgraph SliceA["HAMi Slice 0: 20 GiB HBM / 50% SMs"]
@@ -92,9 +92,9 @@ flowchart TD
 2. **Guard:** [`gateway/guard.py`](../infra/inference/gateway/guard.py) checks JSON structure and context length. Payloads exceeding 8,192 tokens or with malformed schemas are rejected immediately with `400` or `413` without consuming GPU cycles.
 3. **Tenant Quota:** [`gateway/tenants.py`](../infra/inference/gateway/tenants.py) tracks in-flight requests per tenant. If a tenant exceeds 10 concurrent requests, it is throttled with `429 tenant_concurrency` (which strictly stays local and never overflows).
 4. **Admission Control:** [`gateway/admission.py`](../infra/inference/gateway/admission.py) checks cluster decode slots and worker free KV. If local decode slots are saturated, batch requests are routed to the capacity overflow handler; otherwise, shed with `503 decode_slots`.
-5. **Priority Queue:** [`gateway/queueing.py`](../infra/inference/gateway/queueing.py) orders admitted requests by traffic class (interactive before batch), prompt length, and deadline slack, preventing batch starvation of interactive decodes.
-6. **Router & Placement:** [`gateway/placement.py`](../infra/inference/gateway/placement.py) evaluates prefix affinity (`prefix_then_load`). Requests land on the worker holding the cached prefix (223-token system + tool schemas), falling back to least-loaded.
-7. **Engine Execution:** Dispatched to vLLM worker (`ClusterIP:8000`). vLLM executes chunked prefill (2,048 tokens) and decodes with continuous batching. Streams back through the gateway to the orchestrator.
+5. **Router & Placement:** [`gateway/placement.py`](../infra/inference/gateway/placement.py) evaluates prefix affinity (`prefix_then_load`) and worker queue depth. It assigns the sticky owner worker holding the cached prefix (223-token system + tool schemas), falling back to least-loaded. If batch slots on the candidate worker are full (cap 6 of 8 slots), it sheds with `503 batch_slot_cap`.
+6. **Per-Worker Priority Queue:** [`gateway/queueing.py`](../infra/inference/gateway/queueing.py) acquires an execution slot in the chosen worker's queue, ordering admitted requests by traffic class (interactive before batch), prompt length, and deadline slack. Discards requests with `504 timeout_queue` if deadline expires before an in-flight slot opens.
+7. **Engine Execution:** Dispatched to the chosen vLLM worker (`ClusterIP:8000`). vLLM executes chunked prefill (2,048 tokens) and decodes with continuous batching. Streams back through the gateway to the orchestrator.
 
 ---
 
@@ -166,6 +166,40 @@ flowchart TD
   - **Stay Local:** HTTP `429` (`tenant_concurrency`, `tenant_tokens`), HTTP `500` (internal bugs), and `slice_oom` **never leave**.
   - **May Leave to Overflow:** Only HTTP `503` or `529` explicitly citing capacity exhaustion (`decode_slots`, `kv_pressure`, `no_signal`) may leave to Superlinked.
 
+### E4 Evidence Deep Dive: Does Admission Protect Interactive Traffic, or Is It Too Aggressive?
+
+In the benchmark run ([`notebook-run-2026-10-10.html`](inference-experiments/evidence/notebook/notebook-run-2026-10-10.html), [`e4-compare-d123-20261010-e4-0003.json`](inference-experiments/evidence/metrics/e4-compare-d123-20261010-e4-0003.json), and [`e4-analysis-d123-20261010-e4-0003.txt`](inference-experiments/evidence/metrics/e4-analysis-d123-20261010-e4-0003.txt)), we evaluated an overload trace of 48 requests across 22 concurrent conversations (12 `tenant_interactive`, 24 `tenant_noisy`, 12 `tenant_batch` with interactive deadlines of 1,500–2,000 ms) under two arms: **Admission OFF** vs. **Admission ON**.
+
+#### Head-to-Head Comparison:
+
+| Metric | Admission OFF (`a_admission_off`) | Admission ON (`b_admission_on`) | Delta / Trade-off |
+| :--- | :--- | :--- | :--- |
+| **Completed Turns** | **32 of 48** (66.7%) | **20 of 48** (41.7%) | **-12 completed (-37.5%)** |
+| **`tenant_interactive` Completed** | **12 of 12 (100%)** | **8 of 12 (66.7%)** | **4 interactive turns shed at door** |
+| **`tenant_noisy` Completed** | **20 of 24 (83.3%)** | **12 of 24 (50.0%)** | 8 noisy turns shed at door |
+| **`tenant_batch` Completed** | **0 of 12 (0%)** | **0 of 12 (0%)** | Starved in both arms |
+| **Rejections & Sheds** | 12 x `batch_slot_cap` (place)<br/>4 x `tenant_concurrency` (quota) | 24 x `decode_slots` (admit)<br/>4 x `tenant_concurrency` (quota) | **58.3% total shed rate in ON** (28/48 failed) |
+| **`tenant_interactive` TTFT p95 / p99** | 1,048 ms / 1,435 ms | **638 ms / 638 ms** | -410 ms p95 (-39.1%) |
+| **`tenant_interactive` E2E p95 / p99** | 1,857 ms / 2,126 ms | **1,568 ms / 1,568 ms** | -289 ms p95 (-15.6%) |
+| **`tenant_interactive` Queue Wait p95**| 540 ms | **0.0 ms** | Eliminated wait for admitted survivors |
+| **Engine State (`vLLM Waiting`)** | Max 0 (engine wait ~23 µs) | Max 0 (engine wait ~23 µs) | Engine was never overloaded in either arm |
+
+#### Drilling into the Result: Why Admission ON Was Too Aggressive
+
+1. **Trading Completed Work for Unnecessary Tail Latency Reduction:**
+   - In Admission OFF, **all 12 interactive requests completed successfully within client deadlines** (interactive deadline was 1,500–2,000 ms; p95 E2E was 1,857 ms). The gateway queue comfortably absorbed the burst (interactive queue wait p95 was only 540 ms, and overall queue wait p95 was 1,215 ms).
+   - In Admission ON, the gateway shed 4 of the 12 interactive requests with HTTP 503 `decode_slots`. While the surviving 8 requests enjoyed tighter tail latency (TTFT p95 dropped from 1,048 ms to 638 ms, and queue wait dropped to 0 ms), this bought latency reduction at the unacceptable cost of **dropping 33% of legitimate interactive user requests** at the door.
+2. **Global Decode Slot Counting Without Per-Tenant Isolation:**
+   - Admission checks global decode slot saturation (`MAX_DECODE_SLOTS=8` per worker = 16 total cluster-wide).
+   - Although admission shedding is class-aware (shedding `batch` before `interactive`), it is not tenant-isolated. A 22-wide concurrency burst driven largely by `tenant_noisy` quickly saturated the 16 global slots. Subsequent requests from `tenant_interactive` were dropped with `decode_slots` despite having clean per-tenant quotas.
+3. **Lack of Deadline Slack Before Shedding:**
+   - Admission evaluated slot fullness as an instantaneous binary decision rather than calculating whether an incoming request had sufficient slack time to queue. Because the actual queue delay was only ~540 ms in OFF, those 4 shed requests would have easily succeeded in time.
+
+#### Architectural Lessons & Production Remedies:
+- **Introduce Queue Slack Before Shedding:** Do not reject immediately upon instantaneous slot saturation. If `estimated_queue_wait + estimated_decode_time < remaining_deadline`, admit the request into the priority queue; shed only when `deadline_unachievable` (504) or queue buffer overflows.
+- **Tenant-Reserved Interactive Capacity:** Reserve a baseline quota of decode slots per tenant so noisy neighbors cannot trigger decode-slot starvation for interactive users.
+- **Superlinked Overflow Path:** The 24 shed requests (especially the 12 batch analytics turns) demonstrate why external overflow is vital: routing shed batch traffic to the Superlinked endpoint (`Qwen/Qwen3.8-27B-FP8`) fulfills the workload without degrading local GPU tail latency.
+
 ---
 
 ## Part 4. Placement (Which Worker & Policy)
@@ -187,9 +221,16 @@ flowchart TD
 ## Part 5. Queue & Engine (What Runs Next & What You Do Not)
 
 ### 1. Who sits in your queue vs vLLM's waiting queue?
-- **Gateway Queue:** Requests wait in `infra/inference/gateway/queueing.py` ordered by class (interactive before batch), prompt length, slack time, and arrival age.
-- **vLLM's Waiting Queue:** Because `WORKER_MAX_INFLIGHT=8` matches vLLM's `--max-num-seqs 8`, **vLLM's waiting queue stays at 0**. The gateway absorbs the queue.
+- **Gateway Queue:** Requests wait in `infra/inference/gateway/queueing.py` per worker, ordered by class (interactive before batch), prompt length, slack time, and arrival age.
+- **vLLM's Waiting Queue:** Because `WORKER_MAX_INFLIGHT=8` matches vLLM's `--max-num-seqs 8`, **vLLM's macro-level waiting queue stays at 0**. The gateway absorbs arrival bursts.
 - **Evidence:** `vllm:num_requests_waiting` peaked at `0` in E4 Prometheus scrapes.
+
+#### Crucial Nuance: Why vLLM Can Still Queue Internally Even When Limits Match
+While the gateway absorbs macro-level queues (seconds), the engine can and does still queue requests internally under realistic workloads:
+1. **Token Budget & Chunked Prefill (`--max-num-batched-tokens 2048`):** Concurrency is two-dimensional (sequences $\times$ tokens). Even when in-flight sequences are $\le 8$, if total prompt/generation tokens across active requests exceed the 2,048-token batch budget in an iteration forward pass, vLLM's continuous batching scheduler chunks prefills and retains admitted requests in the engine's internal `waiting` state until token budget opens up.
+2. **Iteration Step Boundaries & Async LLM Engine Scheduling:** In `AsyncLLMEngine`, requests arrive over HTTP asynchronously between forward passes. A request dispatched by the gateway sits in the engine queue (measured at ~23 microseconds in E4) waiting for the current GPU forward pass to complete before the engine's `_schedule()` cycle promotes it from `waiting` to `running`.
+3. **Dynamic KV Allocation & Step Latency:** As active sequences generate new tokens, dynamic KV block allocation can pause newly admitted sequences across step boundaries until blocks are freed or paged.
+4. **Prometheus Scrape Interval Aliasing:** Prometheus scrapes every 15 seconds. Sub-millisecond or sub-second engine waiting states are smoothed out or missed in gauge snapshots, which gives the appearance of a strictly zero queue in scraped metrics even when transient engine-level scheduling queues occur.
 
 ### 2. Waiting / running / swapped (or preempted)?
 - Waiting: Gateway priority queues hold waiting requests.
