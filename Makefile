@@ -43,7 +43,7 @@ inference-config: ## Apply only safe, allowlisted inference configuration remote
 	@mkdir -p $(INFERENCE_LOG_DIR)
 	@set -o pipefail; bash infra/inference/scripts/config.sh 2>&1 | tee $(INFERENCE_LOG_DIR)/config.log
 
-inference-secret: ## Stream the optional Hugging Face token into the cluster secret
+inference-secret: ## Stream optional HF_TOKEN and SUPERLINKED_API_KEY (overflow-credentials) into cluster Secrets; idempotent, needs the namespace
 	bash infra/inference/scripts/secret.sh
 
 inference-bootstrap: ## Bootstrap pinned k3s, Helm, and HAMi on Lambda
@@ -57,7 +57,7 @@ inference-deploy: ## Deploy workers and #120 observability configuration
 inference-dashboards: ## Regenerate the #115 slice E Grafana dashboards (stdlib-only, deterministic)
 	python3 infra/inference/observability/grafana/dashboards.py
 
-inference-up: inference-sync inference-bootstrap inference-config inference-deploy ## Provision the #120 cluster lab
+inference-up: inference-sync inference-bootstrap inference-config inference-secret inference-deploy ## Provision the #120 cluster lab
 
 inference-fresh-up: ## Fresh Lambda instance (new IP already in .env and ~/.ssh/config): up + controls on + verify workers. Long; state-changing
 	@$(MAKE) inference-up
@@ -92,11 +92,27 @@ inference-gateway-restart: ## Restart the remote inference gateway pod and wait 
 	@mkdir -p $(INFERENCE_LOG_DIR)
 	@set -o pipefail; bash infra/inference/scripts/gateway-restart.sh 2>&1 | tee $(INFERENCE_LOG_DIR)/gateway-restart.log
 
+inference-refresh: ## Bring a RUNNING cluster to the current manifests (no bootstrap): sync, Secrets, deploy, controls ON, verify workers. Restarts the gateway; wait for worker_warm 1 and worker_ramp_cap 0 after
+	@$(MAKE) inference-sync
+	@$(MAKE) inference-secret
+	@$(MAKE) inference-deploy
+	@$(MAKE) inference-controls-on
+	@$(MAKE) inference-verify-workers
+
 inference-controls-on: ## Enable test-only gateway experiment controls + E4 tenant allowlist (restarts gateway pod)
 	@bash infra/inference/scripts/controls.sh on
 
 inference-controls-off: ## Disable experiment controls and forced placement (restarts gateway pod)
 	@bash infra/inference/scripts/controls.sh off
+
+inference-overflow-check: ## Local, no cluster: verify the Superlinked destination speaks OpenAI chat (models, chat, tools, stream); needs SUPERLINKED_API_KEY in infra/inference/.env; spends a few tokens
+	@bash infra/inference/scripts/overflow-check.sh
+
+inference-overflow-on: ## Enable gateway overflow to the Superlinked destination (needs OVERFLOW_URL in infra/inference/.env; restarts gateway pod; not for E4/E5)
+	@bash infra/inference/scripts/overflow.sh on
+
+inference-overflow-off: ## Disable gateway overflow (restarts gateway pod)
+	@bash infra/inference/scripts/overflow.sh off
 
 inference-verify-workers: ## Read-only: compare worker image/args/startup log with the run manifest (experiments/manifest/common.env)
 	@bash infra/inference/scripts/verify-workers.sh

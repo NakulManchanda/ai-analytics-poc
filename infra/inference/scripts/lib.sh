@@ -23,3 +23,9 @@ require_connection() {
 remote_dir() { printf '%s' "${INFERENCE_REMOTE_DIR:-~/ai-analytics-inference}"; }
 ssh_target() { printf '%s@%s' "$LAMBDA_SSH_USER" "$LAMBDA_SSH_HOST"; }
 ssh_cmd() { ssh -i "$LAMBDA_SSH_KEY_PATH" -o StrictHostKeyChecking=accept-new "$(ssh_target)" "$@"; }
+
+# Complete a bare base URL (no path) to the OpenAI chat route; leave a URL that already has a path alone.
+normalize_chat_url() {
+  local u="${1%/}"
+  if [[ "$u" =~ ^https?://[^/]+$ ]]; then printf '%s/v1/chat/completions' "$u"; else printf '%s' "$u"; fi
+}

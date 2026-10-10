@@ -175,7 +175,7 @@ def test_root_makefile_exposes_safe_inference_entry_points() -> None:
     assert "inference-connect: inference-sync" in makefile
     expected_up = (
         "inference-up: inference-sync inference-bootstrap "
-        "inference-config inference-deploy"
+        "inference-config inference-secret inference-deploy"
     )
     assert expected_up in makefile
     expected_run = (

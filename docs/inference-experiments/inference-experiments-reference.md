@@ -58,14 +58,19 @@ playbook are what you actually run, so follow those.
 
 ## E4: admission on vs off
 
-- **Steps:** set `TENANT_ALLOWLIST=tenant_interactive,tenant_noisy,tenant_batch`, tune admission thresholds
-  (`MAX_DECODE_SLOTS`, `KV_FREE_MIN`, `PREFILL_TOKENS_PER_S`, `QUEUE_WAIT_PER_WAITING_S`) so the trace really overloads two
-  workers, then `make replay-e4-admission-off` and `make replay-e4-admission-on`.
-- **Look for:** off, interactive p99 and goodput degrade; on, sheds appear by reason (`kv_pressure`, `decode_slots`,
-  `deadline_unachievable`, `timeout_queue`) and interactive goodput holds. Fairness (Jain) and batch starvation are in
-  `e4_compare`. Watch the alerts fire and record which.
+- **Steps:** the commands live in the playbook's E4 section (and are not repeated here). In short: `make inference-refresh` brings a
+  running cluster to the manifests (tenant cap `TENANT_MAX_CONCURRENCY=10` per tenant, controls on); wait for `worker_warm == 1`
+  and `worker_ramp_cap == 0`; then `make replay-e4-admission-off` and `make replay-e4-admission-on`.
+- **Why a cap of 10:** the cap is per tenant and `MAX_DECODE_SLOTS=8` is per worker (16 slots). At the old default of 4, three
+  tenants hold at most 12 in flight, so `decode_slots` could never fire and `tenant_interactive` would be 429'd itself.
+- **Look for:** off, interactive p99 and goodput degrade (queueing, `timeout_queue`); on, sheds appear by reason (`decode_slots`,
+  `tenant_concurrency` for `tenant_noisy`, and possibly `kv_pressure` / `deadline_unachievable`) and interactive goodput holds.
+  Fairness (Jain) and batch starvation are in `e4_compare`. Watch the alerts fire and record which.
+- **Expected from the code, not yet observed:** `deadline_unachievable` (504) may not fire, because its estimate uses vLLM
+  `waiting` only while the gateway holds the queue (`WORKER_MAX_INFLIGHT` equals `--max-num-seqs`). Report what actually fires.
 - **Proof from the guide:** shed requests never enter vLLM's queue, so `vllm:num_requests_waiting` does not rise for them.
-- **Note:** `x-admission-mode: off` skips only capacity/deadline shedding; tenant quota still runs.
+- **Note:** `x-admission-mode: off` skips only capacity/deadline shedding; tenant quota still runs. Client latency through the
+  SSH tunnel is not valid evidence (goodput stays 0); use sheds, queue, fairness and vLLM metrics.
 
 ## E5: recompute vs hop
 

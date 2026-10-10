@@ -29,6 +29,7 @@ def test_bundle_is_pinned_and_retains_hami():
     gateway_env = {
         item["name"]: item["value"]
         for item in gateway["spec"]["template"]["spec"]["containers"][0]["env"]
+        if "value" in item  # entries such as OVERFLOW_API_KEY come from a Secret (valueFrom)
     }
     assert gateway_env["KV_HOP_ENABLED"] == "1"
     assert gateway_env["ALLOW_FORCED_PLACEMENT"] == "1"

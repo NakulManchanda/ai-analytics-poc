@@ -6,6 +6,24 @@ experiment meaning: [inference-testing-guide.md](inference-testing-guide.md) sec
 [inference-project-plan.md](../inference-project-plan.md) sections 8-9 and "Final-run evidence rules".
 All commands run from the repository root (or the active worktree) unless noted.
 
+## Start here: new instance to cluster-ready
+
+Needs the instance IP in `infra/inference/.env` (`LAMBDA_SSH_HOST`) and as the `lambda` host in `~/.ssh/config`. On a running
+cluster use `make inference-refresh` instead of step 1. Stop on any failure.
+
+```bash
+make inference-fresh-up          # 1. sync, bootstrap, Secrets, deploy, controls ON, verify (long; use tmux)
+make inference-tunnel            # 2. own terminal, leave running
+curl -s http://127.0.0.1:18080/health; curl -s http://127.0.0.1:18001/health; curl -s http://127.0.0.1:18002/health   # 3.
+curl -s http://127.0.0.1:18080/metrics | grep -E '^worker_(warm|ramp_cap)\{'   # wait for warm 1 / ramp_cap 0 on both
+make inference-verify-workers    # 4. workers identical
+ssh lambda 'sudo k3s kubectl -n inference-lab get secret' | grep -E "NAME|overflow|hf-token"
+make inference-smoke             # 5. engine, then serve path
+make inference-serve-smoke
+ssh lambda 'sudo k3s kubectl -n inference-lab set env deploy/inference-gateway --list' | grep -E "ALLOW_|TENANT|MAX_DECODE|OVERFLOW"   # 6. controls 1, cap 10, overflow 0
+```
+Section 1 is the full pre-flight before each experiment.
+
 ## 0. Conventions
 
 - **Run id:** `RUN_ID=d123-<YYYYMMDD>-<experiment>` (for example `d123-20261001-e3`). The manifest env files in `infra/inference/experiments/manifest/` add a rerun suffix, `d123-<YYYYMMDD>-<experiment>-<HHMM>` (local time), so reruns do not overwrite; the `export RUN_ID=...` lines below are the plain form. Everything for one
@@ -32,6 +50,13 @@ All commands run from the repository root (or the active worktree) unless noted.
   do not overlap runs, and never attribute window deltas to a request. For the two-worker picture use the
   Prometheus range export over the run window.
 - **Ports** (tunnel): gateway `18080`, worker A `18001`, worker B `18002`, Prometheus `19090`, Grafana `13000`.
+- **Where the driver runs:** the laptop, through the SSH tunnel, as for E0-E3 (the on-host variant is not used for now).
+  Consequence: client TTFT/E2E include tunnel latency (about 2 s TTFT for a 244-token prompt in E0), so SLO goodput
+  stays 0 and client latency is NOT a valid SLO or calibration source. The valid E4 evidence is gateway-side:
+  sheds by reason, `timeout_queue`, per-tenant fairness, queue depth, and vLLM server-side metrics from Prometheus.
+- **Session order (E4 and E5 only):** pre-flight (section 1) -> calibration (section 1a) -> E4 on the plain image ->
+  apply the KV bundle -> E5 control legs -> E5 real hop -> section 5 (restore the normal manifests).
+  E4 must run BEFORE the KV bundle is applied; do not compare across the two images.
 
 ## 1. Pre-flight checklist (once per session)
 
@@ -71,6 +96,40 @@ All commands run from the repository root (or the active worktree) unless noted.
 7. Export the manifest env vars from section 0 and check the local toolchain:
    `uv run --project services/app pytest tests/experiments -q`.
 
+## 1a. Admission calibration (before E4; replaces the placeholder `PREFILL_TOKENS_PER_S` / `QUEUE_WAIT_PER_WAITING_S`)
+
+`k8s/gateway/gateway.yaml` ships `PREFILL_TOKENS_PER_S=4000` and `QUEUE_WAIT_PER_WAITING_S=0.25` as placeholders.
+`deadline_unachievable` is `queue_wait + est_tokens / PREFILL_TOKENS_PER_S` versus the request deadline, so E4 needs
+measured values. Use SERVER-SIDE vLLM metrics (Prometheus on `19090`), never client timings through the tunnel.
+
+1. Load: do NOT run a separate sweep. The E0-style sweep sends no tenant, so it lands in the `other` bucket (max concurrency 4)
+   and returns 429 above 4 unless the quota is raised, and any gateway restart re-runs the warm gate and ramp (wait for
+   `worker_ramp_cap` 0). Instead read the values over the E4 window itself (E4 section, step "record the observed prefill rate").
+   Note: the deadline estimate uses vLLM `waiting` only, and the gateway holds the queue (`WORKER_MAX_INFLIGHT` equals
+   `--max-num-seqs`), so these two values may barely matter and `deadline_unachievable` may not fire; report what fires.
+2. Read the window averages (verify the metric names with `curl -s http://127.0.0.1:18001/metrics | grep -E 'prefill_time|queue_time|prompt_tokens'`):
+   ```bash
+   P=http://127.0.0.1:19090/api/v1/query; W=<window-seconds>
+   # prefill rate (tokens/s) = prompt tokens / prefill seconds, per worker (take the lower of the two)
+   curl -s $P --data-urlencode "query=sum(increase(vllm:request_prompt_tokens_sum[${W}s])) by (pod) / sum(increase(vllm:request_prefill_time_seconds_sum[${W}s])) by (pod)"
+   # engine queue wait while saturated (concurrency 16 vs 8 slots): mean seconds in vLLM's waiting queue
+   curl -s $P --data-urlencode "query=sum(increase(vllm:request_queue_time_seconds_sum[${W}s])) by (pod) / sum(increase(vllm:request_queue_time_seconds_count[${W}s])) by (pod)"
+   curl -s $P --data-urlencode "query=avg_over_time(vllm:num_requests_waiting[${W}s])"
+   ```
+   `PREFILL_TOKENS_PER_S` = the prefill-rate figure. `QUEUE_WAIT_PER_WAITING_S` = mean queue time / mean
+   `num_requests_waiting` in the saturated part of the window. Use a conservative (lower rate, higher wait) value.
+3. Apply and record (the gateway restarts; wait for `/health` 200 and `worker_warm == 1`):
+   ```bash
+   ssh lambda 'sudo k3s kubectl -n inference-lab set env deploy/inference-gateway PREFILL_TOKENS_PER_S=<n> QUEUE_WAIT_PER_WAITING_S=<s> MAX_DECODE_SLOTS=8'
+   ```
+   Write the chosen values, the window, and the three query results into `metrics/inference/$RUN_ID/calibration.md`.
+   Also put the same values in `gateway.yaml` afterwards (a PR) so the next session starts from them.
+   `make inference-deploy` resets these to the manifest, so re-apply after any redeploy.
+
+**Refreshing a running cluster.** After changing manifests, gateway code or Secrets locally, `make inference-refresh` (sync, Secrets,
+deploy, controls ON, verify workers) brings the live cluster to the current files without a bootstrap. `make inference-deploy`
+resets gateway env to the manifest (controls OFF), which is why the target turns them back on.
+
 ## 2. Cold-start recipe (used by E1 and E2)
 
 A cold run needs empty prefix caches and freshly started engines:
@@ -90,7 +149,7 @@ must start from a clean placement state. Wait for `worker_warm == 1` before meas
 ```bash
 # Step 0: the sweep sends no tenant, so it lands in the `other` bucket (max concurrency 4 by default). Raise it for E0 only,
 # or the sweep above 4 concurrent returns 429 tenant_concurrency. Gateway restarts (~30 s); check /health on 18080 afterwards.
-# Restore before E4: `... set env deploy/inference-gateway TENANT_MAX_CONCURRENCY-` (trailing dash unsets it).
+# Before E4 set the E4 cap instead (`TENANT_MAX_CONCURRENCY=10`, see E4); `TENANT_MAX_CONCURRENCY-` (trailing dash) unsets it back to the default 4.
 ssh lambda 'sudo k3s kubectl -n inference-lab set env deploy/inference-gateway TENANT_MAX_CONCURRENCY=64'
 source infra/inference/experiments/manifest/e0-capacity.env   # once per experiment; sets RUN_ID=d123-<date>-e0-<HHMM>
 make inference-capacity RUN_ID=$RUN_ID            # preliminary synthetic capacity: capacity_summary.json
@@ -176,19 +235,41 @@ proves `ALLOW_EXPERIMENT_CONTROLS=1`. Compare with `e3_compare` (checks manifest
 
 ### E4 Admission on vs off
 
+E4 shows `decode_slots` and `deadline_unachievable` (504, `timeout_queue`) firing with admission on versus off; KV
+pressure is not forced. Prerequisites, in order (each gateway change restarts the pod: wait for `/health` 200 on 18080,
+`worker_warm == 1` and `worker_ramp_cap == 0`):
+
+**Tenant cap.** `TENANT_MAX_CONCURRENCY` applies PER TENANT, and `MAX_DECODE_SLOTS=8` is per worker (16 slots on two
+workers). At the default 4, three tenants can hold only 12 in flight, so `decode_slots` can never fire, and
+`tenant_interactive` (6 conversations in the trace) would itself be 429'd. E4 therefore runs with a cap of 10: interactive
+(6) and batch (4) are fully admitted, `tenant_noisy` is capped at 10 of its 12 (two 429 `tenant_concurrency`), and up to 20
+requests can be in flight against 16 slots. A uniform cap cannot show a strong tenant 429 and strong slot shedding together;
+record the cap with the run. The cap is in `k8s/gateway/gateway.yaml` (`TENANT_MAX_CONCURRENCY=10`), so every deploy keeps it;
+`make inference-refresh` applies it to a running cluster, and there is nothing to restore afterwards.
+
 ```bash
-# Prerequisites: make inference-controls-on (also sets TENANT_ALLOWLIST), and restore the default tenant quota so admission can
-# shed: ssh lambda 'sudo k3s kubectl -n inference-lab set env deploy/inference-gateway TENANT_MAX_CONCURRENCY-' (trailing dash unsets it).
-# Tune admission thresholds so the trace actually overloads the workers; otherwise on and off look the same.
+make inference-refresh              # running cluster -> current manifests (TENANT_MAX_CONCURRENCY=10 from gateway.yaml), Secrets, controls ON, verify workers; restarts the gateway
+# then wait for worker_warm == 1 and worker_ramp_cap == 0 on both workers (a few minutes)
+# admission values as deployed (MAX_DECODE_SLOTS=8; PREFILL_TOKENS_PER_S and QUEUE_WAIT_PER_WAITING_S are placeholders): note them with the run; measured values are read from the window (section 1a)
+make inference-verify-workers       # args identical, exit 0
 source infra/inference/experiments/manifest/e4-admission.env   # ONCE; sets RUN_ID=d123-<date>-e4-<HHMM>
+export E4_START=$(date +%s)
 make replay-e4-admission-off TARGET_URL=http://127.0.0.1:18080 REPLAYER_FLAGS="--output-dir metrics/inference/$RUN_ID"
+# optional but cleaner: restart both workers (section 2) so the second arm starts with the same cache state
 make replay-e4-admission-on  TARGET_URL=http://127.0.0.1:18080 REPLAYER_FLAGS="--output-dir metrics/inference/$RUN_ID"
-make inference-pull-range RUN_ID=$RUN_ID START=<epoch-before-first-run> END=<epoch-after-last-run>
+export E4_END=$(date +%s)
+make inference-pull-range RUN_ID=$RUN_ID START=$E4_START END=$E4_END
+make inference-pull-evidence RUN_ID=$RUN_ID
+# record the observed prefill rate / queue stats over the window (the three queries in section 1a, with W=$((E4_END-E4_START)) and &time=$E4_END)
+make evidence-analyze RUN="metrics/inference/$RUN_ID/<off_run_dir> metrics/inference/$RUN_ID/<on_run_dir>" RANGE=metrics/inference/$RUN_ID/prometheus_range
 ```
-Requires `TENANT_ALLOWLIST` (pre-flight step 4). `x-admission-mode: off` skips only capacity/deadline
-shedding; the tenant quota still runs. Compare with `e4_compare`: goodput, p99, sheds by reason,
-`timeout_queue`, per-tenant Jain index and batch starvation. Also screenshot/record the Grafana Gateway+admission
-and Queues dashboards for the same window. Restart workers between runs if you want identical cache state.
+`x-admission-mode: off` skips only capacity/deadline shedding; the tenant quota still runs. Pass condition: with
+admission ON the gateway sheds with named reasons (`decode_slots` and/or `deadline_unachievable`) and the interactive
+tenant is protected from `tenant_noisy`; with it OFF those sheds are absent. If both arms look identical, the
+thresholds are too loose: return to section 1a, do not report the pair. Compare with `e4_compare`: sheds by reason,
+`timeout_queue`, per-tenant Jain index, batch starvation (goodput stays 0 through the tunnel, so do not lead with it).
+Record Grafana Gateway+admission and Queues for the same window. Check the scenario really sets interactive
+deadlines (`deadline_ms` in `requests.jsonl` must not be null); otherwise the 504 path cannot fire.
 
 ### Soak and 10x demo load (arrival-rate mode)
 
@@ -224,9 +305,15 @@ make inference-kv-render KV_IMAGE=<same tag> CACHE_NAMESPACE=e5-$(date +%Y%m%d)-
   TEMPLATE_VERSION=taxi-chat-v1 PREFIX_CONTRACT_VERSION=prefix-v1 OUT=work/kv-hop.yaml
 # 2. Review work/kv-hop.yaml, sync, apply it on the isolated host (authorized GPU session only), wait for both
 #    workers and the gateway to be healthy. The bundle enables forced placement and experiment headers.
-# 3. Copy mooncake/topology.example.json and versions.example.json to work/kv-topology.json and
-#    work/kv-versions.json; replace every placeholder from the deployed cluster. topology "workers" must stay
-#    ["worker_a","worker_b"] (the emitted KV_WORKER_ID values) and the namespace must equal the rendered one.
+make inference-sync
+scp -i "$LAMBDA_SSH_KEY_PATH" work/kv-hop.yaml "$LAMBDA_SSH_USER@$LAMBDA_SSH_HOST:/tmp/kv-hop.yaml"   # after: source infra/inference/.env
+ssh lambda 'sudo k3s kubectl apply -f /tmp/kv-hop.yaml && sudo k3s kubectl -n inference-lab rollout status deploy/inference-worker-a deploy/inference-worker-b deploy/inference-gateway --timeout=15m'
+make inference-verify-workers      # both workers on the KV image, same args
+# 3. Copy the examples (under infra/inference/mooncake/) to work/ and replace every placeholder from the deployed
+#    cluster. topology "workers" must stay ["worker_a","worker_b"] (the emitted KV_WORKER_ID values) and the
+#    namespace must equal the rendered one.
+mkdir -p work && cp infra/inference/mooncake/topology.example.json work/kv-topology.json \
+  && cp infra/inference/mooncake/versions.example.json work/kv-versions.json
 source infra/inference/experiments/manifest/e5-recompute.env   # ONCE; sets RUN_ID=d123-<date>-e5-<HHMM>
 # 4. Control legs, one scenario per size (needs make inference-controls-on, ALLOW_FORCED_PLACEMENT=1 and quota 64
 #    as in E2; restart both workers per section 2 before each scenario so cache state is identical):
@@ -263,6 +350,77 @@ Report the crossover where it is: if the hop never wins at any measured size, or
 size ceiling is the 8,192-token worker context. Keep the hardware in the write-up; a crossover from a
 different GPU than E0-E4 is not directly comparable.
 
+### Demo window and extra proofs (C6a, C6b, C8, C6)
+Run these AFTER E4 and E5 so they cannot contaminate those comparisons. The runs here are demonstrations and proofs, not
+A/B comparisons. Set one id for the whole block (`export RUN_ID=d123-$(date +%Y%m%d)-demo-$(date +%H%M)`), keep every output
+under `metrics/inference/$RUN_ID/`, and note the epoch start and end of each part for `make inference-pull-range`.
+Gateway state for all parts: `make inference-controls-on`, tenant cap 10 (`TENANT_MAX_CONCURRENCY=10`, as in E4; the demo reuses the E4 trace), workers warm. Each gateway change restarts the pod: wait for `/health` 200 and `worker_warm == 1`.
+
+**C6a. One end-to-end run of the real app through `/serve`** (so the evidence includes the actual Track B agent loop, not only the replayer).
+```bash
+make app-serve-dev          # own terminal: LLM_PROVIDER=serve, gateway http://localhost:18080/serve; needs make mcp-dev (port 8001) running too
+# ask one multi-step taxi question in the app (UI/API on port 8080) so it makes several tool/agent steps; note the time
+ssh lambda 'sudo k3s kubectl -n inference-lab logs deploy/inference-gateway --tail=50000' > metrics/inference/$RUN_ID/gateway.log
+make trace-request RUN_DIR=<run dir with the request> REQUEST_ID=<id> GATEWAY_LOG=metrics/inference/$RUN_ID/gateway.log
+```
+The app does not write a replayer `requests.jsonl`; take the request id from the gateway log (`x-request-id`) and say plainly in the
+write-up that this is the only evidence from the real app (D2b).
+
+**C6b. Queue and engine proofs (Part 5)** — read with the notebook queue cell (`queue_proof`); four small windows:
+1. *Gateway queue forms:* a mixed short + long run above the slot count (for example the E0 sweep command at concurrency 16, or `replay-arrival-rate`). Expect non-zero `orch_replica_queue_depth` and `orch_queue_wait_seconds` by class, while `vllm:num_requests_waiting` stays near 0 (the gateway holds the queue because `WORKER_MAX_INFLIGHT` = `--max-num-seqs`).
+2. *KV pressure:* with this model and 0.45 utilisation KV may never get close (E0 peaked at 46%). Do not force it; if it stays low, record "not reached" and show `kv_cache_usage_perc` and `num_preemptions_total`. Say whether `kv_pressure` shed or vLLM preempted only if it actually happened.
+3. *Client abort frees KV:* start a long streaming request, kill the client mid-decode (Ctrl-C), then scrape `vllm:num_requests_running` and `kv_cache_usage_perc` for that worker before and after (a few seconds apart). Expect running back to its prior value.
+4. *Worker restart ramp:* `make inference-restart`, then watch `worker_health`, `worker_warm` and `worker_ramp_cap` (expect 0 while cold, then 2, then 4, then released) and the traffic share to the returning worker while a steady load runs.
+
+**C8. One demo window that fills every dashboard** — a single scripted pass; record the epoch start/end, then pull the range and screenshot Grafana.
+```bash
+export DEMO_START=$(date +%s)
+# 1. Guard rejects (400/413): reasons malformed_payload, missing_messages, prompt_too_long, context_window_exceeded
+make inference-serve-smoke
+curl -s -o /dev/null -w '%{http_code}\n' -X POST http://127.0.0.1:18080/serve -H 'content-type: application/json' -d '[1]'                 # malformed_payload
+curl -s -o /dev/null -w '%{http_code}\n' -X POST http://127.0.0.1:18080/serve -H 'content-type: application/json' -d '{"messages":[]}'      # missing_messages
+# 2. Tenant 429, slot 503 (decode_slots), deadline 504, queue timeout: the E4 overload trace with admission ON
+make replay-e4-admission-on TARGET_URL=http://127.0.0.1:18080 REPLAYER_FLAGS="--output-dir metrics/inference/$RUN_ID"
+# 3. Overflow: same trace again with overflow enabled (only 503/529 limiter reasons leave; 429/500/slice_oom and 504 stay local)
+make inference-overflow-check          # local; must pass first
+make inference-overflow-on             # needs OVERFLOW_URL + the overflow-credentials Secret current (see below)
+make replay-e4-admission-on TARGET_URL=http://127.0.0.1:18080 REPLAYER_FLAGS="--output-dir metrics/inference/$RUN_ID --label demo-overflow"
+make inference-overflow-off
+# 4. Real app: repeat the C6a question once while the cluster is loaded, so the app loop is in the mix
+# 5. Hop: only if the KV bundle is applied (playbook E5 section, make inference-kv-smoke); otherwise leave the Hop panel empty and say so
+export DEMO_END=$(date +%s)
+make inference-pull-range RUN_ID=$RUN_ID START=$DEMO_START END=$DEMO_END
+```
+Screenshot (Grafana `http://127.0.0.1:13000`) for the same window: Cluster, Success and failures, Gateway + admission, Router,
+Queues, vLLM, Hop, Overflow. Confirm each reject has its counter: `guard_reject_total{reason}`, `orch_shed_total{reason,class,code}`,
+`queue_error_total{reason}`, `orch_overflow_total{reason,provider,model,outcome}`, `overflow_error_total{reason}`. A 429 or a 504 must
+never appear as overflowed; check the Overflow dashboard for that.
+
+*Before step 3 (overflow credentials; see also "Overflow" below):* the cluster Secret is created at `make inference-up` from `SUPERLINKED_API_KEY` in
+`infra/inference/.env`. If the key changed since, run `make inference-secret` then `make inference-gateway-restart` (the pod reads the
+Secret only at start). `OVERFLOW_URL` and `OVERFLOW_MODEL` (`Qwen/Qwen3.8-27B-FP8`) come from the same `.env`; overflow stays OFF for E4/E5.
+
+**C6. Extra proofs the brief asks for**
+- *Live overflow case:* from C8 step 3, pick one request with `x-overflow` set and one 429 that stayed local; keep both response headers and the `orch_overflow_total` scrape.
+- *Queue-timeout case:* from the E4-on window, one `queue_error_total{reason="timeout_queue"}` event and its request in `requests.jsonl` (`x-queue-decision`).
+- *Cold-restart to declared-warm timing (warmup time):* `make inference-restart`, note the restart time, the time `worker_warm` flips to 1 and the first successful warm probe (`warm_probe_total`); put the two numbers in `warmup_summary.json` or the write-up.
+
+### Overflow (demo window only, not E4/E5)
+
+Overflow is off by default and must stay off for E4/E5: it would turn their local 503s into overflowed requests.
+Destination: Superlinked, `Qwen/Qwen3.8-27B-FP8` (same Qwen family, larger). Only 503/529 whose reason names a limiter
+(`decode_slots`, `kv_pressure`, `no_signal`) leave; 429, 500 and `slice_oom` stay local.
+
+```bash
+# once: SUPERLINKED_API_KEY and OVERFLOW_URL (the OpenAI-compatible .../v1/chat/completions route) in infra/inference/.env
+make inference-secret                  # creates the overflow-credentials Secret (also part of make inference-up)
+make inference-overflow-on             # sets OVERFLOW_ENABLED/PROVIDER/MODEL/URL; restarts the gateway
+# drive a 503 (saturate the slots, e.g. the E4 trace); overflowed responses carry x-overflow and x-overflow-reason
+make inference-overflow-off            # restore the default
+```
+Check first, locally and with no cluster: `make inference-overflow-check` (models, chat, tools, stream; a few tokens of credit). Exit 0 means the route is OpenAI-compatible. Scrape `orch_overflow_total` /
+`overflow_error_total` for the window.
+
 ### Memory proof
 
 `make inference-pull-range RUN_ID=<id> START=<epoch> END=<epoch> STEP=15s` over the busiest window (the E0
@@ -287,7 +445,7 @@ range series. Report negative or neutral results as found (plan completion check
 
 ## 5. After the session
 
-Turn controls back off (`kubectl set env deploy/inference-gateway ALLOW_EXPERIMENT_CONTROLS=0` or
+Turn overflow off if it was enabled (`make inference-overflow-off`) and controls back off (`kubectl set env deploy/inference-gateway ALLOW_EXPERIMENT_CONTROLS=0` or
 `make inference-deploy`). After E5, also restore the normal gateway and worker manifests (the KV bundle
 enables forced placement and experiment headers; `make inference-deploy` resets them), and leave Mooncake
 unexposed outside the lab. Run `make inference-pull-evidence RUN_ID=<id>` once more, then stop the tunnel and

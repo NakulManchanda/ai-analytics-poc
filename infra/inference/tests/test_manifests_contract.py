@@ -221,3 +221,25 @@ def test_gateway_sets_every_admission_threshold_explicitly() -> None:
         "PLACEMENT_SPILL_QUEUE",
     ):
         assert gateway_env.get(name), f"gateway manifest must set {name}"
+
+
+def test_gateway_overflow_is_off_by_default_and_key_comes_from_an_optional_secret() -> None:
+    deployments = {doc["metadata"]["name"]: doc for _p, doc in _find_kind("Deployment")}
+    container = deployments["inference-gateway"]["spec"]["template"]["spec"]["containers"][0]
+    env = {item["name"]: item for item in container["env"]}
+    assert env["OVERFLOW_ENABLED"]["value"] == "0"
+    key = env["OVERFLOW_API_KEY"]
+    assert "value" not in key, "the overflow key must never be a literal in the manifest"
+    ref = key["valueFrom"]["secretKeyRef"]
+    assert ref == {"name": "overflow-credentials", "key": "api-key", "optional": True}
+
+
+def test_gateway_tenant_cap_leaves_the_decode_slots_reachable() -> None:
+    """A per-tenant cap of 4 (the code default) cannot saturate the workers, so the cap is set explicitly."""
+    deployments = {doc["metadata"]["name"]: doc for _p, doc in _find_kind("Deployment")}
+    gateway_env = _container_env(deployments["inference-gateway"])
+    cap = int(gateway_env["TENANT_MAX_CONCURRENCY"])
+    slots_per_worker = int(gateway_env["MAX_DECODE_SLOTS"])
+    # E4 tenants: interactive 6, batch 4, noisy 12 conversations at once.
+    assert cap >= 6, "tenant_interactive's 6 conversations must not be 429'd by the quota"
+    assert 3 * cap >= 2 * slots_per_worker, "allowlisted tenants must be able to fill every decode slot"

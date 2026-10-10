@@ -39,6 +39,11 @@ spec:
             # A conversation stays on its KV owner until waiting + queued + just-placed requests there reach this.
             - name: PLACEMENT_SPILL_QUEUE
               value: "4"
+            # Concurrency cap PER TENANT bucket (each allowlisted tenant, and the shared "other" bucket). The code default is 4:
+            # three tenants would then hold at most 12 requests against 16 decode slots (2 workers x 8), so slot shedding could
+            # never fire and a 6-conversation tenant would be 429'd. 10 admits the E4 interactive (6) and batch (4) tenants fully.
+            - name: TENANT_MAX_CONCURRENCY
+              value: "10"
             # Gateway limits tied to the engine flags in k8s/workers/*.yaml (a test enforces the match):
             # decode slots = --max-num-seqs; dispatch slots per worker = --max-num-seqs so excess work
             # waits in the gateway queue, not in vLLM's; prompt + completion must fit --max-model-len.
@@ -89,6 +94,14 @@ spec:
               value: ""
             - name: OVERFLOW_URL
               value: ""  # OpenAI-compatible .../v1/chat/completions
+            # Key comes from the overflow-credentials Secret (make inference-secret); optional so the gateway
+            # starts without it. Read at pod start: restart the gateway after creating the Secret.
+            - name: OVERFLOW_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: overflow-credentials
+                  key: api-key
+                  optional: true
           ports:
             - containerPort: 8080
           readinessProbe:
