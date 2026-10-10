@@ -2,8 +2,8 @@
 
 **Repository:** [GitHub: NakulManchanda/ai-analytics-poc](https://github.com/NakulManchanda/ai-analytics-poc)  
 **Submission Track:** **Track B — Tool-Using Agent** (CrewAI Multi-Agent Strategy + FastMCP DuckDB Tools)  
-**Canonical Design Doc:** [DESIGN.md](file:///Users/nakulmanchanda/dev/ai_app_poc/DESIGN.md)  
-**Evidence Artifacts:** [docs/inference-experiments/evidence/](file:///Users/nakulmanchanda/dev/ai_app_poc/docs/inference-experiments/evidence/) (7 plots, 11 curated metric summaries)
+**Canonical Design Doc:** [DESIGN.md](../DESIGN.md)  
+**Evidence Artifacts:** [docs/inference-experiments/evidence/](inference-experiments/evidence/) (7 plots, 11 curated metric summaries, executed notebook)
 
 ---
 
@@ -71,11 +71,11 @@ $$\text{max\_concurrent\_seqs} \approx \frac{\text{HBM} - \text{weights} - \text
 ## Part 3. Guardrails, Admit, Stay vs. Leave
 
 ### Implementation Locations:
-- **Guard:** [`infra/inference/gateway/guard.py`](file:///Users/nakulmanchanda/dev/ai_app_poc/infra/inference/gateway/guard.py) (`inspect(payload) -> GuardDecision`)
+- **Guard:** [`infra/inference/gateway/guard.py`](../infra/inference/gateway/guard.py) (`inspect(payload) -> GuardDecision`)
   - First "no": Rejects malformed JSON payloads (HTTP 400 `malformed_payload`), missing messages (HTTP 400), prompt length > 8,192 tokens (HTTP 413 `prompt_too_long`), and context window breaches (HTTP 413 `context_window_exceeded`). Never touches GPU.
-- **Admission:** [`infra/inference/gateway/admission.py`](file:///Users/nakulmanchanda/dev/ai_app_poc/infra/inference/gateway/admission.py) (`should_admit(req, snap) -> (admit?, code, reason, retry_after)`)
+- **Admission:** [`infra/inference/gateway/admission.py`](../infra/inference/gateway/admission.py) (`should_admit(req, snap) -> (admit?, code, reason, retry_after)`)
   - Evaluates worker capacity: sheds on `no_signal` (503), `kv_pressure` (< 10% free KV, 503), `decode_slots` (local slots full, 503), and `deadline_unachievable` (504).
-- **Tenant Quotas:** [`infra/inference/gateway/tenants.py`](file:///Users/nakulmanchanda/dev/ai_app_poc/infra/inference/gateway/tenants.py) (`TENANT_MAX_CONCURRENCY=10`, token budget 200k/window).
+- **Tenant Quotas:** [`infra/inference/gateway/tenants.py`](../infra/inference/gateway/tenants.py) (`TENANT_MAX_CONCURRENCY=10`, token budget 200k/window).
 - **Stay vs. Leave Policy:**
   - **Stay Local:** HTTP `429` (`tenant_concurrency`, `tenant_tokens`), HTTP `500` (internal bugs), and `slice_oom` **never leave**.
   - **May Leave to Overflow:** Only HTTP `503` or `529` explicitly citing capacity exhaustion (`decode_slots`, `kv_pressure`, `no_signal`) may leave to Superlinked.
@@ -85,7 +85,7 @@ $$\text{max\_concurrent\_seqs} \approx \frac{\text{HBM} - \text{weights} - \text
 ## Part 4. Placement (Which Worker & Policy)
 
 ### Implementation Location:
-- [`infra/inference/gateway/placement.py`](file:///Users/nakulmanchanda/dev/ai_app_poc/infra/inference/gateway/placement.py) (`pick_worker(req, workers, *, policy) -> Worker | Shed`)
+- [`infra/inference/gateway/placement.py`](../infra/inference/gateway/placement.py) (`pick_worker(req, workers, *, policy) -> Worker | Shed`)
 
 ### Policies Supported:
 1. `least_loaded`: Evaluates active in-flight count and queue depth; picks least congested worker.
@@ -140,8 +140,8 @@ $$\text{max\_concurrent\_seqs} \approx \frac{\text{HBM} - \text{weights} - \text
 ## Part 6. Hop: When Do You Move KV? Is the Replica Warm?
 
 ### Implementation Locations:
-- [`infra/inference/gateway/hop.py`](file:///Users/nakulmanchanda/dev/ai_app_poc/infra/inference/gateway/hop.py) (`decide_hop(req, chosen_worker, prefix_state)`)
-- [`infra/inference/kv_transfer/evidence.py`](file:///Users/nakulmanchanda/dev/ai_app_poc/infra/inference/kv_transfer/evidence.py)
+- [`infra/inference/gateway/hop.py`](../infra/inference/gateway/hop.py) (`decide_hop(req, chosen_worker, prefix_state)`)
+- [`infra/inference/kv_transfer/evidence.py`](../infra/inference/kv_transfer/evidence.py)
 
 ### Hop Decision Rules:
 - **Same Worker (`src == dst`):** KV blocks are already local. No-op (`action = local_reuse`).
