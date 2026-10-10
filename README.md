@@ -394,6 +394,7 @@ Every request operates under an immutable `ExecutionBudget` with strict limits:
 
 ## Work History & Decisions
 
+- [Inference Cluster & Serving Architecture (Track B)](docs/inference.md)
 - [System Design Architecture Deep-Dive](docs/system-design-blog.md)
 - [Public Cloud Testing Guide](docs/public-uat-guide.md)
 - [Local Docker Testing Guide](docs/local-uat-guide.md)
