@@ -5,9 +5,13 @@
 **Canonical Design Doc:** [DESIGN.md](../DESIGN.md)  
 **Evidence Artifacts:** [docs/inference-experiments/evidence/](inference-experiments/evidence/) (7 plots, 11 curated metric summaries, executed notebook)
 
+![Taxi Analytics Control Room UI](images/taxi-analytics-control-room.png)
+
+*The Taxi Analytics Control Room UI: the copilot calls FastMCP DuckDB tools (`average_trip_metrics`, `read_schema`) over millions of NYC taxi rows, and answers with structured figures alongside the real-time SSE execution inspector.*
+
 ---
 
-## Part 0. The Application: What We Are Serving (Track B)
+## Part 0. The Application & Serving Architecture (Track B)
 
 Our application is an enterprise analytics copilot over the NYC Yellow Taxi dataset (millions of trip records in Parquet tables).
 - **Workload Loop:** Multi-step agent loop (`think` → `tool call` → `observe` → `answer`).
@@ -17,7 +21,83 @@ Our application is an enterprise analytics copilot over the NYC Yellow Taxi data
   - **Lengthening Pre-fill:** Each conversation turn appends tool observations and agent reasoning tokens, creating lengthening prefills across successive turns.
   - **Traffic Mix:** Interactive user queries (`tenant_interactive`), synthetic noisy agent loops (`tenant_noisy`), and background evaluation/sweeps (`tenant_batch`).
 
+### Architecture Decisions
+
+| Part | Decision | Why |
+| :--- | :--- | :--- |
+| **Northbound** | Gateway `/serve` + FastMCP DuckDB | Application owns tool execution and conversation state; gateway owns GPU entry |
+| **Guard** | Structural JSON & context check (> 8,192 tokens) | Rejects bad payloads (400/413) at the door before consuming GPU compute |
+| **Tenant Quota** | Concurrency cap (`TENANT_MAX_CONCURRENCY=10`) + token budget | Stops single noisy tenant from monopolizing GPU slots; 429 strictly stays local |
+| **Admission** | Decode slots saturation (`MAX_DECODE_SLOTS=8`) + KV pressure check | Protects GPU decode slots from overload; sheds early to preserve interactive tail latency |
+| **Queue** | Class-aware priority queue (interactive over batch) | Prevents background analytics sweeps from head-of-line blocking interactive turns |
+| **Router** | `prefix_then_load` with sticky owner and queue depth anti-herding | Maximizes prefix cache hit rate (72%-98%) while preventing burst congestion on one replica |
+| **Cache** | Local vLLM prefix cache + LMCache/Mooncake TCP store | 3.1x TTFT speedup on turn 1; enables inter-worker KV block reuse |
+| **Engine** | vLLM (v0.11.0) serving Qwen/Qwen3-0.6B (bf16) | Native PagedAttention, continuous batching, and chunked prefill at 2,048 tokens |
+| **Device / Pod** | HAMi GPU slicing (two 20 GiB / 50% SM slices on 1 A100-40GB) | Isolates two worker pods with dedicated KV pools on one physical GPU |
+| **Overflow** | Superlinked hosted `Qwen/Qwen3.8-27B-FP8` | Offloads shed batch requests (503) to external sibling model, rescuing batch traffic |
+| **Scaling** | Scale decode slots pool (not KV memory) | E0 proved decode slots are the primary bottleneck, while KV cache stays cold (<46%) |
+
+### Architecture Diagram
+
+```mermaid
+flowchart TD
+    subgraph CLIENT["Client Layer"]
+        UI["React 18 SPA (Web UI)<br/>Real-Time SSE Timeline"]
+        CLI["API Clients / Replay Runner<br/>(POST /api/ask)"]
+    end
+
+    subgraph APP["Application & Tool Orchestration (Track B: Tool-Using Agent)"]
+        Orch["FastAPI Orchestrator (ai-app)<br/>CrewAI Multi-Agent Loop & Context Reducer"]
+        MCP["FastMCP Analytical Server (analytics-mcp)<br/>DuckDB SQL on 2.96M NYC Taxi Records"]
+        State[("Authoritative State: Amazon DynamoDB<br/>Transient Events: Redis Streams & Pub/Sub")]
+        Orch <-->|"Tool Invocations<br/>(get_schema · execute_query)"| MCP
+        Orch <-->|"Durable Runs & SSE Events"| State
+    end
+
+    UI --> Orch
+    CLI --> Orch
+
+    Orch -- "POST /serve<br/>(model: Qwen3-0.6B · headers: tenant, class, deadline)" --> GW
+
+    subgraph GW["Inference Gateway (FastAPI)"]
+        Guard["1. Guardrails<br/>(malformed JSON · context > 8,192 tokens)"] --> Tenant["2. Tenant Quotas<br/>(cap 10 in-flight · 429 stays local)"]
+        Tenant --> Admit["3. Admission Control<br/>(decode slots saturation · KV pressure)"]
+        Admit --> Queue["4. Priority Queue<br/>(interactive > batch · deadline slack)"]
+        Queue --> Router["5. Router & Placement<br/>(prefix_then_load · sticky owner)"]
+    end
+
+    Tenant -. "429 tenant_concurrency<br/>(stays local)" .-> Orch
+    Admit -- "503 decode_slots<br/>(batch traffic)" --> Overflow["Superlinked Overflow<br/>(Qwen/Qwen3.8-27B-FP8)"]
+
+    Router -- "Sticky Worker A" --> WA
+    Router -- "Sticky Worker B" --> WB
+
+    subgraph CLUSTER["K3s Inference Cluster (1 x NVIDIA A100-SXM4-40GB)"]
+        subgraph SliceA["HAMi Slice 0: 20 GiB HBM / 50% SMs"]
+            WA["vLLM Worker A<br/>Qwen/Qwen3-0.6B (bf16)<br/>max-num-seqs 8 · chunked prefill 2048"]
+        end
+        subgraph SliceB["HAMi Slice 1: 20 GiB HBM / 50% SMs"]
+            WB["vLLM Worker B<br/>Qwen/Qwen3-0.6B (bf16)<br/>max-num-seqs 8 · chunked prefill 2048"]
+        end
+        WA <== "KV Block Transfer<br/>(LMCache + Mooncake TCP)" ==> WB
+    end
+
+    WA --> Metrics[("Prometheus + DCGM Exporter<br/>(9 Grafana Dashboards)")]
+    WB --> Metrics
+```
+
+### How One Request Flows
+
+1. **Client / App Interaction:** The client sends an analytics question (`/api/ask`) or starts a multi-step CrewAI run. The orchestrator calls the local FastMCP server for DuckDB SQL tools, then dispatches the prompt to `http://127.0.0.1:18080/serve` with tenant and deadline headers.
+2. **Guard:** [`gateway/guard.py`](../infra/inference/gateway/guard.py) checks JSON structure and context length. Payloads exceeding 8,192 tokens or with malformed schemas are rejected immediately with `400` or `413` without consuming GPU cycles.
+3. **Tenant Quota:** [`gateway/tenants.py`](../infra/inference/gateway/tenants.py) tracks in-flight requests per tenant. If a tenant exceeds 10 concurrent requests, it is throttled with `429 tenant_concurrency` (which strictly stays local and never overflows).
+4. **Admission Control:** [`gateway/admission.py`](../infra/inference/gateway/admission.py) checks cluster decode slots and worker free KV. If local decode slots are saturated, batch requests are routed to the capacity overflow handler; otherwise, shed with `503 decode_slots`.
+5. **Priority Queue:** [`gateway/queueing.py`](../infra/inference/gateway/queueing.py) orders admitted requests by traffic class (interactive before batch), prompt length, and deadline slack, preventing batch starvation of interactive decodes.
+6. **Router & Placement:** [`gateway/placement.py`](../infra/inference/gateway/placement.py) evaluates prefix affinity (`prefix_then_load`). Requests land on the worker holding the cached prefix (223-token system + tool schemas), falling back to least-loaded.
+7. **Engine Execution:** Dispatched to vLLM worker (`ClusterIP:8000`). vLLM executes chunked prefill (2,048 tokens) and decodes with continuous batching. Streams back through the gateway to the orchestrator.
+
 ---
+
 
 ## Part 1. Capacity on Paper
 

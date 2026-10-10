@@ -1,98 +1,97 @@
-# AI Analytics POC
+# AI Analytics POC: Enterprise Analytics Copilot on a Scarce GPU (Track B)
 
-A cost-governed AI Analytics POC with application-owned durable conversation
-orchestration, strict Model Context Protocol (MCP) boundaries, reconstructed
-Server-Sent Events (SSE), and bounded working-context inspection.
-
+> 🚀 **Course Submission & Architecture Answers (Start Here)**: **[`docs/inference.md`](docs/inference.md)** | **[DESIGN.md](DESIGN.md)** | **[Executed Evidence Notebook & HTML](docs/inference-experiments/evidence/notebook/)**  
 > 📚 **System Design Deep-Dive Blog**: Read **[What Happens When a User Clicks "Run Analysis" in an AI App?](docs/system-design-blog.md)** for a comprehensive architectural breakdown of Agent Loops, FastMCP tool boundaries, Context Reducers, and SSE event streaming.
+
+![Taxi Analytics Control Room UI](docs/images/taxi-analytics-control-room.png)
+
+*The Taxi Analytics Control Room UI: the copilot calls FastMCP DuckDB tools (`average_trip_metrics`, `read_schema`) over millions of NYC taxi rows, and answers with structured figures alongside the real-time SSE execution inspector.*
+
+A cost-governed enterprise analytics copilot (Track B: Tool-Using Agent) over the NYC Yellow Taxi dataset (millions of trip records in Parquet tables). It answers natural language operational and financial questions, citing exact query results from DuckDB views.
+
+Features application-owned durable conversation orchestration, strict FastMCP tool boundaries, reconstructed Server-Sent Events (SSE), and an inference gateway (guard, tenant quotas, admission control, class-aware priority queuing, prefix-aware routing) in front of two colocated vLLM worker replicas on an NVIDIA A100 GPU.
 
 ---
 
-## v1.1 local verification and deployment boundary
+## Architecture (Track B Serving & Application Stack)
 
-The current v1.1 contract is verified locally with a backend-created
-conversation, two synchronous `/api/ask` turns, durable conversation reload,
-and reconstructed run events:
+### Architecture Decisions
 
-```bash
-uv run --project services/app pytest services/app/tests/test_v11_integration_smoke.py -q
+| Part | Decision | Why |
+| :--- | :--- | :--- |
+| **Northbound** | Gateway `/serve` + FastMCP DuckDB | Application owns tool execution and conversation state; gateway owns GPU entry |
+| **Guard** | Structural JSON & context check (> 8,192 tokens) | Rejects bad payloads (400/413) at the door before consuming GPU compute |
+| **Tenant Quota** | Concurrency cap (`TENANT_MAX_CONCURRENCY=10`) + token budget | Stops single noisy tenant from monopolizing GPU slots; 429 strictly stays local |
+| **Admission** | Decode slots saturation (`MAX_DECODE_SLOTS=8`) + KV pressure check | Protects GPU decode slots from overload; sheds early to preserve interactive tail latency |
+| **Queue** | Class-aware priority queue (interactive over batch) | Prevents background analytics sweeps from head-of-line blocking interactive turns |
+| **Router** | `prefix_then_load` with sticky owner and queue depth anti-herding | Maximizes prefix cache hit rate (72%-98%) while preventing burst congestion on one replica |
+| **Cache** | Local vLLM prefix cache + LMCache/Mooncake TCP store | 3.1x TTFT speedup on turn 1; enables inter-worker KV block reuse |
+| **Engine** | vLLM (v0.11.0) serving Qwen/Qwen3-0.6B (bf16) | Native PagedAttention, continuous batching, and chunked prefill at 2,048 tokens |
+| **Device / Pod** | HAMi GPU slicing (two 20 GiB / 50% SM slices on 1 A100-40GB) | Isolates two worker pods with dedicated KV pools on one physical GPU |
+| **Overflow** | Superlinked hosted `Qwen/Qwen3.8-27B-FP8` | Offloads shed batch requests (503) to external sibling model, rescuing batch traffic |
+| **Scaling** | Scale decode slots pool (not KV memory) | E0 proved decode slots are the primary bottleneck, while KV cache stays cold (<46%) |
+
+### Architecture Diagram
+
+```mermaid
+flowchart TD
+    subgraph CLIENT["Client Layer"]
+        UI["React 18 SPA (Web UI)<br/>Real-Time SSE Timeline"]
+        CLI["API Clients / Replay Runner<br/>(POST /api/ask)"]
+    end
+
+    subgraph APP["Application & Tool Orchestration (Track B: Tool-Using Agent)"]
+        Orch["FastAPI Orchestrator (ai-app)<br/>CrewAI Multi-Agent Loop & Context Reducer"]
+        MCP["FastMCP Analytical Server (analytics-mcp)<br/>DuckDB SQL on 2.96M NYC Taxi Records"]
+        State[("Authoritative State: Amazon DynamoDB<br/>Transient Events: Redis Streams & Pub/Sub")]
+        Orch <-->|"Tool Invocations<br/>(get_schema · execute_query)"| MCP
+        Orch <-->|"Durable Runs & SSE Events"| State
+    end
+
+    UI --> Orch
+    CLI --> Orch
+
+    Orch -- "POST /serve<br/>(model: Qwen3-0.6B · headers: tenant, class, deadline)" --> GW
+
+    subgraph GW["Inference Gateway (FastAPI)"]
+        Guard["1. Guardrails<br/>(malformed JSON · context > 8,192 tokens)"] --> Tenant["2. Tenant Quotas<br/>(cap 10 in-flight · 429 stays local)"]
+        Tenant --> Admit["3. Admission Control<br/>(decode slots saturation · KV pressure)"]
+        Admit --> Queue["4. Priority Queue<br/>(interactive > batch · deadline slack)"]
+        Queue --> Router["5. Router & Placement<br/>(prefix_then_load · sticky owner)"]
+    end
+
+    Tenant -. "429 tenant_concurrency<br/>(stays local)" .-> Orch
+    Admit -- "503 decode_slots<br/>(batch traffic)" --> Overflow["Superlinked Overflow<br/>(Qwen/Qwen3.8-27B-FP8)"]
+
+    Router -- "Sticky Worker A" --> WA
+    Router -- "Sticky Worker B" --> WB
+
+    subgraph CLUSTER["K3s Inference Cluster (1 x NVIDIA A100-SXM4-40GB)"]
+        subgraph SliceA["HAMi Slice 0: 20 GiB HBM / 50% SMs"]
+            WA["vLLM Worker A<br/>Qwen/Qwen3-0.6B (bf16)<br/>max-num-seqs 8 · chunked prefill 2048"]
+        end
+        subgraph SliceB["HAMi Slice 1: 20 GiB HBM / 50% SMs"]
+            WB["vLLM Worker B<br/>Qwen/Qwen3-0.6B (bf16)<br/>max-num-seqs 8 · chunked prefill 2048"]
+        end
+        WA <== "KV Block Transfer<br/>(LMCache + Mooncake TCP)" ==> WB
+    end
+
+    WA --> Metrics[("Prometheus + DCGM Exporter<br/>(9 Grafana Dashboards)")]
+    WB --> Metrics
 ```
 
-The smoke uses the intentional local/test default,
-`InMemoryStateRepository`, then makes a fresh FastAPI app/TestClient over that
-same injected repository. It verifies API reconstruction, not process-restart
-durability. In deployed mode, `DYNAMODB_TABLE_NAME` selects the existing
-DynamoDB state repository and must not silently fall back to in-memory state.
+### Course Brief Repository Map
 
-The separately recorded AWS checkpoint passed for `60373f3` on `ai-app` task
-definition `:5`: DynamoDB contained the four-message/two-run conversation, and
-a replacement ECS task restored that conversation and six reconstructed SSE
-events in a fresh browser tab. The environment is not CloudWatch-clean yet:
-missing `REDIS_URL` produces connection-refused Redis publish/read errors;
-[#57](https://github.com/NakulManchanda/ai-analytics-poc/issues/57) tracks the
-gap, and the v1.1 tag remains pending. See the
-[local guide](docs/local-uat-guide.md) and [public guide](docs/public-uat-guide.md).
-
-## Historical deployment endpoints and architecture
-
-### Production URL Access
-
-- **Primary Custom Subdomain**: [https://ai.sibkaro.com](https://ai.sibkaro.com)
-- **Apex Domain**: [https://sibkaro.com](https://sibkaro.com)
-- **CloudFront Direct**: `https://d71q2u5j5gxbq.cloudfront.net` *(or `https://db5j03ttoao1a.cloudfront.net`)*
-
-> 💡 **How It Works & Quick Walkthrough**: See the **[Public Cloud Testing Guide](docs/public-uat-guide.md)** for step-by-step test scenarios, capability discovery, and sample analytical queries. For local development, see the **[Local Docker Testing Guide](docs/local-uat-guide.md)**.
-
-### 📊 Previously reported live system status
-
-The deployed platform operates in AWS `us-east-1` as a coordinated 5-component distributed system:
-
-| Layer | Service / Target | Live Health / Status | Verified Capability |
-| :--- | :--- | :--- | :--- |
-| **Edge CDN** | AWS CloudFront + ACM | `HTTP/2 200 OK` | Custom SSL (`*.sibkaro.com`), SPA routing, `/api/*` cache bypass |
-| **Frontend UI** | Amazon S3 + OAC | `HTTP 200 OK` | React 18 SPA, real-time SSE Timeline, Working Context Inspector |
-| **Ingress Proxy** | Application Load Balancer | `healthy` | Public path-based routing to internal ECS Fargate tasks |
-| **Application Layer** | FastAPI `ai-app` (Fargate) | `status: ok` | Bedrock Claude 3.5 Haiku orchestration, execution budgets, DynamoDB state |
-| **Analytical Gateway** | FastMCP `analytics-mcp` | `status: ok (2 tools, 1 resource)` | Read-only DuckDB zero-copy views over 2.96M NYC taxi records via Service Connect |
-
-```
-                                      +----------------------------------------------------+
-                                      |                 AWS Certificate Manager            |
-                                      |              SSL: *.sibkaro.com, sibkaro.com       |
-                                      +-------------------------+--------------------------+
-                                                                |
-                                      +-------------------------v--------------------------+
-                                      |                  Amazon CloudFront                 |
-                                      |      https://ai.sibkaro.com / https://sibkaro.com  |
-                                      +-------------------------+--------------------------+
-                                                                |
-                                       +------------------------+------------------------+
-                        /* (Static React 18 Assets)                            /api/* (Dynamic API & SSE)
-                                       |                                                 |
-                       +---------------+---------------+                 +---------------+---------------+
-                       |        Private S3 Bucket      |                 |   Application Load Balancer   |
-                       |    (Origin Access Control)    |                 |             (ALB)             |
-                       +-------------------------------+                 +---------------+---------------+
-                                                                                         |
-                                                                         +---------------+---------------+
-                                                                         |   ECS Fargate: ai-app (8080)  |
-                                                                         |   - Bedrock Claude 3.5 Haiku  |
-                                                                         |   - Execution Budgets & State |
-                                                                         +-------+---------------+-------+
-                                                                                 |               |
-                                      +------------------------------------------+               +-----------------------+
-                                      | (AWS Service Connect: port 8001)                         | (Transient Events)    | (Durable State)
-                                      v                                                          v                       v
-                      +---------------+---------------+                          +---------------+---+   +---------------+---+
-                      | ECS Fargate: analytics-mcp    |                          |       Redis       |   | Amazon DynamoDB   |
-                      | - FastMCP Server (8001)       |                          |   Streams & Queue |   | Application State |
-                      | - Zero-Copy DuckDB Views      |                          +-------------------+   +-------------------+
-                      | - 2.96M NYC Taxi Parquet Data |                                  ^
-                      +-------------------------------+                                  | (Job Dequeue)
-                                                                                 +-------+-------+
-                                                                                 |  ECS Worker   |
-                                                                                 +---------------+
-```
+| Brief | Where it is |
+|---|---|
+| `app/` | `services/app/app/` (`ServeLLMClient` calls only the gateway `/serve`), `services/mcp/` |
+| `control/` (guard, admit, place, queue, hop) | `infra/inference/gateway/`, `infra/inference/kv_transfer/` |
+| `cluster/` (how the engine comes up) | `infra/inference/k8s/`, `infra/inference/scripts/`, `infra/inference/mooncake/`, `make inference-*` targets |
+| `DESIGN.md` | [DESIGN.md](DESIGN.md) |
+| `plots/` | `docs/inference-experiments/evidence/plots/` (7 plots, regenerate with `experiments/plot_evidence.py`) |
+| `metrics/` | `docs/inference-experiments/evidence/metrics/` (11 small tracked files); full run data is under `metrics/inference/` (gitignored) |
+| `notebook/` | `docs/inference-experiments/evidence/notebook/` (executed HTML & `.ipynb`), `experiments/123_evidence.ipynb` (clean scaffold) |
+| How to run it | [docs/inference-experiments/inference-run-playbook.md](docs/inference-experiments/inference-run-playbook.md); what each experiment means: [inference-experiments-reference.md](docs/inference-experiments/inference-experiments-reference.md) |
 
 ---
 
@@ -120,24 +119,41 @@ The deployed platform operates in AWS `us-east-1` as a coordinated 5-component d
 
 ---
 
-## Inference cluster project (course submission map)
+## Historical Deployment Endpoints & Cloud Verification
 
-The same repository also holds the inference-cluster work: a tool-using taxi-analytics agent served through a gateway
-(guard, admit, place, queue, hop, overflow) in front of two vLLM workers on one A100. Start with **[DESIGN.md](DESIGN.md)**
-(the design, the questions, the results and the gaps). The code stays where it is; this table maps the brief's names to paths.
+### Production URL Access
 
-| Brief | Where it is |
-|---|---|
-| `app/` | `services/app/app/` (`ServeLLMClient` calls only the gateway `/serve`), `services/mcp/` |
-| `control/` (guard, admit, place, queue, hop) | `infra/inference/gateway/`, `infra/inference/kv_transfer/` |
-| `cluster/` (how the engine comes up) | `infra/inference/k8s/`, `infra/inference/scripts/`, `infra/inference/mooncake/`, `make inference-*` targets |
-| `DESIGN.md` | [DESIGN.md](DESIGN.md) |
-| `plots/` | `docs/inference-experiments/evidence/plots/` (regenerate with `experiments/plot_evidence.py`) |
-| `metrics/` | `docs/inference-experiments/evidence/` (small tracked files); full run data is under `metrics/inference/` (gitignored) |
-| `notebook/` | `experiments/123_evidence.ipynb` (`make evidence-notebook`) |
-| How to run it | [docs/inference-experiments/inference-run-playbook.md](docs/inference-experiments/inference-run-playbook.md); what each experiment means: [inference-experiments-reference.md](docs/inference-experiments/inference-experiments-reference.md) |
+- **Primary Custom Subdomain**: [https://ai.sibkaro.com](https://ai.sibkaro.com)
+- **Apex Domain**: [https://sibkaro.com](https://sibkaro.com)
+- **CloudFront Direct**: `https://d71q2u5j5gxbq.cloudfront.net` *(or `https://db5j03ttoao1a.cloudfront.net`)*
 
-Not in this submission: a live KV hop run and a live overflow event (both are built and tested; see DESIGN.md section 10).
+> 💡 **How It Works & Quick Walkthrough**: See the **[Public Cloud Testing Guide](docs/public-uat-guide.md)** for step-by-step test scenarios, capability discovery, and sample analytical queries. For local development, see the **[Local Docker Testing Guide](docs/local-uat-guide.md)**.
+
+### 📊 Previously Reported Live System Status
+
+The deployed platform operates in AWS `us-east-1` as a coordinated 5-component distributed system:
+
+| Layer | Service / Target | Live Health / Status | Verified Capability |
+| :--- | :--- | :--- | :--- |
+| **Edge CDN** | AWS CloudFront + ACM | `HTTP/2 200 OK` | Custom SSL (`*.sibkaro.com`), SPA routing, `/api/*` cache bypass |
+| **Frontend UI** | Amazon S3 + OAC | `HTTP 200 OK` | React 18 SPA, real-time SSE Timeline, Working Context Inspector |
+| **Ingress Proxy** | Application Load Balancer | `healthy` | Public path-based routing to internal ECS Fargate tasks |
+| **Application Layer** | FastAPI `ai-app` (Fargate) | `status: ok` | Bedrock Claude 3.5 Haiku orchestration, execution budgets, DynamoDB state |
+| **Analytical Gateway** | FastMCP `analytics-mcp` | `status: ok (2 tools, 1 resource)` | Read-only DuckDB zero-copy views over 2.96M NYC taxi records via Service Connect |
+
+---
+
+## v1.1 Local Verification and Deployment Boundary
+
+The current v1.1 contract is verified locally with a backend-created conversation, two synchronous `/api/ask` turns, durable conversation reload, and reconstructed run events:
+
+```bash
+uv run --project services/app pytest services/app/tests/test_v11_integration_smoke.py -q
+```
+
+The smoke uses the intentional local/test default, `InMemoryStateRepository`, then makes a fresh FastAPI app/TestClient over that same injected repository. It verifies API reconstruction, not process-restart durability. In deployed mode, `DYNAMODB_TABLE_NAME` selects the existing DynamoDB state repository and must not silently fall back to in-memory state.
+See the [local guide](docs/local-uat-guide.md) and [public guide](docs/public-uat-guide.md).
+
 
 ---
 
