@@ -1,0 +1,18 @@
+OFF (admission off) 48 rows  [count, (tenant, status, x-admit-decision, x-place-decision)]
+  13 ('tenant_noisy', 'completed', 'accept', 'worker_b')
+  12 ('tenant_batch', 'http_503', 'accept', 'none')
+  8 ('tenant_interactive', 'completed', 'accept', 'worker_a')
+  7 ('tenant_noisy', 'completed', 'accept', 'worker_a')
+  4 ('tenant_interactive', 'completed', 'accept', 'worker_b')
+  4 ('tenant_noisy', 'http_429', 'shed:tenant_concurrency', 'none')
+
+ON (admission on) 48 rows  [count, (tenant, status, x-admit-decision, x-place-decision)]
+  12 ('tenant_batch', 'http_503', 'shed:decode_slots', 'none')
+  8 ('tenant_noisy', 'http_503', 'shed:decode_slots', 'none')
+  8 ('tenant_noisy', 'completed', 'accept', 'worker_b')
+  6 ('tenant_interactive', 'completed', 'accept', 'worker_a')
+  4 ('tenant_interactive', 'http_503', 'shed:decode_slots', 'none')
+  4 ('tenant_noisy', 'completed', 'accept', 'worker_a')
+  4 ('tenant_noisy', 'http_429', 'shed:tenant_concurrency', 'none')
+  2 ('tenant_interactive', 'completed', 'accept', 'worker_b')
+

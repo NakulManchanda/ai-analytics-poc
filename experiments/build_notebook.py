@@ -357,6 +357,7 @@ if (p := need("E4_ADMISSION_OFF", "E4_ADMISSION_ON")):
     off, on = load_run(p[0]), load_run(p[1])
     compare_breakdown("E4 admission", "workload_class", "admission off", off, "admission on", on)
     show("E4 admission off (a) vs on (b)", e4_compare(off, on))
+writeup("E4")
 """
 
 E5 = """\
@@ -549,7 +550,11 @@ EXPECTED = {
     "QUEUE": "Gateway replica queues absorb offered load over the concurrency limit while vLLM waiting remains near zero, proving the gateway queue protects the engine scheduler rather than duplicating it.",
 }
 for experiment, hypothesis in EXPECTED.items():
-    CONTEXT[experiment] += "**Expected behavior (hypothesis):** " + hypothesis + "\n\n**Observed evidence:** charts and tables below use only supplied run artifacts; the session writeup records interpretation. Missing runs are skipped.\n\n"
+    CONTEXT[experiment] += (
+        "**Expected behavior (hypothesis):** "
+        + hypothesis
+        + "\n\n**Observed evidence:** charts and tables below use only supplied run artifacts; the session writeup records interpretation. Missing runs are skipped.\n\n"
+    )
 
 
 CELLS = [
@@ -562,17 +567,37 @@ CELLS = [
     (MD, OVERVIEW),
     ("code", SETUP),
     ("code", CHARTS),
-    (MD, "## E0 Capacity and offered-load knee\n\n" + CONTEXT["E0"] + "`completed_rps` is successful completions divided by elapsed seconds. "
-         "`good_rps` is SLO-qualified requests divided by the same duration: completion alone is insufficient. "
-         "The replayer checks TTFT and E2E against the recorded SLOs. Zero goodput means no requests met both limits; "
-         "it does not mean no requests completed. An all-zero curve cannot establish a useful goodput knee. "
-         "Client transport latency is included; do not read it as GPU-only latency."),
+    (
+        MD,
+        "## E0 Capacity and offered-load knee\n\n"
+        + CONTEXT["E0"]
+        + "`completed_rps` is successful completions divided by elapsed seconds. "
+        "`good_rps` is SLO-qualified requests divided by the same duration: completion alone is insufficient. "
+        "The replayer checks TTFT and E2E against the recorded SLOs. Zero goodput means no requests met both limits; "
+        "it does not mean no requests completed. An all-zero curve cannot establish a useful goodput knee. "
+        "Client transport latency is included; do not read it as GPU-only latency.",
+    ),
     ("code", E0),
-    (MD, "## E1 Cold vs declared-warm worker\n\n" + CONTEXT["E1"] + "Compare the first observed request with subsequent-request p50. This is request latency after readiness, not full worker startup time. Empty summaries cannot prove warmup occurred."),
+    (
+        MD,
+        "## E1 Cold vs declared-warm worker\n\n"
+        + CONTEXT["E1"]
+        + "Compare the first observed request with subsequent-request p50. This is request latency after readiness, not full worker startup time. Empty summaries cannot prove warmup occurred.",
+    ),
     ("code", E1),
-    (MD, "## E2 Prefix reuse (cold vs reused)\n\n" + CONTEXT["E2"] + "Inspect turn 1 separately: the cold arm can reuse prefixes on its own later turns. Manifest parity gates causal comparisons; unmatched runs remain descriptive. Prometheus hit rates describe a window, never an individual request."),
+    (
+        MD,
+        "## E2 Prefix reuse (cold vs reused)\n\n"
+        + CONTEXT["E2"]
+        + "Inspect turn 1 separately: the cold arm can reuse prefixes on its own later turns. Manifest parity gates causal comparisons; unmatched runs remain descriptive. Prometheus hit rates describe a window, never an individual request.",
+    ),
     ("code", E2),
-    (MD, "## E3 Routing: least_loaded vs prefix_then_load\n\n" + CONTEXT["E3"] + "Compare first-turn and later-turn latency, tail latency and worker distribution together. Better reuse can trade off against queueing on one worker. Check manifest parity and policy verification before declaring a winner; a single pair does not establish a repeatable advantage."),
+    (
+        MD,
+        "## E3 Routing: least_loaded vs prefix_then_load\n\n"
+        + CONTEXT["E3"]
+        + "Compare first-turn and later-turn latency, tail latency and worker distribution together. Better reuse can trade off against queueing on one worker. Check manifest parity and policy verification before declaring a winner; a single pair does not establish a repeatable advantage.",
+    ),
     ("code", E3),
     (MD, "## E4 Admission on vs off\n\n" + CONTEXT["E4"]),
     ("code", E4),
@@ -583,7 +608,6 @@ CELLS = [
     (MD, "## Gateway queue vs engine waiting proof\n\n" + CONTEXT["QUEUE"]),
     ("code", QUEUE),
 ]
-
 
 
 def build() -> dict:
@@ -619,9 +643,21 @@ def main() -> None:
     import os
 
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--runs-json", type=Path, help="JSON file mapping experiment keys to run directories")
-    parser.add_argument("--writeup-dir", type=Path, help="Optional directory of e0.md through e3.md talk tracks")
-    parser.add_argument("--html", type=Path, help="Execute and export HTML plus an executed sibling .ipynb")
+    parser.add_argument(
+        "--runs-json",
+        type=Path,
+        help="JSON file mapping experiment keys to run directories",
+    )
+    parser.add_argument(
+        "--writeup-dir",
+        type=Path,
+        help="Optional directory of e0.md through e3.md talk tracks",
+    )
+    parser.add_argument(
+        "--html",
+        type=Path,
+        help="Execute and export HTML plus an executed sibling .ipynb",
+    )
     args = parser.parse_args()
     if (args.runs_json or args.writeup_dir) and not args.html:
         parser.error("--runs-json and --writeup-dir require --html to render evidence")
@@ -639,7 +675,9 @@ def main() -> None:
     if args.runs_json:
         runs = json.loads(args.runs_json.read_text(encoding="utf-8"))
         if not isinstance(runs, dict):
-            parser.error("runs JSON must be an object mapping experiment keys to directories")
+            parser.error(
+                "runs JSON must be an object mapping experiment keys to directories"
+            )
         overrides["EVIDENCE_RUNS_JSON"] = json.dumps(runs)
     if args.writeup_dir:
         overrides["EVIDENCE_WRITEUP_DIR"] = str(args.writeup_dir.resolve())
@@ -647,8 +685,12 @@ def main() -> None:
     try:
         os.environ.update(overrides)
         nb = nbformat.reads(json.dumps(build()), as_version=4)
-        NotebookClient(nb, timeout=180, kernel_name="python3",
-                       resources={"metadata": {"path": str(Path(__file__).resolve().parents[1])}}).execute()
+        NotebookClient(
+            nb,
+            timeout=180,
+            kernel_name="python3",
+            resources={"metadata": {"path": str(Path(__file__).resolve().parents[1])}},
+        ).execute()
     finally:
         for key, value in previous.items():
             if value is None:
@@ -662,8 +704,11 @@ def main() -> None:
     args.html.parent.mkdir(parents=True, exist_ok=True)
     args.html.write_text(html, encoding="utf-8")
     nbformat.write(nb, executed)
-    images = sum("image/png" in output.get("data", {})
-                 for cell in nb.cells for output in cell.get("outputs", []))
+    images = sum(
+        "image/png" in output.get("data", {})
+        for cell in nb.cells
+        for output in cell.get("outputs", [])
+    )
     print(f"wrote {args.html} and {executed} ({images} embedded charts)")
 
 

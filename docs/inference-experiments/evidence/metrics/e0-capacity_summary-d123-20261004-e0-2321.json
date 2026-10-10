@@ -1,0 +1,2499 @@
+{
+  "kv_bytes_per_token": 114688,
+  "kv_budget_bytes": 4294967296,
+  "paper_sequence_ceilings": {
+    "512": 73,
+    "2048": 18,
+    "8192": 4
+  },
+  "configured_ceiling": {
+    "parameter": "max_num_seqs",
+    "value": 8
+  },
+  "first_practical_limiter": "max_num_seqs_concurrency_limit",
+  "first_limiter": "max_num_seqs_concurrency_limit",
+  "limiters_by_context": {
+    "512": "max_num_seqs_concurrency_limit",
+    "2048": "max_num_seqs_concurrency_limit",
+    "8192": "scheduler_long_context_batched_tokens_limit"
+  },
+  "limiter_details": {
+    "limiters_by_context": {
+      "512": "max_num_seqs_concurrency_limit",
+      "2048": "max_num_seqs_concurrency_limit",
+      "8192": "scheduler_long_context_batched_tokens_limit"
+    },
+    "explanation": "At short context (512 tokens), queueing onset occurs at concurrency 16 with peak_running=8.0 and peak_waiting=6.0, confirming the max_num_seqs=8 concurrency ceiling. At long context (8192 tokens), queueing onset occurs earlier at concurrency 8 with peak_running=5.0 and peak_waiting=4.0, demonstrating scheduler token budgeting (max_num_batched_tokens=8192) and long-context prefill compute pressure rather than the max_num_seqs sequence limit."
+  },
+  "limiter_basis": "unshared_capacity_sweep",
+  "cache_mode": "unshared_unique_prompts",
+  "slo_criteria": {
+    "max_ttft_ms": 1000.0,
+    "max_duration_ms": 10000.0,
+    "status": 200
+  },
+  "workers": {
+    "http://127.0.0.1:18001": {
+      "reachable": true,
+      "num_total_gpu_blocks": null,
+      "num_free_gpu_blocks": null,
+      "kv_cache_usage_perc": 0.0,
+      "num_requests_waiting": 0.0
+    },
+    "http://127.0.0.1:18002": {
+      "reachable": true,
+      "num_total_gpu_blocks": null,
+      "num_free_gpu_blocks": null,
+      "kv_cache_usage_perc": 0.0,
+      "num_requests_waiting": 0.0
+    }
+  },
+  "live_sweep": [
+    {
+      "concurrency": 1,
+      "repetitions": 2,
+      "context_length_target": 512,
+      "requested_prompt_tokens": 512,
+      "actual_prompt_tokens": 512,
+      "requested_output_tokens": 15,
+      "total_context": 527,
+      "cache_mode": "unshared_unique_prompts",
+      "sample_count": 2,
+      "success_count": 2,
+      "error_count": 0,
+      "qualifying_slo_count": 2,
+      "ttft_p50_ms": 247.3001671023667,
+      "ttft_p95_ms": 247.3001671023667,
+      "total_duration_seconds": 1.1406662079971284,
+      "goodput_tokens_per_sec": 26.300419693046194,
+      "goodput_requests_per_sec": 1.7533613128697463,
+      "peak_waiting": 0.0,
+      "peak_running": 0.0,
+      "peak_kv_usage": 0.0,
+      "sampler_sample_count": 5,
+      "sampler_errors": 0,
+      "metric_timeline": [
+        {
+          "t_ms": 226.1,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 462.7,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 728.5,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 974.0,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 1253.9,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        }
+      ]
+    },
+    {
+      "concurrency": 2,
+      "repetitions": 2,
+      "context_length_target": 512,
+      "requested_prompt_tokens": 512,
+      "actual_prompt_tokens": 512,
+      "requested_output_tokens": 15,
+      "total_context": 527,
+      "cache_mode": "unshared_unique_prompts",
+      "sample_count": 4,
+      "success_count": 4,
+      "error_count": 0,
+      "qualifying_slo_count": 4,
+      "ttft_p50_ms": 264.849542058073,
+      "ttft_p95_ms": 265.40054206270725,
+      "total_duration_seconds": 1.6644758339971304,
+      "goodput_tokens_per_sec": 36.04738427226901,
+      "goodput_requests_per_sec": 2.403158951484601,
+      "peak_waiting": 0.0,
+      "peak_running": 0.0,
+      "peak_kv_usage": 0.0,
+      "sampler_sample_count": 7,
+      "sampler_errors": 0,
+      "metric_timeline": [
+        {
+          "t_ms": 203.7,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 496.3,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 743.8,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 1017.4,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 1261.8,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 1542.6,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 1787.8,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        }
+      ]
+    },
+    {
+      "concurrency": 4,
+      "repetitions": 2,
+      "context_length_target": 512,
+      "requested_prompt_tokens": 512,
+      "actual_prompt_tokens": 512,
+      "requested_output_tokens": 15,
+      "total_context": 527,
+      "cache_mode": "unshared_unique_prompts",
+      "sample_count": 8,
+      "success_count": 8,
+      "error_count": 0,
+      "qualifying_slo_count": 8,
+      "ttft_p50_ms": 296.0334580857307,
+      "ttft_p95_ms": 319.62824997026473,
+      "total_duration_seconds": 2.494436707929708,
+      "goodput_tokens_per_sec": 48.10705343556127,
+      "goodput_requests_per_sec": 3.2071368957040844,
+      "peak_waiting": 0.0,
+      "peak_running": 4.0,
+      "peak_kv_usage": 0.029669588671611624,
+      "sampler_sample_count": 10,
+      "sampler_errors": 0,
+      "metric_timeline": [
+        {
+          "t_ms": 249.3,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 507.1,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 773.7,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 1006.0,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 1296.4,
+          "running": 4.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.029669588671611624
+        },
+        {
+          "t_ms": 1532.4,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 1821.8,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 2052.3,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 2346.6,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 2591.8,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        }
+      ]
+    },
+    {
+      "concurrency": 8,
+      "repetitions": 2,
+      "context_length_target": 512,
+      "requested_prompt_tokens": 512,
+      "actual_prompt_tokens": 512,
+      "requested_output_tokens": 15,
+      "total_context": 527,
+      "cache_mode": "unshared_unique_prompts",
+      "sample_count": 16,
+      "success_count": 16,
+      "error_count": 0,
+      "qualifying_slo_count": 16,
+      "ttft_p50_ms": 302.82849993091077,
+      "ttft_p95_ms": 362.415042007342,
+      "total_duration_seconds": 4.810039000003599,
+      "goodput_tokens_per_sec": 49.895645336726055,
+      "goodput_requests_per_sec": 3.3263763557817367,
+      "peak_waiting": 0.0,
+      "peak_running": 0.0,
+      "peak_kv_usage": 0.0,
+      "sampler_sample_count": 19,
+      "sampler_errors": 0,
+      "metric_timeline": [
+        {
+          "t_ms": 249.5,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 506.1,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 776.4,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 1031.7,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 1299.2,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 1555.4,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 1823.3,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 2090.6,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 2351.5,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 2608.3,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 2874.8,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 3126.2,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 3396.4,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 3642.7,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 3918.3,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 4159.6,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 4444.7,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 4697.5,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 4967.5,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        }
+      ]
+    },
+    {
+      "concurrency": 12,
+      "repetitions": 2,
+      "context_length_target": 512,
+      "requested_prompt_tokens": 512,
+      "actual_prompt_tokens": 512,
+      "requested_output_tokens": 15,
+      "total_context": 527,
+      "cache_mode": "unshared_unique_prompts",
+      "sample_count": 24,
+      "success_count": 24,
+      "error_count": 0,
+      "qualifying_slo_count": 24,
+      "ttft_p50_ms": 396.9725420465693,
+      "ttft_p95_ms": 524.209333001636,
+      "total_duration_seconds": 6.983712624991313,
+      "goodput_tokens_per_sec": 51.548512851421606,
+      "goodput_requests_per_sec": 3.4365675234281072,
+      "peak_waiting": 4.0,
+      "peak_running": 8.0,
+      "peak_kv_usage": 0.05933917734322325,
+      "sampler_sample_count": 27,
+      "sampler_errors": 0,
+      "metric_timeline": [
+        {
+          "t_ms": 240.5,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 493.9,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 755.3,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 1019.0,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 1285.9,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 1542.0,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 1788.2,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 2066.3,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 2319.8,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 2592.7,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 2837.3,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 3115.3,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 3335.2,
+          "running": 4.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.029669588671611624
+        },
+        {
+          "t_ms": 3638.0,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 3893.8,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 4164.1,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 4415.9,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 4686.4,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 4932.5,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 5213.0,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 5463.2,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 5737.5,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 5994.0,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 6260.6,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 6524.0,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 6796.1,
+          "running": 8.0,
+          "waiting": 4.0,
+          "kv_cache_usage_perc": 0.05933917734322325
+        },
+        {
+          "t_ms": 7043.6,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        }
+      ]
+    },
+    {
+      "concurrency": 16,
+      "repetitions": 2,
+      "context_length_target": 512,
+      "requested_prompt_tokens": 512,
+      "actual_prompt_tokens": 512,
+      "requested_output_tokens": 15,
+      "total_context": 527,
+      "cache_mode": "unshared_unique_prompts",
+      "sample_count": 32,
+      "success_count": 32,
+      "error_count": 0,
+      "qualifying_slo_count": 32,
+      "ttft_p50_ms": 416.1815829575062,
+      "ttft_p95_ms": 537.658957997337,
+      "total_duration_seconds": 8.850615332950838,
+      "goodput_tokens_per_sec": 54.23351732539546,
+      "goodput_requests_per_sec": 3.615567821693031,
+      "peak_waiting": 8.0,
+      "peak_running": 8.0,
+      "peak_kv_usage": 0.05933917734322325,
+      "sampler_sample_count": 34,
+      "sampler_errors": 0,
+      "metric_timeline": [
+        {
+          "t_ms": 236.7,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 480.3,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 760.2,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 1011.2,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 1292.2,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 1519.7,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 1809.2,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 2046.6,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 2334.5,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 2590.3,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 2858.2,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 3135.4,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 3403.8,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 3664.7,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 3919.7,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 4180.1,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 4449.9,
+          "running": 1.0,
+          "waiting": 7.0,
+          "kv_cache_usage_perc": 0.007192627556754316
+        },
+        {
+          "t_ms": 4727.1,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 5089.5,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 5346.9,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 5613.8,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 5864.7,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 6136.5,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 6363.2,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 6661.0,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 6908.6,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 7184.8,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 7429.4,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 7707.1,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 7947.4,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 8232.4,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 8457.6,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 8754.5,
+          "running": 8.0,
+          "waiting": 8.0,
+          "kv_cache_usage_perc": 0.05933917734322325
+        },
+        {
+          "t_ms": 8984.4,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        }
+      ]
+    },
+    {
+      "concurrency": 1,
+      "repetitions": 2,
+      "context_length_target": 2048,
+      "requested_prompt_tokens": 2048,
+      "actual_prompt_tokens": 2048,
+      "requested_output_tokens": 15,
+      "total_context": 2063,
+      "cache_mode": "unshared_unique_prompts",
+      "sample_count": 2,
+      "success_count": 2,
+      "error_count": 0,
+      "qualifying_slo_count": 2,
+      "ttft_p50_ms": 287.3044590232894,
+      "ttft_p95_ms": 287.3044590232894,
+      "total_duration_seconds": 1.1376403339672834,
+      "goodput_tokens_per_sec": 26.370373046972816,
+      "goodput_requests_per_sec": 1.7580248697981875,
+      "peak_waiting": 0.0,
+      "peak_running": 0.0,
+      "peak_kv_usage": 0.0,
+      "sampler_sample_count": 5,
+      "sampler_errors": 0,
+      "metric_timeline": [
+        {
+          "t_ms": 271.3,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 509.9,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 796.3,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 1024.5,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 1322.7,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        }
+      ]
+    },
+    {
+      "concurrency": 2,
+      "repetitions": 2,
+      "context_length_target": 2048,
+      "requested_prompt_tokens": 2048,
+      "actual_prompt_tokens": 2048,
+      "requested_output_tokens": 15,
+      "total_context": 2063,
+      "cache_mode": "unshared_unique_prompts",
+      "sample_count": 4,
+      "success_count": 4,
+      "error_count": 0,
+      "qualifying_slo_count": 4,
+      "ttft_p50_ms": 363.69170807302,
+      "ttft_p95_ms": 364.92916697170585,
+      "total_duration_seconds": 1.9120283749653026,
+      "goodput_tokens_per_sec": 31.380287440079865,
+      "goodput_requests_per_sec": 2.092019162671991,
+      "peak_waiting": 0.0,
+      "peak_running": 2.0,
+      "peak_kv_usage": 0.05799055967633171,
+      "sampler_sample_count": 8,
+      "sampler_errors": 0,
+      "metric_timeline": [
+        {
+          "t_ms": 232.5,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 492.4,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 728.5,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 1019.2,
+          "running": 2.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.05799055967633171
+        },
+        {
+          "t_ms": 1264.2,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 1542.2,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 1785.9,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 2066.7,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        }
+      ]
+    },
+    {
+      "concurrency": 4,
+      "repetitions": 2,
+      "context_length_target": 2048,
+      "requested_prompt_tokens": 2048,
+      "actual_prompt_tokens": 2048,
+      "requested_output_tokens": 15,
+      "total_context": 2063,
+      "cache_mode": "unshared_unique_prompts",
+      "sample_count": 8,
+      "success_count": 8,
+      "error_count": 0,
+      "qualifying_slo_count": 8,
+      "ttft_p50_ms": 317.89845903404057,
+      "ttft_p95_ms": 338.06470804847777,
+      "total_duration_seconds": 2.7123484580079094,
+      "goodput_tokens_per_sec": 44.24210305490552,
+      "goodput_requests_per_sec": 2.9494735369937013,
+      "peak_waiting": 0.0,
+      "peak_running": 4.0,
+      "peak_kv_usage": 0.11598111935266353,
+      "sampler_sample_count": 11,
+      "sampler_errors": 0,
+      "metric_timeline": [
+        {
+          "t_ms": 229.5,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 494.9,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 730.7,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 1018.9,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 1275.2,
+          "running": 4.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.11598111935266353
+        },
+        {
+          "t_ms": 1545.5,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 1805.9,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 2068.7,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 2325.2,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 2595.1,
+          "running": 3.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0863115306810519
+        },
+        {
+          "t_ms": 2857.2,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        }
+      ]
+    },
+    {
+      "concurrency": 8,
+      "repetitions": 2,
+      "context_length_target": 2048,
+      "requested_prompt_tokens": 2048,
+      "actual_prompt_tokens": 2048,
+      "requested_output_tokens": 15,
+      "total_context": 2063,
+      "cache_mode": "unshared_unique_prompts",
+      "sample_count": 16,
+      "success_count": 16,
+      "error_count": 0,
+      "qualifying_slo_count": 16,
+      "ttft_p50_ms": 449.0165839670226,
+      "ttft_p95_ms": 513.9854999724776,
+      "total_duration_seconds": 5.004142416990362,
+      "goodput_tokens_per_sec": 47.96026571608708,
+      "goodput_requests_per_sec": 3.1973510477391387,
+      "peak_waiting": 2.0,
+      "peak_running": 8.0,
+      "peak_kv_usage": 0.23196223870532706,
+      "sampler_sample_count": 20,
+      "sampler_errors": 0,
+      "metric_timeline": [
+        {
+          "t_ms": 230.5,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 497.0,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 759.1,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 1015.9,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 1280.3,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 1507.2,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 1804.7,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 2056.0,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 2329.0,
+          "running": 4.0,
+          "waiting": 2.0,
+          "kv_cache_usage_perc": 0.11508204090806928
+        },
+        {
+          "t_ms": 2587.6,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 2855.4,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 3119.8,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 3377.3,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 3626.7,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 3900.7,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 4154.5,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 4435.0,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 4689.3,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 4951.8,
+          "running": 8.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.23196223870532706
+        },
+        {
+          "t_ms": 5200.4,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        }
+      ]
+    },
+    {
+      "concurrency": 12,
+      "repetitions": 2,
+      "context_length_target": 2048,
+      "requested_prompt_tokens": 2048,
+      "actual_prompt_tokens": 2048,
+      "requested_output_tokens": 15,
+      "total_context": 2063,
+      "cache_mode": "unshared_unique_prompts",
+      "sample_count": 24,
+      "success_count": 24,
+      "error_count": 0,
+      "qualifying_slo_count": 24,
+      "ttft_p50_ms": 400.3262090263888,
+      "ttft_p95_ms": 628.9869169704616,
+      "total_duration_seconds": 7.193852417054586,
+      "goodput_tokens_per_sec": 50.04272803074775,
+      "goodput_requests_per_sec": 3.336181868716517,
+      "peak_waiting": 4.0,
+      "peak_running": 8.0,
+      "peak_kv_usage": 0.23196223870532706,
+      "sampler_sample_count": 26,
+      "sampler_errors": 0,
+      "metric_timeline": [
+        {
+          "t_ms": 249.0,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 497.2,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 769.0,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 1018.1,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 1292.3,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 1541.1,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 1816.0,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 2060.5,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 2344.7,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 2645.9,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 2994.1,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 3395.4,
+          "running": 8.0,
+          "waiting": 4.0,
+          "kv_cache_usage_perc": 0.23196223870532706
+        },
+        {
+          "t_ms": 3667.4,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 3931.3,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 4181.6,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 4442.8,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 4688.8,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 4966.9,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 5233.0,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 5496.1,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 5749.1,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 6013.6,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 6257.5,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 6537.7,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 6868.3,
+          "running": 1.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.028770510227017265
+        },
+        {
+          "t_ms": 7180.7,
+          "running": 4.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.11598111935266353
+        }
+      ]
+    },
+    {
+      "concurrency": 16,
+      "repetitions": 2,
+      "context_length_target": 2048,
+      "requested_prompt_tokens": 2048,
+      "actual_prompt_tokens": 2048,
+      "requested_output_tokens": 15,
+      "total_context": 2063,
+      "cache_mode": "unshared_unique_prompts",
+      "sample_count": 32,
+      "success_count": 32,
+      "error_count": 0,
+      "qualifying_slo_count": 32,
+      "ttft_p50_ms": 550.4530409816653,
+      "ttft_p95_ms": 742.1322079608217,
+      "total_duration_seconds": 9.713850291911513,
+      "goodput_tokens_per_sec": 49.41397958332592,
+      "goodput_requests_per_sec": 3.294265305555061,
+      "peak_waiting": 8.0,
+      "peak_running": 8.0,
+      "peak_kv_usage": 0.23196223870532706,
+      "sampler_sample_count": 37,
+      "sampler_errors": 0,
+      "metric_timeline": [
+        {
+          "t_ms": 241.5,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 500.7,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 762.2,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 1017.7,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 1270.1,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 1556.6,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 1822.6,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 2062.2,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 2314.6,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 2590.1,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 2843.8,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 3110.2,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 3350.2,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 3630.6,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 3881.5,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 4158.2,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 4576.1,
+          "running": 8.0,
+          "waiting": 8.0,
+          "kv_cache_usage_perc": 0.23196223870532706
+        },
+        {
+          "t_ms": 4840.6,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 5099.0,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 5352.1,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 5615.1,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 5891.3,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 6162.4,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 6422.5,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 6675.4,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 6942.1,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 7192.5,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 7452.4,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 7713.0,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 7983.8,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 8235.8,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 8498.6,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 8778.0,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 9020.4,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 9396.9,
+          "running": 8.0,
+          "waiting": 4.0,
+          "kv_cache_usage_perc": 0.23196223870532706
+        },
+        {
+          "t_ms": 9621.3,
+          "running": 7.0,
+          "waiting": 1.0,
+          "kv_cache_usage_perc": 0.20206788042256685
+        },
+        {
+          "t_ms": 9935.8,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        }
+      ]
+    },
+    {
+      "concurrency": 1,
+      "repetitions": 2,
+      "context_length_target": 8192,
+      "requested_prompt_tokens": 8187,
+      "actual_prompt_tokens": 8187,
+      "requested_output_tokens": 5,
+      "total_context": 8192,
+      "cache_mode": "unshared_unique_prompts",
+      "sample_count": 2,
+      "success_count": 2,
+      "error_count": 0,
+      "qualifying_slo_count": 2,
+      "ttft_p50_ms": 390.69637504871935,
+      "ttft_p95_ms": 390.69637504871935,
+      "total_duration_seconds": 1.2359045420307666,
+      "goodput_tokens_per_sec": 8.091239784238175,
+      "goodput_requests_per_sec": 1.618247956847635,
+      "peak_waiting": 0.0,
+      "peak_running": 0.0,
+      "peak_kv_usage": 0.0,
+      "sampler_sample_count": 5,
+      "sampler_errors": 0,
+      "metric_timeline": [
+        {
+          "t_ms": 210.9,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 499.5,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 758.2,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 1009.3,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 1259.8,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        }
+      ]
+    },
+    {
+      "concurrency": 2,
+      "repetitions": 2,
+      "context_length_target": 8192,
+      "requested_prompt_tokens": 8187,
+      "actual_prompt_tokens": 8187,
+      "requested_output_tokens": 5,
+      "total_context": 8192,
+      "cache_mode": "unshared_unique_prompts",
+      "sample_count": 4,
+      "success_count": 4,
+      "error_count": 0,
+      "qualifying_slo_count": 4,
+      "ttft_p50_ms": 410.3406249778345,
+      "ttft_p95_ms": 436.39529205393046,
+      "total_duration_seconds": 1.7524879580596462,
+      "goodput_tokens_per_sec": 11.412346605875678,
+      "goodput_requests_per_sec": 2.2824693211751357,
+      "peak_waiting": 0.0,
+      "peak_running": 0.0,
+      "peak_kv_usage": 0.0,
+      "sampler_sample_count": 7,
+      "sampler_errors": 0,
+      "metric_timeline": [
+        {
+          "t_ms": 243.0,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 485.2,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 764.7,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 1000.1,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 1295.1,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 1533.7,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 1838.0,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        }
+      ]
+    },
+    {
+      "concurrency": 4,
+      "repetitions": 2,
+      "context_length_target": 8192,
+      "requested_prompt_tokens": 8187,
+      "actual_prompt_tokens": 8187,
+      "requested_output_tokens": 5,
+      "total_context": 8192,
+      "cache_mode": "unshared_unique_prompts",
+      "sample_count": 8,
+      "success_count": 8,
+      "error_count": 0,
+      "qualifying_slo_count": 8,
+      "ttft_p50_ms": 611.8332089390606,
+      "ttft_p95_ms": 753.038875060156,
+      "total_duration_seconds": 3.21892120805569,
+      "goodput_tokens_per_sec": 12.426523488644513,
+      "goodput_requests_per_sec": 2.4853046977289024,
+      "peak_waiting": 0.0,
+      "peak_running": 4.0,
+      "peak_kv_usage": 0.3454708923353562,
+      "sampler_sample_count": 12,
+      "sampler_errors": 0,
+      "metric_timeline": [
+        {
+          "t_ms": 233.6,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 478.4,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 733.6,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 997.8,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 1300.9,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 1608.6,
+          "running": 4.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.3454708923353562
+        },
+        {
+          "t_ms": 1936.3,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 2167.9,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 2461.2,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 2810.3,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 3104.8,
+          "running": 4.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.3454708923353562
+        },
+        {
+          "t_ms": 3330.4,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        }
+      ]
+    },
+    {
+      "concurrency": 8,
+      "repetitions": 2,
+      "context_length_target": 8192,
+      "requested_prompt_tokens": 8187,
+      "actual_prompt_tokens": 8187,
+      "requested_output_tokens": 5,
+      "total_context": 8192,
+      "cache_mode": "unshared_unique_prompts",
+      "sample_count": 16,
+      "success_count": 16,
+      "error_count": 0,
+      "qualifying_slo_count": 10,
+      "ttft_p50_ms": 934.0977910906076,
+      "ttft_p95_ms": 1263.9749579830095,
+      "total_duration_seconds": 5.942011457984336,
+      "goodput_tokens_per_sec": 8.414658967514198,
+      "goodput_requests_per_sec": 1.6829317935028394,
+      "peak_waiting": 5.0,
+      "peak_running": 5.0,
+      "peak_kv_usage": 0.4605529332434255,
+      "sampler_sample_count": 21,
+      "sampler_errors": 0,
+      "metric_timeline": [
+        {
+          "t_ms": 262.8,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 486.5,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 774.9,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 1009.7,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 1319.9,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 1539.0,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 1838.9,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 2357.0,
+          "running": 1.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.11508204090806928
+        },
+        {
+          "t_ms": 2574.1,
+          "running": 5.0,
+          "waiting": 3.0,
+          "kv_cache_usage_perc": 0.4605529332434255
+        },
+        {
+          "t_ms": 2883.9,
+          "running": 5.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.4605529332434255
+        },
+        {
+          "t_ms": 3113.3,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 3397.0,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 3614.5,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 3920.2,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 4137.3,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 4452.0,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 4668.4,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 5172.2,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 5396.1,
+          "running": 3.0,
+          "waiting": 5.0,
+          "kv_cache_usage_perc": 0.23038885142728704
+        },
+        {
+          "t_ms": 5640.2,
+          "running": 5.0,
+          "waiting": 3.0,
+          "kv_cache_usage_perc": 0.4605529332434255
+        },
+        {
+          "t_ms": 5919.9,
+          "running": 5.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.4605529332434255
+        }
+      ]
+    },
+    {
+      "concurrency": 12,
+      "repetitions": 2,
+      "context_length_target": 8192,
+      "requested_prompt_tokens": 8187,
+      "actual_prompt_tokens": 8187,
+      "requested_output_tokens": 5,
+      "total_context": 8192,
+      "cache_mode": "unshared_unique_prompts",
+      "sample_count": 24,
+      "success_count": 24,
+      "error_count": 0,
+      "qualifying_slo_count": 5,
+      "ttft_p50_ms": 1396.7661249917,
+      "ttft_p95_ms": 1886.9076250120997,
+      "total_duration_seconds": 9.1692580410745,
+      "goodput_tokens_per_sec": 2.7265019577385976,
+      "goodput_requests_per_sec": 0.5453003915477195,
+      "peak_waiting": 8.0,
+      "peak_running": 5.0,
+      "peak_kv_usage": 0.4607777028545741,
+      "sampler_sample_count": 33,
+      "sampler_errors": 0,
+      "metric_timeline": [
+        {
+          "t_ms": 210.3,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 495.4,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 704.1,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 921.1,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 1208.5,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 1441.7,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 1744.7,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 1968.3,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 2267.3,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 2485.0,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 2766.8,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 3407.0,
+          "running": 1.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.11508204090806928
+        },
+        {
+          "t_ms": 3641.3,
+          "running": 4.0,
+          "waiting": 8.0,
+          "kv_cache_usage_perc": 0.3454708923353562
+        },
+        {
+          "t_ms": 3887.8,
+          "running": 5.0,
+          "waiting": 5.0,
+          "kv_cache_usage_perc": 0.4605529332434255
+        },
+        {
+          "t_ms": 4166.7,
+          "running": 5.0,
+          "waiting": 3.0,
+          "kv_cache_usage_perc": 0.4605529332434255
+        },
+        {
+          "t_ms": 4402.4,
+          "running": 5.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.4605529332434255
+        },
+        {
+          "t_ms": 4685.5,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 4916.8,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 5217.5,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 5452.9,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 5736.9,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 5948.9,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 6312.8,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 6542.8,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 6785.2,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 7002.4,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 7309.1,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 7955.8,
+          "running": 2.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.11530681051921776
+        },
+        {
+          "t_ms": 8165.9,
+          "running": 4.0,
+          "waiting": 8.0,
+          "kv_cache_usage_perc": 0.3454708923353562
+        },
+        {
+          "t_ms": 8460.0,
+          "running": 5.0,
+          "waiting": 6.0,
+          "kv_cache_usage_perc": 0.4605529332434255
+        },
+        {
+          "t_ms": 8676.9,
+          "running": 5.0,
+          "waiting": 4.0,
+          "kv_cache_usage_perc": 0.4607777028545741
+        },
+        {
+          "t_ms": 8986.4,
+          "running": 5.0,
+          "waiting": 1.0,
+          "kv_cache_usage_perc": 0.4607777028545741
+        },
+        {
+          "t_ms": 9222.0,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        }
+      ]
+    },
+    {
+      "concurrency": 16,
+      "repetitions": 2,
+      "context_length_target": 8192,
+      "requested_prompt_tokens": 8187,
+      "actual_prompt_tokens": 8187,
+      "requested_output_tokens": 5,
+      "total_context": 8192,
+      "cache_mode": "unshared_unique_prompts",
+      "sample_count": 32,
+      "success_count": 32,
+      "error_count": 0,
+      "qualifying_slo_count": 4,
+      "ttft_p50_ms": 1657.9881670186296,
+      "ttft_p95_ms": 2395.7320000045,
+      "total_duration_seconds": 12.217258792021312,
+      "goodput_tokens_per_sec": 1.6370284317019903,
+      "goodput_requests_per_sec": 0.32740568634039807,
+      "peak_waiting": 11.0,
+      "peak_running": 5.0,
+      "peak_kv_usage": 0.4607777028545741,
+      "sampler_sample_count": 41,
+      "sampler_errors": 0,
+      "metric_timeline": [
+        {
+          "t_ms": 273.9,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 502.8,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 787.3,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 1032.8,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 1316.6,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 1574.5,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 1833.3,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 2054.5,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 2362.0,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 2584.9,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 2870.8,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 3087.5,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 3406.1,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 3635.5,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 4470.1,
+          "running": 3.0,
+          "waiting": 5.0,
+          "kv_cache_usage_perc": 0.23038885142728704
+        },
+        {
+          "t_ms": 4697.3,
+          "running": 5.0,
+          "waiting": 10.0,
+          "kv_cache_usage_perc": 0.4605529332434255
+        },
+        {
+          "t_ms": 4993.1,
+          "running": 5.0,
+          "waiting": 7.0,
+          "kv_cache_usage_perc": 0.4605529332434255
+        },
+        {
+          "t_ms": 5234.6,
+          "running": 5.0,
+          "waiting": 5.0,
+          "kv_cache_usage_perc": 0.4605529332434255
+        },
+        {
+          "t_ms": 5503.2,
+          "running": 5.0,
+          "waiting": 2.0,
+          "kv_cache_usage_perc": 0.4607777028545741
+        },
+        {
+          "t_ms": 5749.6,
+          "running": 5.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.4607777028545741
+        },
+        {
+          "t_ms": 6037.6,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 6267.5,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 6558.2,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 6792.4,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 7084.6,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 7322.6,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 7609.9,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 7852.5,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 8139.6,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 8390.9,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 8660.0,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 8903.8,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 9191.3,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 9466.7,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 9808.0,
+          "running": 0.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.0
+        },
+        {
+          "t_ms": 10782.2,
+          "running": 1.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.11508204090806928
+        },
+        {
+          "t_ms": 11043.9,
+          "running": 5.0,
+          "waiting": 11.0,
+          "kv_cache_usage_perc": 0.4605529332434255
+        },
+        {
+          "t_ms": 11356.8,
+          "running": 5.0,
+          "waiting": 8.0,
+          "kv_cache_usage_perc": 0.4605529332434255
+        },
+        {
+          "t_ms": 11690.1,
+          "running": 5.0,
+          "waiting": 6.0,
+          "kv_cache_usage_perc": 0.4605529332434255
+        },
+        {
+          "t_ms": 11927.3,
+          "running": 5.0,
+          "waiting": 2.0,
+          "kv_cache_usage_perc": 0.4607777028545741
+        },
+        {
+          "t_ms": 12215.2,
+          "running": 5.0,
+          "waiting": 0.0,
+          "kv_cache_usage_perc": 0.4607777028545741
+        }
+      ]
+    }
+  ],
+  "classification": {
+    "first_limiter": "max_num_seqs_concurrency_limit",
+    "classification": "evidenced",
+    "evidence_paths": {
+      "request_results": "raw/responses.jsonl",
+      "vllm_metrics": "prometheus/vllm-worker-a.prom",
+      "dcgm_metrics": "prometheus/dcgm.prom",
+      "worker_logs": "logs/worker-a.log"
+    }
+  }
+}

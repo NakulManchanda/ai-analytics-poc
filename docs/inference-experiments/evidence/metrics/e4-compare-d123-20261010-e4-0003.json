@@ -1,0 +1,170 @@
+{
+ "scope": "per-request (requests.jsonl); goodput is run-level",
+ "comparable": true,
+ "manifest_check": {
+  "match": true,
+  "proven": true,
+  "treatment_varied": true,
+  "treatment_problems": [],
+  "comparable": true,
+  "mismatches": [],
+  "unprovable_fields": [],
+  "warnings": []
+ },
+ "runs": {
+  "a_admission_off": {
+   "label": "e4-admission_off",
+   "requests": 48,
+   "completed": 32,
+   "good": 0,
+   "ttft_ms": {
+    "p50": 604.76,
+    "p95": 1544.45,
+    "p99": 1846.34
+   },
+   "e2e_ms": {
+    "p50": 1524.02,
+    "p95": 2194.69,
+    "p99": 2542.06
+   },
+   "queue_wait_ms": {
+    "p50": 0.0,
+    "p95": 1214.5,
+    "p99": 1249.63
+   },
+   "goodput": {
+    "requests_per_s": 12.68,
+    "tokens_per_s": 1081.88,
+    "good_requests_per_s": 0.0,
+    "good_tokens_per_s": 0.0
+   },
+   "not_completed_by_reason": {
+    "http_503": 12,
+    "shed:tenant_concurrency": 4
+   },
+   "sheds_by_reason": {
+    "shed:tenant_concurrency": 4
+   },
+   "timeout_queue": 0,
+   "fairness": {
+    "per_tenant": {
+     "tenant_batch": {
+      "offered": 12,
+      "admitted": 12,
+      "completed": 0,
+      "completed_tokens": 0,
+      "served_fraction": 0.0
+     },
+     "tenant_interactive": {
+      "offered": 12,
+      "admitted": 12,
+      "completed": 12,
+      "completed_tokens": 1536,
+      "served_fraction": 1.0
+     },
+     "tenant_noisy": {
+      "offered": 24,
+      "admitted": 20,
+      "completed": 20,
+      "completed_tokens": 2560,
+      "served_fraction": 0.833
+     }
+    },
+    "jain_completed_requests": 0.627,
+    "jain_completed_tokens": 0.627,
+    "jain_served_fraction": 0.661
+   },
+   "batch_starvation": {
+    "completed_fraction": {
+     "interactive": 0.8888888888888888,
+     "batch": 0.0
+    },
+    "class_p99_spread_ms": null,
+    "batch_starved": true,
+    "note": "a favorable class_p99_spread is NOT success if batch_starved is true"
+   }
+  },
+  "b_admission_on": {
+   "label": "e4-admission_on",
+   "requests": 48,
+   "completed": 20,
+   "good": 0,
+   "ttft_ms": {
+    "p50": 609.58,
+    "p95": 1676.36,
+    "p99": 1677.18
+   },
+   "e2e_ms": {
+    "p50": 1567.48,
+    "p95": 2368.57,
+    "p99": 2375.54
+   },
+   "queue_wait_ms": {
+    "p50": 0.0,
+    "p95": 1252.5,
+    "p99": 1275.3
+   },
+   "goodput": {
+    "requests_per_s": 16.01,
+    "tokens_per_s": 853.62,
+    "good_requests_per_s": 0.0,
+    "good_tokens_per_s": 0.0
+   },
+   "not_completed_by_reason": {
+    "shed:decode_slots": 24,
+    "shed:tenant_concurrency": 4
+   },
+   "sheds_by_reason": {
+    "shed:decode_slots": 24,
+    "shed:tenant_concurrency": 4
+   },
+   "timeout_queue": 0,
+   "fairness": {
+    "per_tenant": {
+     "tenant_batch": {
+      "offered": 12,
+      "admitted": 0,
+      "completed": 0,
+      "completed_tokens": 0,
+      "served_fraction": 0.0
+     },
+     "tenant_interactive": {
+      "offered": 12,
+      "admitted": 8,
+      "completed": 8,
+      "completed_tokens": 1024,
+      "served_fraction": 0.667
+     },
+     "tenant_noisy": {
+      "offered": 24,
+      "admitted": 12,
+      "completed": 12,
+      "completed_tokens": 1536,
+      "served_fraction": 0.5
+     }
+    },
+    "jain_completed_requests": 0.641,
+    "jain_completed_tokens": 0.641,
+    "jain_served_fraction": 0.653
+   },
+   "batch_starvation": {
+    "completed_fraction": {
+     "interactive": 0.5555555555555556,
+     "batch": 0.0
+    },
+    "class_p99_spread_ms": null,
+    "batch_starved": true,
+    "note": "a favorable class_p99_spread is NOT success if batch_starved is true"
+   }
+  }
+ },
+ "delta_b_minus_a": {
+  "goodput.good_requests_per_s": 0.0,
+  "e2e_ms.p99": -166.52,
+  "ttft_ms.p99": -169.16
+ },
+ "warnings": [
+  "a_admission_off: batch starved (completed fraction < 0.5 x interactive)",
+  "b_admission_on: batch starved (completed fraction < 0.5 x interactive)"
+ ]
+}

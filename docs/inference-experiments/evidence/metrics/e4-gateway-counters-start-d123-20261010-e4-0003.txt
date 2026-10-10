@@ -1,0 +1,7 @@
+orch_shed_total{class="interactive",code="429",reason="tenant_concurrency"} 8.0
+orch_tenant_total{outcome="admitted",tenant="tenant_noisy"} 40.0
+orch_tenant_total{outcome="shed",tenant="tenant_noisy"} 8.0
+orch_tenant_total{outcome="admitted",tenant="tenant_interactive"} 12.0
+orch_tenant_total{outcome="admitted",tenant="tenant_batch"} 12.0
+orch_queue_wait_seconds_count{class="interactive",worker="worker_b"} 27.0
+orch_queue_wait_seconds_count{class="interactive",worker="worker_a"} 25.0

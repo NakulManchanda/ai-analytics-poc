@@ -187,7 +187,7 @@ dev: ## Run the AI application locally on port 8080
 	uv run --project services/app uvicorn app.main:app --host 0.0.0.0 --port $(APP_HOST_PORT) --reload
 
 app-serve-dev: ## Run the AI application locally wired to the serve path (vLLM gateway)
-	LLM_PROVIDER=serve INFERENCE_GATEWAY_URL=http://localhost:18080/serve INFERENCE_MODEL_ID=Qwen/Qwen3-0.6B \
+	LLM_PROVIDER=serve INFERENCE_GATEWAY_URL=http://localhost:18080/serve INFERENCE_MODEL_ID=Qwen/Qwen3-0.6B MCP_URL=http://localhost:8001/mcp \
 	uv run --project services/app uvicorn app.main:app --host 0.0.0.0 --port $(APP_HOST_PORT) --reload
 
 mcp-dev: ## Run the MCP service locally on port 8001

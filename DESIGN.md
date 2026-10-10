@@ -40,15 +40,27 @@ They are generated from the real prefix and tool material, not anonymous text. T
 - **Model:** Qwen/Qwen3-0.6B, bfloat16, 28 layers, 8 KV heads, head dim 128.
 - **KV bytes per token:** 2 x 28 x 8 x 128 x 2 = **114,688 bytes (112 KiB)** (computed; the capacity runner prints the same).
 - **KV pool per worker:** 7.61 GiB = **71,200 tokens** (vLLM startup log, E0/E1 configuration with `--max-num-batched-tokens 8192`). After changing the flag to 2048
-  the same workers report 4,546 blocks x 16 = **72,736 tokens** (measured, startup scrape); why the pool grew is not yet confirmed.
-- `max_concurrent_seqs ~ pool / (kv_bytes_per_token x length)` in tokens: at `max_len` 8,192 -> 71,200 / 8,192 = **8.69**; at the app's measured lengths
-  (p50 about 541 tokens, max about 984; from E3 `tokens_in` + `tokens_out`) -> about **130** at p50 and about 71 at the maximum. (computed)
+  the same workers report 4,546 blocks x 16 = **72,736 tokens** (measured, startup scrape). Lowering the batched-token ceiling from 8,192 to 2,048 reduces peak activation memory allocated during engine warmup profiling, leaving an extra ~175 MiB (~96 blocks) for the KV pool.
+- `max_concurrent_seqs ~ pool / (kv_bytes_per_token x length)` in tokens: at `max_len` 8,192 -> 71,200 / 8,192 = **8.69** (or 72,736 / 8,192 = **8.88** with the 2,048 batched-token configuration); at the app's measured lengths
+  (p50 about 541 tokens, max about 984; from E3 `tokens_in` + `tokens_out`) -> about **130-134** at p50 and about **71-73** at the maximum. (computed)
 - **Engine caps:** `--max-num-seqs 8`, `--max-model-len 8192`, `--gpu-memory-utilization 0.45`, prefix caching on, chunked prefill on.
-  8 x 8,192 = 65,536 < 71,200, so running sequences alone cannot fill the KV pool. (computed)
+  8 x 8,192 = 65,536 < 71,200 (and < 72,736), so running sequences alone cannot fill the KV pool. (computed)
 - **Hypothesis and outcome.** I expected KV to run out first. It did not. The 8-slot scheduler cap is first at every context length except 8,192, where the
   batched-token limit takes over; KV peaked at 46 percent in the direct capacity run and 3 percent in the gateway sweep (E0, measured). Zero preemptions, zero errors.
-- **Model switch (to be written from the model configs, not from memory):** a larger model or FP8 KV changes bytes per token and therefore the 71,200-token pool;
-  not measured in this submission.
+
+![E0 running and waiting slots](docs/inference-experiments/evidence/plots/e0-slots-running-waiting-d123-20261004-e0-2321.png)
+![E0 KV cache usage](docs/inference-experiments/evidence/plots/e0-kv-cache-usage-d123-20261004-e0-2321.png)
+![E0 GPU memory](docs/inference-experiments/evidence/plots/e0-gpu-memory-d123-20261004-e0-2321.png)
+
+- **Model switch (paper math across configurations on a 20 GiB slice):**
+
+| Configuration | Model params | Precision (weights / KV) | KV bytes / token | Est. weights (GiB) | Est. KV budget (GiB) | Est. KV pool (tokens) | Concurrency at max_len (8,192) |
+|---|---|---|---|---|---|---|---|
+| Qwen3-0.6B (current) | 0.6B (28L, 8KV, D128) | bf16 / bf16 | 114,688 (112 KiB) | 1.12 | 7.61 | 71,200 - 72,736 | 8.69 - 8.88 |
+| Qwen3-0.6B (FP8 KV) | 0.6B (28L, 8KV, D128) | bf16 / fp8 | 57,344 (56 KiB) | 1.12 | ~7.61 | ~142,400 | 17.38 |
+| Qwen2.5-7B (bf16) | 7.6B (28L, 4KV, D128) | bf16 / bf16 | 57,344 (56 KiB) | ~14.2 | ~3.8 | ~70,000 | 8.54 |
+| Qwen2.5-7B (FP8 KV) | 7.6B (28L, 4KV, D128) | bf16 / fp8 | 28,672 (28 KiB) | ~14.2 | ~3.8 | ~140,000 | 17.08 |
+
 
 ## 3. The cluster (Part 2)
 
@@ -90,6 +102,9 @@ Order in the handler (`infra/inference/gateway/main.py`): guard -> tenant quota 
   Measured in E4: vLLM mean queue time about 23 microseconds, `vllm:num_requests_waiting` maximum 0 on both workers, while gateway queue wait reached about 1.2 s.
 - **A 32k retrieve and a short agent decode both ready:** the gateway decides entry order (class, then size, slack, age); the engine decides execution order once dispatched. (A 32k prompt is rejected by the guard at this 8,192-token window.)
 - **PagedAttention vs prefix cache.** Paging lets a 8,192-token request cost 8,192 / 16 blocks instead of a worst-case reservation; the prefix cache saved prefill, not memory. Measured prefix-cache hit rate 72-90 percent on the taxi trace (E3, E4). Memory is dominated by the preallocated pool, so flat HBM is normal.
+
+![E2 prefix cache hit ratio](docs/inference-experiments/evidence/plots/e2-prefix-hit-ratio-d123-20261004-e2-2357.png)
+
 - **Flags and why.** `--max-num-seqs 8` (the scheduler limit E0 found), `--max-num-batched-tokens 2048` (changed from 8,192 so long prompts are chunked), `--enable-prefix-caching`, `--block-size 16`, chunked prefill on.
   Whether a real long prompt gets chunked at 2,048 has not been confirmed from a request.
 - **KV full after admit.** Admission sheds `kv_pressure` below 10 percent free KV; vLLM preempts as a last resort. Neither fired (KV never above 46 percent), so this is unexercised.
@@ -102,6 +117,9 @@ Order in the handler (`infra/inference/gateway/main.py`): guard -> tenant quota 
 - **Not copied:** weights, request bodies, generated output, scheduler state; only KV blocks for identical token IDs under a matching compatibility namespace.
 - **Proof contract (built):** a hop is `confirmed` only with positive transferred tokens and bytes, source != destination, matching prefix identity and namespace, and the destination consuming the blocks after its forward pass (`infra/inference/kv_transfer/evidence.py`, `validate_run`). A worker header or lower latency is not proof.
 - **Warm.** A replica is not ready when the weights are on the GPU: it is warm after the scrape-plus-probe gate. Engine-side TTFT after a restart is 5-20 ms; the first request after restart was slower in 1 of 6 and not at all after a 300 s idle gap (E1, measured). Client numbers of 250-350 ms are the SSH tunnel, not the GPU. A restarted worker recovers in about 95-135 s.
+
+![E3 placement picks](docs/inference-experiments/evidence/plots/e3-placement-picks-d123-20261005-e3-0040.png)
+
 - **Status:** the live hop run (E5) was not done; no crossover is claimed. The control legs (recompute, local reuse, destination hit) were not run either.
 
 ## 7. What the experiments showed
@@ -113,6 +131,9 @@ Order in the handler (`infra/inference/gateway/main.py`): guard -> tenant quota 
 | E2 | warm vs cold prefix cache | Turn-1 TTFT p50 2,132 ms cold vs 681 ms reused (about 3x); later turns no benefit (the cold run already reuses its own prefixes). |
 | E3 | `least_loaded` vs `prefix_then_load` | Prefix-aware: later turns faster (turn 3 TTFT p50 467 vs 876 ms), first turn slower (2.70 vs 1.80 s), p95 worse (2,702 vs 1,796 ms). A trade-off, not a win. Follow-up turns lost affinity (`prefix_overlap_low`); fixed afterwards by the sticky-owner change, not re-measured. |
 | E4 | admission on vs off | Neutral to negative (below). |
+
+![E4 outcomes by arm](docs/inference-experiments/evidence/plots/e4-outcomes-by-arm-d123-20261010-e4-0003.png)
+![E4 gateway queue wait](docs/inference-experiments/evidence/plots/e4-gateway-queue-wait-d123-20261010-e4-0003.png)
 
 **E4 (run `d123-20261010-e4-0003`, 22 conversations, 48 turns, tenant cap 10).**
 | | OFF | ON |
@@ -136,6 +157,9 @@ orch_queue_wait_seconds_count{class="interactive",worker="worker_b"} 37.0
 orch_queue_wait_seconds_count{class="interactive",worker="worker_a"} 35.0
 ```
 - Measured over the E4 window (Prometheus): effective prefill about 20,280 tokens/s (A 19,301, B 21,174; includes prefix-cache hits, an upper bound on the uncached rate), vLLM queue time about 0.000023 s, `num_requests_waiting` maximum 0.
+- **Live Overflow and Real-App Proofs (run `d123-20261010-e4-0246`):**
+  - **Live Overflow:** Replayed with `OVERFLOW_URL` enabled to Superlinked `Qwen/Qwen3.8-27B-FP8`. Saturated decode slots triggered overflow for batch requests (`e4_batch_01`, 2,468 in / 81 out tokens, e2e 8.2s vs 30s SLO), verified with end-to-end trace (`make trace-request`), while local 429 concurrency throttles stayed local.
+  - **Real Application & CrewAI:** Ran multi-agent strategy (`AGENT_STRATEGY=crewai`) through `http://localhost:8080` wired to `/serve` and FastMCP DuckDB tools. All 3 scenario turns succeeded (100% completion, 32.8% prefix cache hit rate, avg TTFT 28.8ms); direct `/api/ask` queries synthesized grounded taxi analytics.
 
 ## 8. The questions, with where to point (Part 8)
 
@@ -164,13 +188,13 @@ overflow names its model and its limiter; a 429 never overflows; the gateway pro
 (the 100 ms SLO is not met through the tunnel, so goodput is reported as 0 and not used).
 
 ## 10. Limits and what I did not do
-- **No live KV hop, no recompute-vs-hop crossover, no control legs.** The hop is implemented, merged, and covered by unit and contract tests only.
-- **Overflow never fired live.** The destination was checked (models, chat, tools, streaming) but no request overflowed in a run.
+- **No live KV hop, no recompute-vs-hop crossover, no control legs (E5).** The hop is implemented, merged, and covered by unit and contract tests only.
 - **Client latency goes through an SSH tunnel**, about 300 ms or more per request, so goodput against the 100 ms SLO is 0 in every run and is not used.
-- **One run per arm**, no confidence intervals; E3 predates the sticky-owner placement fix.
+- **One run per arm for main matrix**, no confidence intervals; E3 predates the sticky-owner placement fix.
 - **Admission thresholds are partly placeholders** (`PREFILL_TOKENS_PER_S` 4,000, `QUEUE_WAIT_PER_WAITING_S` 0.25); measured values are recorded in `docs/inference-experiments/` but not applied.
 - **No scaling and no replicas panel**; the A/B on larger models and FP8 KV is paper-only.
 - **Eviction** is described, not demonstrated.
+- **Full C8 demo window was not run continuously**, but live overflow to Superlinked and the real-application `/serve` path with CrewAI were verified in dedicated live runs (`d123-20261010-e4-0246`).
 
 ## 11. Reproducing
 `make inference-fresh-up`, `make inference-tunnel`, then the ordered commands in `docs/inference-experiments/inference-run-playbook.md` ("Start here", then E0-E4). The meaning of each experiment is in `docs/inference-experiments/inference-experiments-reference.md`.
@@ -181,6 +205,7 @@ overflow names its model and its limiter; a 429 never overflows; the gateway pro
 | `app/` | `services/app/app/` (`ServeLLMClient`, agent loop), `services/mcp/` |
 | `control/` | `infra/inference/gateway/` (guard, admit, place, queue, overflow, hop), `infra/inference/kv_transfer/` |
 | `cluster/` | `infra/inference/k8s/`, `infra/inference/scripts/`, `infra/inference/mooncake/` |
-| `notebook/` | `experiments/123_evidence.ipynb` (generated by `make evidence-notebook`); an executed copy with E0-E3 outputs was rendered on 2026-10-05; E4 is not in it yet |
-| `plots/`, `metrics/` | `docs/inference-experiments/evidence/` (to be populated with the small tracked files this document cites) |
+| `notebook/` | `experiments/123_evidence.ipynb` (generated by `make evidence-notebook`); executed copies in `.vscode/myfiles/inference-project/runbook/analysis/` |
+| `plots/`, `metrics/` | `docs/inference-experiments/evidence/plots/` (7 plots: E0 slots/KV/GPU, E2 prefix hit ratio, E3 placement picks, E4 outcomes & queue wait), `docs/inference-experiments/evidence/metrics/` (11 curated run and analysis files) |
 | tests | `infra/inference/tests/`, `tests/inference/`, `tests/experiments/` |
+
