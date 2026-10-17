@@ -88,9 +88,9 @@ flowchart TD
 | `control/` (guard, admit, place, queue, hop) | `services/gateway/`, `infra/inference/kv_transfer/` |
 | `cluster/` (how the engine comes up) | `infra/inference/k8s/`, `infra/inference/scripts/`, `infra/inference/mooncake/`, `make inference-*` targets |
 | `DESIGN.md` | [DESIGN.md](DESIGN.md) |
-| `plots/` | `docs/inference-experiments/evidence/plots/` (7 plots, regenerate with `experiments/plot_evidence.py`) |
+| `plots/` | `docs/inference-experiments/evidence/plots/` (7 plots, regenerate with `tooling/experiments/plot_evidence.py`) |
 | `metrics/` | `docs/inference-experiments/evidence/metrics/` (11 small tracked files); full run data is under `metrics/inference/` (gitignored) |
-| `notebook/` | `docs/inference-experiments/evidence/notebook/` (executed HTML & `.ipynb`), `experiments/123_evidence.ipynb` (clean scaffold) |
+| `notebook/` | `docs/inference-experiments/evidence/notebook/` (executed HTML & `.ipynb`), `tooling/experiments/123_evidence.ipynb` (clean scaffold) |
 | How to run it | [docs/inference-experiments/inference-run-playbook.md](docs/inference-experiments/inference-run-playbook.md); what each experiment means: [inference-experiments-reference.md](docs/inference-experiments/inference-experiments-reference.md) |
 
 ---
@@ -159,38 +159,63 @@ See the [local guide](docs/local-uat-guide.md) and [public guide](docs/public-ua
 
 ## Repository Structure
 
-```text
-ai_analytics_poc/
-├── services/
-│   ├── app/                 # FastAPI orchestration server & async worker
-│   │   ├── app/
-│   │   │   ├── orchestration/ # Agent loop, execution budgets, Bedrock client
-│   │   │   ├── storage/       # DynamoDB state repository & Redis Streams
-│   │   │   └── routers/       # /api/ask, /api/jobs, /api/runs, /api/status
-│   │   └── tests/
-│   ├── mcp/                 # FastMCP analytical server (DuckDB + Parquet)
-│   │   ├── mcp_server/      # Tools (query_taxi_data, get_dataset_profile)
-│   │   └── tests/
-│   └── dataset_spike/       # NYC TLC Yellow Taxi dataset profiling & spike
-├── tooling/
-│   ├── benchmarks/          # Offline scenario replayer (app_runs / gateway_chat), goodput, trace CLI; own uv project
-│   └── evals/               # Reserved for answer-quality evals (not yet implemented)
-├── web/                     # React 18 + TypeScript + Vite UI
-│   ├── src/                 # App, TimelineInspector, ContextInspector
-│   └── dist/                # Production build artifacts for S3 deployment
-├── infra/
-│   └── terraform/           # Complete AWS infrastructure (ALB, ECS, S3, CloudFront, Route 53)
-├── scripts/
-│   ├── smoke/               # Milestone verification & integration smoke scripts
-│   └── deploy_frontend.sh   # S3 sync + CloudFront cache invalidation
-└── docs/
-    ├── system-design-blog.md # In-depth System Design architecture blog post
-    ├── public-uat-guide.md   # Public cloud UAT acceptance testing guide
-    ├── local-uat-guide.md    # Local docker UAT testing guide
-    ├── work-history/         # Monotonic post-bootstrap ledger (0001–0025)
-    ├── decisions/            # Architectural Decision Records (ADRs)
-    └── progress.md           # Active milestone tracking
+Folders are organised by ownership: deployable services, offline tooling, infrastructure, then docs.
+
+| Path | Owns | Notes |
+|---|---|---|
+| `services/app/` | FastAPI orchestration, ReAct loop, run/job state, async worker | Production app image; imports nothing from `tooling/` |
+| `services/mcp/` | FastMCP analytical server (DuckDB + Parquet) | Never calls an LLM |
+| `services/gateway/` | Inference gateway: guard, quota, admission, placement, queue, hop, overflow | Deployed by `infra/inference/` as a ConfigMap |
+| `services/dataset_spike/` | NYC TLC dataset profiling spike | |
+| `web/` | React UI | |
+| `tooling/benchmarks/` | Scenario replayer (`app_runs`, `gateway_chat`), goodput, trace CLI | Own uv project; scenario fixtures in `config/scenarios/` |
+| `tooling/experiments/` | Evidence analysis package, notebook builder, plots | Reads pulled run directories under `metrics/` |
+| `tooling/evals/` | Reserved for answer-quality evals | Not implemented yet |
+| `infra/terraform/` | AWS infrastructure | |
+| `infra/inference/` | GPU cluster deploy: K8s, HAMi, vLLM workers, KV transfer, scripts, experiment runners and manifests | Experiment runners (`experiments/`) run against the remote host |
+| `infra/observability/core/` | Local Compose stack: OTEL Collector, Jaeger, Prometheus, Loki, Grafana | Mounted by `docker-compose.observability.yml` |
+| `infra/observability/inference/` | Inference-cluster Prometheus, Grafana, DCGM, alerts, dashboards | Deployed by `infra/inference/scripts/` |
+| `config/scenarios/` | Replay workload fixtures | Single source for `tooling/benchmarks` |
+| `tests/` | Cross-service, infra and experiments tests | Service-local tests stay with their service |
+| `scripts/` | Smoke scripts and developer commands | |
+| `docs/` | Architecture, plans, ADRs, work history | |
+
+The Grafana/Prometheus configuration under `infra/observability/` is separate from application tracing
+instrumentation (`services/app/app/telemetry.py`).
+
+### Request paths
+
+```mermaid
+flowchart LR
+    UI["React UI"] --> API
+    RP["Scenario replayer<br/>tooling/benchmarks"]
+
+    subgraph APPSVC["services/app (FastAPI)"]
+        API["/api/runs"] --> LOOP["ReAct / deterministic loop<br/>(in-process thread)"]
+        JOBS["/api/jobs"] --> PROD["Job producer"]
+    end
+
+    RP -- "app_runs" --> API
+    LOOP -- "tool calls" --> MCP["services/mcp<br/>DuckDB + taxi data"]
+    LOOP -- "model calls (/serve)" --> GW
+    LOOP <--> STATE[("DynamoDB / in-memory state<br/>Redis events + SSE")]
+
+    PROD --> RQ[("Redis job queue")] --> WK["Job worker"]
+    WK --> STATE
+
+    RP -- "gateway_chat (direct)" --> GW
+
+    subgraph GWSVC["services/gateway"]
+        GW["guard, quota, admission,<br/>placement, queue, hop"]
+    end
+    GW --> VA["vLLM worker A"]
+    GW --> VB["vLLM worker B"]
+    LOOP -. "other provider config" .-> BR["Bedrock"]
 ```
+
+- **Full app:** UI or replayer (`app_runs`) -> `/api/runs` -> loop -> MCP tools and gateway `/serve` -> vLLM.
+- **Direct gateway:** replayer (`gateway_chat`) -> gateway -> vLLM; bypasses the app, MCP, DuckDB and ReAct. Use it for inference benchmarks.
+- **Background jobs:** `/api/jobs` -> Redis queue -> worker. `/api/runs` does not go through Redis; Redis there is only transient events.
 
 ---
 
