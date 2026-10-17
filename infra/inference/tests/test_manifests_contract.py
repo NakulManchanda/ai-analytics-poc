@@ -11,7 +11,7 @@ import yaml
 ROOT = Path(__file__).resolve().parents[3]
 BUNDLE = ROOT / "infra" / "inference"
 K8S = BUNDLE / "k8s"
-OBSERVABILITY = BUNDLE / "observability"
+OBSERVABILITY = ROOT / "infra" / "observability" / "inference"
 
 
 def _yaml_documents() -> list[tuple[Path, dict[str, Any]]]:

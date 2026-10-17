@@ -1,4 +1,4 @@
-"""Offline tests for experiments/analysis against tiny committed fake run directories."""
+"""Offline tests for tooling/experiments/analysis against tiny committed fake run directories."""
 
 from __future__ import annotations
 
@@ -12,10 +12,10 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 if (
     str(ROOT) not in sys.path
-):  # documented path: `experiments.analysis` from the repo root
+):  # documented path: `tooling.experiments.analysis` from the repo root
     sys.path.insert(0, str(ROOT))
 
-from experiments.analysis import (  # noqa: E402
+from tooling.experiments.analysis import (  # noqa: E402
     PER_REQUEST,
     WINDOW,
     breakdown,

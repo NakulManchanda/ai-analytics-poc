@@ -128,13 +128,15 @@ def test_bundle_is_a_self_contained_issue_120_lab() -> None:
         "k8s/hami",
         "k8s/workers",
         "k8s/services",
-        "observability/prometheus",
-        "observability/grafana",
-        "observability/dcgm",
         "experiments",
     )
     missing = [path for path in required_paths if not (BUNDLE / path).exists()]
     assert not missing, f"Missing #120 bundle paths: {missing}"
+    # Inference observability config lives in infra/observability/inference (#163).
+    obs = ROOT / "infra" / "observability" / "inference"
+    for sub in ("prometheus", "grafana", "dcgm"):
+        assert (obs / sub).is_dir(), f"Missing infra/observability/inference/{sub}"
+    assert not (BUNDLE / "observability").exists()
 
     missing_scripts = [
         name for name in LIFECYCLE_SCRIPTS if not (SCRIPTS / name).is_file()
@@ -243,6 +245,7 @@ def test_sync_plan_is_allowlisted_and_does_not_print_connection_secret_values() 
     plan = result.stdout + result.stderr
 
     assert re.search(r"source\s*[:=].*infra/inference", plan, re.I)
+    assert "infra/observability/inference -> remote observability/" in plan
     for excluded in (
         ".env",
         "credentials",
@@ -371,6 +374,12 @@ def test_gateway_bundle_contract() -> None:
     assert '"$GATEWAY_ROOT/" "$(ssh_target):$TARGET/gateway/"' in sync
     assert '"$GATEWAY_ROOT/" "$(ssh_target):$RDIR/gateway/"' in restart
     assert "RDIR/gateway" in restart and "--from-file" in restart
+    # Observability: local source infra/observability/inference; remote stays $RDIR/observability.
+    deploy = (SCRIPTS / "deploy.sh").read_text(encoding="utf-8")
+    assert "infra/observability/inference" in lib and "OBSERVABILITY_ROOT" in lib
+    assert "--exclude '/observability'" in sync
+    assert '"$OBSERVABILITY_ROOT/" "$(ssh_target):$TARGET/observability/"' in sync
+    assert "$RDIR/observability/prometheus/alerts.yaml" in deploy
     assert "inference-gateway-code" in restart
     assert "uvicorn main:app" in (K8S / "gateway" / "gateway.yaml").read_text(
         encoding="utf-8"

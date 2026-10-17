@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Plot submission graphs from retained Prometheus range exports and per-request evidence (no cluster needed).
 
-Usage: uv run --project experiments python experiments/plot_evidence.py [--out DIR]
+Usage: uv run --project tooling/experiments python tooling/experiments/plot_evidence.py [--out DIR]
 Inputs are the `metrics/inference/<run id>/prometheus_range/*.json` files from `make inference-pull-range` and the
 `requests.jsonl` of the E4 arms. Series are WINDOW-level (15 s steps), not per request.
 """

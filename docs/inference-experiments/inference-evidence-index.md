@@ -10,8 +10,8 @@ the tooling exists), `merged-pending-live-run` (the #133 code, bundle and proof 
 in PR #154; the artifact exists only after a live two-worker GPU run retains it).
 
 Dashboards are the generated Grafana dashboards in
-`infra/inference/observability/grafana/dashboards.py` (JSON under `.../grafana/dashboards/`);
-alerts are in `infra/inference/observability/prometheus/alerts.yaml`.
+`infra/observability/inference/grafana/dashboards.py` (JSON under `.../grafana/dashboards/`);
+alerts are in `infra/observability/inference/prometheus/alerts.yaml`.
 
 ## Evidence scope rule
 

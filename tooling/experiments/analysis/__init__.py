@@ -1,15 +1,15 @@
 """Offline analysis of #123 run artifacts (stdlib only). See docs/inference-experiments/inference-run-playbook.md."""
 
-from experiments.analysis.compare import (
+from tooling.experiments.analysis.compare import (
     check_manifests,
     e2_prefix_reuse,
     e3_compare,
     e4_compare,
     jain_index,
 )
-from experiments.analysis.memory import memory_proof
-from experiments.analysis.queue import queue_proof
-from experiments.analysis.runs import (
+from tooling.experiments.analysis.memory import memory_proof
+from tooling.experiments.analysis.queue import queue_proof
+from tooling.experiments.analysis.runs import (
     PER_REQUEST,
     WINDOW,
     Run,

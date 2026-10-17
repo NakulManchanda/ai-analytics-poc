@@ -4,7 +4,7 @@ source "$(dirname "$0")/lib.sh"
 
 if [[ "${1:-}" == "--help" ]]; then
   echo "Usage: pull-prometheus-range.sh RUN_ID [START END [STEP]]"
-  echo "Runs the queries in observability/prometheus/evidence_queries.json against Prometheus query_range"
+  echo "Runs the queries in infra/observability/inference/prometheus/evidence_queries.json against Prometheus query_range"
   echo "(through the loopback tunnel from 'make inference-tunnel', PROMETHEUS_URL default http://127.0.0.1:19090)"
   echo "and writes one raw JSON response per query to metrics/inference/<run_id>/prometheus_range/."
   echo "START/END: epoch seconds or RFC3339 (default: last 30 minutes). STEP default 15s."
@@ -17,7 +17,7 @@ END="${3:-${END:-$(date +%s)}}"
 START="${2:-${START:-$((END - 1800))}}"
 STEP="${4:-${STEP:-15s}}"
 PROMETHEUS_URL="${PROMETHEUS_URL:-http://127.0.0.1:19090}"
-QUERIES="$INFERENCE_ROOT/observability/prometheus/evidence_queries.json"
+QUERIES="$OBSERVABILITY_ROOT/prometheus/evidence_queries.json"
 OUT_DIR="$INFERENCE_ROOT/../../metrics/inference/$RUN_ID/prometheus_range"
 curl -fsS --connect-timeout 5 "$PROMETHEUS_URL/-/ready" >/dev/null \
   || { echo "Prometheus not reachable at $PROMETHEUS_URL; run 'make inference-tunnel' first" >&2; exit 1; }

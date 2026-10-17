@@ -11,7 +11,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from experiments.analysis.runs import WINDOW
+from tooling.experiments.analysis.runs import WINDOW
 
 # query name (evidence_queries.json) -> column group
 PANELS = (

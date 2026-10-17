@@ -17,7 +17,7 @@ services:
     image: ghcr.io/open-telemetry/opentelemetry-collector-releases/opentelemetry-collector:0.157.0
     command: ["--config=/etc/otelcol/config.yaml"]
     volumes:
-      - ./observability/otel-collector.yaml:/etc/otelcol/config.yaml:ro
+      - ./infra/observability/core/otel-collector.yaml:/etc/otelcol/config.yaml:ro
     depends_on:
       - jaeger
 
@@ -30,7 +30,7 @@ services:
     image: prom/blackbox-exporter:v0.25.0
     command: ["--config.file=/etc/blackbox_exporter/config.yml"]
     volumes:
-      - ./observability/blackbox.yml:/etc/blackbox_exporter/config.yml:ro
+      - ./infra/observability/core/blackbox.yml:/etc/blackbox_exporter/config.yml:ro
     ports:
       - "127.0.0.1:${BLACKBOX_PORT:-19115}:9115"
 
@@ -41,7 +41,7 @@ services:
       - "--storage.tsdb.path=/prometheus"
       - "--web.enable-lifecycle"
     volumes:
-      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./infra/observability/core/prometheus.yml:/etc/prometheus/prometheus.yml:ro
     ports:
       - "127.0.0.1:${PROMETHEUS_PORT:-19090}:9090"
     depends_on:
@@ -51,7 +51,7 @@ services:
     image: grafana/loki:3.4.2
     command: ["-config.file=/etc/loki/loki.yml"]
     volumes:
-      - ./observability/loki.yml:/etc/loki/loki.yml:ro
+      - ./infra/observability/core/loki.yml:/etc/loki/loki.yml:ro
     ports:
       - "127.0.0.1:${LOKI_PORT:-13100}:3100"
 
@@ -59,7 +59,7 @@ services:
     image: grafana/alloy:v1.7.1
     command: ["run", "--server.http.listen-addr=0.0.0.0:12345", "/etc/alloy/config.alloy"]
     volumes:
-      - ./observability/alloy.alloy:/etc/alloy/config.alloy:ro
+      - ./infra/observability/core/alloy.alloy:/etc/alloy/config.alloy:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
     depends_on:
       - loki
@@ -74,9 +74,9 @@ services:
     ports:
       - "127.0.0.1:${GRAFANA_PORT:-13001}:3000"
     volumes:
-      - ./observability/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
-      - ./observability/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
-      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - ./infra/observability/core/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./infra/observability/core/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./infra/observability/core/grafana/dashboards:/var/lib/grafana/dashboards:ro
     depends_on:
       - prometheus
       - loki

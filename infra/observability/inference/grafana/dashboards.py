@@ -12,7 +12,7 @@ dashboards. No KEDA, HAMi allocator, or Mooncake/KV-hop panels are included: the
 metrics arrive with #133 (``kv_hop_stub`` is a text-only placeholder).
 
 Worker-distinguishing label: Prometheus scrapes the two workers as two separate
-``static_configs`` targets (see ``infra/inference/observability/prometheus/values.yaml``):
+``static_configs`` targets (see ``infra/observability/inference/prometheus/values.yaml``):
 ``inference-worker-a.inference-lab.svc.cluster.local:8000`` and
 ``inference-worker-b...:8000``. There is no ``pod``/``app``/``job`` label split per
 worker in these series (no Prometheus pod service-discovery relabeling is configured),
@@ -20,11 +20,11 @@ so ``instance`` is the only label that distinguishes worker A from worker B in t
 vLLM metrics. Kube-state-metrics and cAdvisor series (pods, containers) are labelled
 by ``pod``/``namespace`` as usual and are split by ``pod`` instead. DCGM is scraped as
 a single static target for the shared GPU (see
-``infra/inference/observability/prometheus/values.yaml``), so its series have no
+``infra/observability/inference/prometheus/values.yaml``), so its series have no
 ``pod`` label at all and are split by ``instance`` (the DCGM exporter's scrape
 target), not by ``pod``.
 
-Regenerate with ``python3 infra/inference/observability/grafana/dashboards.py`` (or
+Regenerate with ``python3 infra/observability/inference/grafana/dashboards.py`` (or
 ``make inference-dashboards``) and commit the resulting JSON.
 """
 

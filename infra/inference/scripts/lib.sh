@@ -4,6 +4,8 @@ set -euo pipefail
 INFERENCE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # Gateway source lives in services/gateway (#162); the remote layout stays $RDIR/gateway.
 GATEWAY_ROOT="$(cd "$INFERENCE_ROOT/../../services/gateway" && pwd)"
+# Inference observability source lives in infra/observability/inference (#163); the remote layout stays $RDIR/observability.
+OBSERVABILITY_ROOT="$(cd "$INFERENCE_ROOT/../observability/inference" && pwd)"
 INFERENCE_ENV_FILE="${INFERENCE_ENV_FILE:-$INFERENCE_ROOT/.env}"
 
 load_local_env() {

@@ -1,4 +1,4 @@
-"""Generate experiments/123_evidence.ipynb (diff-friendly: no outputs, stable ids, no results).
+"""Generate tooling/experiments/123_evidence.ipynb (diff-friendly: no outputs, stable ids, no results).
 
 Run: make evidence-notebook [RUNS_JSON=path WRITEUP_DIR=path HTML=path]
 """
@@ -14,11 +14,11 @@ SETUP = '''\
 import json, os, sys
 from pathlib import Path
 
-ROOT = next(p for p in [Path.cwd(), *Path.cwd().parents] if (p / "experiments" / "analysis").is_dir())
+ROOT = next(p for p in [Path.cwd(), *Path.cwd().parents] if (p / "tooling" / "experiments" / "analysis").is_dir())
 sys.path.insert(0, str(ROOT))
-from experiments.analysis import (breakdown, e2_prefix_reuse, e3_compare, e4_compare,
+from tooling.experiments.analysis import (breakdown, e2_prefix_reuse, e3_compare, e4_compare,
                                   load_run, memory_proof, queue_proof, sweep_curve, ttft_by_turn)
-from experiments.analysis.display import show as plain_show, flatten
+from tooling.experiments.analysis.display import show as plain_show, flatten
 from html import escape
 try:
     from IPython import get_ipython
@@ -104,7 +104,7 @@ def need(*keys):
 
 CHARTS = """\
 # Chart helpers: missing values stay missing; captions preserve evidence scope.
-from experiments.analysis.runs import latency_stats
+from tooling.experiments.analysis.runs import latency_stats
 
 BLUE, ORANGE, AQUA, INK, MUTED = "#2a78d6", "#eb6834", "#1baf7a", "#0b0b0b", "#52514e"
 COLORS = [BLUE, ORANGE, AQUA]
@@ -560,7 +560,7 @@ for experiment, hypothesis in EXPECTED.items():
 CELLS = [
     (
         MD,
-        "# #123 evidence notebook\n\nThin view over `experiments/analysis`; contains no results. Point `RUNS` "
+        "# #123 evidence notebook\n\nThin view over `tooling/experiments/analysis`; contains no results. Point `RUNS` "
         "at pulled run directories (see `docs/inference-experiments/inference-run-playbook.md`). Every output states its evidence "
         "scope: **per-request** (requests.jsonl) or **WINDOW-level** (Prometheus; never per request).",
     ),
@@ -689,7 +689,7 @@ def main() -> None:
             nb,
             timeout=180,
             kernel_name="python3",
-            resources={"metadata": {"path": str(Path(__file__).resolve().parents[1])}},
+            resources={"metadata": {"path": str(Path(__file__).resolve().parents[2])}},
         ).execute()
     finally:
         for key, value in previous.items():

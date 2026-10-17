@@ -55,7 +55,7 @@ inference-deploy: ## Deploy workers and #120 observability configuration
 	@set -o pipefail; bash infra/inference/scripts/deploy.sh 2>&1 | tee $(INFERENCE_LOG_DIR)/deploy.log
 
 inference-dashboards: ## Regenerate the #115 slice E Grafana dashboards (stdlib-only, deterministic)
-	python3 infra/inference/observability/grafana/dashboards.py
+	python3 infra/observability/inference/grafana/dashboards.py
 
 inference-up: inference-sync inference-bootstrap inference-config inference-secret inference-deploy ## Provision the #120 cluster lab
 
@@ -171,13 +171,13 @@ inference-pull-range: ## Export Prometheus range series for the memory proof (us
 	@START='$(START)' END='$(END)' STEP='$(STEP)' bash infra/inference/scripts/pull-prometheus-range.sh $(RUN_ID)
 
 evidence-analyze: ## Text summary of pulled run dirs (usage: make evidence-analyze RUN="metrics/inference/<id>/<run_dir> ..." [RANGE=metrics/inference/<id>/prometheus_range])
-	uv run --project services/app python -m experiments.analysis $(RUN) $(if $(RANGE),--range $(RANGE))
+	uv run --project services/app python -m tooling.experiments.analysis $(RUN) $(if $(RANGE),--range $(RANGE))
 
 evidence-notebook: ## Regenerate clean notebook; render evidence with RUNS_JSON=path WRITEUP_DIR=path HTML=path
-	uv run --project experiments python experiments/build_notebook.py $(if $(RUNS_JSON),--runs-json "$(RUNS_JSON)") $(if $(WRITEUP_DIR),--writeup-dir "$(WRITEUP_DIR)") $(if $(HTML),--html "$(HTML)")
+	uv run --project tooling/experiments python tooling/experiments/build_notebook.py $(if $(RUNS_JSON),--runs-json "$(RUNS_JSON)") $(if $(WRITEUP_DIR),--writeup-dir "$(WRITEUP_DIR)") $(if $(HTML),--html "$(HTML)")
 
 evidence-notebook-open: ## Open the evidence notebook in Jupyter Lab
-	uv run --project experiments jupyter lab experiments/123_evidence.ipynb
+	uv run --project tooling/experiments jupyter lab tooling/experiments/123_evidence.ipynb
 
 inference-teardown: ## Remove only issue-owned inference resources
 	@mkdir -p $(INFERENCE_LOG_DIR)

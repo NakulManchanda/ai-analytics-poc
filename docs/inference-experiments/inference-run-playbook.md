@@ -1,7 +1,7 @@
 # Inference evidence run playbook (#123 E0-E5 + memory proof)
 
 Ordered commands for a cluster session that produce the artifacts the local analysis toolkit
-(`experiments/analysis`) and notebook (`experiments/123_evidence.ipynb`) consume. Background and
+(`tooling/experiments/analysis`) and notebook (`tooling/experiments/123_evidence.ipynb`) consume. Background and
 experiment meaning: [inference-testing-guide.md](inference-testing-guide.md) section 4 and
 [inference-project-plan.md](../inference-project-plan.md) sections 8-9 and "Final-run evidence rules".
 All commands run from the repository root (or the active worktree) unless noted.
@@ -426,7 +426,7 @@ Check first, locally and with no cluster: `make inference-overflow-check` (model
 `make inference-pull-range RUN_ID=<id> START=<epoch> END=<epoch> STEP=15s` over the busiest window (the E0
 sweep or E4 pair). The range export holds HBM used/free (DCGM), KV usage, running/waiting, request rate,
 preemptions, prefix hit ratio, TTFT/queue quantiles and gateway queue depth/sheds/picks
-(`infra/inference/observability/prometheus/evidence_queries.json`). `memory_proof` joins them and flags
+(`infra/observability/inference/prometheus/evidence_queries.json`). `memory_proof` joins them and flags
 flat-at-max, monotonic growth without frees, preemptions and idle windows. Flat HBM is normal when vLLM
 preallocates; the KV series is the informative one.
 
@@ -434,11 +434,11 @@ preallocates; the KV series is the informative one.
 
 ```bash
 make evidence-analyze RUN="metrics/inference/<id>/<run_dir> ..." RANGE=metrics/inference/<id>/prometheus_range   # stdlib text summary
-make evidence-notebook    # regenerates experiments/123_evidence.ipynb, opens Jupyter (uv project: experiments/)
+make evidence-notebook    # regenerates tooling/experiments/123_evidence.ipynb, opens Jupyter (uv project: tooling/experiments/)
 ```
 In the notebook's first code cell fill `RUNS` (or set `EVIDENCE_RUNS_JSON`). Cells with no run directory print
 "run directory not provided". Tests: `uv run --project services/app pytest tests/experiments -q` (stdlib, runs in
-CI) and, with the notebook dependencies, `uv run --project experiments pytest tests/experiments -q`.
+CI) and, with the notebook dependencies, `uv run --project tooling/experiments pytest tests/experiments -q`.
 
 Evidence scopes in every output: **per-request** = requests.jsonl fields; **WINDOW-level** = Prometheus deltas and
 range series. Report negative or neutral results as found (plan completion checklist).

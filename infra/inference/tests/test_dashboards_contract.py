@@ -17,11 +17,11 @@ import yaml
 from services.gateway import metrics as gateway_metrics
 
 ROOT = Path(__file__).resolve().parents[3]
-GRAFANA_DIR = ROOT / "infra" / "inference" / "observability" / "grafana"
+GRAFANA_DIR = ROOT / "infra" / "observability" / "inference" / "grafana"
 DASHBOARDS_MODULE = GRAFANA_DIR / "dashboards.py"
 DASHBOARDS_DIR = GRAFANA_DIR / "dashboards"
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
-PROM_DIR = ROOT / "infra" / "inference" / "observability" / "prometheus"
+PROM_DIR = ROOT / "infra" / "observability" / "inference" / "prometheus"
 ALERTS_FILE = PROM_DIR / "alerts.yaml"
 
 # Standard kube-state-metrics / node-exporter / cAdvisor names, matching what the

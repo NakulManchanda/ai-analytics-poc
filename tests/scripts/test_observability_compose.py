@@ -32,7 +32,7 @@ def test_observability_compose_overlay_declares_all_services() -> None:
 
 def test_observability_configuration_files_are_valid() -> None:
     # Prometheus config
-    prom_cfg = ROOT / "observability/prometheus.yml"
+    prom_cfg = ROOT / "infra/observability/core/prometheus.yml"
     assert prom_cfg.exists()
     prom_data = yaml.safe_load(prom_cfg.read_text())
     assert "scrape_configs" in prom_data
@@ -59,7 +59,7 @@ def test_observability_configuration_files_are_valid() -> None:
     assert "otel-collector:4318" in tcp_targets
 
     # Blackbox config
-    blackbox_cfg = ROOT / "observability/blackbox.yml"
+    blackbox_cfg = ROOT / "infra/observability/core/blackbox.yml"
     assert blackbox_cfg.exists()
     bb_data = yaml.safe_load(blackbox_cfg.read_text())
     assert "modules" in bb_data
@@ -67,13 +67,16 @@ def test_observability_configuration_files_are_valid() -> None:
     assert "tcp_connect" in bb_data["modules"]
 
     # Loki config
-    loki_cfg = ROOT / "observability/loki.yml"
+    loki_cfg = ROOT / "infra/observability/core/loki.yml"
     assert loki_cfg.exists()
     loki_data = yaml.safe_load(loki_cfg.read_text())
     assert loki_data.get("auth_enabled") is False
 
     # Grafana datasources
-    ds_cfg = ROOT / "observability/grafana/provisioning/datasources/datasources.yml"
+    ds_cfg = (
+        ROOT
+        / "infra/observability/core/grafana/provisioning/datasources/datasources.yml"
+    )
     assert ds_cfg.exists()
     ds_data = yaml.safe_load(ds_cfg.read_text())
     ds_names = [d["name"] for d in ds_data.get("datasources", [])]
@@ -82,7 +85,7 @@ def test_observability_configuration_files_are_valid() -> None:
     assert "Jaeger" in ds_names
 
     # Grafana dashboard JSON
-    dash_json = ROOT / "observability/grafana/dashboards/local-stack.json"
+    dash_json = ROOT / "infra/observability/core/grafana/dashboards/local-stack.json"
     assert dash_json.exists()
     dash_data = json.loads(dash_json.read_text())
     assert dash_data.get("title") == "AI Analytics — Local Stack"
