@@ -31,7 +31,7 @@ export INFERENCE_TOPOLOGY="two vLLM replicas/HAMi slices on one physical A100"
 # Verify these against the LIVE workers (read-only; prints image/args for both workers, whether they match, and the engine
 # settings from each startup log: vLLM version, revision, tokenizer_revision, block_size, dtype, kv_cache_dtype, max_seq_len):
 #   make inference-verify-workers
-# Same exports must be set in EVERY terminal that runs make replay-* / run_scenario.py (they are not persisted).
+# Same exports must be set in EVERY terminal that runs make replay-* / benchmarks.run (they are not persisted).
 # optional SLO overrides (defaults: TTFT 100 ms, E2E 3500 ms)
 # export INTERACTIVE_TTFT_SLO_MS=100 E2E_SLO_MS=3500
 ```
@@ -66,7 +66,7 @@ make inference-tmux-end      # when finished; also terminate the instance to sto
 - [ ] Grafana `http://127.0.0.1:13000`: open Overview, Gateway+admission, Router, Queues, Overflow, Memory Proof. Every panel that should show data does (live rendering has NEVER been checked). Note broken panels; fix queries in `infra/inference/observability/grafana/dashboards.py`, regenerate, redeploy before recording evidence.
 - [x] Alerts: Prometheus `/alerts` lists the five rules (four required plus `InferenceEngineTTFTHigh`); confirmed loaded and Inactive on 2026-10-04 (the `--set-file` problem is fixed in `deploy.sh`). `promtool` is optional and skipped. Inactive does not prove a rule can fire: paste a rule's metric into Prometheus Graph to confirm it returns data once traffic flows.
 - [ ] Tokenizer: `curl -s -X POST http://127.0.0.1:18080/tokenize -H 'content-type: application/json' -d '{"model":"Qwen/Qwen3-0.6B","prompt":"hello"}'` returns a `count`.
-- [ ] Schema check (manual, affects E3 prefix length): first refresh the MCP venv if `make mcp-dev` fails with `ImportError: cannot import name 'aggregate_taxi_data'` (stale installed copy of `dataset_spike`): `uv sync --project services/mcp --reinstall-package dataset-spike`. Then `make mcp-dev` locally, read the `dataset://nyc-taxi/schema` resource, compare its `columns` to `CANONICAL_TAXI_SCHEMA["columns"]` in `services/app/app/benchmarks/canonical_prefix.py`. If different: update that file, run `uv run --project services/app pytest services/app/tests/test_scenarios.py`, and rerun before E3.
+- [ ] Schema check (manual, affects E3 prefix length): first refresh the MCP venv if `make mcp-dev` fails with `ImportError: cannot import name 'aggregate_taxi_data'` (stale installed copy of `dataset_spike`): `uv sync --project services/mcp --reinstall-package dataset-spike`. Then `make mcp-dev` locally, read the `dataset://nyc-taxi/schema` resource, compare its `columns` to `CANONICAL_TAXI_SCHEMA["columns"]` in `tooling/benchmarks/src/benchmarks/app_checks.py`. If different: update that file, run `uv run --project services/app pytest services/app/tests/test_scenarios.py`, and rerun before E3.
 - [ ] Turn on the test-only controls (this triggers a gateway rollout):
 
 ```bash
@@ -123,7 +123,7 @@ Read `comparable: true/false` and `manifest_check` first. Before this, export th
 2. `make inference-capacity RUN_ID=$RUN_ID` (synthetic, preliminary).
 3. Application-shaped sweep (no policy override):
 ```bash
-uv run --project services/app python services/app/scripts/run_scenario.py --scenario e3_routing_mixed \
+uv run --project tooling/benchmarks python -m benchmarks.run --scenario e3_routing_mixed \
   --endpoint-type gateway_chat --target-url http://127.0.0.1:18080 --output-dir metrics/inference/$RUN_ID \
   --sweep-concurrency 1,2,4,8,12,16 --label e0-sweep
 make inference-pull-range RUN_ID=$RUN_ID

@@ -16,7 +16,7 @@ from experiments.analysis.runs import (
     ttft_by_turn,
 )
 
-# Mirrors app.benchmarks.parity.EQUAL_FIELDS plus the run-level inputs (kept stdlib-only here).
+# Mirrors benchmarks.parity.EQUAL_FIELDS plus the run-level inputs (kept stdlib-only here).
 MUST_MATCH = (
     "scenario.sha256",
     "system_prefix.prefix_chars",

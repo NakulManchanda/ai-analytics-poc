@@ -8,13 +8,13 @@ import json
 import sys
 from pathlib import Path
 
-from app.benchmarks.trace import TraceError, build_trace, load_requests, render_text
+from benchmarks.trace import TraceError, build_trace, load_requests, render_text
 
 
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument(
-        "--run-dir", required=True, type=Path, help="run_scenario.py run directory"
+        "--run-dir", required=True, type=Path, help="benchmarks.run run directory"
     )
     p.add_argument("--request-id", help="request_id from requests.jsonl (see --list)")
     p.add_argument(

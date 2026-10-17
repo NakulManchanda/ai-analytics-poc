@@ -1,5 +1,5 @@
-from app.scenarios.loader import load_scenario, validate_catalogue_alignment
-from app.scenarios.models import (
+from benchmarks.scenarios.loader import load_scenario
+from benchmarks.scenarios.models import (
     ScenarioConfig,
     ScenarioConversation,
     ScenarioTurn,
@@ -10,5 +10,4 @@ __all__ = [
     "ScenarioConversation",
     "ScenarioTurn",
     "load_scenario",
-    "validate_catalogue_alignment",
 ]

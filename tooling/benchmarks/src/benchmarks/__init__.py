@@ -1,10 +1,10 @@
-from app.benchmarks.metrics_scraper import (
+from benchmarks.metrics_scraper import (
     MetricSample,
     MetricsDelta,
     PrometheusMetricSnapshot,
     compute_metrics_delta,
 )
-from app.benchmarks.replayer import (
+from benchmarks.replayer import (
     ConversationResult,
     ReplaySummary,
     ScenarioReplayer,

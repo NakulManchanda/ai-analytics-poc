@@ -6,9 +6,9 @@ import sys
 import time
 
 import httpx
-from app.benchmarks.canonical_prefix import CANONICAL_TAXI_SCHEMA
-from app.benchmarks.serve_smoke import problems_for_accepted, problems_for_rejected
 from app.llm import ServeLLMClient
+from benchmarks.app_checks import CANONICAL_TAXI_SCHEMA
+from benchmarks.serve_smoke import problems_for_accepted, problems_for_rejected
 
 
 def _post_gateway(gateway_url: str, body: dict, request_id: str) -> httpx.Response:

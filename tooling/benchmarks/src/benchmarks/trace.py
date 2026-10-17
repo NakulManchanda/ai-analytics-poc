@@ -1,6 +1,6 @@
 """Single-request proof: join one requests.jsonl record with the gateway decision log (#123).
 
-Reads a run directory written by ``run_scenario.py`` (``requests.jsonl``, ``summary.json``,
+Reads a run directory written by ``benchmarks.run`` (``requests.jsonl``, ``summary.json``,
 ``manifest.json``) plus an optional pulled gateway log (JSON decision lines, e.g. from
 ``kubectl logs``) and builds a stage timeline for ONE request_id:
 
@@ -19,8 +19,8 @@ import json
 from pathlib import Path
 from typing import Any
 
-from app.benchmarks.goodput import Slos, is_good
-from app.benchmarks.replayer import TurnResult
+from benchmarks.goodput import Slos, is_good
+from benchmarks.replayer import TurnResult
 
 # Confirmed-hop proof schema. FIELD NAMES ARE AN ASSUMPTION until #133 lands (derived from the
 # #133 "Evidence and metrics" list and the #123 real-hop criteria); the REQUIRED EVIDENCE is
@@ -153,7 +153,7 @@ class TraceError(ValueError):
 def load_requests(run_dir: Path) -> list[dict[str, Any]]:
     path = Path(run_dir) / "requests.jsonl"
     if not path.is_file():
-        raise TraceError(f"{path} not found (is this a run_scenario.py run directory?)")
+        raise TraceError(f"{path} not found (is this a benchmarks.run run directory?)")
     return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
 
 
