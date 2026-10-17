@@ -35,9 +35,9 @@ Gateway code sat under `infra/inference/`. It is deployed as flat files via the 
 ## Limitations
 
 - The rsync/ConfigMap flow and `--exclude '/gateway'` were not run against a real host or cluster; needs a live `make inference-sync`/`inference-gateway-restart` check by the owner.
-- Moved files and touched tests under `infra/inference/tests` and `services/gateway` are outside the CI lint scope and were not reformatted.
+- `infra/inference/tests` is still not black-clean (32 files) and stays outside the CI lint scope; `services/gateway` is now black-formatted (separate formatting-only commit) and covered by CI black/ruff/compileall, and `make test` now runs `gateway-test` (`infra/inference/tests`).
 - Historical work-history entries still mention old paths.
 
 ## Pull request
 
-Draft PR (stacked on #164); see PR for number.
+PR #165 (closes #162), rebased onto `main` after #164 merged.
