@@ -126,7 +126,9 @@ async def tokenize(request: Request) -> Response:
                 detail=f"Error proxying to worker: {exc}",
             ) from exc
     content = (
-        upstream_resp.json() if upstream_resp.status_code == 200 else {"error": upstream_resp.text}
+        upstream_resp.json()
+        if upstream_resp.status_code == 200
+        else {"error": upstream_resp.text}
     )
     return JSONResponse(status_code=upstream_resp.status_code, content=content)
 
@@ -185,7 +187,13 @@ async def _overflow(
 
     def record(outcome: str, exc: Exception | None = None) -> None:
         metrics.OVERFLOW.labels(reason, cfg.provider, cfg.model, outcome).inc()
-        fields = {**log_fields, "stage": "overflow", "reason": reason, **dest, "outcome": outcome}
+        fields = {
+            **log_fields,
+            "stage": "overflow",
+            "reason": reason,
+            **dest,
+            "outcome": outcome,
+        }
         if exc is not None:
             metrics.OVERFLOW_ERROR.labels(_fallback_failure(exc)).inc()
             fields["error_type"] = type(exc).__name__
@@ -249,7 +257,8 @@ async def _overflow(
 
 def _has_content(line: str) -> bool:
     """True for an SSE ``data:`` record carrying a non-empty generated token (chat delta content
-    or completions text). Role-only deltas, keepalives, errors, [DONE], and non-JSON are not."""
+    or completions text). Role-only deltas, keepalives, errors, [DONE], and non-JSON are not.
+    """
     if not line.startswith("data:"):
         return False
     try:
@@ -268,10 +277,13 @@ class _NoLease:  # x-tenant-quota-mode: off (experiments only): nothing acquired
         return None
 
 
-def _experiment_controls(policy: str | None, admission: str | None, quota_mode: str | None):
+def _experiment_controls(
+    policy: str | None, admission: str | None, quota_mode: str | None
+):
     """Test-only overrides (#123): honored only with ALLOW_EXPERIMENT_CONTROLS=1, else ignored
     entirely (production traffic can never steer placement or skip admission). Returns
-    (policy, admission_off, quota_off) or None when a value is invalid (caller answers 400)."""
+    (policy, admission_off, quota_off) or None when a value is invalid (caller answers 400).
+    """
     if os.getenv("ALLOW_EXPERIMENT_CONTROLS") != "1":
         return None, False, False
     if (
@@ -355,7 +367,10 @@ async def serve_completion(
     if policy_override:
         correlation_headers["x-policy-override-applied"] = policy_override
         log_fields["policy_override"] = policy_override
-    if os.getenv("ALLOW_EXPERIMENT_CONTROLS") == "1" and x_admission_mode in ("on", "off"):
+    if os.getenv("ALLOW_EXPERIMENT_CONTROLS") == "1" and x_admission_mode in (
+        "on",
+        "off",
+    ):
         correlation_headers["x-admission-mode"] = x_admission_mode
         log_fields["admission_mode"] = x_admission_mode
     if quota_off:
@@ -372,7 +387,11 @@ async def serve_completion(
             decide(code, reason, never_overflow, source), Overflow
         ):
             return None
-        remaining = None if deadline_ms is None else started + deadline_ms / 1000 - time.monotonic()
+        remaining = (
+            None
+            if deadline_ms is None
+            else started + deadline_ms / 1000 - time.monotonic()
+        )
 
         done = False
 
@@ -435,7 +454,9 @@ async def serve_completion(
         )
 
     with metrics.timed("guard", klass):
-        verdict = guard_mod.inspect(body, estimated_tokens_header=x_estimated_prompt_tokens)
+        verdict = guard_mod.inspect(
+            body, estimated_tokens_header=x_estimated_prompt_tokens
+        )
     if not verdict.ok:
         metrics.GUARD_REJECT.labels(verdict.code).inc()
         return reject(
@@ -470,7 +491,9 @@ async def serve_completion(
         metrics.ADMIT.labels("shed", result.reason, klass).inc()
         metrics.SHED.labels(result.reason, klass, str(result.code)).inc()
         metrics.TENANT_REQUESTS.labels(tenant, "shed").inc()
-        if resp := await try_overflow(result.code, result.reason, "admit", result.never_overflow):
+        if resp := await try_overflow(
+            result.code, result.reason, "admit", result.never_overflow
+        ):
             return resp
         return reject(
             result.code,
@@ -495,13 +518,17 @@ async def serve_completion(
                 "stage": "admit",
                 "ts": time.time(),
                 "decision": "accept",
-                "admission_inputs": result.inputs if result else {"skipped": "admission_off"},
+                "admission_inputs": (
+                    result.inputs if result else {"skipped": "admission_off"}
+                ),
             }
         )
     )
 
     for w in registry.snapshots.values():
-        w.queued = queues.depth(w.id)  # gateway queue depth participates in the load score
+        w.queued = queues.depth(
+            w.id
+        )  # gateway queue depth participates in the load score
     # x-prefix-tokens sizes the region x-prefix-id names (e.g. system prefix only). Absent or
     # invalid = legacy: the whole prompt is believed reusable, which over-counts prompts that
     # carry a per-turn suffix or divergent history.
@@ -523,7 +550,9 @@ async def serve_completion(
         metrics.PLACEMENT_ERRORS.labels(decision.reason).inc()
         if resp := await try_overflow(503, decision.reason, "place"):
             return resp
-        return reject(503, decision.reason, "no worker available for placement", "place")
+        return reject(
+            503, decision.reason, "no worker available for placement", "place"
+        )
 
     metrics.PICKS.labels(
         decision.placement_policy, decision.chosen_worker, decision.placement_reason
@@ -532,7 +561,9 @@ async def serve_completion(
         metrics.STALE_FALLBACK.inc()
     snap = registry.snapshots[decision.chosen_worker]
     registry.record_prefix(
-        decision.chosen_worker, x_prefix_id, est_tokens if prefix_tokens is None else prefix_tokens
+        decision.chosen_worker,
+        x_prefix_id,
+        est_tokens if prefix_tokens is None else prefix_tokens,
     )
     correlation_headers.update(
         {
@@ -543,7 +574,11 @@ async def serve_completion(
             "x-intended-action": decision.intended_action,
         }
     )
-    log.info(json.dumps({**log_fields, "stage": "place", "ts": time.time(), **vars(decision)}))
+    log.info(
+        json.dumps(
+            {**log_fields, "stage": "place", "ts": time.time(), **vars(decision)}
+        )
+    )
 
     deadline_at = now + deadline_ms / 1000 if deadline_ms is not None else None
     queue_enter = time.time()
@@ -563,7 +598,10 @@ async def serve_completion(
             exc.reason,
             "request could not get a dispatch slot",
             "queue",
-            {"queue_enter": queue_enter, "queue_wait_ms": _ms(time.time() - queue_enter)},
+            {
+                "queue_enter": queue_enter,
+                "queue_wait_ms": _ms(time.time() - queue_enter),
+            },
             **{
                 "x-queue-decision": exc.reason,
                 "x-queue-wait-ms": str(_ms(time.time() - queue_enter)),
@@ -599,7 +637,9 @@ async def serve_completion(
         x_kv_hop_mode,
         x_kv_hop_case,
     )
-    log.info(json.dumps({**log_fields, "stage": "hop", "ts": time.time(), **hop_fields}))
+    log.info(
+        json.dumps({**log_fields, "stage": "hop", "ts": time.time(), **hop_fields})
+    )
     correlation_headers["x-hop-decision"] = hop_fields["hop_decision_reason"]
     target_url = f"{snap.worker.url}/v1/chat/completions"
     snap.inflight += 1
@@ -618,12 +658,16 @@ async def serve_completion(
         if freed:
             return
         freed = True
-        metrics.STAGE_DURATION.labels("proxy", klass).observe(time.perf_counter() - proxy_start)
+        metrics.STAGE_DURATION.labels("proxy", klass).observe(
+            time.perf_counter() - proxy_start
+        )
         snap.inflight -= 1
         snap.inflight_tokens -= est_tokens
         snap.note_finish(dispatch_token)
         ticket.release()
-        log.info(json.dumps({**log_fields, "stage": "queue", "queue_release": time.time()}))
+        log.info(
+            json.dumps({**log_fields, "stage": "queue", "queue_release": time.time()})
+        )
 
     def finish(status: int) -> None:  # final client status + tenant lease; idempotent
         nonlocal finished
@@ -740,13 +784,17 @@ async def serve_completion(
         _note_slice_oom(snap.id, correlation_headers)
     if upstream_resp.status_code in (503, 529) and (
         resp := await try_overflow(
-            upstream_resp.status_code, upstream_reason or "worker_overloaded", "upstream"
+            upstream_resp.status_code,
+            upstream_reason or "worker_overloaded",
+            "upstream",
         )
     ):
         return resp
     finish(upstream_resp.status_code)
     content = (
-        upstream_resp.json() if upstream_resp.status_code == 200 else {"error": upstream_resp.text}
+        upstream_resp.json()
+        if upstream_resp.status_code == 200
+        else {"error": upstream_resp.text}
     )
     return JSONResponse(
         status_code=upstream_resp.status_code,

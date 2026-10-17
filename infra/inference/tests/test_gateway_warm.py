@@ -10,9 +10,9 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from infra.inference.gateway import main as gateway_main
-from infra.inference.gateway.admission import AdmitConfig
-from infra.inference.gateway.workers import Registry, Worker, build_registry
+from services.gateway import main as gateway_main
+from services.gateway.admission import AdmitConfig
+from services.gateway.workers import Registry, Worker, build_registry
 
 PROM = (Path(__file__).parent / "fixtures" / "vllm-worker-b.prom").read_text()
 MSG = [{"role": "user", "content": "hello"}]

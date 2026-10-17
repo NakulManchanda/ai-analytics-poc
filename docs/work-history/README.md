@@ -86,3 +86,4 @@ Monotonically numbered log of every post-bootstrap task. Each entry records the 
 - [0088 — Gateway hardening, step 3](0088-inference-gateway-hardening-step3.md) — sticky owner placement, anti-herding, class-aware admission, serve smoke stage checks
 - [0089 — Gateway hardening, step 5](0089-inference-gateway-hardening-step5.md) — hop minimum-token rule, slice_oom detection, warm context in evidence, eviction documentation
 - [0091 — #161 extract benchmark tooling](0091-extract-benchmark-tooling.md) — replayer, scenarios, goodput and trace CLI moved from the app package to `tooling/benchmarks/`
+- [0092 — #162 move gateway to services/gateway](0092-move-gateway-to-services.md) — gateway FastAPI code separated from GPU/K8s infra; remote deploy layout unchanged

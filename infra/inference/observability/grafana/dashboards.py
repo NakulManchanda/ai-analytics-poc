@@ -7,7 +7,7 @@ metric name used here is one this lab actually exposes today (see
 ``infra/inference/tests/fixtures/vllm-worker-b.prom`` and ``dcgm.prom``), plus the
 standard kube-state-metrics / node-exporter / cAdvisor names already used by the
 committed ``cluster.json``. Since #123 slice B the gateway's own ``/metrics`` (scraped as
-job ``inference-gateway``, see ``infra/inference/gateway/metrics.py``) backs the ``orch_*``
+job ``inference-gateway``, see ``services/gateway/metrics.py``) backs the ``orch_*``
 dashboards. No KEDA, HAMi allocator, or Mooncake/KV-hop panels are included: the real hop
 metrics arrive with #133 (``kv_hop_stub`` is a text-only placeholder).
 

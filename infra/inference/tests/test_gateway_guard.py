@@ -2,7 +2,7 @@
 
 import pytest
 
-from infra.inference.gateway.guard import (
+from services.gateway.guard import (
     CONTEXT_TOO_LONG,
     PROMPT_TOO_LONG,
     estimate_prompt_tokens,

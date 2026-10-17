@@ -62,5 +62,5 @@ Every inference request sent through `/serve` passes correlation metadata via HT
 ## 5. Architectural Boundary
 
 - **Application (`services/app`)**: Assembles prompts using `services/app/app/prefix.py`, calculates `prefix_id`, estimates token counts, and passes headers to the gateway client.
-- **Gateway (`infra/inference/gateway`)**: Ingests headers without modifying prompt content; in Issue #122, uses `x-prefix-id` to route requests to the worker with highest KV cache affinity (`prefix_then_load`).
+- **Gateway (`services/gateway`)**: Ingests headers without modifying prompt content; in Issue #122, uses `x-prefix-id` to route requests to the worker with highest KV cache affinity (`prefix_then_load`).
 - **vLLM Workers (`infra/inference/k8s/workers`)**: Use `--enable-prefix-caching` with block-size 16 to match identical prefix blocks and skip prefill computation.

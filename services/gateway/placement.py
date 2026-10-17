@@ -33,7 +33,9 @@ PLACEMENT_ERRORS = (
     "unknown_policy",
 )
 STICKY_MAX_INFLIGHT_TOKENS = 10_000
-SPILL_QUEUE = 4  # waiting + gateway-queued + just-placed requests that make an owner "saturated"
+SPILL_QUEUE = (
+    4  # waiting + gateway-queued + just-placed requests that make an owner "saturated"
+)
 
 
 @dataclass(frozen=True)
@@ -54,7 +56,9 @@ class PlacementDecision:
     intended_action: Literal["local_reuse", "destination_hit", "recompute", "hop"]
     snapshot_age: float
     fallback: str | None = None
-    prior_reusable_tokens: int = 0  # tokens the prior owner is believed to hold (hop size)
+    prior_reusable_tokens: int = (
+        0  # tokens the prior owner is believed to hold (hop size)
+    )
 
 
 @dataclass(frozen=True)
@@ -66,7 +70,10 @@ def load(s: WorkerSnapshot) -> tuple[bool, float]:
     """Worker queue depth (waiting, weighted), the gateway's own queue (queued) and requests placed
     but not yet queued (pending) participate alongside running and in-flight work;
     a never-observed worker sorts last."""
-    return (s.observed_at is None, 2 * s.waiting + s.running + s.inflight + s.queued + s.pending)
+    return (
+        s.observed_at is None,
+        2 * s.waiting + s.running + s.inflight + s.queued + s.pending,
+    )
 
 
 def pick(
@@ -98,7 +105,9 @@ def pick(
             action = "local_reuse" if snap.id == prior else "destination_hit"
             reusable = belief.tokens
         owner = by_id.get(prior) if prior else None
-        owner_belief = owner.prefixes.get(req.prefix_id) if owner and req.prefix_id else None
+        owner_belief = (
+            owner.prefixes.get(req.prefix_id) if owner and req.prefix_id else None
+        )
         return PlacementDecision(
             snap.id,
             prior,
@@ -158,7 +167,9 @@ def pick(
     return PlacementError("unknown_policy")
 
 
-def _owner_saturated(owner: WorkerSnapshot, kv_used_max: float, spill_queue: int) -> str | None:
+def _owner_saturated(
+    owner: WorkerSnapshot, kv_used_max: float, spill_queue: int
+) -> str | None:
     """Reason the prefix owner should be left, or None when the conversation should stay."""
     if 1.0 - owner.kv_free_ratio >= kv_used_max:
         return "prefix_owner_kv_pressure"
@@ -173,7 +184,9 @@ def _p2c(cands: Sequence[WorkerSnapshot], rng: random.Random | None) -> WorkerSn
     return min((rng or random).sample(list(cands), min(2, len(cands))), key=load)
 
 
-def _prior_worker(req: PlacementRequest, workers: Sequence[WorkerSnapshot]) -> str | None:
+def _prior_worker(
+    req: PlacementRequest, workers: Sequence[WorkerSnapshot]
+) -> str | None:
     """Worker most recently believed to hold this prefix identity (not tenant)."""
     if not req.prefix_id:
         return None

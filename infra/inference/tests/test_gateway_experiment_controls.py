@@ -8,10 +8,10 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from infra.inference.gateway import main as gateway_main
-from infra.inference.gateway.admission import AdmitConfig
-from infra.inference.gateway.tenants import TenantQuota
-from infra.inference.gateway.workers import Registry, Worker
+from services.gateway import main as gateway_main
+from services.gateway.admission import AdmitConfig
+from services.gateway.tenants import TenantQuota
+from services.gateway.workers import Registry, Worker
 
 MSG = [{"role": "user", "content": "hello"}]
 CFG = AdmitConfig(

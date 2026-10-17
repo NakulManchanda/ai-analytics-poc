@@ -70,7 +70,7 @@ They are generated from the real prefix and tool material, not anonymous text. T
 | Model | Qwen3-0.6B: tool calling works with the hermes parser, weights are small against a 20 GiB slice, and the app's contexts are short (p50 about 541 tokens). The cost is that KV is never the limiter. |
 | Topology | Two colocated replicas on one GPU, no prefill/decode split. Both share the SMs, so a second replica adds slots but not compute; weights and KV are duplicated. HAMi 50/50 memory and core slices. |
 | Engine box | vLLM v0.11.0, two Deployments (`infra/inference/k8s/workers/`), `ClusterIP` only, no public port. |
-| Gateway box | One FastAPI Deployment (`infra/inference/gateway/`, manifest `infra/inference/k8s/gateway/gateway.yaml`): guard, admit, place, queue, hop decision, overflow. The gateway never loads a model. |
+| Gateway box | One FastAPI Deployment (`services/gateway/`, manifest `infra/inference/k8s/gateway/gateway.yaml`): guard, admit, place, queue, hop decision, overflow. The gateway never loads a model. |
 | Concurrency | `--max-num-seqs 8`, `--max-model-len 8192`; gateway `MAX_DECODE_SLOTS=8`, `WORKER_MAX_INFLIGHT=8` (a test ties them to the engine flags). |
 | Hop backend | LMCache with Mooncake over TCP (`infra/inference/kv_transfer/`, `infra/inference/mooncake/`). Built and tested; not run live. |
 | Overflow | A hosted OpenAI-compatible endpoint serving the same family at larger size: Superlinked, `Qwen/Qwen3.8-27B-FP8`. Only a 503 or 529 whose reason names a capacity limiter (`decode_slots`, `kv_pressure`, `no_signal`) may leave; 429, 500 and `slice_oom` stay local. |
@@ -80,7 +80,7 @@ They are generated from the real prefix and tool material, not anonymous text. T
 
 ## 4. The control plane (Parts 3, 4, 7)
 
-Order in the handler (`infra/inference/gateway/main.py`): guard -> tenant quota -> admission -> placement -> queue -> hop -> engine -> overflow gate. Every response carries stage headers
+Order in the handler (`services/gateway/main.py`): guard -> tenant quota -> admission -> placement -> queue -> hop -> engine -> overflow gate. Every response carries stage headers
 (`x-guard-decision`, `x-admit-decision`, `x-place-decision`, `x-queue-decision`, `x-queue-wait-ms`) so a request's path can be read back from `requests.jsonl`.
 
 | Stage | Decides | Reasons (metric label values) | Code |
@@ -203,7 +203,7 @@ overflow names its model and its limiter; a 429 never overflows; the gateway pro
 | Brief name | Path |
 |---|---|
 | `app/` | `services/app/app/` (`ServeLLMClient`, agent loop), `services/mcp/` |
-| `control/` | `infra/inference/gateway/` (guard, admit, place, queue, overflow, hop), `infra/inference/kv_transfer/` |
+| `control/` | `services/gateway/` (guard, admit, place, queue, overflow, hop), `infra/inference/kv_transfer/` |
 | `cluster/` | `infra/inference/k8s/`, `infra/inference/scripts/`, `infra/inference/mooncake/` |
 | `notebook/` | `experiments/123_evidence.ipynb` (clean scaffold); executed copies in `docs/inference-experiments/evidence/notebook/` (`.html` and `.ipynb`) |
 | `plots/`, `metrics/` | `docs/inference-experiments/evidence/plots/` (7 plots: E0 slots/KV/GPU, E2 prefix hit ratio, E3 placement picks, E4 outcomes & queue wait), `docs/inference-experiments/evidence/metrics/` (11 curated run and analysis files) |

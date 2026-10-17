@@ -85,7 +85,7 @@ flowchart TD
 | Brief | Where it is |
 |---|---|
 | `app/` | `services/app/app/` (`ServeLLMClient` calls only the gateway `/serve`), `services/mcp/` |
-| `control/` (guard, admit, place, queue, hop) | `infra/inference/gateway/`, `infra/inference/kv_transfer/` |
+| `control/` (guard, admit, place, queue, hop) | `services/gateway/`, `infra/inference/kv_transfer/` |
 | `cluster/` (how the engine comes up) | `infra/inference/k8s/`, `infra/inference/scripts/`, `infra/inference/mooncake/`, `make inference-*` targets |
 | `DESIGN.md` | [DESIGN.md](DESIGN.md) |
 | `plots/` | `docs/inference-experiments/evidence/plots/` (7 plots, regenerate with `experiments/plot_evidence.py`) |

@@ -23,7 +23,9 @@ HEALTH_STATES = ("healthy", "unhealthy", "stale")
 REQUESTS = Counter(
     "gateway_requests_total", "Gateway requests", ["status", "class"], registry=REGISTRY
 )
-GUARD_REJECT = Counter("guard_reject_total", "Guard rejections", ["reason"], registry=REGISTRY)
+GUARD_REJECT = Counter(
+    "guard_reject_total", "Guard rejections", ["reason"], registry=REGISTRY
+)
 PICKS = Counter(
     "orch_pick_total",
     "Placement picks",
@@ -81,7 +83,9 @@ ADMIT = Counter(
     ["decision", "reason", "class"],
     registry=REGISTRY,
 )
-SHED = Counter("orch_shed_total", "Shed requests", ["reason", "class", "code"], registry=REGISTRY)
+SHED = Counter(
+    "orch_shed_total", "Shed requests", ["reason", "class", "code"], registry=REGISTRY
+)
 TENANT_REQUESTS = Counter(
     "orch_tenant_total",
     "Tenant outcomes (tenant is an allowlisted bucket or 'other')",
@@ -110,7 +114,10 @@ OVERFLOW = Counter(
     registry=REGISTRY,
 )
 OVERFLOW_ERROR = Counter(
-    "overflow_error_total", "Overflow attempts that failed", ["reason"], registry=REGISTRY
+    "overflow_error_total",
+    "Overflow attempts that failed",
+    ["reason"],
+    registry=REGISTRY,
 )
 # Client-visible time to first token for STREAMING requests only: from gateway arrival to the
 # first SSE chunk with non-empty generated content (role-only deltas, keepalives, errors and
@@ -142,7 +149,11 @@ def timed(stage: str, klass: str):
 
 def observe_snapshots(snaps, stale_after: float) -> None:
     for s in snaps:
-        state = "unhealthy" if not s.healthy else "stale" if s.is_stale(stale_after) else "healthy"
+        state = (
+            "unhealthy"
+            if not s.healthy
+            else "stale" if s.is_stale(stale_after) else "healthy"
+        )
         for st in HEALTH_STATES:
             WORKER_HEALTH.labels(s.id, st).set(1 if st == state else 0)
         WORKER_WARM.labels(s.id).set(1 if s.warm else 0)

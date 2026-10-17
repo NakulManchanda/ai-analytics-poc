@@ -43,7 +43,9 @@ class AdmitConfig:
     max_decode_slots: int = 32
     kv_free_min: float = 0.10
     prefill_tokens_per_s: float = 4000.0
-    queue_wait_per_waiting_s: float = 0.25  # est. added wait per request queued at the worker
+    queue_wait_per_waiting_s: float = (
+        0.25  # est. added wait per request queued at the worker
+    )
     stale_after_s: float = 5.0
     retry_after_s: int = 1
     batch_reserve: float = 0.25  # fraction of decode slots kept free of batch work
@@ -65,7 +67,9 @@ class AdmitConfig:
         """Slots a request of this class may count on: batch gives up the reserved fraction."""
         if workload_class != "batch":
             return self.max_decode_slots
-        reserved = math.ceil(self.max_decode_slots * min(max(self.batch_reserve, 0.0), 1.0))
+        reserved = math.ceil(
+            self.max_decode_slots * min(max(self.batch_reserve, 0.0), 1.0)
+        )
         return max(1, self.max_decode_slots - reserved)
 
 
@@ -88,7 +92,9 @@ class Shed:
     reason: str
     retry_after_seconds: int
     inputs: dict = field(default_factory=dict)
-    never_overflow: bool = False  # True for 429 (tenant/rate budget): stays local (slice 4)
+    never_overflow: bool = (
+        False  # True for 429 (tenant/rate budget): stays local (slice 4)
+    )
     shed: bool = True
 
 
@@ -121,7 +127,9 @@ def should_shed(
 ) -> Admit | Shed:
     inputs = _inputs(req, snapshots, now)
     ra = cfg.retry_after_s
-    eligible = [s for s in snapshots if s.healthy and not s.is_stale(cfg.stale_after_s, now)]
+    eligible = [
+        s for s in snapshots if s.healthy and not s.is_stale(cfg.stale_after_s, now)
+    ]
     if not eligible:
         return Shed(503, "no_signal", ra, inputs)
     if max(s.kv_free_ratio for s in eligible) < cfg.kv_free_min:

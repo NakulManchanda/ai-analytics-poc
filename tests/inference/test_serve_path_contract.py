@@ -9,9 +9,9 @@ import pytest
 from app.prefix import build_query_proposal_partition
 from fastapi.testclient import TestClient
 
-from infra.inference.gateway import main as gateway_main
-from infra.inference.gateway.main import app as gateway_app
-from infra.inference.gateway.workers import Registry, Worker
+from services.gateway import main as gateway_main
+from services.gateway.main import app as gateway_app
+from services.gateway.workers import Registry, Worker
 
 ROOT = Path(__file__).resolve().parents[2]
 

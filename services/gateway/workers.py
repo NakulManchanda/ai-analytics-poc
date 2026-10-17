@@ -53,19 +53,33 @@ class WorkerSnapshot:
     healthy: bool = False
     warm: bool = False
     healthy_streak: int = 0  # consecutive successful scrapes (warm gate)
-    health_epoch: int = 0  # bumped on every failed scrape; a probe only counts within its epoch
+    health_epoch: int = (
+        0  # bumped on every failed scrape; a probe only counts within its epoch
+    )
     warmed_at: float | None = None
-    warm_count: int = 0  # times this worker has passed the warm gate (2+ means it returned)
+    warm_count: int = (
+        0  # times this worker has passed the warm gate (2+ means it returned)
+    )
     requests_since_warm: int = 0  # requests dispatched here since it last became warm
-    ramp_cap: int | None = None  # max in-flight + queued while ramping a returning worker
+    ramp_cap: int | None = (
+        None  # max in-flight + queued while ramping a returning worker
+    )
     ramp_stage: int = 0
     ramp_next_at: float = 0.0
     inflight: int = 0
     inflight_tokens: int = 0
-    queued: int = 0  # requests waiting in this gateway's per-worker queue (#122 slice 3)
-    pending: int = 0  # requests placed here that have not reached the queue yet (anti-herding)
-    dispatch_grace_s: float = 2.0  # how long a scrape may lag a dispatch (see ``occupied``)
-    recent_dispatches: dict[int, float] = field(default_factory=dict)  # token -> monotonic time
+    queued: int = (
+        0  # requests waiting in this gateway's per-worker queue (#122 slice 3)
+    )
+    pending: int = (
+        0  # requests placed here that have not reached the queue yet (anti-herding)
+    )
+    dispatch_grace_s: float = (
+        2.0  # how long a scrape may lag a dispatch (see ``occupied``)
+    )
+    recent_dispatches: dict[int, float] = field(
+        default_factory=dict
+    )  # token -> monotonic time
     _dispatch_id: int = 0
     prefixes: dict[str, PrefixBelief] = field(default_factory=dict)
 
@@ -85,14 +99,17 @@ class WorkerSnapshot:
         """
         horizon = float("-inf") if self.observed_at is None else self.observed_at
         return self.running + sum(
-            1 for dispatched_at in self.recent_dispatches.values()
+            1
+            for dispatched_at in self.recent_dispatches.values()
             if dispatched_at > horizon - self.dispatch_grace_s
         )
 
     def note_dispatch(self, now: float | None = None) -> int:
         """Count a dispatch; returns the token to pass to ``note_finish``."""
         self._dispatch_id += 1
-        self.recent_dispatches[self._dispatch_id] = time.monotonic() if now is None else now
+        self.recent_dispatches[self._dispatch_id] = (
+            time.monotonic() if now is None else now
+        )
         return self._dispatch_id
 
     def warm_context(self, now: float | None = None) -> tuple[int, int]:
@@ -105,7 +122,10 @@ class WorkerSnapshot:
         self.requests_since_warm += 1
         if self.warmed_at is None:
             return -1, index
-        return int(((time.monotonic() if now is None else now) - self.warmed_at) * 1000), index
+        return (
+            int(((time.monotonic() if now is None else now) - self.warmed_at) * 1000),
+            index,
+        )
 
     def note_finish(self, token: int) -> None:
         self.recent_dispatches.pop(token, None)
@@ -186,11 +206,15 @@ class Registry:
         warm = [s for s in self.snapshots.values() if not self.require_warm or s.warm]
         if not self.ramp_steps:
             return warm
-        open_ = [s for s in warm if s.ramp_cap is None or s.inflight + s.queued < s.ramp_cap]
+        open_ = [
+            s for s in warm if s.ramp_cap is None or s.inflight + s.queued < s.ramp_cap
+        ]
         return open_ or warm
 
     async def refresh(self, client: httpx.AsyncClient) -> None:
-        await asyncio.gather(*(self._scrape(client, s) for s in self.snapshots.values()))
+        await asyncio.gather(
+            *(self._scrape(client, s) for s in self.snapshots.values())
+        )
 
     async def _scrape(self, client: httpx.AsyncClient, snap: WorkerSnapshot) -> None:
         try:
@@ -200,7 +224,9 @@ class Registry:
             if "running" not in vals or "waiting" not in vals or "kv_used" not in vals:
                 raise ValueError("vLLM gauges missing from /metrics")
         except (httpx.HTTPError, ValueError):
-            snap.healthy = False  # keep last numbers; observed_at is not advanced -> goes stale
+            snap.healthy = (
+                False  # keep last numbers; observed_at is not advanced -> goes stale
+            )
             snap.healthy_streak = 0
             snap.health_epoch += 1
             if self.require_warm and snap.warm:
@@ -216,7 +242,11 @@ class Registry:
         self._advance_ramp(snap)
         if not self.require_warm:
             if not snap.warm:  # legacy: one good scrape
-                snap.warm, snap.warmed_at, snap.requests_since_warm = True, time.monotonic(), 0
+                snap.warm, snap.warmed_at, snap.requests_since_warm = (
+                    True,
+                    time.monotonic(),
+                    0,
+                )
         elif not snap.warm and snap.healthy_streak >= self.warm_min_scrapes:
             self._start_probe(client, snap)
 
@@ -233,7 +263,9 @@ class Registry:
             return
         snap.ramp_next_at = self._clock() + self.ramp_step_s
         if snap.waiting > 0 or snap.kv_free_ratio < self.ramp_min_kv_free:
-            log.info("worker %s ramp held at cap=%d (under pressure)", snap.id, snap.ramp_cap)
+            log.info(
+                "worker %s ramp held at cap=%d (under pressure)", snap.id, snap.ramp_cap
+            )
             return
         snap.ramp_stage += 1
         if snap.ramp_stage >= len(self.ramp_steps):
@@ -276,16 +308,24 @@ class Registry:
             # An outage happened while the probe was in flight: the worker must re-qualify.
             result = "stale"
         if result == "ok":
-            snap.warm, snap.warmed_at, snap.requests_since_warm = True, time.monotonic(), 0
+            snap.warm, snap.warmed_at, snap.requests_since_warm = (
+                True,
+                time.monotonic(),
+                0,
+            )
             snap.warm_count += 1
             self._start_ramp(snap)
-            log.info("worker %s is warm (scrapes=%d, probe ok)", snap.id, snap.healthy_streak)
+            log.info(
+                "worker %s is warm (scrapes=%d, probe ok)", snap.id, snap.healthy_streak
+            )
         if self.on_probe is not None:
             self.on_probe(snap.id, result)
 
     def record_prefix(self, worker_id: str, prefix_id: str | None, tokens: int) -> None:
         if prefix_id:
-            self.snapshots[worker_id].prefixes[prefix_id] = PrefixBelief(time.monotonic(), tokens)
+            self.snapshots[worker_id].prefixes[prefix_id] = PrefixBelief(
+                time.monotonic(), tokens
+            )
 
 
 def build_registry() -> Registry:
@@ -295,7 +335,9 @@ def build_registry() -> Registry:
     ("2,4") caps a returning worker and raises the cap every WARM_RAMP_STEP_S while it is not
     under pressure. Both are off by default so local runs behave as before.
     """
-    a_url = os.getenv("WORKER_A_URL") or os.getenv("DEFAULT_WORKER_URL") or DEFAULT_A_URL
+    a_url = (
+        os.getenv("WORKER_A_URL") or os.getenv("DEFAULT_WORKER_URL") or DEFAULT_A_URL
+    )
     workers = [Worker("worker_a", a_url.rstrip("/"))]
     if b_url := os.getenv("WORKER_B_URL"):
         workers.append(Worker("worker_b", b_url.rstrip("/")))
@@ -304,7 +346,9 @@ def build_registry() -> Registry:
         require_warm=os.getenv("WARM_GATE", "0") == "1",
         warm_min_scrapes=int(os.getenv("WARM_MIN_SCRAPES", "3")),
         probe_model=os.getenv("WARM_PROBE_MODEL", "Qwen/Qwen3-0.6B"),
-        ramp_steps=tuple(int(x) for x in os.getenv("WARM_RAMP_STEPS", "").split(",") if x.strip()),
+        ramp_steps=tuple(
+            int(x) for x in os.getenv("WARM_RAMP_STEPS", "").split(",") if x.strip()
+        ),
         ramp_step_s=float(os.getenv("WARM_RAMP_STEP_S", "30")),
         dispatch_grace_s=float(os.getenv("DISPATCH_GRACE_S", "2")),
     )

@@ -15,7 +15,7 @@ require_connection
 RDIR="$(remote_dir)"
 ssh_cmd "mkdir -p $RDIR/gateway"
 rsync -az --delete -e "ssh -i $LAMBDA_SSH_KEY_PATH -o StrictHostKeyChecking=accept-new" \
-  "$INFERENCE_ROOT/gateway/" "$(ssh_target):$RDIR/gateway/"
+  "$GATEWAY_ROOT/" "$(ssh_target):$RDIR/gateway/"
 
 ssh_cmd "
   set -eu
