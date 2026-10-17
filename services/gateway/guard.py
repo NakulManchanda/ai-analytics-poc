@@ -78,7 +78,9 @@ def inspect(
     limit = max_prompt_tokens() if max_tokens is None else max_tokens
     tokens = estimate_prompt_tokens(payload, estimated_tokens_header)
     if tokens > limit:
-        return Guard(False, PROMPT_TOO_LONG, f"estimated {tokens} tokens exceeds limit {limit}")
+        return Guard(
+            False, PROMPT_TOO_LONG, f"estimated {tokens} tokens exceeds limit {limit}"
+        )
     window = max_model_len() if model_len is None else model_len
     completion = requested_completion_tokens(payload)
     if window is not None and tokens + completion > window:

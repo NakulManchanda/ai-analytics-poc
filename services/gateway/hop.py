@@ -32,7 +32,10 @@ def prepare(
     payload = dict(body)
     payload.pop("kv_transfer_params", None)
     if os.getenv("KV_HOP_ENABLED") != "1":
-        return payload, {"hop_decision_reason": "disabled", "hop_result": "not_attempted"}
+        return payload, {
+            "hop_decision_reason": "disabled",
+            "hop_result": "not_attempted",
+        }
     allowed = remaining_s is None or remaining_s >= 1.5
     min_tokens = int(os.getenv("KV_HOP_MIN_TOKENS", str(DEFAULT_MIN_TOKENS)))
     worth_moving = decision.prior_reusable_tokens >= min_tokens
@@ -55,7 +58,9 @@ def prepare(
             reason = {
                 "same_worker_local_reuse": "local_prefix_present",
                 "cross_worker_recompute_transfer_disabled": "transfer_disabled",
-                "independently_warmed_destination_local_hit": ("independently_warmed_destination"),
+                "independently_warmed_destination_local_hit": (
+                    "independently_warmed_destination"
+                ),
                 "real_mooncake_transfer_consumed": "remote_prefix_candidate",
             }[experiment_case]
     if not allowed:

@@ -67,7 +67,12 @@ class QueueTicket:
     """A held dispatch slot. ``release`` is idempotent."""
 
     def __init__(self, queues: WorkerQueues, worker_id: str, wait_s: float) -> None:
-        self._queues, self.worker_id, self.wait_s, self._done = queues, worker_id, wait_s, False
+        self._queues, self.worker_id, self.wait_s, self._done = (
+            queues,
+            worker_id,
+            wait_s,
+            False,
+        )
 
     def release(self) -> None:
         if not self._done:

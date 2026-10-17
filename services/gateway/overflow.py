@@ -28,7 +28,9 @@ class Overflow:
     original_code: int
 
 
-def decide(code: int, reason: str, never_overflow: bool, source: str = "") -> Local | Overflow:
+def decide(
+    code: int, reason: str, never_overflow: bool, source: str = ""
+) -> Local | Overflow:
     """``source`` (admit|place|queue|upstream) is informational for callers/logs."""
     if never_overflow or code not in ELIGIBLE_CODES or reason in LOCAL_ONLY_REASONS:
         return Local()
