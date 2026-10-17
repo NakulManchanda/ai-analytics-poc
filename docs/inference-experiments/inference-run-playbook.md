@@ -88,8 +88,8 @@ Section 1 is the full pre-flight before each experiment.
    passes the warm gate, so wait for `worker_warm == 1` before measuring.
 5. Schema/prefix check (manual): start the local MCP (`make mcp-dev`), read its dataset-schema resource and
    confirm the column list equals `CANONICAL_TAXI_SCHEMA["columns"]` in
-   `services/app/app/benchmarks/canonical_prefix.py`. If it differs, update that file and run
-   `uv run --project services/app pytest services/app/tests/test_scenarios.py` before any E3 run.
+   `tooling/benchmarks/src/benchmarks/app_checks.py`. If it differs, update that file and run
+   `uv run --project tooling/benchmarks --extra app pytest tooling/benchmarks/tests/test_scenarios.py` before any E3 run.
 6. Tokenizer count: confirm `curl -s -X POST http://127.0.0.1:18080/tokenize -H 'content-type: application/json'
    -d '{"model":"Qwen/Qwen3-0.6B","prompt":"hello"}'` returns a `count`. The replayer writes the exact prefix
    token count into every manifest (`system_prefix.exact_tokens`; `null` plus a reason if unreachable).
@@ -154,7 +154,7 @@ ssh lambda 'sudo k3s kubectl -n inference-lab set env deploy/inference-gateway T
 source infra/inference/experiments/manifest/e0-capacity.env   # once per experiment; sets RUN_ID=d123-<date>-e0-<HHMM>
 make inference-capacity RUN_ID=$RUN_ID            # preliminary synthetic capacity: capacity_summary.json
 # Application-shaped offered-load sweep through the gateway (taxi-shaped multi-turn trace, no policy override):
-uv run --project services/app python services/app/scripts/run_scenario.py --scenario e3_routing_mixed \
+uv run --project tooling/benchmarks python -m benchmarks.run --scenario e3_routing_mixed \
   --endpoint-type gateway_chat --target-url http://127.0.0.1:18080 --output-dir metrics/inference/$RUN_ID \
   --sweep-concurrency 1,2,4,8,12,16 --label e0-sweep
 make inference-pull-range RUN_ID=$RUN_ID          # after the sweep; default window is the last 30 minutes

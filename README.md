@@ -172,6 +172,9 @@ ai_analytics_poc/
 │   │   ├── mcp_server/      # Tools (query_taxi_data, get_dataset_profile)
 │   │   └── tests/
 │   └── dataset_spike/       # NYC TLC Yellow Taxi dataset profiling & spike
+├── tooling/
+│   ├── benchmarks/          # Offline scenario replayer (app_runs / gateway_chat), goodput, trace CLI; own uv project
+│   └── evals/               # Reserved for answer-quality evals (not yet implemented)
 ├── web/                     # React 18 + TypeScript + Vite UI
 │   ├── src/                 # App, TimelineInspector, ContextInspector
 │   └── dist/                # Production build artifacts for S3 deployment

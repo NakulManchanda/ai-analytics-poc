@@ -13,7 +13,11 @@ from typing import Any
 import httpx
 from pydantic import BaseModel, Field
 
-from app.scenarios.models import ScenarioConfig, ScenarioConversation, ScenarioTurn
+from benchmarks.scenarios.models import (
+    ScenarioConfig,
+    ScenarioConversation,
+    ScenarioTurn,
+)
 
 logger = logging.getLogger(__name__)
 

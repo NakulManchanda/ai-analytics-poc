@@ -1,7 +1,7 @@
 """E5 prefix locality/mobility scenarios that do NOT need real KV transfer (#123).
 
 The scenario JSON files under ``config/scenarios/e5_*.json`` are generated from this module
-(``uv run --project services/app python -m app.benchmarks.e5_locality``) and a test asserts the
+(``uv run --project tooling/benchmarks python -m benchmarks.e5_locality``) and a test asserts the
 committed files match, so prefix sizes and forced-worker patterns cannot drift silently.
 
 Every case uses a SYNTHETIC padded system prefix (a prefix-size treatment, not the taxi-agent

@@ -3,13 +3,13 @@ from __future__ import annotations
 import csv
 import io
 
-from app.benchmarks.goodput import (
+from benchmarks.goodput import (
     Slos,
     is_good,
     summarize_turns,
     sweep_to_csv,
 )
-from app.benchmarks.replayer import TurnResult
+from benchmarks.replayer import TurnResult
 
 
 def _t(**kw) -> TurnResult:
@@ -130,7 +130,7 @@ def test_fully_measured_tokens_have_rates():
 
 
 def test_all_unmeasured_sweep_row_and_csv_are_na_not_zero():
-    from app.benchmarks.goodput import sweep_row
+    from benchmarks.goodput import sweep_row
 
     s = summarize_turns([_t(tokens_out=None)], 1.0, Slos())
     row = sweep_row(1, s)
@@ -141,7 +141,7 @@ def test_all_unmeasured_sweep_row_and_csv_are_na_not_zero():
 
 
 def test_placement_reasons_by_turn_shows_affinity_to_spill_crossover():
-    from app.benchmarks.goodput import placement_reasons_by_turn
+    from benchmarks.goodput import placement_reasons_by_turn
 
     def t(idx, reason):
         return _t(turn_index=idx, gateway_headers={"x-placement-reason": reason})

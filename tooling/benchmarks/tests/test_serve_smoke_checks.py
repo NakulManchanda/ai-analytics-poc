@@ -1,6 +1,6 @@
 """The serve smoke must fail when a stage header is missing or a reject is not stamped."""
 
-from app.benchmarks.serve_smoke import (
+from benchmarks.serve_smoke import (
     missing_stage_headers,
     problems_for_accepted,
     problems_for_rejected,

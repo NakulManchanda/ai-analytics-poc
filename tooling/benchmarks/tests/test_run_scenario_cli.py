@@ -4,12 +4,11 @@ import json
 from pathlib import Path
 
 import pytest
-from app.benchmarks.metrics_scraper import (
+from benchmarks.metrics_scraper import (
     MetricsDelta,
 )
-from app.benchmarks.replayer import ReplaySummary, TurnResult
-
-from services.app.scripts.run_scenario import (
+from benchmarks.replayer import ReplaySummary, TurnResult
+from benchmarks.run import (
     async_main,
     generate_markdown_report,
 )
@@ -546,8 +545,7 @@ def test_markdown_report_includes_placement_reason_by_turn():
 @pytest.mark.anyio
 async def test_system_prefix_record_exact_count_and_failure():
     import httpx
-
-    from services.app.scripts.run_scenario import system_prefix_record
+    from benchmarks.run import system_prefix_record
 
     seen = []
 

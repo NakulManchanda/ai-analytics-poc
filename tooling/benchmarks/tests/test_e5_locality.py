@@ -1,16 +1,20 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import httpx
 import pytest
-from app.benchmarks import e5_locality as e5
-from app.benchmarks.replayer import ControlNotApplied, ScenarioReplayer
-from app.scenarios.loader import load_scenario, validate_catalogue_alignment
-from app.scenarios.models import ScenarioConfig, ScenarioConversation, ScenarioTurn
+from benchmarks import e5_locality as e5
+from benchmarks.app_checks import validate_catalogue_alignment
+from benchmarks.replayer import ControlNotApplied, ScenarioReplayer
+from benchmarks.scenarios.loader import DEFAULT_SCENARIOS_DIR, load_scenario
+from benchmarks.scenarios.models import (
+    ScenarioConfig,
+    ScenarioConversation,
+    ScenarioTurn,
+)
 
-SCEN = Path("config/scenarios")
+SCEN = DEFAULT_SCENARIOS_DIR
 
 
 def test_committed_e5_scenarios_match_generator():
@@ -20,7 +24,7 @@ def test_committed_e5_scenarios_match_generator():
         on_disk = json.loads((SCEN / f"{name}.json").read_text())
         assert (
             on_disk == data
-        ), f"{name} drifted: regenerate with python -m app.benchmarks.e5_locality"
+        ), f"{name} drifted: regenerate with python -m benchmarks.e5_locality"
 
 
 def test_prefix_sizes_and_labels():
@@ -215,7 +219,7 @@ def test_uses_force_worker_property():
 
 @pytest.mark.anyio
 async def test_manifest_records_force_fields(tmp_path, monkeypatch):
-    from services.app.scripts.run_scenario import async_main
+    from benchmarks.run import async_main
 
     original = httpx.AsyncClient
     monkeypatch.setattr(

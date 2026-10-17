@@ -48,7 +48,7 @@ record `--dynamo-version n/a --dynamo-kv-block-size n/a` explicitly. Set them wi
 1. Pass `--require-parity` to every run: it exits 2 before any request, writing no evidence,
    if a field is missing or `unknown`.
 2. After the runs, check the set:
-   `uv run --project services/app python -m app.benchmarks.parity <A>/manifest.json
+   `uv run --project tooling/benchmarks python -m benchmarks.parity <A>/manifest.json
    <B>/manifest.json <C>/manifest.json`. Exit 1 and a `PARITY FAIL` line for any incomplete arm or any cross-arm
    difference. A failed check voids the comparison.
 
@@ -74,7 +74,7 @@ record `--dynamo-version n/a --dynamo-kv-block-size n/a` explicitly. Set them wi
 ## Commands (arm C; A and B use existing `make replay-e3-*`)
 
 ```text
-uv run --project services/app python services/app/scripts/run_scenario.py \
+uv run --project tooling/benchmarks python -m benchmarks.run \
   --scenario e3_routing_mixed --endpoint-type gateway_chat \
   --router-label dynamo-kv --label e3-dynamo-kv \
   --target-url http://<dynamo-frontend>:8000 --metrics-url <one worker /metrics> ...

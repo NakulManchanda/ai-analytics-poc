@@ -3,9 +3,8 @@ from __future__ import annotations
 import json
 
 import pytest
-from app.benchmarks.trace import TraceError, build_trace, parse_gateway_log, render_text
-
-from services.app.scripts.trace_request import main as trace_main
+from benchmarks.trace import TraceError, build_trace, parse_gateway_log, render_text
+from benchmarks.trace_cli import main as trace_main
 
 T0 = 1_000_000.0
 NS = "qwen3-0.6b/rev1/tok1/tpl1/bf16/kv-bf16/no-adapter/layout-v1"

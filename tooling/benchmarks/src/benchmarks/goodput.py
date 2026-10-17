@@ -9,7 +9,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from app.benchmarks.replayer import (
+from benchmarks.replayer import (
     GATEWAY_DECISION_HEADERS,
     TurnResult,
     calculate_percentiles,

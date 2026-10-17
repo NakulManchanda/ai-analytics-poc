@@ -15,7 +15,8 @@ from pathlib import Path
 from typing import Any
 
 import httpx
-from app.benchmarks.goodput import (
+
+from benchmarks.goodput import (
     Slos,
     is_good,
     placement_reasons_by_turn,
@@ -23,19 +24,19 @@ from app.benchmarks.goodput import (
     sweep_row,
     sweep_to_csv,
 )
-from app.benchmarks.metrics_scraper import (
+from benchmarks.metrics_scraper import (
     MetricsDelta,
     PrometheusMetricSnapshot,
     compute_metrics_delta,
 )
-from app.benchmarks.parity import check_run as parity_check_run
-from app.benchmarks.replayer import (
+from benchmarks.parity import check_run as parity_check_run
+from benchmarks.replayer import (
     ControlNotApplied,
     ReplaySummary,
     ScenarioReplayer,
 )
-from app.scenarios.loader import load_scenario
-from app.scenarios.models import ScenarioConfig
+from benchmarks.scenarios.loader import load_scenario
+from benchmarks.scenarios.models import ScenarioConfig
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s"
@@ -723,7 +724,7 @@ def main() -> int:
         "--require-parity",
         action="store_true",
         help="Exit 2 before any request unless every comparison field is concrete "
-        "(no missing/'unknown'); see app.benchmarks.parity",
+        "(no missing/'unknown'); see benchmarks.parity",
     )
     parser.add_argument(
         "--engine-flags", default=None, help="Free-form engine flags (env ENGINE_FLAGS)"

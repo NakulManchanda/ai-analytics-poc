@@ -11,7 +11,7 @@ OBSERVABILITY_BURST_COUNT ?= 10
 OBSERVABILITY_LOG_TAIL ?= 200
 KV_BUNDLE_OUT = $(or $(OUT),work/kv-hop.yaml)
 
-.PHONY: help check-bootstrap dev app-serve-dev mcp-dev mcp-smoke dataset-test dataset-smoke smoke test mcp-test infra-test web-test compose-smoke observability-up observability-down observability-smoke observability-dev-up observability-dev-info observability-dev-ask observability-dev-burst observability-dev-metrics observability-dev-logs observability-dev-down local-aws-compose local-aws-refresh local-serve-compose local-serve-refresh local-bedrock-compose bedrock-smoke m5-bedrock-smoke m6-bedrock-smoke dashboard tf-dispatch tf-resume tf-park inference-validate inference-sync inference-config inference-secret inference-bootstrap inference-deploy inference-up inference-tunnel inference-connect inference-smoke inference-warmup inference-capacity inference-restart inference-gateway-restart inference-controls-on inference-controls-off inference-verify-workers inference-e1 inference-fresh-up inference-tmux-start inference-tmux-end inference-serve-smoke inference-run inference-pull-evidence inference-pull-range inference-kv-image inference-kv-render inference-kv-smoke evidence-analyze evidence-notebook evidence-notebook-open inference-teardown replay-fanout replay-multi-turn replay-compare-strategies replay-strategy-manual replay-strategy-crewai replay-e3-least-loaded replay-e3-prefix-then-load replay-e4-admission-on replay-e4-admission-off replay-e3-large-prefix-least-loaded replay-e3-large-prefix-prefix-then-load replay-e5 trace-request
+.PHONY: help check-bootstrap dev app-serve-dev mcp-dev mcp-smoke dataset-test dataset-smoke smoke test bench-test mcp-test infra-test web-test compose-smoke observability-up observability-down observability-smoke observability-dev-up observability-dev-info observability-dev-ask observability-dev-burst observability-dev-metrics observability-dev-logs observability-dev-down local-aws-compose local-aws-refresh local-serve-compose local-serve-refresh local-bedrock-compose bedrock-smoke m5-bedrock-smoke m6-bedrock-smoke dashboard tf-dispatch tf-resume tf-park inference-validate inference-sync inference-config inference-secret inference-bootstrap inference-deploy inference-up inference-tunnel inference-connect inference-smoke inference-warmup inference-capacity inference-restart inference-gateway-restart inference-controls-on inference-controls-off inference-verify-workers inference-e1 inference-fresh-up inference-tmux-start inference-tmux-end inference-serve-smoke inference-run inference-pull-evidence inference-pull-range inference-kv-image inference-kv-render inference-kv-smoke evidence-analyze evidence-notebook evidence-notebook-open inference-teardown replay-fanout replay-multi-turn replay-compare-strategies replay-strategy-manual replay-strategy-crewai replay-e3-least-loaded replay-e3-prefix-then-load replay-e4-admission-on replay-e4-admission-off replay-e3-large-prefix-least-loaded replay-e3-large-prefix-prefix-then-load replay-e5 replay-arrival-rate trace-request
 
 
 help: ## Show available commands
@@ -127,7 +127,7 @@ inference-e1: ## Run E1 end to end: restarts BOTH workers, cold run, wait, warm 
 	@WARM_WAIT_S='$(WARM_WAIT_S)' YES='$(YES)' bash infra/inference/scripts/run-e1.sh
 
 inference-serve-smoke: ## Smoke check the end-to-end serve path through gateway to vLLM worker
-	uv run --project services/app python scripts/smoke/17_inference_serve.py
+	uv run --project tooling/benchmarks --extra app python scripts/smoke/17_inference_serve.py
 
 inference-run: inference-smoke inference-warmup inference-capacity inference-pull-evidence ## Run #120 measurements and pull evidence
 	@python3 infra/inference/experiments/evidence.py --run-id $(INFERENCE_RUN_ID) --output-dir $(INFERENCE_RUN_DIR)
@@ -306,12 +306,16 @@ local-bedrock-compose: local-aws-compose ## Deprecated alias for local-aws-compo
 bedrock-smoke: ## Make one opt-in, bounded paid Bedrock call through POST /api/ask
 	uv run --project services/app python services/app/scripts/bedrock_smoke.py
 
-test: ## Run application, MCP, dataset spike, infra, and React checks
+test: ## Run application, benchmark tooling, MCP, dataset spike, infra, and React checks
 	uv run --project services/app pytest services/app/tests
+	$(MAKE) bench-test
 	uv run --project services/mcp pytest services/mcp/tests
 	uv run --project services/dataset_spike pytest services/dataset_spike/tests
 	uv run --project services/app pytest tests
 	$(MAKE) web-test
+
+bench-test: ## Run offline benchmark/replay tooling tests (tooling/benchmarks; needs the app extra for catalogue/prefix checks)
+	uv run --project tooling/benchmarks --extra app pytest tooling/benchmarks/tests
 
 mcp-test: ## Run MCP tests
 	uv run --project services/mcp pytest services/mcp/tests
@@ -353,49 +357,49 @@ METRICS_URL ?= http://127.0.0.1:18001/metrics
 REPLAYER_FLAGS ?=
 
 replay-fanout: ## Replay shared_prefix_fanout scenario (usage: make replay-fanout [TARGET_URL=...] [METRICS_URL=...])
-	uv run --project services/app python services/app/scripts/run_scenario.py --scenario shared_prefix_fanout --target-url $(TARGET_URL) $(if $(METRICS_URL),--metrics-url $(METRICS_URL)) $(REPLAYER_FLAGS)
+	uv run --project tooling/benchmarks python -m benchmarks.run --scenario shared_prefix_fanout --target-url $(TARGET_URL) $(if $(METRICS_URL),--metrics-url $(METRICS_URL)) $(REPLAYER_FLAGS)
 
 replay-multi-turn: ## Replay growing_multi_turn scenario (usage: make replay-multi-turn [TARGET_URL=...] [METRICS_URL=...])
-	uv run --project services/app python services/app/scripts/run_scenario.py --scenario growing_multi_turn --target-url $(TARGET_URL) $(if $(METRICS_URL),--metrics-url $(METRICS_URL)) $(REPLAYER_FLAGS)
+	uv run --project tooling/benchmarks python -m benchmarks.run --scenario growing_multi_turn --target-url $(TARGET_URL) $(if $(METRICS_URL),--metrics-url $(METRICS_URL)) $(REPLAYER_FLAGS)
 
 replay-compare-strategies: ## Replay comparative scenario (note: restart app with AGENT_STRATEGY=crewai between manual and crewai runs)
 	@echo "==> [1/2] Replaying strategy_comparison (strategy=manual). Target app should have AGENT_STRATEGY=manual"
-	uv run --project services/app python services/app/scripts/run_scenario.py --scenario strategy_comparison --strategy manual --target-url $(TARGET_URL) $(if $(METRICS_URL),--metrics-url $(METRICS_URL)) $(REPLAYER_FLAGS)
+	uv run --project tooling/benchmarks python -m benchmarks.run --scenario strategy_comparison --strategy manual --target-url $(TARGET_URL) $(if $(METRICS_URL),--metrics-url $(METRICS_URL)) $(REPLAYER_FLAGS)
 	@echo "==> [2/2] Note: The app selects strategy via AGENT_STRATEGY env var at boot. To complete comparison against crewai, restart app with AGENT_STRATEGY=crewai and run 'make replay-strategy-crewai'"
 
 replay-strategy-manual: ## Replay strategy_comparison with manual strategy (app booted with AGENT_STRATEGY=manual)
-	uv run --project services/app python services/app/scripts/run_scenario.py --scenario strategy_comparison --strategy manual --target-url $(TARGET_URL) $(if $(METRICS_URL),--metrics-url $(METRICS_URL)) $(REPLAYER_FLAGS)
+	uv run --project tooling/benchmarks python -m benchmarks.run --scenario strategy_comparison --strategy manual --target-url $(TARGET_URL) $(if $(METRICS_URL),--metrics-url $(METRICS_URL)) $(REPLAYER_FLAGS)
 
 replay-strategy-crewai: ## Replay strategy_comparison with crewai strategy (app booted with AGENT_STRATEGY=crewai)
-	uv run --project services/app python services/app/scripts/run_scenario.py --scenario strategy_comparison --strategy crewai --target-url $(TARGET_URL) $(if $(METRICS_URL),--metrics-url $(METRICS_URL)) $(REPLAYER_FLAGS)
+	uv run --project tooling/benchmarks python -m benchmarks.run --scenario strategy_comparison --strategy crewai --target-url $(TARGET_URL) $(if $(METRICS_URL),--metrics-url $(METRICS_URL)) $(REPLAYER_FLAGS)
 
 # E3/E4 controlled runs (#123): the gateway must run with ALLOW_EXPERIMENT_CONTROLS=1 (test-only); E4 also needs
 # TENANT_ALLOWLIST=tenant_interactive,tenant_noisy,tenant_batch. See docs/inference-experiments/inference-testing-guide.md.
 
 replay-e3-least-loaded: ## Replay E3 routing trace under least_loaded (usage: make replay-e3-least-loaded TARGET_URL=http://127.0.0.1:18080)
-	uv run --project services/app python services/app/scripts/run_scenario.py --scenario e3_routing_mixed --endpoint-type gateway_chat --policy-override least_loaded --label e3-least_loaded --target-url $(TARGET_URL) $(if $(METRICS_URL),--metrics-url $(METRICS_URL)) $(REPLAYER_FLAGS)
+	uv run --project tooling/benchmarks python -m benchmarks.run --scenario e3_routing_mixed --endpoint-type gateway_chat --policy-override least_loaded --label e3-least_loaded --target-url $(TARGET_URL) $(if $(METRICS_URL),--metrics-url $(METRICS_URL)) $(REPLAYER_FLAGS)
 
 replay-e3-prefix-then-load: ## Replay E3 routing trace under prefix_then_load (usage: make replay-e3-prefix-then-load TARGET_URL=http://127.0.0.1:18080)
-	uv run --project services/app python services/app/scripts/run_scenario.py --scenario e3_routing_mixed --endpoint-type gateway_chat --policy-override prefix_then_load --label e3-prefix_then_load --target-url $(TARGET_URL) $(if $(METRICS_URL),--metrics-url $(METRICS_URL)) $(REPLAYER_FLAGS)
+	uv run --project tooling/benchmarks python -m benchmarks.run --scenario e3_routing_mixed --endpoint-type gateway_chat --policy-override prefix_then_load --label e3-prefix_then_load --target-url $(TARGET_URL) $(if $(METRICS_URL),--metrics-url $(METRICS_URL)) $(REPLAYER_FLAGS)
 
 replay-e4-admission-on: ## Replay E4 overload trace with admission on (usage: make replay-e4-admission-on TARGET_URL=http://127.0.0.1:18080)
-	uv run --project services/app python services/app/scripts/run_scenario.py --scenario e4_admission_overload --endpoint-type gateway_chat --admission-mode on --label e4-admission_on --target-url $(TARGET_URL) $(if $(METRICS_URL),--metrics-url $(METRICS_URL)) $(REPLAYER_FLAGS)
+	uv run --project tooling/benchmarks python -m benchmarks.run --scenario e4_admission_overload --endpoint-type gateway_chat --admission-mode on --label e4-admission_on --target-url $(TARGET_URL) $(if $(METRICS_URL),--metrics-url $(METRICS_URL)) $(REPLAYER_FLAGS)
 
 replay-e4-admission-off: ## Replay E4 overload trace with admission off (capacity/deadline shedding skipped) (usage: make replay-e4-admission-off TARGET_URL=http://127.0.0.1:18080)
-	uv run --project services/app python services/app/scripts/run_scenario.py --scenario e4_admission_overload --endpoint-type gateway_chat --admission-mode off --label e4-admission_off --target-url $(TARGET_URL) $(if $(METRICS_URL),--metrics-url $(METRICS_URL)) $(REPLAYER_FLAGS)
+	uv run --project tooling/benchmarks python -m benchmarks.run --scenario e4_admission_overload --endpoint-type gateway_chat --admission-mode off --label e4-admission_off --target-url $(TARGET_URL) $(if $(METRICS_URL),--metrics-url $(METRICS_URL)) $(REPLAYER_FLAGS)
 
 replay-e3-large-prefix-least-loaded: ## SYNTHETIC large-prefix E3 treatment under least_loaded (headline E3 is replay-e3-*; usage: make replay-e3-large-prefix-least-loaded TARGET_URL=...)
-	uv run --project services/app python services/app/scripts/run_scenario.py --scenario e3_routing_large_prefix --endpoint-type gateway_chat --policy-override least_loaded --label e3-large-prefix-least_loaded --target-url $(TARGET_URL) $(if $(METRICS_URL),--metrics-url $(METRICS_URL)) $(REPLAYER_FLAGS)
+	uv run --project tooling/benchmarks python -m benchmarks.run --scenario e3_routing_large_prefix --endpoint-type gateway_chat --policy-override least_loaded --label e3-large-prefix-least_loaded --target-url $(TARGET_URL) $(if $(METRICS_URL),--metrics-url $(METRICS_URL)) $(REPLAYER_FLAGS)
 
 replay-e3-large-prefix-prefix-then-load: ## SYNTHETIC large-prefix E3 treatment under prefix_then_load (headline E3 is replay-e3-*; usage: make replay-e3-large-prefix-prefix-then-load TARGET_URL=...)
-	uv run --project services/app python services/app/scripts/run_scenario.py --scenario e3_routing_large_prefix --endpoint-type gateway_chat --policy-override prefix_then_load --label e3-large-prefix-prefix_then_load --target-url $(TARGET_URL) $(if $(METRICS_URL),--metrics-url $(METRICS_URL)) $(REPLAYER_FLAGS)
+	uv run --project tooling/benchmarks python -m benchmarks.run --scenario e3_routing_large_prefix --endpoint-type gateway_chat --policy-override prefix_then_load --label e3-large-prefix-prefix_then_load --target-url $(TARGET_URL) $(if $(METRICS_URL),--metrics-url $(METRICS_URL)) $(REPLAYER_FLAGS)
 
 replay-e5: ## Replay an E5 locality/control scenario (usage: make replay-e5 E5_SCENARIO=e5_recompute_control_2k TARGET_URL=http://127.0.0.1:18080; gateway needs ALLOW_FORCED_PLACEMENT=1)
-	uv run --project services/app python services/app/scripts/run_scenario.py --scenario $(E5_SCENARIO) --endpoint-type gateway_chat --label $(E5_SCENARIO) --target-url $(TARGET_URL) $(if $(METRICS_URL),--metrics-url $(METRICS_URL)) $(REPLAYER_FLAGS)
+	uv run --project tooling/benchmarks python -m benchmarks.run --scenario $(E5_SCENARIO) --endpoint-type gateway_chat --label $(E5_SCENARIO) --target-url $(TARGET_URL) $(if $(METRICS_URL),--metrics-url $(METRICS_URL)) $(REPLAYER_FLAGS)
 
 replay-arrival-rate: ## Replay scenario with open-loop Poisson/rate scheduling (usage: make replay-arrival-rate SCENARIO=e4_admission_overload RATE=5.0 [DIST=poisson] TARGET_URL=http://127.0.0.1:18080)
-	uv run --project services/app python services/app/scripts/run_scenario.py --scenario $(SCENARIO) --endpoint-type gateway_chat --arrival-rate $(RATE) $(if $(DIST),--arrival-distribution $(DIST)) --target-url $(TARGET_URL) $(if $(METRICS_URL),--metrics-url $(METRICS_URL)) $(REPLAYER_FLAGS)
+	uv run --project tooling/benchmarks python -m benchmarks.run --scenario $(SCENARIO) --endpoint-type gateway_chat --arrival-rate $(RATE) $(if $(DIST),--arrival-distribution $(DIST)) --target-url $(TARGET_URL) $(if $(METRICS_URL),--metrics-url $(METRICS_URL)) $(REPLAYER_FLAGS)
 
 trace-request: ## Explain one request end to end (usage: make trace-request RUN_DIR=metrics/evidence/<run> REQUEST_ID=<id> [GATEWAY_LOG=gateway.log])
-	uv run --project services/app python services/app/scripts/trace_request.py --run-dir $(RUN_DIR) --request-id $(REQUEST_ID) $(if $(GATEWAY_LOG),--gateway-log $(GATEWAY_LOG))
+	uv run --project tooling/benchmarks python -m benchmarks.trace_cli --run-dir $(RUN_DIR) --request-id $(REQUEST_ID) $(if $(GATEWAY_LOG),--gateway-log $(GATEWAY_LOG))
 

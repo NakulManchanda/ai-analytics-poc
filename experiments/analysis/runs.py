@@ -1,4 +1,4 @@
-"""Load one run directory (written by services/app/scripts/run_scenario.py) and summarize it.
+"""Load one run directory (written by tooling/benchmarks, `python -m benchmarks.run`) and summarize it.
 
 Evidence scopes (every result dict carries one under "scope"):
   PER_REQUEST  fields measured per request (requests.jsonl).

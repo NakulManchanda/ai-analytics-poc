@@ -23,7 +23,7 @@ copied to the submission folders listed in section 12). Paths are relative to th
 server over a pinned dataset schema), observe, answer. Context grows every step. Code: `services/app/app/` (`ServeLLMClient` routes every model call
 through the gateway `/serve`; anti-bypass tests in `services/app/tests/test_gateway_bypass.py`), MCP service in `services/mcp/`.
 
-**Shared vs unique tokens** (`docs/prefix-contract.md`, `services/app/app/benchmarks/canonical_prefix.py`):
+**Shared vs unique tokens** (`docs/prefix-contract.md`, `tooling/benchmarks/src/benchmarks/app_checks.py`):
 - *Global shared*: system prompt, tool schemas, pinned dataset schema. **223 tokens** (measured, `system_prefix.exact_tokens` in the E3 manifest).
 - *Conversation shared*: earlier turns and tool outputs; grows every step and is the reusable prefix across agent steps.
 - *Unique*: the newest user turn or observation.
@@ -31,7 +31,7 @@ through the gateway `/serve`; anti-bypass tests in `services/app/tests/test_gate
 
 **Request classes.** Interactive (the user turn) and batch (background sweeps), carried as `x-request-priority`; tenants carried as `x-tenant-id`.
 
-**Traffic used as evidence.** E0-E4 replayed taxi-shaped scenarios (`config/scenarios/`) through the gateway with `services/app/scripts/run_scenario.py`.
+**Traffic used as evidence.** E0-E4 replayed taxi-shaped scenarios (`config/scenarios/`) through the gateway with `tooling/benchmarks/src/benchmarks/run.py`.
 They are generated from the real prefix and tool material, not anonymous text. The real app loop through `/serve` was not part of a retained run.
 
 ## 2. Capacity on paper (Part 1)

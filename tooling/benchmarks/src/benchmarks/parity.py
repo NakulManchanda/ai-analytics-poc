@@ -1,8 +1,8 @@
 """Parity gate for cross-arm comparisons (E6): reject missing/'unknown' metadata.
 
 Used in two places:
-- ``run_scenario.py --require-parity`` calls :func:`check_run` before any request.
-- ``python -m app.benchmarks.parity <manifest.json> ...`` calls :func:`check_arms` on finished
+- ``benchmarks.run --require-parity`` calls :func:`check_run` before any request.
+- ``python -m benchmarks.parity <manifest.json> ...`` calls :func:`check_arms` on finished
   run manifests: every arm must be complete AND every shared input must be equal.
 """
 

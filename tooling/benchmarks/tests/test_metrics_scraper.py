@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import httpx
 import pytest
-from app.benchmarks.metrics_scraper import (
+from benchmarks.metrics_scraper import (
     PrometheusMetricSnapshot,
     compute_metrics_delta,
     parse_labels,

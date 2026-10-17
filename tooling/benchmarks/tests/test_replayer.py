@@ -4,12 +4,12 @@ import json
 
 import httpx
 import pytest
-from app.benchmarks.replayer import (
+from benchmarks.replayer import (
     ControlNotApplied,
     ScenarioReplayer,
     calculate_percentiles,
 )
-from app.scenarios.models import (
+from benchmarks.scenarios.models import (
     ScenarioConfig,
     ScenarioConversation,
     ScenarioTurn,
@@ -528,7 +528,7 @@ async def test_gateway_stream_without_usage_leaves_tokens_unmeasured():
 
 @pytest.mark.anyio
 async def test_gateway_stream_premature_eof_is_incomplete_not_good():
-    from app.benchmarks.goodput import Slos, is_good
+    from benchmarks.goodput import Slos, is_good
 
     body = 'data: {"choices":[{"delta":{"content":"a"}}]}\n\n'
 
@@ -602,7 +602,7 @@ async def test_gateway_no_stream_mode_sends_no_stream_flag():
 
 @pytest.mark.anyio
 async def test_goodput_from_streamed_ttft():
-    from app.benchmarks.goodput import Slos, is_good
+    from benchmarks.goodput import Slos, is_good
 
     body = 'data: {"choices":[{"delta":{"content":"a"}}]}\n\ndata: [DONE]\n\n'
 

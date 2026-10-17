@@ -7,9 +7,8 @@ from pathlib import Path
 
 import httpx
 import pytest
-from app.benchmarks.parity import check_arms, check_run, main
-
-from services.app.scripts.run_scenario import async_main
+from benchmarks.parity import check_arms, check_run, main
+from benchmarks.run import async_main
 
 SLOS = {"interactive_ttft_slo_ms": 100.0, "default_e2e_slo_ms": 3500.0}
 
