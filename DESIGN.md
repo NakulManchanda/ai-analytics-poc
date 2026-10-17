@@ -175,7 +175,7 @@ orch_queue_wait_seconds_count{class="interactive",worker="worker_a"} 35.0
 | 8 | Where do I evict, what becomes a ghost? | eviction lives in the store (Mooncake/LMCache) and vLLM; a ghost is a directory entry for blocks that are gone; the worker requires positive bytes and post-forward consumption before `confirmed`; the gateway's own prefix belief is time-bounded. The `MetadataDirectory` class is a tested library, not on the live path, and no eviction counters are exported by the gateway. | `infra/inference/README.md` "Eviction and ghost entries"; unit tests in `infra/inference/tests/test_kv_transfer_contract.py` |
 | 9 | Where does the engine scheduler sit vs my admit/place/queue? | section 4 and 5 | `make trace-request` timeline |
 | 10 | What limited concurrency? | the 8-slot scheduler cap | E0 `capacity_summary.json`, `sweep.csv`, `prometheus_range/` |
-| 11 | Four production alerts | `InferenceKVPressureSustained` (KV > 85 percent for 5 m), `GatewayInteractiveTTFTSLOBreach`, `GatewayQueueShedSurge`, `InferenceWorkerIntegrity` | `infra/inference/observability/prometheus/alerts.yaml`; thresholds uncalibrated; none fired in E0-E4 |
+| 11 | Four production alerts | `InferenceKVPressureSustained` (KV > 85 percent for 5 m), `GatewayInteractiveTTFTSLOBreach`, `GatewayQueueShedSurge`, `InferenceWorkerIntegrity` | `infra/observability/inference/prometheus/alerts.yaml`; thresholds uncalibrated; none fired in E0-E4 |
 | 12 | If I scale, which pool? | decode slots (section 3) | E0 |
 | 13 | What changes at 10x, and which three knobs are the wrong next move? | below | plan section on 10x |
 
@@ -205,7 +205,7 @@ overflow names its model and its limiter; a 429 never overflows; the gateway pro
 | `app/` | `services/app/app/` (`ServeLLMClient`, agent loop), `services/mcp/` |
 | `control/` | `services/gateway/` (guard, admit, place, queue, overflow, hop), `infra/inference/kv_transfer/` |
 | `cluster/` | `infra/inference/k8s/`, `infra/inference/scripts/`, `infra/inference/mooncake/` |
-| `notebook/` | `experiments/123_evidence.ipynb` (clean scaffold); executed copies in `docs/inference-experiments/evidence/notebook/` (`.html` and `.ipynb`) |
+| `notebook/` | `tooling/experiments/123_evidence.ipynb` (clean scaffold); executed copies in `docs/inference-experiments/evidence/notebook/` (`.html` and `.ipynb`) |
 | `plots/`, `metrics/` | `docs/inference-experiments/evidence/plots/` (7 plots: E0 slots/KV/GPU, E2 prefix hit ratio, E3 placement picks, E4 outcomes & queue wait), `docs/inference-experiments/evidence/metrics/` (11 curated run and analysis files) |
 | tests | `infra/inference/tests/`, `tests/inference/`, `tests/experiments/` |
 

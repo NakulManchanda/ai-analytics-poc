@@ -14,7 +14,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from experiments.analysis.memory import load_range
+from tooling.experiments.analysis.memory import load_range
 
 QUEUE_PANELS = (
     "orch_replica_queue_depth",

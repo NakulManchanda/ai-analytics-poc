@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-NB = ROOT / "experiments" / "123_evidence.ipynb"
+NB = ROOT / "tooling" / "experiments" / "123_evidence.ipynb"
 FIX = Path(__file__).parent / "fixtures"
 
 
@@ -37,7 +37,7 @@ def test_notebook_is_generated_valid_and_has_no_outputs_or_results() -> None:
     else:
         nbformat.validate(nbformat.read(NB, as_version=4))
     # committed file must equal the generator output (diff-friendly, no hand edits)
-    sys.path.insert(0, str(ROOT / "experiments"))
+    sys.path.insert(0, str(ROOT / "tooling" / "experiments"))
     import build_notebook
 
     assert json.loads(NB.read_text()) == build_notebook.build()
@@ -102,7 +102,7 @@ def test_export_embeds_charts_tables_and_writeup(tmp_path: Path) -> None:
     result = subprocess.run(
         [
             sys.executable,
-            str(ROOT / "experiments/build_notebook.py"),
+            str(ROOT / "tooling/experiments/build_notebook.py"),
             "--runs-json",
             str(config),
             "--writeup-dir",

@@ -1,12 +1,12 @@
-"""`python -m experiments.analysis RUN_DIR [RUN_DIR ...] [--range DIR]`: quick text summary."""
+"""`python -m tooling.experiments.analysis RUN_DIR [RUN_DIR ...] [--range DIR]`: quick text summary."""
 
 from __future__ import annotations
 
 import argparse
 from pathlib import Path
 
-from experiments.analysis import breakdown, load_run, memory_proof, sweep_curve
-from experiments.analysis.display import show
+from tooling.experiments.analysis import breakdown, load_run, memory_proof, sweep_curve
+from tooling.experiments.analysis.display import show
 
 
 def main() -> int:

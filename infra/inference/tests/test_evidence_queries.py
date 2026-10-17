@@ -9,8 +9,8 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
-QUERIES = ROOT / "infra/inference/observability/prometheus/evidence_queries.json"
-DASHBOARDS = ROOT / "infra/inference/observability/grafana/dashboards.py"
+QUERIES = ROOT / "infra/observability/inference/prometheus/evidence_queries.json"
+DASHBOARDS = ROOT / "infra/observability/inference/grafana/dashboards.py"
 _TOKEN = re.compile(r"\b(?:vllm:|gateway_|orch_|DCGM_|worker_)[A-Za-z0-9_:]*")
 
 
@@ -38,7 +38,7 @@ def test_every_query_metric_is_allowlisted_and_declared() -> None:
 
 
 def test_memory_proof_queries_are_present() -> None:
-    from experiments.analysis.memory import PANELS
+    from tooling.experiments.analysis.memory import PANELS
 
     names = {q["name"] for q in json.loads(QUERIES.read_text())["queries"]}
     assert set(PANELS) <= names

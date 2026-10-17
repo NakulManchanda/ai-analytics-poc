@@ -58,7 +58,7 @@ infra/inference/
   │   └── services/             # ClusterIP Services
   │       ├── worker-a.yaml
   │       └── worker-b.yaml
-  ├── observability/            # Metrics and monitoring configuration
+  ├── observability/            # Source: infra/observability/inference/ (synced to remote observability/)
   │   ├── prometheus/values.yaml# Prometheus Helm values with worker/DCGM scrape configs
   │   ├── grafana/values.yaml   # Grafana Helm values with ClusterIP & dashboard sidecar
   │   └── dcgm/dcgm-exporter.yaml # DCGM DaemonSet with ClusterIP service
@@ -168,8 +168,8 @@ If the pulled run has no capacity request-results file (e.g. a cluster-snapshot-
 `run-manifest.json` summarizer step is skipped with a clear message instead of failing.
 
 ### 7b. Regenerate Grafana Dashboards (#115 slice E)
-The dashboards under `observability/grafana/dashboards/` are generated, not hand-edited.
-Regenerate and commit them after changing `observability/grafana/dashboards.py`:
+The dashboards under `infra/observability/inference/grafana/dashboards/` are generated, not hand-edited.
+Regenerate and commit them after changing `infra/observability/inference/grafana/dashboards.py`:
 ```bash
 make inference-dashboards
 ```
@@ -191,7 +191,7 @@ This writes deterministic JSON (sorted keys, stable panel ids/uids) for:
 Every worker-scoped vLLM panel is split by the `instance` label — the only label that
 distinguishes worker A from worker B in these series, because Prometheus scrapes both workers as
 two static-config targets rather than via per-pod service discovery (see
-`observability/prometheus/values.yaml`). Kube-state and cAdvisor panels are split by `pod` instead.
+`infra/observability/inference/prometheus/values.yaml`). Kube-state and cAdvisor panels are split by `pod` instead.
 
 #123 slice B adds gateway-backed dashboards (Prometheus scrapes the gateway `/metrics` as job
 `inference-gateway`, `inference-gateway.inference-lab:8080`): **Overview** (`overview.json`, with a
@@ -202,7 +202,7 @@ request rate, preemptions, prefix hit ratio on one time axis), and a text-only *
 (real hop metrics land with #133).
 
 #### Alerts (#123 slice B)
-Five rules live in `observability/prometheus/alerts.yaml` (standard rule-group format) and are
+Five rules live in `infra/observability/inference/prometheus/alerts.yaml` (standard rule-group format) and are
 loaded by `deploy.sh`, which nests them under `serverFiles.alerting_rules.yml` in a temporary values file passed with `-f`; Alertmanager stays disabled, so they show in the Prometheus
 UI only. Four are the required production alerts, plus one supplemental engine alert:
 - `InferenceKVPressureSustained`: KV usage > 85% for 5m; above this vLLM starts queueing/preempting.

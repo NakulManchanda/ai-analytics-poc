@@ -8,6 +8,7 @@ fi
 if [[ "${1:-}" == "--plan" ]]; then
   echo "source: infra/inference"
   echo "source: services/gateway -> remote gateway/"
+  echo "source: infra/observability/inference -> remote observability/"
   echo "exclude: .env credentials metrics services/app services/mcp web .pem .key"
   exit 0
 fi
@@ -26,9 +27,13 @@ TARGET="$RDIR/"
 ssh_cmd "mkdir -p $TARGET"
 rsync -az --delete -e "ssh -i $LAMBDA_SSH_KEY_PATH -o StrictHostKeyChecking=accept-new" \
   --exclude '.env' --exclude 'credentials' --exclude 'metrics' --exclude 'services/app' \
-  --exclude 'services/mcp' --exclude 'web' --exclude '*.pem' --exclude '*.key' --exclude '/gateway' \
+  --exclude 'services/mcp' --exclude 'web' --exclude '*.pem' --exclude '*.key' --exclude '/gateway' --exclude '/observability' \
   "$SOURCE" "$(ssh_target):$TARGET"
 # The gateway source lives in services/gateway; the remote layout stays $RDIR/gateway (ConfigMap source).
 ssh_cmd "mkdir -p $TARGET/gateway"
 rsync -az --delete -e "ssh -i $LAMBDA_SSH_KEY_PATH -o StrictHostKeyChecking=accept-new" \
   "$GATEWAY_ROOT/" "$(ssh_target):$TARGET/gateway/"
+# The inference observability source lives in infra/observability/inference; the remote layout stays $RDIR/observability.
+ssh_cmd "mkdir -p $TARGET/observability"
+rsync -az --delete -e "ssh -i $LAMBDA_SSH_KEY_PATH -o StrictHostKeyChecking=accept-new" \
+  "$OBSERVABILITY_ROOT/" "$(ssh_target):$TARGET/observability/"
