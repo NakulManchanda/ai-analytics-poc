@@ -89,11 +89,11 @@ flowchart TD
 ### How One Request Flows
 
 1. **Client / App Interaction:** The client sends an analytics question (`/api/ask`) or starts a multi-step CrewAI run. The orchestrator calls the local FastMCP server for DuckDB SQL tools, then dispatches the prompt to `http://127.0.0.1:18080/serve` with tenant and deadline headers.
-2. **Guard:** [`gateway/guard.py`](../infra/inference/gateway/guard.py) checks JSON structure and context length. Payloads exceeding 8,192 tokens or with malformed schemas are rejected immediately with `400` or `413` without consuming GPU cycles.
-3. **Tenant Quota:** [`gateway/tenants.py`](../infra/inference/gateway/tenants.py) tracks in-flight requests per tenant. If a tenant exceeds 10 concurrent requests, it is throttled with `429 tenant_concurrency` (which strictly stays local and never overflows).
-4. **Admission Control:** [`gateway/admission.py`](../infra/inference/gateway/admission.py) checks cluster decode slots and worker free KV. If local decode slots are saturated, batch requests are routed to the capacity overflow handler; otherwise, shed with `503 decode_slots`.
-5. **Router & Placement:** [`gateway/placement.py`](../infra/inference/gateway/placement.py) evaluates prefix affinity (`prefix_then_load`) and worker queue depth. It assigns the sticky owner worker holding the cached prefix (223-token system + tool schemas), falling back to least-loaded. If batch slots on the candidate worker are full (cap 6 of 8 slots), it sheds with `503 batch_slot_cap`.
-6. **Per-Worker Priority Queue:** [`gateway/queueing.py`](../infra/inference/gateway/queueing.py) acquires an execution slot in the chosen worker's queue, ordering admitted requests by traffic class (interactive before batch), prompt length, and deadline slack. Discards requests with `504 timeout_queue` if deadline expires before an in-flight slot opens.
+2. **Guard:** [`gateway/guard.py`](../services/gateway/guard.py) checks JSON structure and context length. Payloads exceeding 8,192 tokens or with malformed schemas are rejected immediately with `400` or `413` without consuming GPU cycles.
+3. **Tenant Quota:** [`gateway/tenants.py`](../services/gateway/tenants.py) tracks in-flight requests per tenant. If a tenant exceeds 10 concurrent requests, it is throttled with `429 tenant_concurrency` (which strictly stays local and never overflows).
+4. **Admission Control:** [`gateway/admission.py`](../services/gateway/admission.py) checks cluster decode slots and worker free KV. If local decode slots are saturated, batch requests are routed to the capacity overflow handler; otherwise, shed with `503 decode_slots`.
+5. **Router & Placement:** [`gateway/placement.py`](../services/gateway/placement.py) evaluates prefix affinity (`prefix_then_load`) and worker queue depth. It assigns the sticky owner worker holding the cached prefix (223-token system + tool schemas), falling back to least-loaded. If batch slots on the candidate worker are full (cap 6 of 8 slots), it sheds with `503 batch_slot_cap`.
+6. **Per-Worker Priority Queue:** [`gateway/queueing.py`](../services/gateway/queueing.py) acquires an execution slot in the chosen worker's queue, ordering admitted requests by traffic class (interactive before batch), prompt length, and deadline slack. Discards requests with `504 timeout_queue` if deadline expires before an in-flight slot opens.
 7. **Engine Execution:** Dispatched to the chosen vLLM worker (`ClusterIP:8000`). vLLM executes chunked prefill (2,048 tokens) and decodes with continuous batching. Streams back through the gateway to the orchestrator.
 
 ---
@@ -148,7 +148,7 @@ flowchart TD
 - **Hop Backend:** LMCache with Mooncake over TCP (`infra/inference/kv_transfer/`, `infra/inference/mooncake/`).
 - **Overflow Destination:** Superlinked hosted OpenAI-compatible endpoint serving `Qwen/Qwen3.8-27B-FP8`. Sibling model architecture ensures tool schemas, prompt formatting, and system prompts transfer without conversion errors.
 - **Box Separation:**
-  - **Gateway Box (`infra/inference/gateway/`):** FastAPI orchestrator owning guard, admission, placement, queueing, and overflow. Never loads a model.
+  - **Gateway Box (`services/gateway/`):** FastAPI orchestrator owning guard, admission, placement, queueing, and overflow. Never loads a model.
   - **Engine Box (`infra/inference/k8s/workers/`):** vLLM v0.11.0 owning prefill/decode kernels, PagedAttention block table, continuous batching, and preemptions.
 - **Scaling Pool:** If scaling, scale the **decode slots pool**. E0 proved decode slots are hot while KV is cold. (Adding identical colocated replicas on the same GPU duplicates weights without adding compute).
 
@@ -157,11 +157,11 @@ flowchart TD
 ## Part 3. Guardrails, Admit, Stay vs. Leave
 
 ### Implementation Locations:
-- **Guard:** [`infra/inference/gateway/guard.py`](../infra/inference/gateway/guard.py) (`inspect(payload) -> GuardDecision`)
+- **Guard:** [`services/gateway/guard.py`](../services/gateway/guard.py) (`inspect(payload) -> GuardDecision`)
   - First "no": Rejects malformed JSON payloads (HTTP 400 `malformed_payload`), missing messages (HTTP 400), prompt length > 8,192 tokens (HTTP 413 `prompt_too_long`), and context window breaches (HTTP 413 `context_window_exceeded`). Never touches GPU.
-- **Admission:** [`infra/inference/gateway/admission.py`](../infra/inference/gateway/admission.py) (`should_admit(req, snap) -> (admit?, code, reason, retry_after)`)
+- **Admission:** [`services/gateway/admission.py`](../services/gateway/admission.py) (`should_admit(req, snap) -> (admit?, code, reason, retry_after)`)
   - Evaluates worker capacity: sheds on `no_signal` (503), `kv_pressure` (< 10% free KV, 503), `decode_slots` (local slots full, 503), and `deadline_unachievable` (504).
-- **Tenant Quotas:** [`infra/inference/gateway/tenants.py`](../infra/inference/gateway/tenants.py) (`TENANT_MAX_CONCURRENCY=10`, token budget 200k/window).
+- **Tenant Quotas:** [`services/gateway/tenants.py`](../services/gateway/tenants.py) (`TENANT_MAX_CONCURRENCY=10`, token budget 200k/window).
 - **Stay vs. Leave Policy:**
   - **Stay Local:** HTTP `429` (`tenant_concurrency`, `tenant_tokens`), HTTP `500` (internal bugs), and `slice_oom` **never leave**.
   - **May Leave to Overflow:** Only HTTP `503` or `529` explicitly citing capacity exhaustion (`decode_slots`, `kv_pressure`, `no_signal`) may leave to Superlinked.
@@ -205,7 +205,7 @@ In the benchmark run ([`notebook-run-2026-10-10.html`](inference-experiments/evi
 ## Part 4. Placement (Which Worker & Policy)
 
 ### Implementation Location:
-- [`infra/inference/gateway/placement.py`](../infra/inference/gateway/placement.py) (`pick_worker(req, workers, *, policy) -> Worker | Shed`)
+- [`services/gateway/placement.py`](../services/gateway/placement.py) (`pick_worker(req, workers, *, policy) -> Worker | Shed`)
 
 ### Policies Supported:
 1. `least_loaded`: Evaluates active in-flight count and queue depth; picks least congested worker.
@@ -221,7 +221,7 @@ In the benchmark run ([`notebook-run-2026-10-10.html`](inference-experiments/evi
 ## Part 5. Queue & Engine (What Runs Next & What You Do Not)
 
 ### 1. Who sits in your queue vs vLLM's waiting queue?
-- **Gateway Queue:** Requests wait in `infra/inference/gateway/queueing.py` per worker, ordered by class (interactive before batch), prompt length, slack time, and arrival age.
+- **Gateway Queue:** Requests wait in `services/gateway/queueing.py` per worker, ordered by class (interactive before batch), prompt length, slack time, and arrival age.
 - **vLLM's Waiting Queue:** Because `WORKER_MAX_INFLIGHT=8` matches vLLM's `--max-num-seqs 8`, **vLLM's macro-level waiting queue stays at 0**. The gateway absorbs arrival bursts.
 - **Evidence:** `vllm:num_requests_waiting` peaked at `0` in E4 Prometheus scrapes.
 
@@ -267,7 +267,7 @@ While the gateway absorbs macro-level queues (seconds), the engine can and does 
 ## Part 6. Hop: When Do You Move KV? Is the Replica Warm?
 
 ### Implementation Locations:
-- [`infra/inference/gateway/hop.py`](../infra/inference/gateway/hop.py) (`decide_hop(req, chosen_worker, prefix_state)`)
+- [`services/gateway/hop.py`](../services/gateway/hop.py) (`decide_hop(req, chosen_worker, prefix_state)`)
 - [`infra/inference/kv_transfer/evidence.py`](../infra/inference/kv_transfer/evidence.py)
 
 ### Hop Decision Rules:
@@ -324,7 +324,7 @@ gateway/overflow.py         # 429/500 stay local · 503 decode_slots -> Superlin
 | **4** | Where do I protect KV? | Admission sheds on `kv_pressure` (< 10% free blocks); router skips low-KV workers; guard enforces token budget window. | `gateway/admission.py`, `gateway/placement.py`. Metric: `orch_shed_total{reason="kv_pressure"}`. |
 | **5** | Where do I prioritize interactive traffic? | Gateway queue dispatch key evaluates priority class first (`interactive` before `batch`); batch is capped at 6 of 8 slots per worker. | `gateway/queueing.py` (`_entry_sort_key`). E4 plot: `docs/inference-experiments/evidence/plots/e4-gateway-queue-wait-*.png`. |
 | **6** | Where do I stop one tenant owning the GPU? | Per-tenant token budget (200k/window) and concurrency limiter (`TENANT_MAX_CONCURRENCY=10`). Rejected with 429 and **never overflowed**. | `gateway/tenants.py`. Counters: `orch_shed_total{code="429", reason="tenant_concurrency"}`. |
-| **7** | Where do I hop, what is not copied? | Hop moves KV across workers via LMCache + Mooncake over TCP when placement selects a different worker. Request bodies, weights, and engine state are **not** copied—only compatible KV block tensors. | `infra/inference/gateway/hop.py`, `infra/inference/kv_transfer/evidence.py`. |
+| **7** | Where do I hop, what is not copied? | Hop moves KV across workers via LMCache + Mooncake over TCP when placement selects a different worker. Request bodies, weights, and engine state are **not** copied—only compatible KV block tensors. | `services/gateway/hop.py`, `infra/inference/kv_transfer/evidence.py`. |
 | **8** | Where do I evict, what becomes a ghost? | Eviction is managed by the backing store (Mooncake/LMCache) and vLLM LRU. A "ghost" is a directory entry referencing evicted blocks. Avoided by requiring positive bytes transferred and post-forward consumption before confirming. | `infra/inference/kv_transfer/` contract tests: `test_kv_transfer_contract.py`. |
 | **9** | Where does engine scheduler sit vs admit/place/queue? | Gateway admits, places, and queues. Engine (vLLM) only handles execution of dispatched requests (prefill, decode, PagedAttention block allocation). Gateway caps inflight at `--max-num-seqs` so vLLM scheduler stays in continuous execution. | `services/app/scripts/trace_request.py` lifecycle stages 1 through 10. |
 | **10** | What limited concurrency on this GPU for this app? | **The 8-slot engine scheduler cap (`--max-num-seqs 8`).** Concurrency peaked at 12; KV memory peaked at only 46%, proving decode slots are the bottleneck. | E0 summary: `docs/inference-experiments/evidence/metrics/e0-capacity_summary-*.json`, plot `e0-slots-running-waiting-*.png`. |

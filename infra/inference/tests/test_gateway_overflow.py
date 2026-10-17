@@ -9,12 +9,12 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from infra.inference.gateway import main as gateway_main
-from infra.inference.gateway import metrics
-from infra.inference.gateway.overflow import Local, Overflow, OverflowConfig, decide
-from infra.inference.gateway.queueing import QueueConfig, WorkerQueues
-from infra.inference.gateway.tenants import TenantQuota
-from infra.inference.gateway.workers import Registry, Worker
+from services.gateway import main as gateway_main
+from services.gateway import metrics
+from services.gateway.overflow import Local, Overflow, OverflowConfig, decide
+from services.gateway.queueing import QueueConfig, WorkerQueues
+from services.gateway.tenants import TenantQuota
+from services.gateway.workers import Registry, Worker
 
 MSG = [{"role": "user", "content": "hello"}]
 KEY = "sk-test-SECRET-123"

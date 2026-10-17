@@ -172,6 +172,7 @@ def test_sync_plan_is_allowlisted_and_does_not_print_connection_secret_values() 
     plan = result.stdout + result.stderr
 
     assert re.search(r"source\s*[:=].*infra/inference", plan, re.I)
+    assert re.search(r"source\s*[:=]\s*services/gateway.*remote gateway/", plan, re.I)
     for excluded in (
         ".env",
         "credentials",

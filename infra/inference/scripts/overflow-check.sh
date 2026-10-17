@@ -82,5 +82,5 @@ fi
 
 echo
 [[ $fail -eq 0 ]] && echo "RESULT: overflow destination OK (chat, tools, stream). Set OVERFLOW_URL=$CHAT and run make inference-overflow-on." \
-  || echo "RESULT: NOT ready. Do not enable overflow; an adapter in gateway/main.py _overflow may be needed."
+  || echo "RESULT: NOT ready. Do not enable overflow; an adapter in services/gateway/main.py _overflow may be needed."
 exit $fail

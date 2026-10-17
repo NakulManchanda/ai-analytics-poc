@@ -357,8 +357,24 @@ def test_future_scope_resources_are_not_present() -> None:
 
 
 def test_gateway_bundle_contract() -> None:
-    gateway_dir = BUNDLE / "gateway"
-    assert gateway_dir.is_dir(), "infra/inference/gateway must exist in #121"
+    gateway_dir = ROOT / "services" / "gateway"
+    assert gateway_dir.is_dir(), "services/gateway must exist (#162)"
+    assert not (
+        BUNDLE / "gateway"
+    ).exists(), "gateway source moved out of the bundle (#162)"
+    # Deployment glue keeps the remote layout: sync ships services/gateway to $RDIR/gateway, and the
+    # ConfigMap/pod command are unchanged.
+    sync = (SCRIPTS / "sync.sh").read_text(encoding="utf-8")
+    restart = (SCRIPTS / "gateway-restart.sh").read_text(encoding="utf-8")
+    lib = (SCRIPTS / "lib.sh").read_text(encoding="utf-8")
+    assert "services/gateway" in lib and "GATEWAY_ROOT" in lib
+    assert '"$GATEWAY_ROOT/" "$(ssh_target):$TARGET/gateway/"' in sync
+    assert '"$GATEWAY_ROOT/" "$(ssh_target):$RDIR/gateway/"' in restart
+    assert "RDIR/gateway" in restart and "--from-file" in restart
+    assert "inference-gateway-code" in restart
+    assert "uvicorn main:app" in (K8S / "gateway" / "gateway.yaml").read_text(
+        encoding="utf-8"
+    )
     assert (gateway_dir / "main.py").is_file(), "gateway/main.py must exist"
 
     gateway_service = K8S / "services" / "gateway.yaml"

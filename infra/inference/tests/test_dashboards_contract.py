@@ -14,7 +14,7 @@ from pathlib import Path
 
 import yaml
 
-from infra.inference.gateway import metrics as gateway_metrics
+from services.gateway import metrics as gateway_metrics
 
 ROOT = Path(__file__).resolve().parents[3]
 GRAFANA_DIR = ROOT / "infra" / "inference" / "observability" / "grafana"

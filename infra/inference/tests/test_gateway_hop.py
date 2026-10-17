@@ -2,7 +2,7 @@
 
 from types import SimpleNamespace
 
-from infra.inference.gateway.hop import prepare
+from services.gateway.hop import prepare
 
 HEADERS = {"x-request-id": "r", "x-conversation-id": "c", "x-agent-step": "2"}
 DECISION = SimpleNamespace(

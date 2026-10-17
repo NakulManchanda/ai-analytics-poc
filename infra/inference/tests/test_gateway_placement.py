@@ -10,15 +10,15 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from infra.inference.gateway import main as gateway_main
-from infra.inference.gateway.guard import inspect
-from infra.inference.gateway.placement import (
+from services.gateway import main as gateway_main
+from services.gateway.guard import inspect
+from services.gateway.placement import (
     PlacementDecision,
     PlacementError,
     PlacementRequest,
     pick,
 )
-from infra.inference.gateway.workers import Registry, Worker, WorkerSnapshot, parse_vllm_metrics
+from services.gateway.workers import Registry, Worker, WorkerSnapshot, parse_vllm_metrics
 
 FIXTURE = Path(__file__).parent / "fixtures" / "vllm-worker-b.prom"
 MSG = [{"role": "user", "content": "hi"}]
@@ -135,7 +135,7 @@ def test_p2c_picks_less_loaded_of_pair() -> None:
 
 
 def _with_prefix(ws, wid, prefix="p1", tokens=1000):
-    from infra.inference.gateway.workers import PrefixBelief
+    from services.gateway.workers import PrefixBelief
 
     next(w for w in ws if w.id == wid).prefixes[prefix] = PrefixBelief(time.monotonic(), tokens)
 
@@ -360,7 +360,7 @@ def test_gateway_imports_flat_like_the_configmap_deployment() -> None:
 
 
 def test_worker_warm_gauge_healthy_but_not_warm() -> None:
-    from infra.inference.gateway import metrics
+    from services.gateway import metrics
 
     reg = Registry([Worker("warm_w", "http://a:1"), Worker("cold_w", "http://b:1")])
     now = time.monotonic()
@@ -574,7 +574,7 @@ def test_no_batch_cap_when_no_limit_is_given() -> None:
 def test_gateway_never_routes_admitted_batch_to_the_owner_at_the_batch_cap(
     gw, monkeypatch
 ) -> None:
-    from infra.inference.gateway.admission import AdmitConfig
+    from services.gateway.admission import AdmitConfig
 
     client, reg = gw
     monkeypatch.setattr(gateway_main, "PLACEMENT_POLICY", "prefix_then_load")

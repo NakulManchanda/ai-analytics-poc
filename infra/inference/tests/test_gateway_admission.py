@@ -12,16 +12,16 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from infra.inference.gateway import main as gateway_main
-from infra.inference.gateway.admission import (
+from services.gateway import main as gateway_main
+from services.gateway.admission import (
     Admit,
     AdmitConfig,
     AdmitRequest,
     Shed,
     should_shed,
 )
-from infra.inference.gateway.tenants import TenantQuota
-from infra.inference.gateway.workers import Registry, Worker, WorkerSnapshot
+from services.gateway.tenants import TenantQuota
+from services.gateway.workers import Registry, Worker, WorkerSnapshot
 
 MSG = [{"role": "user", "content": "hello"}]
 NOW = 1000.0

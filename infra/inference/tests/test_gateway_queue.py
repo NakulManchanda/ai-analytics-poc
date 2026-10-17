@@ -9,13 +9,13 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from infra.inference.gateway import main as gateway_main
-from infra.inference.gateway import metrics
-from infra.inference.gateway.admission import Shed
-from infra.inference.gateway.placement import PlacementRequest, pick
-from infra.inference.gateway.queueing import QueueConfig, QueueRejected, WorkerQueues
-from infra.inference.gateway.tenants import TenantQuota
-from infra.inference.gateway.workers import Registry, Worker, WorkerSnapshot
+from services.gateway import main as gateway_main
+from services.gateway import metrics
+from services.gateway.admission import Shed
+from services.gateway.placement import PlacementRequest, pick
+from services.gateway.queueing import QueueConfig, QueueRejected, WorkerQueues
+from services.gateway.tenants import TenantQuota
+from services.gateway.workers import Registry, Worker, WorkerSnapshot
 
 MSG = [{"role": "user", "content": "hello"}]
 

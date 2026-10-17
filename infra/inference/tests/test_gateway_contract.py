@@ -7,9 +7,9 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from infra.inference.gateway import main as gateway_main
-from infra.inference.gateway.main import app
-from infra.inference.gateway.workers import Registry, Worker
+from services.gateway import main as gateway_main
+from services.gateway.main import app
+from services.gateway.workers import Registry, Worker
 
 
 @pytest.fixture

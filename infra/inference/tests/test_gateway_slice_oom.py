@@ -7,11 +7,11 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from infra.inference.gateway import main as gateway_main
-from infra.inference.gateway import metrics
-from infra.inference.gateway.overflow import OverflowConfig
-from infra.inference.gateway.upstream import classify_error
-from infra.inference.gateway.workers import Registry, Worker
+from services.gateway import main as gateway_main
+from services.gateway import metrics
+from services.gateway.overflow import OverflowConfig
+from services.gateway.upstream import classify_error
+from services.gateway.workers import Registry, Worker
 
 MSG = [{"role": "user", "content": "hello"}]
 OVERFLOW_URL = "https://overflow.example.test/v1/chat/completions"
