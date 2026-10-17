@@ -40,4 +40,4 @@ Gateway code sat under `infra/inference/`. It is deployed as flat files via the 
 
 ## Pull request
 
-PR #165 (closes #162), rebased onto `main` after #164 merged.
+PR #165 (closes #162), squash-merged to `main` as `98b7133`.

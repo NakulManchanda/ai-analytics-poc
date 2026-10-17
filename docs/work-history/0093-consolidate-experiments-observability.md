@@ -43,4 +43,4 @@ Root `experiments/` (analysis package, notebook, plots), `infra/inference/experi
 
 ## Pull request
 
-See the PR for #163.
+PR #166 (closes #163); merge state recorded on the PR.

@@ -46,4 +46,4 @@ Isolating the app-coupled checks first made the move purely mechanical.
 
 ## Pull request
 
-Draft PR #164 (closes #161); awaiting review.
+PR #164 (closes #161), squash-merged to `main` as `7c7fd70`.

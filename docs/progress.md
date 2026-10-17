@@ -85,6 +85,10 @@ Milestones 0–16 and prior public-UAT work remain historical baseline work. Any
 previous live-deployment statements are not v1.1 deployment evidence; use the
 current local and public UAT guides for this release's verification boundaries.
 
+## Repository structural refactor (epic #160)
+
+Ownership-based layout, no behavior change (works 0091-0093): benchmark tooling in `tooling/benchmarks/` (#161, PR #164), the inference gateway in `services/gateway/` (#162, PR #165), and experiments/observability in `tooling/experiments/` and `infra/observability/{core,inference}/` (#163, PR #166). `tooling/evals/` is reserved for the next DeepEval integration. Live verification of the remote sync/restart (`make inference-sync`, `make inference-gateway-restart`) on a real host remains a tracked follow-up.
+
 ## Isolated inference-course track
 
 Issue #120 and PR #130 defined the boundary for an isolated Lambda/k3s inference lab. A
