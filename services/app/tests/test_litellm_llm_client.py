@@ -31,7 +31,9 @@ def test_settings_and_factory() -> None:
     settings = Settings(llm_provider="litellm")
     assert isinstance(create_llm_client(settings), LiteLLMClient)
     with pytest.raises(LLMConfigurationError):
-        Settings(llm_provider="litellm", litellm_proxy_url="nope").validate_litellm_alignment()
+        Settings(
+            llm_provider="litellm", litellm_proxy_url="nope"
+        ).validate_litellm_alignment()
 
 
 def test_ask_uses_answer_alias_and_strips_vllm_params() -> None:

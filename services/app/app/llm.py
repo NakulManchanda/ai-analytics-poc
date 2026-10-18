@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 
 import httpx
-from opentelemetry import propagate
 from botocore.config import Config
 from botocore.exceptions import (
     BotoCoreError,
@@ -15,6 +14,7 @@ from botocore.exceptions import (
     EndpointConnectionError,
     ReadTimeoutError,
 )
+from opentelemetry import propagate
 
 from app.bedrock_budget import (
     BedrockBudgetExceededError,
