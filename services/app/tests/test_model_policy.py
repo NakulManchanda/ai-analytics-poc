@@ -243,3 +243,21 @@ def test_monthly_guard_still_authoritative() -> None:
     with pytest.raises(LLMProviderError) as err:
         client.ask("x")
     assert err.value.code == "bedrock_budget_exhausted" and calls == []
+
+
+def test_unknown_pricing_fails_closed_when_usd_cap_set() -> None:
+    policy = _policy()
+    unpriced = ModelPolicyRuntime(
+        policy, default_pricing(("taxi-planner",)), RunBudgets(max_usd=1.0)
+    )
+    calls: list[int] = []
+    client = _client(lambda r: calls.append(1) or _ok(), unpriced)
+    with call_context("t", "r9"), pytest.raises(LLMProviderError) as err:
+        client.ask("x")  # taxi-answer has no price
+    assert err.value.code == "run_budget_exhausted" and calls == []
+    # Without a USD cap the same unpriced call is allowed (token cap only).
+    token_only = ModelPolicyRuntime(
+        policy, default_pricing(("taxi-planner",)), RunBudgets(max_tokens=10_000)
+    )
+    with call_context("t", "r10"):
+        assert _client(lambda r: _ok(), token_only).ask("x").cost_usd is None

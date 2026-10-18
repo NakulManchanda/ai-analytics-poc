@@ -28,7 +28,7 @@ Every alias must exist in `infra/litellm/config.yaml`. Without the file, `LITELL
 | --- | --- | --- |
 | Tenant entitlement (`tenant_allowlists`; omitted = all) | app policy | `model_not_entitled` |
 | Per-call `max_tokens` per role | app policy | clamped, not an error |
-| Per-run budget (`RUN_MAX_TOKENS`, `RUN_MAX_USD`) | app, in-process, atomic reserve/commit | `run_budget_exhausted` |
+| Per-run budget (`RUN_MAX_TOKENS`, `RUN_MAX_USD`; with a USD cap, an unpriced model is denied, fail closed) | app, in-process, atomic reserve/commit | `run_budget_exhausted` |
 | Monthly Bedrock cap (`GLOBAL_BEDROCK_MONTHLY_LIMIT_USD`) | DynamoDB `app.bedrock_budget` | `bedrock_budget_exhausted` |
 | Fallbacks | policy allowlist, same provider only | original error is raised |
 
@@ -38,7 +38,7 @@ defense in depth only and are not relied on until verified. A policy fallback th
 (`PolicyConfigError`) unless `allow_cross_provider_fallback` is set explicitly; there is no silent cross-provider egress.
 A fallback the tenant is not entitled to is skipped and logged (`fallback_rejected`); the original error surfaces.
 
-Per-run budgets apply only when the loop binds identity with `call_context(tenant_id, run_id)` (see
+**Not yet operational (pending integration):** per-run budgets and tenant entitlements do nothing until the integration PR binds `call_context(tenant_id, run_id)` in `orchestration/loop.py`; only the DynamoDB monthly guard is enforced today. Per-run budgets apply only when the loop binds identity with `call_context(tenant_id, run_id)` (see
 `model_policy/context.py`). Until the orchestration owner adds that call, tenant is `default` and no run budget is applied.
 
 ## Cost accounting

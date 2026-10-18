@@ -43,12 +43,14 @@ class RunBudgets:
                 and state.used_tokens + state.held_tokens + tokens > self.max_tokens
             ):
                 raise RunBudgetExceededError("run token budget exhausted")
-            if (
-                self.max_usd is not None
-                and usd is not None
-                and state.used_usd + state.held_usd + usd > self.max_usd
-            ):
-                raise RunBudgetExceededError("run USD budget exhausted")
+            if self.max_usd is not None:
+                # Fail closed: a USD cap cannot be enforced for an unpriced model.
+                if usd is None:
+                    raise RunBudgetExceededError(
+                        "cost unknown; run USD budget cannot hold"
+                    )
+                if state.used_usd + state.held_usd + usd > self.max_usd:
+                    raise RunBudgetExceededError("run USD budget exhausted")
             state.held_tokens += tokens
             state.held_usd += usd or 0.0
             return Reservation(run_id, tokens, usd)

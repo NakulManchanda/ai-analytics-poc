@@ -30,4 +30,6 @@ Per-role model policy with entitlements, per-call and per-run limits, versioned 
 
 ## Lessons / limitations
 
+Pending integration: per-run budgets and tenant entitlements are NOT operational until the integration PR binds `call_context(tenant_id, run_id)` in `orchestration/loop.py`. Until then tenant is `default` and no run budget applies; only the DynamoDB monthly guard is enforced. With `RUN_MAX_USD` set, a call whose cost cannot be estimated is denied (fail closed).
+
 Run budgets need `call_context(...)` from the loop to take effect. Proxy-side budgets and key issuance are not implemented.
