@@ -97,6 +97,8 @@ def live_score(turn: Turn, view: TurnView, judge_model: str) -> dict[str, float]
     Evidence for faithfulness is the reviewed reference facts, because capture.v1 stores
     row counts and query ids, not raw tool results.
     """
+    if not live_enabled():
+        raise JudgeDisabled(f"set {LIVE_FLAG}=1 to run the live judge")
     from deepeval.test_case import LLMTestCase, ToolCall
 
     metrics = build_metrics(judge_model)
