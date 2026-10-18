@@ -1404,6 +1404,9 @@ class LiteLLMClient(ServeLLMClient):
         )
         if payload.get("stream"):
             payload["stream_options"] = {"include_usage": True}
+        # Group a conversation's planner/answer calls in the proxy's Logs view.
+        if conversation_id := headers.get("x-conversation-id"):
+            headers["x-litellm-session-id"] = conversation_id
         if self._api_key:
             headers["authorization"] = f"Bearer {self._api_key}"
         # W3C trace context so proxy spans join the app trace.

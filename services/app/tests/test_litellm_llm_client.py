@@ -119,3 +119,15 @@ def test_connect_error_is_retryable() -> None:
         _client(handler).ask("x")
     assert exc.value.code == "litellm_proxy_unavailable"
     assert exc.value.retryable is True
+
+
+def test_conversation_id_becomes_litellm_session_id() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json=_completion("ok"))
+
+    _client(handler).ask("hello", conversation_id="conv_abc")
+    assert seen[0].headers["x-litellm-session-id"] == "conv_abc"
+    assert seen[0].headers["x-conversation-id"] == "conv_abc"
