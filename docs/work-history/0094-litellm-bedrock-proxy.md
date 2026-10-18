@@ -26,6 +26,7 @@ No LiteLLM code; ADR 0010 deferred it. Bedrock is the main path, so two gateways
 - Deployed proxy is stateless. Local Compose adds Postgres, the Admin UI (`127.0.0.1:14000`), DEBUG logs, and prompt/response storage.
 - Master key lives in the git-ignored `.env` (`make litellm-env`), never printed.
 - `LiteLLMClient` subclasses `ServeLLMClient` via a hook; planner alias for proposals, answer alias otherwise; conversation id sent as `x-litellm-session-id`.
+- Review fixes: `LiteLLMClient` reserves the shared DynamoDB Bedrock allowance once per proxy request (cap preserved on the default path); `LITELLM_API_KEY` is required when `LLM_PROVIDER=litellm`; local prompt/response capture and DEBUG logs are opt-in (`LITELLM_CAPTURE=1`).
 - No `gateway_chat` bypass test: the replayer only drives vLLM gateway load tests.
 
 ## Bugs found by running it
@@ -36,12 +37,12 @@ No LiteLLM code; ADR 0010 deferred it. Bedrock is the main path, so two gateways
 
 ## Verification
 
-- `services/app` tests: 231 passed; Black, ruff, terraform fmt/validate clean.
+- `make test`: app 234, plus bench/gateway/MCP/dataset/infra suites passed; `web-test` 41 passed and build ok (after `npm ci`); Black, ruff, terraform fmt/validate clean.
 - Live, real Bedrock: proxy readiness healthy with DB; `make litellm-smoke` completes a run and finds its planner+answer calls by session; `make litellm-calls/spend/errors` read the logs.
-- Rollback smoke: `make local-bedrock-direct-compose` run completed with provider `bedrock` and zero new proxy calls.
+- Rollback smoke: `make local-bedrock-direct-compose` run completed with provider `bedrock` (no proxy calls).
 - Trace context: the proxy adopted a supplied `traceparent` trace id (0af76519…).
 - Streaming: answer streamed through the proxy; run telemetry recorded a real `ttft_ms` (the non-streaming path reports an unavailable reason instead).
-- Not done: terraform plan/apply; an OTEL exporter to a collector; catalogue prompts skip the planner by design, so they log only an answer call.
+- Not done: live budget-exhaustion against DynamoDB (unit-tested only); committed direct-vs-proxy contract test; cancellation/deadline tests through the proxy; terraform plan/apply; an OTEL exporter to a collector; catalogue prompts skip the planner by design, so they log only an answer call.
 
 ## PR / merge state
 
