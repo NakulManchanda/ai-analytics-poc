@@ -165,6 +165,15 @@ class LLMResult:
     reasoning_tokens_unavailable_reason: str | None = None
     visible_answer_tokens: int | None = None
     visible_answer_tokens_unavailable_reason: str | None = None
+    # Policy/accounting (#170); all optional so existing constructors are unchanged.
+    role: str | None = None  # classifier | planner | answer
+    model_alias: str | None = None
+    pricing_version: str | None = None
+    cost_usd: float | None = None  # None when unknown, never 0 by default
+    cost_kind: str | None = None  # estimated | billed | unknown
+    # False when the provider returned no usage; token fields are then not real
+    # counts and consumers must record them as null.
+    usage_known: bool = True
 
 
 @dataclass(frozen=True)
@@ -177,6 +186,12 @@ class ToolProposalResult:
     latency_ms: int
     finish_reason: str | None = None
     configured_max_tokens: int | None = None
+    role: str | None = None
+    model_alias: str | None = None
+    pricing_version: str | None = None
+    cost_usd: float | None = None
+    cost_kind: str | None = None
+    usage_known: bool = True
 
 
 class LLMClient(Protocol):
