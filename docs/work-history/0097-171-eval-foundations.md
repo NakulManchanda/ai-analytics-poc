@@ -1,4 +1,4 @@
-# 0095 — #171 eval foundations (offline slice)
+# 0097 — #171 eval foundations (offline slice)
 
 ## Goal
 Add `tooling/evals/`: versioned golden dataset, deterministic taxi graders, DeepEval metric setup with

@@ -4,6 +4,8 @@ Scope: the offline `tooling/evals/` slice of #171. Live capture ingest (#169) an
 direct-Bedrock vs LiteLLM comparison are follow-ups; this slice runs on committed golden cases and
 synthetic `capture.v1` fixtures.
 
+**Status: all fixtures (traces, run manifests, recorded judge scores) are synthetic, and all 37 golden cases are `pending_human_review`.** Nothing here is a real model observation or a human-approved reference yet.
+
 ## Feedback loop
 
 1. **Observe**: runs emit `capture.v1` JSONL (one record per model or tool call, joined by `run_id`).
