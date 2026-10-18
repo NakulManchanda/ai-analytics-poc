@@ -6,12 +6,12 @@ This guide provides end-to-end instructions for testing the AI Analytics POC app
 
 ## 1. Local vs. Remote Cloud: Why Local Docker + Remote AWS is Most Cost-Efficient
 
-For daily testing, development, and user acceptance evaluations, running the **Local Docker Stack with Remote AWS Services (`make local-aws-compose`)** is the **most cost-efficient architecture** by a wide margin:
+For daily testing, development, and user acceptance evaluations, running the **Local Docker Stack with Remote AWS Services (`make local-aws-litellm-compose`)** is the **most cost-efficient architecture** by a wide margin:
 
 | Architecture | Compute Cost (Fargate/ALB/Redis) | Model & Voice Cost (Bedrock/Transcribe) | Total Monthly Spend |
 | :--- | :--- | :--- | :--- |
 | **Full Remote Cloud (AWS Fargate + ALB + ElastiCache)** | **~$90–$120/month** (Fixed hourly baseline even when 100% idle) | Pay-per-request | High idle overhead |
-| **Local Docker + Remote AWS (`make local-aws-compose`)** | **$0.00** (Runs on host machine; no ALB, no Fargate, no NAT Gateway) | **~$0.001 per test run** (Strictly on-demand micro-cents) | **Under $1.00/month** |
+| **Local Docker + Remote AWS (`make local-aws-litellm-compose`)** | **$0.00** (Runs on host machine; no ALB, no Fargate, no NAT Gateway) | **~$0.001 per test run** (Strictly on-demand micro-cents) | **Under $1.00/month** |
 
 ### Why This Option Is Recommended:
 1. **Zero Idle Cloud Spend**: All server compute (FastAPI orchestrator, FastMCP DuckDB server, Redis event broker, React 18 web UI) runs locally on Docker for free.
@@ -30,13 +30,13 @@ For daily testing, development, and user acceptance evaluations, running the **L
 
 | Mode | Command | LLM Provider | Voice & Tools | State Storage | Use Case |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **Real AWS Stack** | `make local-aws-compose` | AWS Bedrock (`amazon.nova-micro-v1:0`) | Transcribe STT + Polly TTS + FastMCP DuckDB | DynamoDB + Redis | **Recommended:** Real cloud AI with zero compute overhead |
+| **Real AWS Stack** | `make local-aws-litellm-compose` | AWS Bedrock (`amazon.nova-micro-v1:0`) | Transcribe STT + Polly TTS + FastMCP DuckDB | DynamoDB + Redis | **Recommended:** Real cloud AI with zero compute overhead |
 | **Inference Serve Stack** | `make local-serve-compose` | Owned vLLM Gateway (`:18080/serve` on A100) | Transcribe STT + FastMCP DuckDB | DynamoDB + Redis | Testing Track B cluster gateway, queueing, and vLLM workers |
 | **Deterministic Fake Stack** | `docker compose up --build -d` | Mock LLM (`fake`) | Mock STT + FastMCP DuckDB | In-Memory / Local Redis | Offline unit testing, CI checks, and rapid frontend iteration |
 
-### Configured Defaults (`make local-aws-compose`)
+### Configured Defaults (`make local-aws-litellm-compose`)
 
-When you run `make local-aws-compose`, the following defaults are automatically applied:
+When you run `make local-aws-litellm-compose`, the following defaults are automatically applied:
 
 ```bash
 DYNAMODB_TABLE_NAME=ai-analytics-poc-demo-application-state # Shared DynamoDB state table
@@ -58,10 +58,10 @@ To benchmark and evaluate our bespoke ReAct orchestration loop against an extern
 
 ```bash
 # Evaluate with CrewAI multi-agent strategy (Researcher + Writer agents):
-AGENT_STRATEGY=crewai make local-aws-compose
+AGENT_STRATEGY=crewai make local-aws-litellm-compose
 
 # Switch back to bespoke ReAct loop:
-AGENT_STRATEGY=manual make local-aws-compose
+AGENT_STRATEGY=manual make local-aws-litellm-compose
 ```
 
 - **`manual` (Default)**: Our custom, deterministic ReAct loop (`think` → `tool call` → `observe` → `answer`). Strictly governed by execution budgets (30s wall-clock, 5 loop iterations, 3 tool calls), context compression via context reducer, and fast cancellation flags.
@@ -75,10 +75,10 @@ AGENT_STRATEGY=manual make local-aws-compose
 
 ```bash
 # Starts the stack with all defaults (Bedrock active, Transcribe voice input active, answer speech muted, manual ReAct loop):
-make local-aws-compose
+make local-aws-litellm-compose
 ```
 
-*(Optional: If you explicitly want the application to speak answers aloud via Amazon Polly, run `VOICE_ENABLED=true make local-aws-compose`.)*
+*(Optional: If you explicitly want the application to speak answers aloud via Amazon Polly, run `VOICE_ENABLED=true make local-aws-litellm-compose`.)*
 
 ### Step-by-Step Docker Verification Commands
 

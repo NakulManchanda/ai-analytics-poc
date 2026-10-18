@@ -68,7 +68,7 @@ You can manage Terraform in two ways:
   ```sh
   export DYNAMODB_TABLE_NAME=ai-analytics-poc-demo-application-state
   export AWS_PROFILE=default
-  make local-aws-compose
+  make local-aws-litellm-compose
   ```
 - **Metrics Comparison Dashboard**:
   ```sh

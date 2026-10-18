@@ -11,7 +11,7 @@ OBSERVABILITY_BURST_COUNT ?= 10
 OBSERVABILITY_LOG_TAIL ?= 200
 KV_BUNDLE_OUT = $(or $(OUT),work/kv-hop.yaml)
 
-.PHONY: help check-bootstrap dev app-serve-dev mcp-dev mcp-smoke dataset-test dataset-smoke smoke test bench-test gateway-test mcp-test infra-test web-test compose-smoke observability-up observability-down observability-smoke observability-dev-up observability-dev-info observability-dev-ask observability-dev-burst observability-dev-metrics observability-dev-logs observability-dev-down local-aws-compose local-aws-refresh local-serve-compose local-serve-refresh local-bedrock-compose bedrock-smoke m5-bedrock-smoke m6-bedrock-smoke dashboard tf-dispatch tf-resume tf-park inference-validate inference-sync inference-config inference-secret inference-bootstrap inference-deploy inference-up inference-tunnel inference-connect inference-smoke inference-warmup inference-capacity inference-restart inference-gateway-restart inference-controls-on inference-controls-off inference-verify-workers inference-e1 inference-fresh-up inference-tmux-start inference-tmux-end inference-serve-smoke inference-run inference-pull-evidence inference-pull-range inference-kv-image inference-kv-render inference-kv-smoke evidence-analyze evidence-notebook evidence-notebook-open inference-teardown replay-fanout replay-multi-turn replay-compare-strategies replay-strategy-manual replay-strategy-crewai replay-e3-least-loaded replay-e3-prefix-then-load replay-e4-admission-on replay-e4-admission-off replay-e3-large-prefix-least-loaded replay-e3-large-prefix-prefix-then-load replay-e5 replay-arrival-rate trace-request
+.PHONY: help check-bootstrap dev app-serve-dev mcp-dev mcp-smoke dataset-test dataset-smoke smoke test bench-test gateway-test mcp-test infra-test web-test compose-smoke observability-up observability-down observability-smoke observability-dev-up observability-dev-info observability-dev-ask observability-dev-burst observability-dev-metrics observability-dev-logs observability-dev-down local-aws-litellm-compose local-aws-compose local-litellm-compose local-bedrock-direct-compose litellm-traffic litellm-ready litellm-ui local-aws-refresh local-serve-compose local-serve-refresh local-bedrock-compose bedrock-smoke m5-bedrock-smoke m6-bedrock-smoke dashboard tf-dispatch tf-resume tf-park inference-validate inference-sync inference-config inference-secret inference-bootstrap inference-deploy inference-up inference-tunnel inference-connect inference-smoke inference-warmup inference-capacity inference-restart inference-gateway-restart inference-controls-on inference-controls-off inference-verify-workers inference-e1 inference-fresh-up inference-tmux-start inference-tmux-end inference-serve-smoke inference-run inference-pull-evidence inference-pull-range inference-kv-image inference-kv-render inference-kv-smoke evidence-analyze evidence-notebook evidence-notebook-open inference-teardown replay-fanout replay-multi-turn replay-compare-strategies replay-strategy-manual replay-strategy-crewai replay-e3-least-loaded replay-e3-prefix-then-load replay-e4-admission-on replay-e4-admission-off replay-e3-large-prefix-least-loaded replay-e3-large-prefix-prefix-then-load replay-e5 replay-arrival-rate trace-request
 
 
 help: ## Show available commands
@@ -275,17 +275,44 @@ observability-dev-down: ## Stop only the issue-owned local observability project
 	GRAFANA_PORT="$(OBSERVABILITY_GRAFANA_PORT)" PROMETHEUS_PORT="$(OBSERVABILITY_PROMETHEUS_PORT)" \
 		docker compose -p "$(OBSERVABILITY_PROJECT)" -f docker-compose.yml -f docker-compose.observability.yml down --remove-orphans
 
-local-aws-compose: ## Start local Compose with opt-in real AWS (Bedrock + Transcribe) and shared DynamoDB budget
+LITELLM_COMPOSE = -f docker-compose.yml -f docker-compose.aws.yml -f docker-compose.litellm.yml
+AWS_DIRECT_COMPOSE = -f docker-compose.yml -f docker-compose.aws.yml
+
+local-litellm-compose: ## Start local Compose with real AWS, model calls routed through the LiteLLM proxy (default model path)
+	DYNAMODB_TABLE_NAME=$(or $(DYNAMODB_TABLE_NAME),ai-analytics-poc-demo-application-state) \
+	AWS_PROFILE=$(or $(AWS_PROFILE),default) \
+	LOCAL_UID=$$(id -u) \
+	LITELLM_MASTER_KEY=$(or $(LITELLM_MASTER_KEY),sk-local-dev) \
+	LITELLM_PORT=$(or $(LITELLM_PORT),14000) \
+	WEB_PORT=$(or $(WEB_PORT),3000) \
+	VOICE_ENABLED=$(or $(VOICE_ENABLED),false) \
+	docker compose $(LITELLM_COMPOSE) up --build -d
+	@$(MAKE) --no-print-directory litellm-ui
+
+local-aws-litellm-compose: local-litellm-compose ## Start local Compose with real AWS (Bedrock via LiteLLM proxy + Transcribe); proxy is the default
+
+local-aws-compose: local-aws-litellm-compose ## Deprecated alias for local-aws-litellm-compose
+
+local-bedrock-direct-compose: ## Rollback path: local Compose with direct Bedrock (no LiteLLM proxy)
 	DYNAMODB_TABLE_NAME=$(or $(DYNAMODB_TABLE_NAME),ai-analytics-poc-demo-application-state) \
 	AWS_PROFILE=$(or $(AWS_PROFILE),default) \
 	LOCAL_UID=$$(id -u) \
 	WEB_PORT=$(or $(WEB_PORT),3000) \
 	VOICE_ENABLED=$(or $(VOICE_ENABLED),false) \
-	docker compose -f docker-compose.yml -f docker-compose.aws.yml up --build -d
+	docker compose $(AWS_DIRECT_COMPOSE) up --build -d
 
 local-aws-refresh: ## Restart local Compose stack from scratch (down then rebuild/up)
-	docker compose -f docker-compose.yml -f docker-compose.aws.yml down
-	$(MAKE) local-aws-compose
+	LOCAL_UID=$$(id -u) LITELLM_MASTER_KEY=$(or $(LITELLM_MASTER_KEY),sk-local-dev) DYNAMODB_TABLE_NAME=$(or $(DYNAMODB_TABLE_NAME),x) docker compose $(LITELLM_COMPOSE) down
+	$(MAKE) local-aws-litellm-compose
+
+litellm-traffic: ## Follow every request/response the LiteLLM proxy intercepts (local, DEBUG logs)
+	LOCAL_UID=$$(id -u) LITELLM_MASTER_KEY=$(or $(LITELLM_MASTER_KEY),sk-local-dev) DYNAMODB_TABLE_NAME=$(or $(DYNAMODB_TABLE_NAME),x) docker compose $(LITELLM_COMPOSE) logs -f --tail 50 litellm
+
+litellm-ui: ## Print the local LiteLLM Admin UI URL and login (admin / LITELLM_MASTER_KEY)
+	@echo "LiteLLM UI: http://127.0.0.1:$(or $(LITELLM_PORT),14000)/ui  (user: admin, password: $(or $(LITELLM_MASTER_KEY),sk-local-dev))"
+
+litellm-ready: ## Check the running local LiteLLM proxy readiness endpoint
+	LOCAL_UID=$$(id -u) LITELLM_MASTER_KEY=$(or $(LITELLM_MASTER_KEY),sk-local-dev) DYNAMODB_TABLE_NAME=$(or $(DYNAMODB_TABLE_NAME),x) docker compose $(LITELLM_COMPOSE) exec litellm python -c "import urllib.request; print(urllib.request.urlopen('http://localhost:4000/health/readiness').read().decode())"
 
 local-serve-compose: ## Start local Compose wired to owned vLLM inference gateway on port 3000
 	DYNAMODB_TABLE_NAME=$(or $(DYNAMODB_TABLE_NAME),ai-analytics-poc-demo-application-state) \
@@ -301,7 +328,7 @@ local-serve-refresh: ## Restart local serve Compose stack (down then rebuild/up)
 	docker compose -f docker-compose.yml -f docker-compose.serve.yml down
 	$(MAKE) local-serve-compose
 
-local-bedrock-compose: local-aws-compose ## Deprecated alias for local-aws-compose
+local-bedrock-compose: local-aws-litellm-compose ## Deprecated alias for local-aws-litellm-compose
 
 bedrock-smoke: ## Make one opt-in, bounded paid Bedrock call through POST /api/ask
 	uv run --project services/app python services/app/scripts/bedrock_smoke.py
