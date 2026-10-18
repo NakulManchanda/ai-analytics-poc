@@ -23,6 +23,7 @@ make local-aws-litellm-compose   # default; proxy + Postgres + app on real AWS
 make litellm-ui                  # Admin UI: http://127.0.0.1:14000/ui (admin / LITELLM_MASTER_KEY, default sk-local-dev)
 make litellm-traffic             # follow every intercepted request/response (DEBUG logs)
 make litellm-ready               # readiness check
+make litellm-calls               # compact table of recent proxy calls (needs jq); SESSION=conv_... LIMIT=20
 make litellm-smoke               # real run through the app; asserts the proxy logged its calls (spends a few tokens)
 make local-bedrock-direct-compose  # rollback: direct Bedrock, no proxy
 ```
