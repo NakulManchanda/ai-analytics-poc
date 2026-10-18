@@ -172,6 +172,7 @@ def test_serve_llm_client_execute_partitioned_call_headers(monkeypatch) -> None:
 
     class DummyResponse:
         status_code = 200
+        headers: dict = {}
 
         def json(self):
             return {

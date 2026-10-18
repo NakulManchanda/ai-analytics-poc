@@ -56,6 +56,10 @@ class Settings:
     litellm_planner_alias: str = "taxi-planner"
     litellm_answer_alias: str = "taxi-answer"
     litellm_api_key: str | None = None
+    # Model policy (#170): optional JSON policy file and per-run caps (None = no cap).
+    model_policy_file: str | None = None
+    run_max_tokens: int | None = None
+    run_max_usd: float | None = None
 
     def __post_init__(self) -> None:
         if self.agent_strategy not in ("manual", "crewai"):
@@ -87,6 +91,15 @@ class Settings:
             litellm_planner_alias=os.getenv("LITELLM_PLANNER_ALIAS", "taxi-planner"),
             litellm_answer_alias=os.getenv("LITELLM_ANSWER_ALIAS", "taxi-answer"),
             litellm_api_key=os.getenv("LITELLM_API_KEY") or None,
+            model_policy_file=os.getenv("MODEL_POLICY_FILE") or None,
+            run_max_tokens=(
+                int(os.environ["RUN_MAX_TOKENS"])
+                if os.getenv("RUN_MAX_TOKENS")
+                else None
+            ),
+            run_max_usd=(
+                float(os.environ["RUN_MAX_USD"]) if os.getenv("RUN_MAX_USD") else None
+            ),
         )
 
     def validate_litellm_alignment(self) -> None:
