@@ -96,6 +96,10 @@ class Settings:
             raise LLMConfigurationError(
                 f"LITELLM_PROXY_URL must be a valid HTTP(S) URL, got {self.litellm_proxy_url!r}"
             )
+        if not self.litellm_api_key:
+            raise LLMConfigurationError(
+                "LITELLM_API_KEY is required when LLM_PROVIDER=litellm"
+            )
         if not (self.litellm_planner_alias and self.litellm_answer_alias):
             raise LLMConfigurationError("LiteLLM aliases must be specified")
 

@@ -27,13 +27,56 @@ def _completion(content: str = "hi", **extra) -> dict:
     }
 
 
+class _Budget:
+    def __init__(self, error: Exception | None = None) -> None:
+        self.calls: list[str] = []
+        self._error = error
+
+    def reserve(self, model_id: str) -> None:
+        self.calls.append(model_id)
+        if self._error is not None:
+            raise self._error
+
+
 def test_settings_and_factory() -> None:
-    settings = Settings(llm_provider="litellm")
-    assert isinstance(create_llm_client(settings), LiteLLMClient)
+    settings = Settings(llm_provider="litellm", litellm_api_key="sk-test")
+    assert isinstance(create_llm_client(settings, budget=_Budget()), LiteLLMClient)
     with pytest.raises(LLMConfigurationError):
         Settings(
-            llm_provider="litellm", litellm_proxy_url="nope"
+            llm_provider="litellm", litellm_api_key="k", litellm_proxy_url="nope"
         ).validate_litellm_alignment()
+
+
+def test_factory_requires_api_key_and_budget_table() -> None:
+    with pytest.raises(LLMConfigurationError, match="LITELLM_API_KEY"):
+        create_llm_client(Settings(llm_provider="litellm"), budget=_Budget())
+    with pytest.raises(ValueError, match="DYNAMODB_TABLE_NAME"):
+        create_llm_client(Settings(llm_provider="litellm", litellm_api_key="k"))
+
+
+def test_budget_reserved_once_per_request() -> None:
+    budget = _Budget()
+    _client(lambda r: httpx.Response(200, json=_completion()), budget=budget).ask("x")
+    assert budget.calls == ["amazon.nova-micro-v1:0"]
+
+
+def test_budget_exhausted_blocks_proxy_call() -> None:
+    from app.bedrock_budget import (
+        BedrockBudgetExceededError,
+        BedrockBudgetUnavailableError,
+    )
+
+    def never(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("proxy must not be called when the allowance is spent")
+
+    for error, code, retryable in (
+        (BedrockBudgetExceededError(), "bedrock_budget_exhausted", False),
+        (BedrockBudgetUnavailableError(), "bedrock_budget_unavailable", True),
+    ):
+        with pytest.raises(LLMProviderError) as exc:
+            _client(never, budget=_Budget(error)).ask("x")
+        assert exc.value.code == code
+        assert exc.value.retryable is retryable
 
 
 def test_ask_uses_answer_alias_and_strips_vllm_params() -> None:

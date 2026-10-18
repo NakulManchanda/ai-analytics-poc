@@ -6,7 +6,7 @@ Decision: [ADR 0012](decisions/0012-litellm-bedrock-model-proxy.md). Issue #168,
 
 A separate LiteLLM Proxy service, now the default model path locally (`make local-aws-litellm-compose`) and in Terraform (ai-app `LLM_PROVIDER=litellm`). The app (`LiteLLMClient`, `LLM_PROVIDER=litellm`) calls
 stable aliases; the proxy maps them to Bedrock. The app still owns every LLM call, loop budget and
-durable state. Deployed (ECS) proxy is stateless. Local Compose adds Postgres so the Admin UI and request/response logs work.
+durable state. Deployed (ECS) proxy is stateless. Local Compose adds Postgres so the Admin UI and call logs work.
 
 | Alias | Used for | Target |
 | --- | --- | --- |
@@ -32,7 +32,7 @@ make local-bedrock-direct-compose  # rollback: direct Bedrock, no proxy
 ```
 
 `LITELLM_PORT` overrides the host port (default 14000, loopback only). `local-aws-compose` remains as a deprecated alias.
-Local stores prompts/responses in Postgres (`STORE_PROMPTS_IN_SPEND_LOGS`); read them via the UI or `GET /spend/logs`.
+Call metadata is stored in Postgres; read it via the UI or `GET /spend/logs`. Bodies are stored only with `LITELLM_CAPTURE=1`.
 
 ## Terraform
 
@@ -62,7 +62,22 @@ With the flag on, the proxy is a hard dependency for model calls (a down proxy m
 
 Rollback: locally use `make local-bedrock-direct-compose`; in Terraform set ai-app `LLM_PROVIDER` back to `bedrock` (its task role keeps Bedrock access). The GPU gateway and the direct `gateway_chat` replayer never use the proxy.
 
+## Spend guard
+
+`LiteLLMClient` reserves the shared DynamoDB Bedrock allowance (`DynamoDBBedrockBudget`) once per proxy
+request, exactly like the direct client, so the monthly cap still applies on the default path. An exhausted
+or unavailable allowance maps to `bedrock_budget_exhausted` / `bedrock_budget_unavailable` before the proxy is
+called. `LITELLM_API_KEY` is required when `LLM_PROVIDER=litellm` (startup fails closed without it).
+Proxy-native budgets and per-key limits are #170.
+
+## Prompt capture is opt-in
+
+Local logging is metadata-only by default. `LITELLM_CAPTURE=1 make local-aws-litellm-compose` stores prompts and
+responses in Postgres and prints bodies (DEBUG) for evaluation capture; without it `make litellm-calls` shows `-`
+in the TOOL column and Logs has no request/response JSON. Deployed ECS never stores bodies.
+
 ## Known limitations
 
-- Rollback smoke and direct-vs-proxy live comparison are not yet run.
-- Budget enforcement for the proxy path (`DynamoDBBedrockBudget`) is not applied; spend controls are #170.
+- Terraform is validated only (no plan/apply); the ECS rollout is unverified.
+- OTEL: the proxy adopts the incoming `traceparent`, but no collector/exporter is configured for it yet.
+- Cancellation and deadline behaviour through the proxy have no proxy-specific tests.

@@ -1380,6 +1380,8 @@ class LiteLLMClient(ServeLLMClient):
         planner_alias: str = "taxi-planner",
         answer_alias: str = "taxi-answer",
         api_key: str | None = None,
+        budget: Any | None = None,
+        budget_model_id: str = DEFAULT_MODEL_ID,
         timeout_seconds: float = 60.0,
         http_client: httpx.Client | None = None,
     ) -> None:
@@ -1391,6 +1393,23 @@ class LiteLLMClient(ServeLLMClient):
         )
         self._planner_alias = planner_alias
         self._api_key = api_key
+        # The proxy fronts billed Bedrock, so the shared DynamoDB allowance still applies.
+        self._budget = budget
+        self._budget_model_id = budget_model_id
+
+    def _reserve_budget(self) -> None:
+        if self._budget is None:
+            return
+        try:
+            self._budget.reserve(self._budget_model_id)
+        except BedrockBudgetExceededError as error:
+            raise LLMProviderError(
+                retryable=False, code="bedrock_budget_exhausted"
+            ) from error
+        except BedrockBudgetUnavailableError as error:
+            raise LLMProviderError(
+                retryable=True, code="bedrock_budget_unavailable"
+            ) from error
 
     def propose_taxi_query(
         self,
@@ -1431,6 +1450,7 @@ class LiteLLMClient(ServeLLMClient):
     def _prepare_request(
         self, payload: dict[str, Any], headers: dict[str, str]
     ) -> None:
+        self._reserve_budget()
         # vLLM-only knob; Bedrock via the proxy must not receive it.
         payload.pop("chat_template_kwargs", None)
         payload["model"] = (
@@ -1471,18 +1491,13 @@ def create_llm_client(
         )
     if settings.llm_provider == "litellm":
         settings.validate_litellm_alignment()
-        return LiteLLMClient(
-            settings.litellm_proxy_url,
-            planner_alias=settings.litellm_planner_alias,
-            answer_alias=settings.litellm_answer_alias,
-            api_key=settings.litellm_api_key,
-            http_client=http_client,
-        )
-    settings.validate_m4_alignment()
+    else:
+        settings.validate_m4_alignment()
     if budget is None:
         if not settings.dynamodb_table_name:
             raise ValueError(
-                "LLM_PROVIDER=bedrock requires DYNAMODB_TABLE_NAME for the shared Bedrock allowance"
+                f"LLM_PROVIDER={settings.llm_provider} requires DYNAMODB_TABLE_NAME "
+                "for the shared Bedrock allowance"
             )
         budget = DynamoDBBedrockBudget(
             settings.dynamodb_table_name,
@@ -1490,6 +1505,16 @@ def create_llm_client(
                 settings.global_bedrock_monthly_limit_usd
             ),
             region_name=settings.aws_region,
+        )
+    if settings.llm_provider == "litellm":
+        return LiteLLMClient(
+            settings.litellm_proxy_url,
+            planner_alias=settings.litellm_planner_alias,
+            answer_alias=settings.litellm_answer_alias,
+            api_key=settings.litellm_api_key,
+            budget=budget,
+            budget_model_id=settings.llm_model_id,
+            http_client=http_client,
         )
     return BedrockLLMClient(
         settings.llm_model_id,

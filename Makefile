@@ -285,8 +285,9 @@ LITELLM_COMPOSE_ENV = LOCAL_UID=$$(id -u) DYNAMODB_TABLE_NAME=$(or $(DYNAMODB_TA
 litellm-env: ## Ensure LITELLM_MASTER_KEY exists in the git-ignored .env (generated once, never printed)
 	@touch .env; grep -q '^LITELLM_MASTER_KEY=' .env || { printf 'LITELLM_MASTER_KEY=sk-%s\n' "$$(openssl rand -hex 24)" >> .env; echo "Generated LITELLM_MASTER_KEY in .env (value not shown)"; }
 
-local-litellm-compose: litellm-env ## Start local Compose with real AWS, model calls routed through the LiteLLM proxy (default model path)
+local-litellm-compose: litellm-env ## Start local Compose with real AWS, model calls routed through the LiteLLM proxy (default; LITELLM_CAPTURE=1 also stores prompts/responses and DEBUG-logs bodies)
 	$(LITELLM_COMPOSE_ENV) \
+	LITELLM_STORE_PROMPTS=$(if $(LITELLM_CAPTURE),true,false) LITELLM_LOG=$(if $(LITELLM_CAPTURE),DEBUG,INFO) \
 	WEB_PORT=$(or $(WEB_PORT),3000) \
 	VOICE_ENABLED=$(or $(VOICE_ENABLED),false) \
 	docker compose $(LITELLM_COMPOSE) up --build -d

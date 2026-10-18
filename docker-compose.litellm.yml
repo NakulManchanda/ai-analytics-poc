@@ -20,10 +20,10 @@ services:
       AWS_CONFIG_FILE: /aws/config
       AWS_SHARED_CREDENTIALS_FILE: /aws/credentials
       HOME: /tmp
-      # Local only: DEBUG prints every request and response body the proxy intercepts
-      # (view with `make litellm-traffic`). Never enable raw-body logging in deployed envs.
-      STORE_PROMPTS_IN_SPEND_LOGS: "true"
-      LITELLM_LOG: "${LITELLM_LOG:-DEBUG}"
+      # Metadata-only by default. `LITELLM_CAPTURE=1 make local-aws-litellm-compose` stores prompts/
+      # responses and prints bodies (DEBUG) for local evaluation capture. Never in deployed envs.
+      STORE_PROMPTS_IN_SPEND_LOGS: "${LITELLM_STORE_PROMPTS:-false}"
+      LITELLM_LOG: "${LITELLM_LOG:-INFO}"
     volumes:
       - ./infra/litellm/config.yaml:/app/config.yaml:ro
       - "${HOME}/.aws:/aws:ro"
@@ -52,15 +52,6 @@ services:
       retries: 20
 
   app:
-    environment:
-      LLM_PROVIDER: litellm
-      LITELLM_PROXY_URL: http://litellm:4000
-      LITELLM_API_KEY: "${LITELLM_MASTER_KEY}"
-    depends_on:
-      litellm:
-        condition: service_healthy
-
-  worker:
     environment:
       LLM_PROVIDER: litellm
       LITELLM_PROXY_URL: http://litellm:4000
