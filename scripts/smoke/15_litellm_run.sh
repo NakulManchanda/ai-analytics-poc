@@ -5,7 +5,8 @@ set -euo pipefail
 
 web="http://localhost:${WEB_PORT:-3000}"
 proxy="http://127.0.0.1:${LITELLM_PORT:-14000}"
-key="${LITELLM_MASTER_KEY:-sk-local-dev}"
+set -a; [[ -f .env ]] && . ./.env; set +a
+key="${LITELLM_MASTER_KEY:?run make litellm-env first}"
 prompt="${1:-Show an unusual ranking of pickup spots, please}"
 
 run="$(curl -sf -X POST "${web}/api/runs" -H 'content-type: application/json' \
@@ -18,16 +19,12 @@ if grep -q "run.completed" <<<"${events}"; then echo "run: completed"; else echo
 
 # The proxy batches spend-log writes; poll until the session's calls appear.
 for _ in $(seq 1 24); do
-  rows="$(curl -sf "${proxy}/spend/logs" -H "Authorization: Bearer ${key}" || echo '[]')"
-  found="$(python3 -c '
-import json,sys
-rows=[r for r in json.loads(sys.argv[1]) if r.get("session_id")==sys.argv[2]]
-for r in sorted(rows,key=lambda r:r["startTime"]):
-    print(r["startTime"][11:19], r["model_group"], r["status"], r["total_tokens"], "tokens")
-' "${rows}" "${cid}")"
-  if [[ -n "${found}" ]] && grep -q "taxi-answer" <<<"${found}"; then
+  found="$(curl -sf "${proxy}/spend/logs" -H "Authorization: Bearer ${key}" \
+    | jq -r --arg s "${cid}" '[.[] | select(.session_id == $s)] | sort_by(.startTime)[]
+        | "\(.startTime[11:19]) \(.model_group) \(.status) \(.total_tokens) tokens"' || true)"
+  if grep -q "taxi-answer" <<<"${found}"; then
     echo "proxy logged calls for session ${cid}:"; echo "${found}"
-    echo "find them: ${proxy}/ui -> Logs (session ${cid}), or GET ${proxy}/spend/logs"
+    echo "find them: ${proxy}/ui -> Logs (session ${cid}), or make litellm-calls SESSION=${cid}"
     exit 0
   fi
   sleep 5

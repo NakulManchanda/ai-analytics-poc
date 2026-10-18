@@ -11,7 +11,7 @@ OBSERVABILITY_BURST_COUNT ?= 10
 OBSERVABILITY_LOG_TAIL ?= 200
 KV_BUNDLE_OUT = $(or $(OUT),work/kv-hop.yaml)
 
-.PHONY: help check-bootstrap dev app-serve-dev mcp-dev mcp-smoke dataset-test dataset-smoke smoke test bench-test gateway-test mcp-test infra-test web-test compose-smoke observability-up observability-down observability-smoke observability-dev-up observability-dev-info observability-dev-ask observability-dev-burst observability-dev-metrics observability-dev-logs observability-dev-down local-aws-litellm-compose local-aws-compose local-litellm-compose local-bedrock-direct-compose litellm-traffic litellm-smoke litellm-calls litellm-ready litellm-ui local-aws-refresh local-serve-compose local-serve-refresh local-bedrock-compose bedrock-smoke m5-bedrock-smoke m6-bedrock-smoke dashboard tf-dispatch tf-resume tf-park inference-validate inference-sync inference-config inference-secret inference-bootstrap inference-deploy inference-up inference-tunnel inference-connect inference-smoke inference-warmup inference-capacity inference-restart inference-gateway-restart inference-controls-on inference-controls-off inference-verify-workers inference-e1 inference-fresh-up inference-tmux-start inference-tmux-end inference-serve-smoke inference-run inference-pull-evidence inference-pull-range inference-kv-image inference-kv-render inference-kv-smoke evidence-analyze evidence-notebook evidence-notebook-open inference-teardown replay-fanout replay-multi-turn replay-compare-strategies replay-strategy-manual replay-strategy-crewai replay-e3-least-loaded replay-e3-prefix-then-load replay-e4-admission-on replay-e4-admission-off replay-e3-large-prefix-least-loaded replay-e3-large-prefix-prefix-then-load replay-e5 replay-arrival-rate trace-request
+.PHONY: help check-bootstrap dev app-serve-dev mcp-dev mcp-smoke dataset-test dataset-smoke smoke test bench-test gateway-test mcp-test infra-test web-test compose-smoke observability-up observability-down observability-smoke observability-dev-up observability-dev-info observability-dev-ask observability-dev-burst observability-dev-metrics observability-dev-logs observability-dev-down local-aws-litellm-compose local-aws-compose local-litellm-compose local-bedrock-direct-compose litellm-traffic litellm-env litellm-smoke litellm-calls litellm-spend litellm-errors litellm-ready litellm-ui litellm-traffic local-aws-refresh local-serve-compose local-serve-refresh local-bedrock-compose bedrock-smoke m5-bedrock-smoke m6-bedrock-smoke dashboard tf-dispatch tf-resume tf-park inference-validate inference-sync inference-config inference-secret inference-bootstrap inference-deploy inference-up inference-tunnel inference-connect inference-smoke inference-warmup inference-capacity inference-restart inference-gateway-restart inference-controls-on inference-controls-off inference-verify-workers inference-e1 inference-fresh-up inference-tmux-start inference-tmux-end inference-serve-smoke inference-run inference-pull-evidence inference-pull-range inference-kv-image inference-kv-render inference-kv-smoke evidence-analyze evidence-notebook evidence-notebook-open inference-teardown replay-fanout replay-multi-turn replay-compare-strategies replay-strategy-manual replay-strategy-crewai replay-e3-least-loaded replay-e3-prefix-then-load replay-e4-admission-on replay-e4-admission-off replay-e3-large-prefix-least-loaded replay-e3-large-prefix-prefix-then-load replay-e5 replay-arrival-rate trace-request
 
 
 help: ## Show available commands
@@ -277,13 +277,16 @@ observability-dev-down: ## Stop only the issue-owned local observability project
 
 LITELLM_COMPOSE = -f docker-compose.yml -f docker-compose.aws.yml -f docker-compose.litellm.yml
 AWS_DIRECT_COMPOSE = -f docker-compose.yml -f docker-compose.aws.yml
+# The proxy master key lives in the git-ignored .env (see litellm-env); it is sourced, never printed.
+LITELLM_ENV = set -a; [ -f .env ] && . ./.env; set +a; : "$${LITELLM_MASTER_KEY:?run make litellm-env}";
+LITELLM_URL = http://127.0.0.1:$(or $(LITELLM_PORT),14000)
+LITELLM_COMPOSE_ENV = LOCAL_UID=$$(id -u) DYNAMODB_TABLE_NAME=$(or $(DYNAMODB_TABLE_NAME),ai-analytics-poc-demo-application-state) AWS_PROFILE=$(or $(AWS_PROFILE),default) LITELLM_PORT=$(or $(LITELLM_PORT),14000)
 
-local-litellm-compose: ## Start local Compose with real AWS, model calls routed through the LiteLLM proxy (default model path)
-	DYNAMODB_TABLE_NAME=$(or $(DYNAMODB_TABLE_NAME),ai-analytics-poc-demo-application-state) \
-	AWS_PROFILE=$(or $(AWS_PROFILE),default) \
-	LOCAL_UID=$$(id -u) \
-	LITELLM_MASTER_KEY=$(or $(LITELLM_MASTER_KEY),sk-local-dev) \
-	LITELLM_PORT=$(or $(LITELLM_PORT),14000) \
+litellm-env: ## Ensure LITELLM_MASTER_KEY exists in the git-ignored .env (generated once, never printed)
+	@touch .env; grep -q '^LITELLM_MASTER_KEY=' .env || { printf 'LITELLM_MASTER_KEY=sk-%s\n' "$$(openssl rand -hex 24)" >> .env; echo "Generated LITELLM_MASTER_KEY in .env (value not shown)"; }
+
+local-litellm-compose: litellm-env ## Start local Compose with real AWS, model calls routed through the LiteLLM proxy (default model path)
+	$(LITELLM_COMPOSE_ENV) \
 	WEB_PORT=$(or $(WEB_PORT),3000) \
 	VOICE_ENABLED=$(or $(VOICE_ENABLED),false) \
 	docker compose $(LITELLM_COMPOSE) up --build -d
@@ -301,29 +304,40 @@ local-bedrock-direct-compose: ## Rollback path: local Compose with direct Bedroc
 	VOICE_ENABLED=$(or $(VOICE_ENABLED),false) \
 	docker compose $(AWS_DIRECT_COMPOSE) up --build -d
 
-local-aws-refresh: ## Restart local Compose stack from scratch (down then rebuild/up)
-	LOCAL_UID=$$(id -u) LITELLM_MASTER_KEY=$(or $(LITELLM_MASTER_KEY),sk-local-dev) DYNAMODB_TABLE_NAME=$(or $(DYNAMODB_TABLE_NAME),x) docker compose $(LITELLM_COMPOSE) down
+local-aws-refresh: litellm-env ## Restart local Compose stack from scratch (down then rebuild/up)
+	$(LITELLM_COMPOSE_ENV) docker compose $(LITELLM_COMPOSE) down
 	$(MAKE) local-aws-litellm-compose
 
-litellm-traffic: ## Follow every request/response the LiteLLM proxy intercepts (local, DEBUG logs)
-	LOCAL_UID=$$(id -u) LITELLM_MASTER_KEY=$(or $(LITELLM_MASTER_KEY),sk-local-dev) DYNAMODB_TABLE_NAME=$(or $(DYNAMODB_TABLE_NAME),x) docker compose $(LITELLM_COMPOSE) logs -f --tail 50 litellm
+litellm-ui: ## Print the local LiteLLM Admin UI URL; login is admin / LITELLM_MASTER_KEY from .env
+	@echo "LiteLLM UI: $(LITELLM_URL)/ui  (user: admin, password: LITELLM_MASTER_KEY in .env)"
 
-litellm-ui: ## Print the local LiteLLM Admin UI URL and login (admin / LITELLM_MASTER_KEY)
-	@echo "LiteLLM UI: http://127.0.0.1:$(or $(LITELLM_PORT),14000)/ui  (user: admin, password: $(or $(LITELLM_MASTER_KEY),sk-local-dev))"
+litellm-ready: ## Check the local LiteLLM proxy readiness and liveness endpoints (no auth needed)
+	@curl -sf "$(LITELLM_URL)/health/readiness" && echo && curl -sf "$(LITELLM_URL)/health/liveliness" && echo
 
-litellm-smoke: ## Send a real run through the local stack and confirm the LiteLLM proxy logged its calls (spends a few Bedrock tokens; usage: make litellm-smoke [PROMPT=...])
-	./scripts/smoke/15_litellm_run.sh $(if $(PROMPT),"$(PROMPT)")
+litellm-traffic: litellm-env ## Follow every request/response the LiteLLM proxy intercepts (local, DEBUG logs)
+	$(LITELLM_COMPOSE_ENV) docker compose $(LITELLM_COMPOSE) logs -f --tail 50 litellm
 
 litellm-calls: ## List recent proxy calls (time, session, alias, status, tokens, cost, latency, tool); usage: make litellm-calls [SESSION=conv_...] [LIMIT=20]
-	@curl -sf "http://127.0.0.1:$(or $(LITELLM_PORT),14000)/spend/logs" -H "Authorization: Bearer $(or $(LITELLM_MASTER_KEY),sk-local-dev)" \
+	@$(LITELLM_ENV) curl -sf "$(LITELLM_URL)/spend/logs" -H "Authorization: Bearer $$LITELLM_MASTER_KEY" \
 	| jq -r --arg s "$(SESSION)" --argjson n $(or $(LIMIT),20) '\
 	  ["TIME","SESSION","ALIAS","STATUS","TOKENS","COST_USD","MS","TOOL"], \
 	  (map(select($$s == "" or .session_id == $$s)) | sort_by(.startTime) | reverse | .[:$$n][] | \
 	   [(.startTime[11:19]), (.session_id // "-"), .model_group, .status, .total_tokens, (.spend | tostring[0:8]), (.request_duration_ms // 0 | floor), \
 	    ((.response.choices[0].message.tool_calls // [])[0].function.name // "-")]) | @tsv' | column -t -s "$$(printf '\t')"
 
-litellm-ready: ## Check the running local LiteLLM proxy readiness endpoint
-	LOCAL_UID=$$(id -u) LITELLM_MASTER_KEY=$(or $(LITELLM_MASTER_KEY),sk-local-dev) DYNAMODB_TABLE_NAME=$(or $(DYNAMODB_TABLE_NAME),x) docker compose $(LITELLM_COMPOSE) exec litellm python -c "import urllib.request; print(urllib.request.urlopen('http://localhost:4000/health/readiness').read().decode())"
+litellm-spend: ## Summarise proxy usage per alias: calls, failures, tokens, cost, average latency
+	@$(LITELLM_ENV) curl -sf "$(LITELLM_URL)/spend/logs" -H "Authorization: Bearer $$LITELLM_MASTER_KEY" \
+	| jq -r '["ALIAS","CALLS","FAILED","TOKENS","COST_USD","AVG_MS"], \
+	  (group_by(.model_group // "")[] | [(if (.[0].model_group // "") == "" then "(none)" else .[0].model_group end), length, (map(select(.status=="failure"))|length), (map(.total_tokens)|add), (map(.spend)|add|tostring[0:9]), ((map(.request_duration_ms // 0)|add)/length|floor)]), \
+	  ["TOTAL", length, (map(select(.status=="failure"))|length), (map(.total_tokens)|add), (map(.spend)|add|tostring[0:9]), "-"] | @tsv' | column -t -s "$$(printf '\t')"
+
+litellm-errors: ## Show failed proxy calls with the provider error (usage: make litellm-errors [LIMIT=10])
+	@$(LITELLM_ENV) curl -sf "$(LITELLM_URL)/spend/logs" -H "Authorization: Bearer $$LITELLM_MASTER_KEY" \
+	| jq -r --argjson n $(or $(LIMIT),10) 'map(select(.status=="failure")) | sort_by(.startTime) | reverse | .[:$$n][] | \
+	  "\(.startTime[11:19])  \(.model_group)  \(.session_id // "-")  \((.metadata.error_information.error_message // "unknown") | split("\n")[0] | .[0:160])"'
+
+litellm-smoke: ## Send a real run through the local stack and confirm the LiteLLM proxy logged its calls (spends a few Bedrock tokens; usage: make litellm-smoke [PROMPT=...])
+	./scripts/smoke/15_litellm_run.sh $(if $(PROMPT),"$(PROMPT)")
 
 local-serve-compose: ## Start local Compose wired to owned vLLM inference gateway on port 3000
 	DYNAMODB_TABLE_NAME=$(or $(DYNAMODB_TABLE_NAME),ai-analytics-poc-demo-application-state) \

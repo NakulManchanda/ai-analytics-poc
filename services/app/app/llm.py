@@ -212,6 +212,69 @@ class LLMClient(Protocol):
     ) -> LLMResult: ...
 
 
+TAXI_PROPOSAL_TOOL_SPECS: list[dict[str, Any]] = [
+    {
+        "name": "query_taxi_data",
+        "description": "Run one fixed read-only analysis over the pinned NYC Taxi dataset.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "analysis": {
+                    "type": "string",
+                    "enum": [
+                        "top_pickup_zones",
+                        "trip_volume_by_hour",
+                        "average_distance_by_weekday",
+                    ],
+                },
+                "limit": {"type": "integer", "minimum": 1, "maximum": 20},
+            },
+            "required": ["analysis", "limit"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "average_trip_metrics",
+        "description": (
+            "Compare average trip distance and fare amount across governed "
+            "pickup boroughs (Manhattan, Brooklyn, Queens, Bronx, "
+            "Staten Island). Leave region_name empty to compare all "
+            "boroughs, or provide exactly one single borough name."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "region_name": {
+                    "type": "string",
+                    "description": (
+                        "Optional single borough name. "
+                        "Omit to compare all boroughs across NYC."
+                    ),
+                    "enum": [
+                        "Manhattan",
+                        "Brooklyn",
+                        "Queens",
+                        "Bronx",
+                        "Staten Island",
+                    ],
+                }
+            },
+            "additionalProperties": False,
+        },
+    },
+]
+
+
+def taxi_proposal_prompt(prompt: str, schema: Mapping[str, object]) -> str:
+    schema_json = json.dumps(schema, separators=(",", ":"), allow_nan=False)
+    return (
+        "Choose exactly ONE governed analysis that answers the question. "
+        "Do not make multiple tool calls. To compare all boroughs "
+        "across NYC, call average_trip_metrics with region_name omitted. "
+        f"Dataset schema: {schema_json}\nQuestion: {prompt}"
+    )
+
+
 class LocalFakeLLMClient:
     """Deterministic local-only client used by the Compose M5 smoke path."""
 
@@ -431,88 +494,23 @@ class BedrockLLMClient:
     def propose_taxi_query(
         self, prompt: str, schema: Mapping[str, object]
     ) -> ToolProposalResult:
-        schema_json = json.dumps(schema, separators=(",", ":"), allow_nan=False)
         response = self._converse(
             messages=[
                 {
                     "role": "user",
-                    "content": [
-                        {
-                            "text": (
-                                "Choose exactly ONE governed analysis that answers the question. "
-                                "Do not make multiple tool calls. To compare all boroughs "
-                                "across NYC, call average_trip_metrics with region_name omitted. "
-                                f"Dataset schema: {schema_json}\nQuestion: {prompt}"
-                            )
-                        }
-                    ],
+                    "content": [{"text": taxi_proposal_prompt(prompt, schema)}],
                 }
             ],
             tool_config={
                 "tools": [
                     {
                         "toolSpec": {
-                            "name": "query_taxi_data",
-                            "description": (
-                                "Run one fixed read-only analysis over the pinned NYC Taxi dataset."
-                            ),
-                            "inputSchema": {
-                                "json": {
-                                    "type": "object",
-                                    "properties": {
-                                        "analysis": {
-                                            "type": "string",
-                                            "enum": [
-                                                "top_pickup_zones",
-                                                "trip_volume_by_hour",
-                                                "average_distance_by_weekday",
-                                            ],
-                                        },
-                                        "limit": {
-                                            "type": "integer",
-                                            "minimum": 1,
-                                            "maximum": 20,
-                                        },
-                                    },
-                                    "required": ["analysis", "limit"],
-                                    "additionalProperties": False,
-                                }
-                            },
+                            "name": spec["name"],
+                            "description": spec["description"],
+                            "inputSchema": {"json": spec["inputSchema"]},
                         }
-                    },
-                    {
-                        "toolSpec": {
-                            "name": "average_trip_metrics",
-                            "description": (
-                                "Compare average trip distance and fare amount across governed "
-                                "pickup boroughs (Manhattan, Brooklyn, Queens, Bronx, "
-                                "Staten Island). Leave region_name empty to compare all "
-                                "boroughs, or provide exactly one single borough name."
-                            ),
-                            "inputSchema": {
-                                "json": {
-                                    "type": "object",
-                                    "properties": {
-                                        "region_name": {
-                                            "type": "string",
-                                            "description": (
-                                                "Optional single borough name. "
-                                                "Omit to compare all boroughs across NYC."
-                                            ),
-                                            "enum": [
-                                                "Manhattan",
-                                                "Brooklyn",
-                                                "Queens",
-                                                "Bronx",
-                                                "Staten Island",
-                                            ],
-                                        }
-                                    },
-                                    "additionalProperties": False,
-                                }
-                            },
-                        }
-                    },
+                    }
+                    for spec in TAXI_PROPOSAL_TOOL_SPECS
                 ],
                 "toolChoice": {"any": {}},
             },
@@ -1394,6 +1392,42 @@ class LiteLLMClient(ServeLLMClient):
         self._planner_alias = planner_alias
         self._api_key = api_key
 
+    def propose_taxi_query(
+        self,
+        prompt: str,
+        schema: Mapping[str, object],
+        *,
+        conversation_id: str | None = None,
+        repo: Any | None = None,
+        current_message_id: str | None = None,
+    ) -> ToolProposalResult:
+        # Same prompt and tool schemas as the direct Bedrock client, so the proxy
+        # path is behaviourally equivalent (no prompt/strategy change).
+        partition = build_query_proposal_partition(prompt, schema)
+        headers = self._build_headers(
+            partition=partition, agent_step=1, conversation_id=conversation_id
+        )
+        payload: dict[str, Any] = {
+            "model": self._planner_alias,
+            "messages": [
+                {"role": "user", "content": taxi_proposal_prompt(prompt, schema)}
+            ],
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": spec["name"],
+                        "description": spec["description"],
+                        "parameters": spec["inputSchema"],
+                    },
+                }
+                for spec in TAXI_PROPOSAL_TOOL_SPECS
+            ],
+            "max_tokens": 512,
+            "stream": False,
+        }
+        return self._post_tool_proposal(payload, headers)
+
     def _prepare_request(
         self, payload: dict[str, Any], headers: dict[str, str]
     ) -> None:
@@ -1402,6 +1436,11 @@ class LiteLLMClient(ServeLLMClient):
         payload["model"] = (
             self._planner_alias if payload.get("tools") else self._model_id
         )
+        # Match the direct Bedrock client: deterministic sampling, and tool use is
+        # forced for proposals (LiteLLM maps "required" to Bedrock toolChoice any).
+        payload["temperature"] = 0.0
+        if payload.get("tools"):
+            payload["tool_choice"] = "required"
         if payload.get("stream"):
             payload["stream_options"] = {"include_usage": True}
         # Group a conversation's planner/answer calls in the proxy's Logs view.

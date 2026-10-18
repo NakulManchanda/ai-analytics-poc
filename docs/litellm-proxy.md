@@ -20,9 +20,12 @@ Config: `infra/litellm/config.yaml` (image pinned in `docker-compose.litellm.yml
 
 ```bash
 make local-aws-litellm-compose   # default; proxy + Postgres + app on real AWS
-make litellm-ui                  # Admin UI: http://127.0.0.1:14000/ui (admin / LITELLM_MASTER_KEY, default sk-local-dev)
+make litellm-ui                  # Admin UI: http://127.0.0.1:14000/ui (admin / LITELLM_MASTER_KEY from .env)
 make litellm-traffic             # follow every intercepted request/response (DEBUG logs)
 make litellm-ready               # readiness check
+make litellm-spend               # per-alias calls, failures, tokens, cost
+make litellm-errors              # failed calls with the provider error
+make litellm-env                 # generate LITELLM_MASTER_KEY into git-ignored .env (value never printed)
 make litellm-calls               # compact table of recent proxy calls (needs jq); SESSION=conv_... LIMIT=20
 make litellm-smoke               # real run through the app; asserts the proxy logged its calls (spends a few tokens)
 make local-bedrock-direct-compose  # rollback: direct Bedrock, no proxy
