@@ -174,6 +174,7 @@ class LLMResult:
     # False when the provider returned no usage; token fields are then not real
     # counts and consumers must record them as null.
     usage_known: bool = True
+    fallback_used: bool = False
 
 
 @dataclass(frozen=True)
@@ -192,6 +193,7 @@ class ToolProposalResult:
     cost_usd: float | None = None
     cost_kind: str | None = None
     usage_known: bool = True
+    fallback_used: bool = False
 
 
 class LLMClient(Protocol):
