@@ -1,0 +1,43 @@
+# Explicit opt-in: combines with docker-compose.yml + docker-compose.aws.yml.
+#   docker compose -f docker-compose.yml -f docker-compose.aws.yml -f docker-compose.litellm.yml up
+# Stateless proxy (no database, no Admin UI). Spend/capture storage is #169/#170.
+services:
+  litellm:
+    image: ghcr.io/berriai/litellm:v1.106.0
+    command: ["--config", "/app/config.yaml", "--port", "4000"]
+    user: "${LOCAL_UID:?Set LOCAL_UID to your host user id}"
+    environment:
+      LITELLM_MASTER_KEY: "${LITELLM_MASTER_KEY:?Set LITELLM_MASTER_KEY (local-only value, never committed)}"
+      AWS_REGION: "${AWS_REGION:-us-east-1}"
+      AWS_PROFILE: "${AWS_PROFILE:-default}"
+      AWS_SDK_LOAD_CONFIG: "1"
+      AWS_CONFIG_FILE: /aws/config
+      AWS_SHARED_CREDENTIALS_FILE: /aws/credentials
+      HOME: /tmp
+    volumes:
+      - ./infra/litellm/config.yaml:/app/config.yaml:ro
+      - "${HOME}/.aws:/aws:ro"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:4000/health/readiness')"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 20s
+
+  app:
+    environment:
+      LLM_PROVIDER: litellm
+      LITELLM_PROXY_URL: http://litellm:4000
+      LITELLM_API_KEY: "${LITELLM_MASTER_KEY}"
+    depends_on:
+      litellm:
+        condition: service_healthy
+
+  worker:
+    environment:
+      LLM_PROVIDER: litellm
+      LITELLM_PROXY_URL: http://litellm:4000
+      LITELLM_API_KEY: "${LITELLM_MASTER_KEY}"
+    depends_on:
+      litellm:
+        condition: service_healthy

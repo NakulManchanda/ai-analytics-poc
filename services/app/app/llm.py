@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 
 import httpx
+from opentelemetry import propagate
 from botocore.config import Config
 from botocore.exceptions import (
     BotoCoreError,
@@ -718,6 +719,8 @@ class BedrockLLMClient:
 class ServeLLMClient:
     """OpenAI-compatible client routing through the owned inference gateway (/serve)."""
 
+    _error_prefix = "vllm_gateway"
+
     def __init__(
         self,
         gateway_url: str,
@@ -742,6 +745,11 @@ class ServeLLMClient:
     @property
     def model_id(self) -> str:
         return self._model_id
+
+    def _prepare_request(
+        self, payload: dict[str, Any], headers: dict[str, str]
+    ) -> None:
+        """Hook for subclasses to adapt the OpenAI-style request in place."""
 
     def _get_client(self) -> httpx.Client:
         if self._http_client is None:
@@ -1036,24 +1044,25 @@ class ServeLLMClient:
     def _post_completion(
         self, payload: dict[str, Any], headers: dict[str, str]
     ) -> LLMResult:
+        self._prepare_request(payload, headers)
         client = self._get_client()
         start = time.monotonic()
         try:
             response = client.post(self._gateway_url, json=payload, headers=headers)
         except (httpx.ConnectError, httpx.TimeoutException) as exc:
             raise LLMProviderError(
-                retryable=True, code="vllm_gateway_unavailable"
+                retryable=True, code=f"{self._error_prefix}_unavailable"
             ) from exc
         except httpx.RequestError as exc:
             raise LLMProviderError(
-                retryable=False, code="vllm_gateway_request_error"
+                retryable=False, code=f"{self._error_prefix}_request_error"
             ) from exc
 
         if response.status_code != 200:
             retryable = response.status_code in (503, 504, 529)
             raise LLMProviderError(
                 retryable=retryable,
-                code=f"vllm_gateway_http_{response.status_code}",
+                code=f"{self._error_prefix}_http_{response.status_code}",
             )
 
         latency_ms = int((time.monotonic() - start) * 1000)
@@ -1115,24 +1124,25 @@ class ServeLLMClient:
         """Exactly one HTTP request. A non-200 response, a missing tool call, or a
         malformed tool call each become a typed, non-retryable failure -- never a
         silent retry or a keyword-guessed tool."""
+        self._prepare_request(payload, headers)
         client = self._get_client()
         start = time.monotonic()
         try:
             response = client.post(self._gateway_url, json=payload, headers=headers)
         except (httpx.ConnectError, httpx.TimeoutException) as exc:
             raise LLMProviderError(
-                retryable=True, code="vllm_gateway_unavailable"
+                retryable=True, code=f"{self._error_prefix}_unavailable"
             ) from exc
         except httpx.RequestError as exc:
             raise LLMProviderError(
-                retryable=False, code="vllm_gateway_request_error"
+                retryable=False, code=f"{self._error_prefix}_request_error"
             ) from exc
 
         if response.status_code != 200:
             retryable = response.status_code in (503, 504, 529)
             raise LLMProviderError(
                 retryable=retryable,
-                code=f"vllm_gateway_http_{response.status_code}",
+                code=f"{self._error_prefix}_http_{response.status_code}",
             )
 
         latency_ms = int((time.monotonic() - start) * 1000)
@@ -1206,6 +1216,7 @@ class ServeLLMClient:
         headers: dict[str, str],
         delta_callback: Callable[[str], None],
     ) -> LLMResult:
+        self._prepare_request(payload, headers)
         client = self._get_client()
         start = time.monotonic()
         accumulated: list[str] = []
@@ -1241,7 +1252,7 @@ class ServeLLMClient:
                     retryable = response.status_code in (503, 504, 529)
                     raise LLMProviderError(
                         retryable=retryable,
-                        code=f"vllm_gateway_http_{response.status_code}",
+                        code=f"{self._error_prefix}_http_{response.status_code}",
                     )
                 content_type = response.headers.get("content-type", "")
                 if "application/json" in content_type:
@@ -1315,11 +1326,11 @@ class ServeLLMClient:
 
         except (httpx.ConnectError, httpx.TimeoutException) as exc:
             raise LLMProviderError(
-                retryable=True, code="vllm_gateway_unavailable"
+                retryable=True, code=f"{self._error_prefix}_unavailable"
             ) from exc
         except httpx.RequestError as exc:
             raise LLMProviderError(
-                retryable=False, code="vllm_gateway_request_error"
+                retryable=False, code=f"{self._error_prefix}_request_error"
             ) from exc
 
         latency_ms = int((time.monotonic() - start) * 1000)
@@ -1356,6 +1367,49 @@ class ServeLLMClient:
         )
 
 
+class LiteLLMClient(ServeLLMClient):
+    """OpenAI-compatible client for the opt-in LiteLLM Proxy (Bedrock-first).
+
+    The agent picks stable aliases; the proxy owns the provider mapping. Tool
+    proposals use the planner alias and answers use the answer alias."""
+
+    _error_prefix = "litellm_proxy"
+
+    def __init__(
+        self,
+        proxy_url: str,
+        *,
+        planner_alias: str = "taxi-planner",
+        answer_alias: str = "taxi-answer",
+        api_key: str | None = None,
+        timeout_seconds: float = 60.0,
+        http_client: httpx.Client | None = None,
+    ) -> None:
+        super().__init__(
+            f"{proxy_url.rstrip('/')}/v1/chat/completions",
+            answer_alias,
+            timeout_seconds=timeout_seconds,
+            http_client=http_client,
+        )
+        self._planner_alias = planner_alias
+        self._api_key = api_key
+
+    def _prepare_request(
+        self, payload: dict[str, Any], headers: dict[str, str]
+    ) -> None:
+        # vLLM-only knob; Bedrock via the proxy must not receive it.
+        payload.pop("chat_template_kwargs", None)
+        payload["model"] = (
+            self._planner_alias if payload.get("tools") else self._model_id
+        )
+        if payload.get("stream"):
+            payload["stream_options"] = {"include_usage": True}
+        if self._api_key:
+            headers["authorization"] = f"Bearer {self._api_key}"
+        # W3C trace context so proxy spans join the app trace.
+        propagate.inject(headers)
+
+
 def create_llm_client(
     settings: Settings,
     *,
@@ -1372,6 +1426,15 @@ def create_llm_client(
             model_id=settings.inference_model_id,
             http_client=http_client,
             answer_thinking_enabled=settings.inference_answer_thinking,
+        )
+    if settings.llm_provider == "litellm":
+        settings.validate_litellm_alignment()
+        return LiteLLMClient(
+            settings.litellm_proxy_url,
+            planner_alias=settings.litellm_planner_alias,
+            answer_alias=settings.litellm_answer_alias,
+            api_key=settings.litellm_api_key,
+            http_client=http_client,
         )
     settings.validate_m4_alignment()
     if budget is None:

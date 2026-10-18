@@ -52,6 +52,10 @@ class Settings:
     # call is off by default too, behind this flag, so #123 can compare on/off.
     inference_answer_thinking: bool = False
     agent_strategy: str = "manual"
+    litellm_proxy_url: str = "http://litellm:4000"
+    litellm_planner_alias: str = "taxi-planner"
+    litellm_answer_alias: str = "taxi-answer"
+    litellm_api_key: str | None = None
 
     def __post_init__(self) -> None:
         if self.agent_strategy not in ("manual", "crewai"):
@@ -79,7 +83,21 @@ class Settings:
             ).lower()
             in ("true", "1", "yes"),
             agent_strategy=os.getenv("AGENT_STRATEGY", "manual"),
+            litellm_proxy_url=os.getenv("LITELLM_PROXY_URL", "http://litellm:4000"),
+            litellm_planner_alias=os.getenv("LITELLM_PLANNER_ALIAS", "taxi-planner"),
+            litellm_answer_alias=os.getenv("LITELLM_ANSWER_ALIAS", "taxi-answer"),
+            litellm_api_key=os.getenv("LITELLM_API_KEY") or None,
         )
+
+    def validate_litellm_alignment(self) -> None:
+        if self.llm_provider != "litellm":
+            raise LLMConfigurationError("LiteLLM requires LLM_PROVIDER=litellm")
+        if not self.litellm_proxy_url.startswith(("http://", "https://")):
+            raise LLMConfigurationError(
+                f"LITELLM_PROXY_URL must be a valid HTTP(S) URL, got {self.litellm_proxy_url!r}"
+            )
+        if not (self.litellm_planner_alias and self.litellm_answer_alias):
+            raise LLMConfigurationError("LiteLLM aliases must be specified")
 
     def validate_m4_alignment(self) -> None:
         if self.llm_provider != "bedrock":
