@@ -15,3 +15,4 @@ Pull-request chronology belongs in `docs/work-history/`; the active session hand
 - [ADR 0009 — V5 Voice Output: AWS Polly TTS with Full-Answer Synthesis](0009-v5-voice-output-polly-tts.md)
 - [ADR 0010 — Package the Lambda inference lab as one remote bundle](0010-transferable-lambda-inference-lab.md)
 - [ADR 0011 — Compare the custom router against Dynamo's KV-aware router (Proposed)](0011-dynamo-kv-router-comparison.md)
+- [ADR 0012 — Introduce LiteLLM Proxy as an opt-in Bedrock-first model proxy](0012-litellm-bedrock-model-proxy.md)

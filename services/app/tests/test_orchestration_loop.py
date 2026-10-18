@@ -876,3 +876,65 @@ def test_turn_two_question_appears_exactly_once_in_rendered_messages() -> None:
         "turn 2 must still see turn 1's tool result/answer in its rendered "
         f"history: {turn_two_messages}"
     )
+
+
+def test_orchestration_loop_litellm_proxy_is_billed_bedrock_and_groups_session() -> (
+    None
+):
+    """#168: the LiteLLM proxy fronts billed Bedrock (not self-hosted), uses the
+    planner then answer aliases, and carries the conversation id as session id."""
+    import json as _json
+
+    import httpx
+    from app.llm import LiteLLMClient
+
+    seen: list[tuple[str, str | None]] = []
+    roles: list[list[str]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = _json.loads(request.content)
+        roles.append([m["role"] for m in payload["messages"]])
+        seen.append((payload["model"], request.headers.get("x-litellm-session-id")))
+        if "tools" in payload:
+            call = {
+                "function": {
+                    "name": "query_taxi_data",
+                    "arguments": _json.dumps(
+                        {"analysis": "top_pickup_zones", "limit": 5}
+                    ),
+                }
+            }
+            message: dict = {"tool_calls": [call]}
+        else:
+            message = {"content": "JFK Airport leads with 1500 trips."}
+        return httpx.Response(
+            200,
+            json={
+                "model": payload["model"],
+                "choices": [{"message": message, "finish_reason": "stop"}],
+                "usage": {"prompt_tokens": 30, "completion_tokens": 6},
+            },
+        )
+
+    client = LiteLLMClient(
+        "http://litellm:4000",
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+    repo = InMemoryStateRepository()
+    loop = OrchestrationLoop(
+        llm_client=client,
+        mcp_client=FakeMCPClient(),  # type: ignore[arg-type]
+        state_repository=repo,
+    )
+
+    result = loop.run("Show an unusual ranking of pickup spots, please")
+    assert result.status == "completed"
+    run = repo.get_run(result.run_id)
+    assert run is not None
+    assert run.metadata["cost_source"] == "bedrock_estimate"
+    assert run.estimated_cost_usd > 0
+    assert [model for model, _ in seen] == ["taxi-planner", "taxi-answer"]
+    sessions = {session for _, session in seen}
+    assert len(sessions) == 1 and None not in sessions
+    # Stored vLLM-shaped history (role "tool") must never reach Bedrock via the proxy.
+    assert all("tool" not in r for r in roles)

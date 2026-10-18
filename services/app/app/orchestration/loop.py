@@ -22,6 +22,7 @@ from app.events import (
     terminal_run_payload,
 )
 from app.llm import (
+    LiteLLMClient,
     LLMClient,
     LLMProviderError,
     LLMResult,
@@ -707,7 +708,22 @@ class OrchestrationLoop:
         # exception paths below always have a well-defined value, even if client
         # construction itself fails.
         is_self_hosted = False
+        # Serve-style clients (gateway and LiteLLM proxy) accept a conversation id.
+        forwards_conversation = False
         configured_model_id = DEFAULT_MODEL_ID
+
+        def conversation_kwargs() -> dict[str, Any]:
+            if not forwards_conversation:
+                return {}
+            if isinstance(llm, LiteLLMClient):
+                # Bedrock path never sent stored history (its tool-call pairing rules
+                # reject the vLLM-shaped history); send only the id for proxy sessions.
+                return {"conversation_id": conv_id}
+            return {
+                "conversation_id": conv_id,
+                "repo": self._repo,
+                "current_message_id": user_msg_id,
+            }
 
         def call_cost(input_tokens: int, output_tokens: int) -> tuple[float, str]:
             # Serve mode runs on an owned, self-hosted vLLM gateway: it has no
@@ -737,7 +753,11 @@ class OrchestrationLoop:
             try:
                 llm = self._get_llm_client()
                 mcp = self._get_mcp_client()
-                is_self_hosted = isinstance(llm, ServeLLMClient)
+                forwards_conversation = isinstance(llm, ServeLLMClient)
+                # The LiteLLM proxy fronts billed Bedrock, so it is not self-hosted.
+                is_self_hosted = forwards_conversation and not isinstance(
+                    llm, LiteLLMClient
+                )
                 configured_model_id = llm.model_id
             except LLMConfigurationError as err:
                 raise OrchestrationError(
@@ -793,15 +813,7 @@ class OrchestrationLoop:
                     )
                     call_start = self._monotonic()
                     try:
-                        proposal_kwargs: dict[str, Any] = (
-                            {
-                                "conversation_id": conv_id,
-                                "repo": self._repo,
-                                "current_message_id": user_msg_id,
-                            }
-                            if is_self_hosted
-                            else {}
-                        )
+                        proposal_kwargs: dict[str, Any] = conversation_kwargs()
                         proposal = self._run_with_cancellation(
                             llm.propose_taxi_query,
                             prompt,
@@ -1372,15 +1384,7 @@ class OrchestrationLoop:
                         stream_answer = getattr(
                             llm, "stream_answer_with_query_result", None
                         )
-                        answer_kwargs: dict[str, Any] = (
-                            {
-                                "conversation_id": conv_id,
-                                "repo": self._repo,
-                                "current_message_id": user_msg_id,
-                            }
-                            if is_self_hosted
-                            else {}
-                        )
+                        answer_kwargs: dict[str, Any] = conversation_kwargs()
                         if callable(stream_answer):
                             final_answer_stream_started = True
                             answer_result = stream_answer(

@@ -105,7 +105,11 @@ resource "aws_ecs_task_definition" "ai_app" {
         },
         {
           name  = "LLM_PROVIDER"
-          value = "bedrock"
+          value = "litellm"
+        },
+        {
+          name  = "LITELLM_PROXY_URL"
+          value = "http://litellm:4000"
         },
         {
           name  = "AWS_REGION"
@@ -122,6 +126,12 @@ resource "aws_ecs_task_definition" "ai_app" {
         {
           name  = "AGENT_STRATEGY"
           value = var.agent_strategy
+        }
+      ]
+      secrets = [
+        {
+          name      = "LITELLM_API_KEY"
+          valueFrom = aws_secretsmanager_secret.litellm_master_key.arn
         }
       ]
       logConfiguration = {
@@ -191,5 +201,5 @@ resource "aws_ecs_service" "ai_app" {
     namespace = aws_service_discovery_http_namespace.main.arn
   }
 
-  depends_on = [aws_lb_listener.http]
+  depends_on = [aws_lb_listener.http, aws_ecs_service.litellm]
 }

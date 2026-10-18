@@ -217,3 +217,27 @@ variable "agent_strategy" {
     error_message = "agent_strategy must be either 'manual' or 'crewai'."
   }
 }
+
+variable "litellm_image" {
+  description = "Pinned LiteLLM Proxy image (public registry; Fargate tasks have a public IP)."
+  type        = string
+  default     = "ghcr.io/berriai/litellm:v1.106.0"
+}
+
+variable "litellm_cpu" {
+  description = "CPU units for the LiteLLM task."
+  type        = number
+  default     = 512
+}
+
+variable "litellm_memory" {
+  description = "Memory in MB for the LiteLLM task."
+  type        = number
+  default     = 1024
+}
+
+variable "litellm_desired_count" {
+  description = "Desired number of tasks for the LiteLLM service."
+  type        = number
+  default     = 1
+}

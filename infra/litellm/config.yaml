@@ -1,0 +1,24 @@
+# LiteLLM Proxy config (issue #168). Agent policy selects aliases; the proxy owns the provider mapping.
+# Bedrock only: every alias targets the IAM-allowlisted Nova Micro model. No public-provider entries.
+# Credentials come from the AWS SDK chain (mounted ~/.aws profile locally, task/instance role on AWS).
+model_list:
+  - model_name: taxi-classifier
+    litellm_params:
+      model: bedrock/amazon.nova-micro-v1:0
+      aws_region_name: us-east-1
+  - model_name: taxi-planner
+    litellm_params:
+      model: bedrock/amazon.nova-micro-v1:0
+      aws_region_name: us-east-1
+  - model_name: taxi-answer
+    litellm_params:
+      model: bedrock/amazon.nova-micro-v1:0
+      aws_region_name: us-east-1
+
+litellm_settings:
+  drop_params: true      # e.g. vLLM-only knobs never reach Bedrock
+  num_retries: 0         # the app owns retry/deadline semantics
+  callbacks: ["otel"]    # trace context propagation; exporter via OTEL_* env
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY

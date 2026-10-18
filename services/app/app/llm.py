@@ -14,6 +14,7 @@ from botocore.exceptions import (
     EndpointConnectionError,
     ReadTimeoutError,
 )
+from opentelemetry import propagate
 
 from app.bedrock_budget import (
     BedrockBudgetExceededError,
@@ -209,6 +210,69 @@ class LLMClient(Protocol):
         conversation_id: str | None = None,
         agent_step: int = 1,
     ) -> LLMResult: ...
+
+
+TAXI_PROPOSAL_TOOL_SPECS: list[dict[str, Any]] = [
+    {
+        "name": "query_taxi_data",
+        "description": "Run one fixed read-only analysis over the pinned NYC Taxi dataset.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "analysis": {
+                    "type": "string",
+                    "enum": [
+                        "top_pickup_zones",
+                        "trip_volume_by_hour",
+                        "average_distance_by_weekday",
+                    ],
+                },
+                "limit": {"type": "integer", "minimum": 1, "maximum": 20},
+            },
+            "required": ["analysis", "limit"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "average_trip_metrics",
+        "description": (
+            "Compare average trip distance and fare amount across governed "
+            "pickup boroughs (Manhattan, Brooklyn, Queens, Bronx, "
+            "Staten Island). Leave region_name empty to compare all "
+            "boroughs, or provide exactly one single borough name."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "region_name": {
+                    "type": "string",
+                    "description": (
+                        "Optional single borough name. "
+                        "Omit to compare all boroughs across NYC."
+                    ),
+                    "enum": [
+                        "Manhattan",
+                        "Brooklyn",
+                        "Queens",
+                        "Bronx",
+                        "Staten Island",
+                    ],
+                }
+            },
+            "additionalProperties": False,
+        },
+    },
+]
+
+
+def taxi_proposal_prompt(prompt: str, schema: Mapping[str, object]) -> str:
+    schema_json = json.dumps(schema, separators=(",", ":"), allow_nan=False)
+    return (
+        "Choose exactly ONE governed analysis that answers the question. "
+        "Do not make multiple tool calls. To compare all boroughs "
+        "across NYC, call average_trip_metrics with region_name omitted. "
+        f"Dataset schema: {schema_json}\nQuestion: {prompt}"
+    )
 
 
 class LocalFakeLLMClient:
@@ -430,88 +494,23 @@ class BedrockLLMClient:
     def propose_taxi_query(
         self, prompt: str, schema: Mapping[str, object]
     ) -> ToolProposalResult:
-        schema_json = json.dumps(schema, separators=(",", ":"), allow_nan=False)
         response = self._converse(
             messages=[
                 {
                     "role": "user",
-                    "content": [
-                        {
-                            "text": (
-                                "Choose exactly ONE governed analysis that answers the question. "
-                                "Do not make multiple tool calls. To compare all boroughs "
-                                "across NYC, call average_trip_metrics with region_name omitted. "
-                                f"Dataset schema: {schema_json}\nQuestion: {prompt}"
-                            )
-                        }
-                    ],
+                    "content": [{"text": taxi_proposal_prompt(prompt, schema)}],
                 }
             ],
             tool_config={
                 "tools": [
                     {
                         "toolSpec": {
-                            "name": "query_taxi_data",
-                            "description": (
-                                "Run one fixed read-only analysis over the pinned NYC Taxi dataset."
-                            ),
-                            "inputSchema": {
-                                "json": {
-                                    "type": "object",
-                                    "properties": {
-                                        "analysis": {
-                                            "type": "string",
-                                            "enum": [
-                                                "top_pickup_zones",
-                                                "trip_volume_by_hour",
-                                                "average_distance_by_weekday",
-                                            ],
-                                        },
-                                        "limit": {
-                                            "type": "integer",
-                                            "minimum": 1,
-                                            "maximum": 20,
-                                        },
-                                    },
-                                    "required": ["analysis", "limit"],
-                                    "additionalProperties": False,
-                                }
-                            },
+                            "name": spec["name"],
+                            "description": spec["description"],
+                            "inputSchema": {"json": spec["inputSchema"]},
                         }
-                    },
-                    {
-                        "toolSpec": {
-                            "name": "average_trip_metrics",
-                            "description": (
-                                "Compare average trip distance and fare amount across governed "
-                                "pickup boroughs (Manhattan, Brooklyn, Queens, Bronx, "
-                                "Staten Island). Leave region_name empty to compare all "
-                                "boroughs, or provide exactly one single borough name."
-                            ),
-                            "inputSchema": {
-                                "json": {
-                                    "type": "object",
-                                    "properties": {
-                                        "region_name": {
-                                            "type": "string",
-                                            "description": (
-                                                "Optional single borough name. "
-                                                "Omit to compare all boroughs across NYC."
-                                            ),
-                                            "enum": [
-                                                "Manhattan",
-                                                "Brooklyn",
-                                                "Queens",
-                                                "Bronx",
-                                                "Staten Island",
-                                            ],
-                                        }
-                                    },
-                                    "additionalProperties": False,
-                                }
-                            },
-                        }
-                    },
+                    }
+                    for spec in TAXI_PROPOSAL_TOOL_SPECS
                 ],
                 "toolChoice": {"any": {}},
             },
@@ -718,6 +717,8 @@ class BedrockLLMClient:
 class ServeLLMClient:
     """OpenAI-compatible client routing through the owned inference gateway (/serve)."""
 
+    _error_prefix = "vllm_gateway"
+
     def __init__(
         self,
         gateway_url: str,
@@ -742,6 +743,11 @@ class ServeLLMClient:
     @property
     def model_id(self) -> str:
         return self._model_id
+
+    def _prepare_request(
+        self, payload: dict[str, Any], headers: dict[str, str]
+    ) -> None:
+        """Hook for subclasses to adapt the OpenAI-style request in place."""
 
     def _get_client(self) -> httpx.Client:
         if self._http_client is None:
@@ -1036,24 +1042,25 @@ class ServeLLMClient:
     def _post_completion(
         self, payload: dict[str, Any], headers: dict[str, str]
     ) -> LLMResult:
+        self._prepare_request(payload, headers)
         client = self._get_client()
         start = time.monotonic()
         try:
             response = client.post(self._gateway_url, json=payload, headers=headers)
         except (httpx.ConnectError, httpx.TimeoutException) as exc:
             raise LLMProviderError(
-                retryable=True, code="vllm_gateway_unavailable"
+                retryable=True, code=f"{self._error_prefix}_unavailable"
             ) from exc
         except httpx.RequestError as exc:
             raise LLMProviderError(
-                retryable=False, code="vllm_gateway_request_error"
+                retryable=False, code=f"{self._error_prefix}_request_error"
             ) from exc
 
         if response.status_code != 200:
             retryable = response.status_code in (503, 504, 529)
             raise LLMProviderError(
                 retryable=retryable,
-                code=f"vllm_gateway_http_{response.status_code}",
+                code=f"{self._error_prefix}_http_{response.status_code}",
             )
 
         latency_ms = int((time.monotonic() - start) * 1000)
@@ -1115,24 +1122,25 @@ class ServeLLMClient:
         """Exactly one HTTP request. A non-200 response, a missing tool call, or a
         malformed tool call each become a typed, non-retryable failure -- never a
         silent retry or a keyword-guessed tool."""
+        self._prepare_request(payload, headers)
         client = self._get_client()
         start = time.monotonic()
         try:
             response = client.post(self._gateway_url, json=payload, headers=headers)
         except (httpx.ConnectError, httpx.TimeoutException) as exc:
             raise LLMProviderError(
-                retryable=True, code="vllm_gateway_unavailable"
+                retryable=True, code=f"{self._error_prefix}_unavailable"
             ) from exc
         except httpx.RequestError as exc:
             raise LLMProviderError(
-                retryable=False, code="vllm_gateway_request_error"
+                retryable=False, code=f"{self._error_prefix}_request_error"
             ) from exc
 
         if response.status_code != 200:
             retryable = response.status_code in (503, 504, 529)
             raise LLMProviderError(
                 retryable=retryable,
-                code=f"vllm_gateway_http_{response.status_code}",
+                code=f"{self._error_prefix}_http_{response.status_code}",
             )
 
         latency_ms = int((time.monotonic() - start) * 1000)
@@ -1206,6 +1214,7 @@ class ServeLLMClient:
         headers: dict[str, str],
         delta_callback: Callable[[str], None],
     ) -> LLMResult:
+        self._prepare_request(payload, headers)
         client = self._get_client()
         start = time.monotonic()
         accumulated: list[str] = []
@@ -1241,7 +1250,7 @@ class ServeLLMClient:
                     retryable = response.status_code in (503, 504, 529)
                     raise LLMProviderError(
                         retryable=retryable,
-                        code=f"vllm_gateway_http_{response.status_code}",
+                        code=f"{self._error_prefix}_http_{response.status_code}",
                     )
                 content_type = response.headers.get("content-type", "")
                 if "application/json" in content_type:
@@ -1315,11 +1324,11 @@ class ServeLLMClient:
 
         except (httpx.ConnectError, httpx.TimeoutException) as exc:
             raise LLMProviderError(
-                retryable=True, code="vllm_gateway_unavailable"
+                retryable=True, code=f"{self._error_prefix}_unavailable"
             ) from exc
         except httpx.RequestError as exc:
             raise LLMProviderError(
-                retryable=False, code="vllm_gateway_request_error"
+                retryable=False, code=f"{self._error_prefix}_request_error"
             ) from exc
 
         latency_ms = int((time.monotonic() - start) * 1000)
@@ -1356,6 +1365,113 @@ class ServeLLMClient:
         )
 
 
+class LiteLLMClient(ServeLLMClient):
+    """OpenAI-compatible client for the opt-in LiteLLM Proxy (Bedrock-first).
+
+    The agent picks stable aliases; the proxy owns the provider mapping. Tool
+    proposals use the planner alias and answers use the answer alias."""
+
+    _error_prefix = "litellm_proxy"
+
+    def __init__(
+        self,
+        proxy_url: str,
+        *,
+        planner_alias: str = "taxi-planner",
+        answer_alias: str = "taxi-answer",
+        api_key: str | None = None,
+        budget: Any | None = None,
+        budget_model_id: str = DEFAULT_MODEL_ID,
+        timeout_seconds: float = 60.0,
+        http_client: httpx.Client | None = None,
+    ) -> None:
+        super().__init__(
+            f"{proxy_url.rstrip('/')}/v1/chat/completions",
+            answer_alias,
+            timeout_seconds=timeout_seconds,
+            http_client=http_client,
+        )
+        self._planner_alias = planner_alias
+        self._api_key = api_key
+        # The proxy fronts billed Bedrock, so the shared DynamoDB allowance still applies.
+        self._budget = budget
+        self._budget_model_id = budget_model_id
+
+    def _reserve_budget(self) -> None:
+        if self._budget is None:
+            return
+        try:
+            self._budget.reserve(self._budget_model_id)
+        except BedrockBudgetExceededError as error:
+            raise LLMProviderError(
+                retryable=False, code="bedrock_budget_exhausted"
+            ) from error
+        except BedrockBudgetUnavailableError as error:
+            raise LLMProviderError(
+                retryable=True, code="bedrock_budget_unavailable"
+            ) from error
+
+    def propose_taxi_query(
+        self,
+        prompt: str,
+        schema: Mapping[str, object],
+        *,
+        conversation_id: str | None = None,
+        repo: Any | None = None,
+        current_message_id: str | None = None,
+    ) -> ToolProposalResult:
+        # Same prompt and tool schemas as the direct Bedrock client, so the proxy
+        # path is behaviourally equivalent (no prompt/strategy change).
+        partition = build_query_proposal_partition(prompt, schema)
+        headers = self._build_headers(
+            partition=partition, agent_step=1, conversation_id=conversation_id
+        )
+        payload: dict[str, Any] = {
+            "model": self._planner_alias,
+            "messages": [
+                {"role": "user", "content": taxi_proposal_prompt(prompt, schema)}
+            ],
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": spec["name"],
+                        "description": spec["description"],
+                        "parameters": spec["inputSchema"],
+                    },
+                }
+                for spec in TAXI_PROPOSAL_TOOL_SPECS
+            ],
+            "max_tokens": 512,
+            "stream": False,
+        }
+        return self._post_tool_proposal(payload, headers)
+
+    def _prepare_request(
+        self, payload: dict[str, Any], headers: dict[str, str]
+    ) -> None:
+        self._reserve_budget()
+        # vLLM-only knob; Bedrock via the proxy must not receive it.
+        payload.pop("chat_template_kwargs", None)
+        payload["model"] = (
+            self._planner_alias if payload.get("tools") else self._model_id
+        )
+        # Match the direct Bedrock client: deterministic sampling, and tool use is
+        # forced for proposals (LiteLLM maps "required" to Bedrock toolChoice any).
+        payload["temperature"] = 0.0
+        if payload.get("tools"):
+            payload["tool_choice"] = "required"
+        if payload.get("stream"):
+            payload["stream_options"] = {"include_usage": True}
+        # Group a conversation's planner/answer calls in the proxy's Logs view.
+        if conversation_id := headers.get("x-conversation-id"):
+            headers["x-litellm-session-id"] = conversation_id
+        if self._api_key:
+            headers["authorization"] = f"Bearer {self._api_key}"
+        # W3C trace context so proxy spans join the app trace.
+        propagate.inject(headers)
+
+
 def create_llm_client(
     settings: Settings,
     *,
@@ -1373,11 +1489,15 @@ def create_llm_client(
             http_client=http_client,
             answer_thinking_enabled=settings.inference_answer_thinking,
         )
-    settings.validate_m4_alignment()
+    if settings.llm_provider == "litellm":
+        settings.validate_litellm_alignment()
+    else:
+        settings.validate_m4_alignment()
     if budget is None:
         if not settings.dynamodb_table_name:
             raise ValueError(
-                "LLM_PROVIDER=bedrock requires DYNAMODB_TABLE_NAME for the shared Bedrock allowance"
+                f"LLM_PROVIDER={settings.llm_provider} requires DYNAMODB_TABLE_NAME "
+                "for the shared Bedrock allowance"
             )
         budget = DynamoDBBedrockBudget(
             settings.dynamodb_table_name,
@@ -1385,6 +1505,16 @@ def create_llm_client(
                 settings.global_bedrock_monthly_limit_usd
             ),
             region_name=settings.aws_region,
+        )
+    if settings.llm_provider == "litellm":
+        return LiteLLMClient(
+            settings.litellm_proxy_url,
+            planner_alias=settings.litellm_planner_alias,
+            answer_alias=settings.litellm_answer_alias,
+            api_key=settings.litellm_api_key,
+            budget=budget,
+            budget_model_id=settings.llm_model_id,
+            http_client=http_client,
         )
     return BedrockLLMClient(
         settings.llm_model_id,

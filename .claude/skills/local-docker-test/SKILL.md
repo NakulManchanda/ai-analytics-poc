@@ -27,7 +27,7 @@ make observability-up
 DYNAMODB_TABLE_NAME=<shared-state-table> \
 AWS_PROFILE=<local-profile> \
 WEB_PORT=<task-owned-port> \
-make local-aws-compose
+make local-aws-litellm-compose
 ```
 
 Use only the path required by the acceptance test. Real AWS is opt-in and may make paid calls; never print or commit credentials.

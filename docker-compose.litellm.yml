@@ -1,0 +1,64 @@
+# Default local model path (used by `make local-aws-litellm-compose`): combines with docker-compose.yml + docker-compose.aws.yml.
+#   docker compose -f docker-compose.yml -f docker-compose.aws.yml -f docker-compose.litellm.yml up
+# Local Postgres backs the Admin UI (http://127.0.0.1:${LITELLM_PORT:-14000}/ui) and request/spend logs.
+# Deployed (ECS) proxy stays stateless. Capture design and spend controls are #169/#170.
+services:
+  litellm:
+    image: ghcr.io/berriai/litellm:v1.106.0
+    command: ["--config", "/app/config.yaml", "--port", "4000"]
+    user: "${LOCAL_UID:?Set LOCAL_UID to your host user id}"
+    ports:
+      - "127.0.0.1:${LITELLM_PORT:-14000}:4000"
+    environment:
+      DATABASE_URL: postgresql://litellm:litellm@litellm-db:5432/litellm
+      UI_USERNAME: admin
+      UI_PASSWORD: "${LITELLM_MASTER_KEY}"
+      LITELLM_MASTER_KEY: "${LITELLM_MASTER_KEY:?Set LITELLM_MASTER_KEY (local-only value, never committed)}"
+      AWS_REGION: "${AWS_REGION:-us-east-1}"
+      AWS_PROFILE: "${AWS_PROFILE:-default}"
+      AWS_SDK_LOAD_CONFIG: "1"
+      AWS_CONFIG_FILE: /aws/config
+      AWS_SHARED_CREDENTIALS_FILE: /aws/credentials
+      HOME: /tmp
+      # Metadata-only by default. `LITELLM_CAPTURE=1 make local-aws-litellm-compose` stores prompts/
+      # responses and prints bodies (DEBUG) for local evaluation capture. Never in deployed envs.
+      STORE_PROMPTS_IN_SPEND_LOGS: "${LITELLM_STORE_PROMPTS:-false}"
+      LITELLM_LOG: "${LITELLM_LOG:-INFO}"
+    volumes:
+      - ./infra/litellm/config.yaml:/app/config.yaml:ro
+      - "${HOME}/.aws:/aws:ro"
+    depends_on:
+      litellm-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:4000/health/readiness')"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 20s
+
+  litellm-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: litellm
+      POSTGRES_PASSWORD: litellm
+      POSTGRES_DB: litellm
+    volumes:
+      - litellm_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U litellm"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  app:
+    environment:
+      LLM_PROVIDER: litellm
+      LITELLM_PROXY_URL: http://litellm:4000
+      LITELLM_API_KEY: "${LITELLM_MASTER_KEY}"
+    depends_on:
+      litellm:
+        condition: service_healthy
+
+volumes:
+  litellm_pgdata:

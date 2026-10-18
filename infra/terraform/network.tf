@@ -108,6 +108,14 @@ resource "aws_security_group" "ecs_tasks" {
     self        = true
   }
 
+  ingress {
+    description = "Allow inter-task Service Connect communication to litellm"
+    from_port   = 4000
+    to_port     = 4000
+    protocol    = "tcp"
+    self        = true
+  }
+
   egress {
     description = "HTTPS egress for AWS APIs, ECR, and public dataset downloads"
     from_port   = 443
