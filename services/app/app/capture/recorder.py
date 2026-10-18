@@ -92,6 +92,24 @@ class CaptureRecorder:
             self._failures += 1
             logger.warning("capture build failed", exc_info=True)
 
+    def _arguments_fields(self, summary: str | None) -> dict[str, Any]:
+        """Metadata-only: argument keys + hash. Raw arguments only when opted in."""
+        keys: list[str] | None = None
+        if summary:
+            try:
+                parsed = json.loads(summary)
+                if isinstance(parsed, dict):
+                    keys = sorted(parsed)
+            except ValueError:
+                pass
+        return {
+            "arguments_sha256": sha256_hex(summary),
+            "argument_keys": keys,
+            "arguments": (
+                _arguments(summary, self.cap) if self.settings.include_content else None
+            ),
+        }
+
     def _build(
         self, repo: Any, run_id: str, question: str | None, answer: str | None
     ) -> list[dict[str, Any]]:
@@ -172,7 +190,7 @@ class CaptureRecorder:
                     "step": step.sequence,
                     "tool_name": step.tool_name,
                     "tool_call_id": step.tool_call_id,
-                    "arguments": _arguments(step.input_summary, self.cap),
+                    **self._arguments_fields(step.input_summary),
                     "query_id": step.query_id,
                     "status": step.status,
                     "row_count": row_count,

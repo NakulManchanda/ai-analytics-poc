@@ -188,3 +188,35 @@ def test_repeat_capture_of_same_run_is_idempotent(tmp_path: Path) -> None:
     n = len(_read(tmp_path / "t1" / "captures.jsonl"))
     recorder.capture_run(repo, result.run_id, "q", result.answer)
     assert len(_read(tmp_path / "t1" / "captures.jsonl")) == n
+
+
+def test_tool_arguments_hashed_in_metadata_only_mode(tmp_path: Path) -> None:
+    _run_loop(tmp_path)
+    tool = next(
+        r
+        for r in _read(tmp_path / "t1" / "captures.jsonl")
+        if r["record_type"] == "tool_call"
+    )
+    assert tool["arguments"] is None
+    assert tool["arguments_sha256"]
+    assert tool["argument_keys"]
+
+
+def test_tool_arguments_raw_when_opted_in(tmp_path: Path) -> None:
+    _run_loop(tmp_path, content=True)
+    tool = next(
+        r
+        for r in _read(tmp_path / "t1" / "captures.jsonl")
+        if r["record_type"] == "tool_call"
+    )
+    assert isinstance(tool["arguments"], dict)
+
+
+def test_two_sink_instances_do_not_duplicate(tmp_path: Path) -> None:
+    a = JsonlCaptureSink(tmp_path, "t1")
+    b = JsonlCaptureSink(tmp_path, "t1")
+    assert a.write(_model("c1")) is True
+    assert b.write(_model("c1")) is False  # b had not seen it before writing
+    assert b.write(_model("c2")) is True
+    assert a.write(_model("c2")) is False
+    assert len(_read(tmp_path / "t1" / "captures.jsonl")) == 2

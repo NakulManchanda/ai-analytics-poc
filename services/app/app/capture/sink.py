@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import fcntl
 import json
 import logging
 import re
@@ -43,34 +44,49 @@ class JsonlCaptureSink:
     def __init__(self, root: Path, tenant_id: str) -> None:
         self._path = tenant_file(root, tenant_id)
         self._lock = threading.Lock()
-        self._seen: set[tuple[str, str]] | None = None
+        self._lock_path = self._path.parent / ".lock"
+        self._seen: set[tuple[str, str]] = set()
+        self._offset = 0
         self.dropped = 0
 
-    def _load_seen(self) -> set[tuple[str, str]]:
-        seen: set[tuple[str, str]] = set()
-        if self._path.exists():
-            for line in self._path.read_text(encoding="utf-8").splitlines():
-                try:
-                    seen.add(dedupe_key(json.loads(line)))
-                except ValueError:
-                    continue
-        return seen
+    def _refresh_seen(self) -> None:
+        """Read records appended (by any process) since the last offset."""
+        if not self._path.exists():
+            return
+        with self._path.open("rb") as fh:
+            fh.seek(self._offset)
+            data = fh.read()
+        # only consume complete lines
+        end = data.rfind(b"\n") + 1
+        for line in data[:end].splitlines():
+            try:
+                self._seen.add(dedupe_key(json.loads(line)))
+            except ValueError:
+                continue
+        self._offset += end
 
     def write(self, record: dict[str, Any]) -> bool:
-        """Append the record unless its (run_id, call_id) exists. True if written."""
+        """Append the record unless its (run_id, call_id) exists. True if written.
+
+        Thread-safe (lock) and multi-process-safe on POSIX (flock on a per-tenant
+        lock file; existing keys are re-read under the lock)."""
         try:
             with self._lock:
-                if self._seen is None:
-                    self._seen = self._load_seen()
-                key = dedupe_key(record)
-                if key in self._seen:
-                    return False
-                line = json.dumps(record, sort_keys=True, separators=(",", ":"))
                 self._path.parent.mkdir(parents=True, exist_ok=True)
-                with self._path.open("a", encoding="utf-8") as fh:
-                    fh.write(line + "\n")
-                self._seen.add(key)
-                return True
+                with self._lock_path.open("a") as lock_fh:
+                    fcntl.flock(lock_fh, fcntl.LOCK_EX)
+                    try:
+                        self._refresh_seen()
+                        key = dedupe_key(record)
+                        if key in self._seen:
+                            return False
+                        line = json.dumps(record, sort_keys=True, separators=(",", ":"))
+                        with self._path.open("a", encoding="utf-8") as fh:
+                            fh.write(line + "\n")
+                        self._seen.add(key)
+                        return True
+                    finally:
+                        fcntl.flock(lock_fh, fcntl.LOCK_UN)
         except Exception:  # capture must never break the online path
             self.dropped += 1
             logger.warning("capture write dropped", exc_info=True)

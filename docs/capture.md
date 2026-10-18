@@ -14,14 +14,14 @@ One JSON object per line, one record per model call (`record_type=model_call`) o
 - Model call: `role` (planner|answer), `model_alias` (null until #170), `provider_model_id`,
   `input_tokens`/`output_tokens`/`reasoning_tokens`, `ttft_ms`, `latency_ms`, `finish_reason`,
   `error`, `cost_usd`, `cost_kind`, `question_sha256`, `answer_sha256`.
-- Tool call: `tool_name`, `tool_call_id`, `arguments`, `query_id`, `status`, `row_count`.
+- Tool call: `tool_name`, `tool_call_id`, `argument_keys`, `arguments_sha256`, `query_id`, `status`, `row_count`.
   Tool result rows are never captured.
 
 Unknown token counts are `null`, never `0` (a recorded `0` input/output count is treated as unknown).
 
 ## Privacy defaults
 
-Metadata only. `question` and `answer` are `null` (hashes only) unless `CAPTURE_CONTENT=1`, which
+Metadata only. `question`, `answer` and tool `arguments` are `null` (hashes and argument keys only) unless `CAPTURE_CONTENT=1`, which
 is for opted-in demo/eval traffic only. Raw provider prompts/responses are not captured by the app
 (LiteLLM-side capture stays under `LITELLM_CAPTURE`). Text fields are capped at
 `CAPTURE_MAX_FIELD_BYTES` (default 4096). Captured questions may contain user data; treat the
@@ -31,7 +31,7 @@ directory as sensitive and store it on encrypted disk.
 
 `$CAPTURE_DIR/<tenant_id>/captures.jsonl`, append-only, one directory per tenant (`tenant_id`
 is validated; the app currently uses `default`). Duplicate `(run_id, call_id)` writes are ignored.
-Write failures never block the response; they are counted (`CaptureRecorder.dropped`) and logged.
+Concurrent writers (threads or processes on one POSIX host) are deduplicated with an `flock` on `<tenant>/.lock`. Not safe across hosts or network filesystems without flock support: treat as single-host. Write failures never block the response; they are counted (`CaptureRecorder.dropped`) and logged.
 
 ## Export and purge
 
