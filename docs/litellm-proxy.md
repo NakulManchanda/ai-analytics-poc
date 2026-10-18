@@ -59,5 +59,5 @@ Rollback: locally use `make local-bedrock-direct-compose`; in Terraform set ai-a
 
 ## Known limitations
 
-- Direct-vs-proxy live comparison and the multi-turn / rollback smokes need real AWS and are manual.
+- Rollback smoke and direct-vs-proxy live comparison are not yet run.
 - Budget enforcement for the proxy path (`DynamoDBBedrockBudget`) is not applied; spend controls are #170.
