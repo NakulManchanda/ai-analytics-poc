@@ -46,7 +46,7 @@ No LiteLLM code; ADR 0010 deferred it. Bedrock is the main path, so two gateways
 
 ## PR / merge state
 
-Draft PR #172.
+PR #172, squash-merged to `main` after two independent reviews (changes requested, then re-review with no blocking findings) and green CI. ECS rollout (Terraform plan/apply) remains an explicit follow-up.
 
 ## Lessons
 
