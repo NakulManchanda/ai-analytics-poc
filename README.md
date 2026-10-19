@@ -427,6 +427,7 @@ Every request operates under an immutable `ExecutionBudget` with strict limits:
 - [Public Cloud Testing Guide](docs/public-uat-guide.md)
 - [Local Docker Testing Guide](docs/local-uat-guide.md)
 - [Implementation Plan](docs/implementation-plan.md)
+- [Versioned Prompt Templates](docs/prompts.md)
 - [Monotonic Work History Ledger](docs/work-history/README.md)
 - [Architectural Decisions](docs/decisions/README.md)
 - [Progress Log](docs/progress.md)

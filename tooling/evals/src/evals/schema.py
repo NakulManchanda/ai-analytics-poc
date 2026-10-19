@@ -102,7 +102,11 @@ class TraceRecord(BaseModel):
     role: Literal["classifier", "planner", "answer"] | None = None
     model_alias: str | None = None
     provider_model_id: str | None = None
+    # Per-call prompt revision (#178); prompt_config_version is the run-wide config tag.
+    prompt_template_id: str | None = None
     prompt_template_version: str | None = None
+    prompt_sha256: str | None = None
+    prompt_config_version: str | None = None
     input_tokens: int | None = None
     output_tokens: int | None = None
     reasoning_tokens: int | None = None

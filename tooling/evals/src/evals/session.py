@@ -159,7 +159,26 @@ def render_session_report(
         "",
         f"Totals are sums of known values only{suffix}. `n/a` means the provider reported no usage; it is never counted as 0.",
         f"Pricing versions: {', '.join(versions) or 'none'}; cost kinds: {', '.join(sorted({c.cost_kind or 'unknown' for c in calls_all}))}; fallbacks used: {sum(bool(c.fallback_used) for c in calls_all)}.",
+        *_prompt_lines(calls_all),
         "Judge metrics: not run on captured traffic (no recorded judge verdicts exist for it).",
         "",
     ]
     return "\n".join(out)
+
+
+def _prompt_lines(calls: list) -> list[str]:
+    """Prompt revisions per role, from per-call capture fields (nothing when absent)."""
+    seen: dict[str, set[str]] = {}
+    for c in calls:
+        if c.prompt_template_id:
+            rev = f"{c.prompt_template_id}@{c.prompt_template_version or '?'}"
+            seen.setdefault(c.role or "?", set()).add(rev)
+    if not seen:
+        return []
+    return [
+        "Prompt revisions by role: "
+        + "; ".join(
+            f"{role}: {', '.join(sorted(revs))}" for role, revs in sorted(seen.items())
+        )
+        + "."
+    ]
