@@ -144,11 +144,11 @@ def test_content_size_cap(tmp_path: Path) -> None:
 
 
 def test_unknown_tokens_are_null_not_zero(tmp_path: Path) -> None:
-    from app.capture.recorder import _tokens
+    from app.capture.recorder import _usage
 
-    assert _tokens(0) is None
-    assert _tokens(None) is None
-    assert _tokens(12) == 12
+    assert _usage({"usage_known": False, "input_tokens": 5}, "input_tokens") is None
+    assert _usage({"usage_known": True, "input_tokens": 0}, "input_tokens") == 0
+    assert _usage({"input_tokens": 12}, "input_tokens") == 12
 
 
 def test_capture_failure_never_blocks_response(tmp_path: Path) -> None:
