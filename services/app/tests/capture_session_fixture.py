@@ -27,7 +27,8 @@ TURNS = [
     "Which pickup zones have the most trips?",
     "Compare that with the second highest zone",
 ]
-_ZONES = [["Midtown Center", 141740], ["Upper East Side South", 141266]]
+# query_taxi_data(top_pickup_zones) is the legacy UNFILTERED ranking.
+_ZONES = [["JFK Airport", 145240], ["Midtown Center", 143471]]
 _USAGE = [
     (412, 38),
     (655, 61),
@@ -59,7 +60,7 @@ class ScriptedMCP:
     def compare_taxi_segments(self, **_: Any) -> dict[str, Any]:
         return {
             "columns": ["segment", "trip_count"],
-            "rows": [["Midtown Center", 141740], ["Upper East Side South", 141266]],
+            "rows": [["JFK Airport", 141182], ["Midtown Center", 141740]],
             "row_count": 2,
             "execution_duration_ms": 18,
             "query_id": "scripted-q2",
@@ -80,8 +81,8 @@ def _provider(calls: list[int]):
                 args = {
                     "segment_dimension": "pickup_zone",
                     "measures": ["trip_count"],
-                    "baseline_filters": {"pickup_zone": "Midtown Center"},
-                    "comparison_filters": {"pickup_zone": "Upper East Side South"},
+                    "baseline_filters": {"pickup_zone": "JFK Airport"},
+                    "comparison_filters": {"pickup_zone": "Midtown Center"},
                     "limit": 5,
                 }
                 name = "compare_taxi_segments"
@@ -97,10 +98,10 @@ def _provider(calls: list[int]):
             }
         else:
             text = (
-                "Upper East Side South is second with 141266 trips, 474 fewer "
-                "than Midtown Center."
+                "Midtown Center is the second highest zone; the filtered comparison "
+                "shows 141740 trips against 141182 for JFK Airport."
                 if second
-                else "Midtown Center has the most pickups with 141740 trips."
+                else "JFK Airport has the most pickups with 145240 trips."
             )
             message = {"role": "assistant", "content": text}
         return httpx.Response(
