@@ -13,6 +13,7 @@ from typing import Any
 from opentelemetry import trace
 from opentelemetry.trace import Tracer
 
+from app.capture import CaptureRecorder
 from app.config import DEFAULT_MODEL_ID, LLMConfigurationError, VoiceSettings
 from app.events import (
     EventPublisher,
@@ -358,7 +359,9 @@ class OrchestrationLoop:
         monotonic_factory: Callable[[], float] = time.monotonic,
         tracer: Tracer | None = None,
         agent_strategy: str = "manual",
+        capture: CaptureRecorder | None = None,
     ) -> None:
+        self._capture = capture or CaptureRecorder.from_environment()
         self._llm_client = llm_client
         self._llm_client_factory = llm_client_factory
         self._mcp_client = mcp_client
@@ -481,16 +484,25 @@ class OrchestrationLoop:
         budgets: ExecutionBudgets | None = None,
     ) -> LoopResult:
         """Execute the orchestration loop using state prepared by prepare_run()."""
-        return self._execute_loop(
-            prompt=submission.prompt,
-            conv_id=submission.conversation_id,
-            user_msg_id=submission.message_id,
-            run_id=submission.run_id,
-            next_seq=submission.next_seq,
-            # run.received was already emitted by prepare_run; start evt_sequence at 1
-            initial_evt_sequence=1,
-            budgets=budgets,
-        )
+        answer: str | None = None
+        try:
+            result = self._execute_loop(
+                prompt=submission.prompt,
+                conv_id=submission.conversation_id,
+                user_msg_id=submission.message_id,
+                run_id=submission.run_id,
+                next_seq=submission.next_seq,
+                # run.received was already emitted by prepare_run; start evt_sequence at 1
+                initial_evt_sequence=1,
+                budgets=budgets,
+            )
+            answer = result.answer
+            return result
+        finally:
+            if self._capture is not None:
+                self._capture.capture_run(
+                    self._repo, submission.run_id, submission.prompt, answer
+                )
 
     def run(
         self,
