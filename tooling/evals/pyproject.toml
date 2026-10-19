@@ -1,0 +1,39 @@
+[project]
+name = "ai-evals"
+version = "0.1.0"
+description = "Offline golden-dataset evaluation tooling for the AI Analytics POC"
+requires-python = ">=3.12"
+dependencies = [
+    "pydantic>=2.12,<3",
+]
+
+[project.optional-dependencies]
+# Reference refresh recomputes expected facts from hand-authored SQL on the pinned parquet.
+reference = ["duckdb>=1.1,<2"]
+# Opt-in LLM-judge metrics. Normal CI never imports this.
+judge = ["deepeval>=3.0,<4"]
+
+[project.scripts]
+evals = "evals.cli:main"
+
+[dependency-groups]
+dev = [
+    "black>=25.1,<26",
+    "duckdb>=1.1,<2",
+    "pytest>=8.4,<9",
+    "ruff>=0.12,<1",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/evals"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff.lint]
+# Black owns wrapping; long f-string report lines and SQL are intentional.
+ignore = ["E501", "C408", "RUF046"]

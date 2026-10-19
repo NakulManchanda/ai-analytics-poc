@@ -48,6 +48,9 @@ jobs:
       - name: Install benchmark tooling dependencies
         run: uv sync --frozen --project tooling/benchmarks --extra app --dev
 
+      - name: Install eval tooling dependencies
+        run: uv sync --frozen --project tooling/evals --dev
+
       - name: Install MCP dependencies
         run: uv sync --frozen --project services/mcp --dev
 
@@ -67,6 +70,7 @@ jobs:
         run: |
           uv run --project services/app black --check services/app tests services/gateway
           uv run --project tooling/benchmarks black --check tooling/benchmarks
+          uv run --project tooling/evals black --check tooling/evals
           uv run --project services/mcp black --check services/mcp/mcp_server services/mcp/tests
           uv run --project services/dataset_spike black --check services/dataset_spike
 
@@ -74,6 +78,7 @@ jobs:
         run: |
           uv run --project services/app ruff check services/app tests services/gateway
           uv run --project tooling/benchmarks ruff check tooling/benchmarks
+          uv run --project tooling/evals ruff check tooling/evals
           uv run --project services/mcp ruff check services/mcp/mcp_server services/mcp/tests
           uv run --project services/dataset_spike ruff check services/dataset_spike
 

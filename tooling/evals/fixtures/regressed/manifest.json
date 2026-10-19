@@ -1,0 +1,21 @@
+{
+  "run_label": "regressed",
+  "dataset_version": "v1",
+  "dataset_sha256": "c75ef6357bf16da19d7658c30122c92f698a76bf7546e2a8554c2ec61176c896",
+  "duckdb_dataset": "nyc-yellow-taxi-2024-01 (config/datasets/nyc_yellow_taxi_2024_01.toml, sha256-pinned parquet)",
+  "model_alias": "answer-tiny",
+  "prompt_version": "prompt-v2",
+  "judge_model": "synthetic-recorded-judge",
+  "judge_mode": "recorded",
+  "capture_schema": "capture.v1",
+  "thresholds": {
+    "min_pass_rate_deterministic": 0.9,
+    "max_pass_rate_drop": 0.05,
+    "max_tool_correctness_drop": 0.05,
+    "max_judge_score_drop": 0.05,
+    "max_failure_rate_increase": 0.05,
+    "max_mean_steps_increase": 0.5,
+    "max_cost_increase_pct": 25.0,
+    "max_p95_latency_increase_pct": 25.0
+  }
+}
