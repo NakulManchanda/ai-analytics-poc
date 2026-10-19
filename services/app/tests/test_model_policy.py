@@ -261,3 +261,17 @@ def test_unknown_pricing_fails_closed_when_usd_cap_set() -> None:
     )
     with call_context("t", "r10"):
         assert _client(lambda r: _ok(), token_only).ask("x").cost_usd is None
+
+
+def test_known_tokens_unknown_cost_still_exhausts_usd_cap() -> None:
+    budgets = RunBudgets(max_usd=0.25)
+    granted = 0
+    for _ in range(10):
+        try:
+            res = budgets.reserve("r", 100, 0.1)
+        except RunBudgetExceededError:
+            break
+        budgets.commit(res, input_tokens=10, output_tokens=5, usd=None)
+        granted += 1
+    assert granted == 2
+    assert budgets.summary("r")["incomplete"] is True

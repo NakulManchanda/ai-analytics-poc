@@ -86,6 +86,8 @@ class RunBudgets:
             state.output_tokens += output_tokens
             state.used_tokens += input_tokens + output_tokens
             if usd is None:
+                # Cost unknown: keep the worst-case USD hold as spend (conservative).
+                state.used_usd += reservation.usd or 0.0
                 state.incomplete = True
             else:
                 state.used_usd += usd
