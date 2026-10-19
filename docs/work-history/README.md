@@ -92,3 +92,4 @@ Monotonically numbered log of every post-bootstrap task. Each entry records the 
 - [0096 — #169 run capture schema and JSONL export](0096-capture-schema.md)
 - [0097 — #171 eval foundations](0097-171-eval-foundations.md) — `tooling/evals/` golden dataset, deterministic graders, DeepEval setup, delta reports
 - [0098 — #176 capture, policy and evals integration](0098-176-integration.md) — loop binds call_context, capture nulls unknown usage, real capture ingest and session report
+- [0101 — fix multi-001 golden reference](0101-fix-multi-001-reference.md) — turn-1 filters, Midtown Center top zone
