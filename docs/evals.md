@@ -49,6 +49,8 @@ is unverified against a real judge in this slice.
 
 ## Known gaps
 
+- **Real traces do not load yet.** Real `capture.v1` JSONL (from #173) carries `run_id`/`turn_id`/`call_id` but no `case_id`/`turn_index`, so `build_turns()` raises `TraceError` ("no case_id") on it; only the synthetic fixtures, which carry golden-case fields, load today. The integration PR must add an explicit matching step: captured run -> candidate case -> reviewed golden case -> eval comparison. Captured traffic is never auto-labeled as golden.
+
 Fixtures are synthetic, so no real model quality or cost decision is supported yet. Ingest of real
 JSONL, the `app_runs` direct vs LiteLLM rerun, quality-qualified goodput joined with the benchmark SLO
 goodput (here: pass rate only), failure clustering and judge calibration are follow-ups.

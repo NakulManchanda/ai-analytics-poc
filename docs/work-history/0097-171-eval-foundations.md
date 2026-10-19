@@ -17,6 +17,9 @@ consumes the contract in synthetic fixtures and does not touch `services/app/`.
 - 37 cases (14 deterministic, 8 ReAct, 5 multi-turn, 6 unsupported, 4 failure), all marked
   `pending_human_review`.
 
+## Known gap
+Real `capture.v1` JSONL (from #173) carries `run_id`/`turn_id`/`call_id` but no `case_id`/`turn_index`, so `build_turns()` raises `TraceError` ("no case_id") on it; only the synthetic fixtures, which carry golden-case fields, load today. The integration PR must add an explicit matching step: captured run -> candidate case -> reviewed golden case -> eval comparison. Captured traffic is never auto-labeled as golden.
+
 ## Verification
 `make evals-test`: 33 passed, 1 skipped (reference drift; passes with `EVALS_DATA_DIR`, 34 passed).
 `make evals-report` exits 0; `CANDIDATE=regressed` exits 2. Black and ruff clean.
