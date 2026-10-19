@@ -27,7 +27,7 @@ TURNS = [
     "Which pickup zones have the most trips?",
     "Compare that with the second highest zone",
 ]
-_ZONES = [["JFK Airport", 145240], ["Upper East Side South", 141266]]
+_ZONES = [["Midtown Center", 141740], ["Upper East Side South", 141266]]
 _USAGE = [
     (412, 38),
     (655, 61),
@@ -59,7 +59,7 @@ class ScriptedMCP:
     def compare_taxi_segments(self, **_: Any) -> dict[str, Any]:
         return {
             "columns": ["segment", "trip_count"],
-            "rows": [["JFK Airport", 145240], ["Upper East Side South", 141266]],
+            "rows": [["Midtown Center", 141740], ["Upper East Side South", 141266]],
             "row_count": 2,
             "execution_duration_ms": 18,
             "query_id": "scripted-q2",
@@ -80,7 +80,7 @@ def _provider(calls: list[int]):
                 args = {
                     "segment_dimension": "pickup_zone",
                     "measures": ["trip_count"],
-                    "baseline_filters": {"pickup_zone": "JFK Airport"},
+                    "baseline_filters": {"pickup_zone": "Midtown Center"},
                     "comparison_filters": {"pickup_zone": "Upper East Side South"},
                     "limit": 5,
                 }
@@ -97,10 +97,10 @@ def _provider(calls: list[int]):
             }
         else:
             text = (
-                "Upper East Side South is second with 141266 trips, about 3.9 thousand "
-                "fewer than JFK Airport."
+                "Upper East Side South is second with 141266 trips, 474 fewer "
+                "than Midtown Center."
                 if second
-                else "JFK Airport has the most pickups with 145240 trips."
+                else "Midtown Center has the most pickups with 141740 trips."
             )
             message = {"role": "assistant", "content": text}
         return httpx.Response(
