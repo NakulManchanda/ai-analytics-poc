@@ -20,5 +20,11 @@ litellm_settings:
   num_retries: 0         # the app owns retry/deadline semantics
   callbacks: ["otel"]    # trace context propagation; exporter via OTEL_* env
 
+  # Spend guard layers (#170, docs/model-policy.md): the app's DynamoDB monthly guard is
+  # authoritative. Proxy budgets are defense in depth only and need the proxy DB for
+  # per-key/team budgets (not enabled in the stateless deployed proxy). To add a coarse
+  # in-proxy ceiling, set `max_budget: <usd>` and `budget_duration: 30d` here; it is NOT
+  # relied on and is unverified in this repo.
+
 general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY

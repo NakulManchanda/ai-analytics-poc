@@ -1,8 +1,9 @@
 import json
+import logging
 import time
 import uuid
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Protocol
 
 import httpx
@@ -23,6 +24,12 @@ from app.bedrock_budget import (
     monthly_limit_micro_usd,
 )
 from app.config import DEFAULT_MODEL_ID, Settings
+from app.model_policy import (
+    ModelPolicyRuntime,
+    PolicyDeniedError,
+    RunBudgetExceededError,
+    current_call_context,
+)
 from app.prefix import (
     PrefixPartition,
     build_ask_partition,
@@ -32,6 +39,8 @@ from app.prefix import (
     estimate_tokens,
 )
 from app.prefix_render import render_conversation_prompt
+
+logger = logging.getLogger(__name__)
 
 RETRYABLE_BEDROCK_ERROR_CODES = {
     "InternalServerException",
@@ -94,6 +103,13 @@ def split_thinking(text: str) -> tuple[str, str]:
         reasoning_parts.append(after_open[:end])
         remaining = after_open[end + len(_THINK_CLOSE) :]
     return "".join(reasoning_parts), "".join(visible_parts)
+
+
+def _usage_known(usage: Mapping[str, Any]) -> bool:
+    return (
+        usage.get("prompt_tokens") is not None
+        and usage.get("completion_tokens") is not None
+    )
 
 
 class ThinkingSplitter:
@@ -165,6 +181,16 @@ class LLMResult:
     reasoning_tokens_unavailable_reason: str | None = None
     visible_answer_tokens: int | None = None
     visible_answer_tokens_unavailable_reason: str | None = None
+    # Policy/accounting (#170); all optional so existing constructors are unchanged.
+    role: str | None = None  # classifier | planner | answer
+    model_alias: str | None = None
+    pricing_version: str | None = None
+    cost_usd: float | None = None  # None when unknown, never 0 by default
+    cost_kind: str | None = None  # estimated | billed | unknown
+    # False when the provider returned no usage; token fields are then not real
+    # counts and consumers must record them as null.
+    usage_known: bool = True
+    fallback_used: bool = False
 
 
 @dataclass(frozen=True)
@@ -177,6 +203,13 @@ class ToolProposalResult:
     latency_ms: int
     finish_reason: str | None = None
     configured_max_tokens: int | None = None
+    role: str | None = None
+    model_alias: str | None = None
+    pricing_version: str | None = None
+    cost_usd: float | None = None
+    cost_kind: str | None = None
+    usage_known: bool = True
+    fallback_used: bool = False
 
 
 class LLMClient(Protocol):
@@ -1072,6 +1105,7 @@ class ServeLLMClient:
         usage = data.get("usage", {})
         input_tokens = usage.get("prompt_tokens", 0)
         output_tokens = usage.get("completion_tokens", 0)
+        usage_known = _usage_known(usage)
 
         separate_reasoning = message.get("reasoning_content")
         if isinstance(separate_reasoning, str) and separate_reasoning:
@@ -1099,7 +1133,22 @@ class ServeLLMClient:
             reasoning_tokens_unavailable_reason=reasoning_unavailable,
             visible_answer_tokens=visible_tokens,
             visible_answer_tokens_unavailable_reason=visible_unavailable,
+            usage_known=usage_known,
+            **self._cost_fields(
+                response.headers, payload, input_tokens, output_tokens, usage_known
+            ),
         )
+
+    def _cost_fields(
+        self,
+        response_headers: Mapping[str, str],
+        payload: Mapping[str, Any],
+        input_tokens: int,
+        output_tokens: int,
+        usage_known: bool,
+    ) -> dict[str, Any]:
+        """Role/alias/cost metadata for the result; the self-hosted path adds none."""
+        return {}
 
     @staticmethod
     def _extract_reasoning_tokens(
@@ -1151,6 +1200,7 @@ class ServeLLMClient:
         usage = data.get("usage", {})
         input_tokens = usage.get("prompt_tokens", 0)
         output_tokens = usage.get("completion_tokens", 0)
+        usage_known = _usage_known(usage)
 
         served_model_id = data.get("model", self._model_id)
 
@@ -1206,6 +1256,10 @@ class ServeLLMClient:
             latency_ms=latency_ms,
             finish_reason=finish_reason,
             configured_max_tokens=payload.get("max_tokens"),
+            usage_known=usage_known,
+            **self._cost_fields(
+                response.headers, payload, input_tokens, output_tokens, usage_known
+            ),
         )
 
     def _stream_completion(
@@ -1221,6 +1275,8 @@ class ServeLLMClient:
         model_id = self._model_id
         input_tokens = 0
         output_tokens = 0
+        usage_seen = False
+        response_headers: Mapping[str, str] = {}
         finish_reason: str | None = None
         reasoning_tokens: int | None = None
         splitter = ThinkingSplitter()
@@ -1252,6 +1308,7 @@ class ServeLLMClient:
                         retryable=retryable,
                         code=f"{self._error_prefix}_http_{response.status_code}",
                     )
+                response_headers = response.headers
                 content_type = response.headers.get("content-type", "")
                 if "application/json" in content_type:
                     content_bytes = response.read()
@@ -1269,6 +1326,7 @@ class ServeLLMClient:
                         # reason rather than mislabeling full latency as TTFT.
                         ttft_unavailable_reason = "non_streaming_json_response"
                         usage = data.get("usage", {})
+                        usage_seen = usage_seen or _usage_known(usage)
                         input_tokens = usage.get("prompt_tokens", input_tokens)
                         output_tokens = usage.get("completion_tokens", output_tokens)
                         rt, _ = self._extract_reasoning_tokens(usage)
@@ -1310,6 +1368,7 @@ class ServeLLMClient:
                                     emit_visible(splitter.feed(content))
                             if "usage" in chunk and chunk["usage"]:
                                 usage_dict = chunk["usage"]
+                                usage_seen = usage_seen or _usage_known(usage_dict)
                                 input_tokens = usage_dict.get(
                                     "prompt_tokens", input_tokens
                                 )
@@ -1362,6 +1421,10 @@ class ServeLLMClient:
             ),
             visible_answer_tokens=visible_tokens,
             visible_answer_tokens_unavailable_reason=visible_unavailable,
+            usage_known=usage_seen,
+            **self._cost_fields(
+                response_headers, payload, input_tokens, output_tokens, usage_seen
+            ),
         )
 
 
@@ -1384,6 +1447,7 @@ class LiteLLMClient(ServeLLMClient):
         budget_model_id: str = DEFAULT_MODEL_ID,
         timeout_seconds: float = 60.0,
         http_client: httpx.Client | None = None,
+        runtime: ModelPolicyRuntime | None = None,
     ) -> None:
         super().__init__(
             f"{proxy_url.rstrip('/')}/v1/chat/completions",
@@ -1396,6 +1460,145 @@ class LiteLLMClient(ServeLLMClient):
         # The proxy fronts billed Bedrock, so the shared DynamoDB allowance still applies.
         self._budget = budget
         self._budget_model_id = budget_model_id
+        # Role->alias, entitlements, caps, run budgets, pricing (#170). Defaults keep
+        # the plain planner/answer alias behaviour with no tenant or run limits.
+        self._runtime = runtime or ModelPolicyRuntime.default(
+            planner_alias, answer_alias
+        )
+
+    @staticmethod
+    def _role(payload: Mapping[str, Any]) -> str:
+        return "planner" if payload.get("tools") else "answer"
+
+    def _governed(
+        self, payload: dict[str, Any], call: Callable[[dict[str, Any]], Any]
+    ) -> Any:
+        """Apply model policy around one logical model call.
+
+        Order: entitlement -> per-call cap -> per-run reservation -> proxy call (which
+        still hits the authoritative DynamoDB monthly guard) -> commit/release."""
+        rt = self._runtime
+        ctx = current_call_context()
+        role = self._role(payload)
+        try:
+            rp = rt.policy.resolve(role, ctx.tenant_id)
+        except PolicyDeniedError as error:
+            raise LLMProviderError(
+                retryable=False, code="model_not_entitled"
+            ) from error
+        fallbacks, rejected = rt.policy.allowed_fallbacks(rp, ctx.tenant_id)
+        if rejected:
+            logger.warning("fallback_rejected role=%s aliases=%s", role, rejected)
+
+        max_tokens = payload.get("max_tokens") or rp.max_tokens
+        if rp.max_tokens is not None and max_tokens is not None:
+            max_tokens = min(max_tokens, rp.max_tokens)
+        reserve_out = max_tokens or 1024
+        reserve_in = estimate_tokens(json.dumps(payload.get("messages", [])))
+
+        candidates = [rp.alias, *fallbacks]
+        for index, alias in enumerate(candidates):
+            attempt = dict(payload)
+            attempt["model"] = alias
+            if max_tokens is not None:
+                attempt["max_tokens"] = max_tokens
+            reservation = None
+            if ctx.run_id is not None:
+                try:
+                    reservation = rt.budgets.reserve(
+                        ctx.run_id,
+                        reserve_in + reserve_out,
+                        rt.pricing.estimate(alias, reserve_in, reserve_out),
+                    )
+                except RunBudgetExceededError as error:
+                    raise LLMProviderError(
+                        retryable=False, code="run_budget_exhausted"
+                    ) from error
+            try:
+                result = call(attempt)
+            except LLMProviderError as error:
+                if reservation:
+                    rt.budgets.release(reservation)
+                last = index == len(candidates) - 1
+                # Never fall back past the monthly guard, and only on transient errors.
+                if (
+                    last
+                    or not error.retryable
+                    or error.code.startswith("bedrock_budget")
+                ):
+                    raise
+                continue
+            except BaseException:
+                if reservation:
+                    rt.budgets.release(reservation)
+                raise
+            if reservation:
+                known = result.usage_known
+                rt.budgets.commit(
+                    reservation,
+                    input_tokens=result.input_tokens if known else None,
+                    output_tokens=result.output_tokens if known else None,
+                    usd=result.cost_usd,
+                )
+            return replace(result, fallback_used=index > 0)
+        raise AssertionError("unreachable")  # pragma: no cover
+
+    def _post_completion(
+        self, payload: dict[str, Any], headers: dict[str, str]
+    ) -> LLMResult:
+        return self._governed(
+            payload, lambda p: ServeLLMClient._post_completion(self, p, headers)
+        )
+
+    def _post_tool_proposal(
+        self, payload: dict[str, Any], headers: dict[str, str]
+    ) -> ToolProposalResult:
+        return self._governed(
+            payload, lambda p: ServeLLMClient._post_tool_proposal(self, p, headers)
+        )
+
+    def _stream_completion(
+        self,
+        payload: dict[str, Any],
+        headers: dict[str, str],
+        delta_callback: Callable[[str], None],
+    ) -> LLMResult:
+        return self._governed(
+            payload,
+            lambda p: ServeLLMClient._stream_completion(
+                self, p, headers, delta_callback
+            ),
+        )
+
+    def _cost_fields(
+        self,
+        response_headers: Mapping[str, str],
+        payload: Mapping[str, Any],
+        input_tokens: int,
+        output_tokens: int,
+        usage_known: bool,
+    ) -> dict[str, Any]:
+        alias = payload.get("model", "")
+        pricing = self._runtime.pricing
+        fields: dict[str, Any] = {
+            "role": self._role(payload),
+            "model_alias": alias,
+            "pricing_version": pricing.version,
+            "cost_usd": None,
+            "cost_kind": "unknown",
+        }
+        # The proxy's own computed cost is the billed figure when it reports one.
+        try:
+            billed = float(response_headers.get("x-litellm-response-cost", ""))
+        except (TypeError, ValueError):
+            billed = None
+        if billed is not None:
+            fields.update(cost_usd=billed, cost_kind="billed")
+        elif usage_known:
+            estimate = pricing.estimate(alias, input_tokens, output_tokens)
+            if estimate is not None:
+                fields.update(cost_usd=estimate, cost_kind="estimated")
+        return fields
 
     def _reserve_budget(self) -> None:
         if self._budget is None:
@@ -1453,9 +1656,6 @@ class LiteLLMClient(ServeLLMClient):
         self._reserve_budget()
         # vLLM-only knob; Bedrock via the proxy must not receive it.
         payload.pop("chat_template_kwargs", None)
-        payload["model"] = (
-            self._planner_alias if payload.get("tools") else self._model_id
-        )
         # Match the direct Bedrock client: deterministic sampling, and tool use is
         # forced for proposals (LiteLLM maps "required" to Bedrock toolChoice any).
         payload["temperature"] = 0.0
@@ -1515,6 +1715,13 @@ def create_llm_client(
             budget=budget,
             budget_model_id=settings.llm_model_id,
             http_client=http_client,
+            runtime=ModelPolicyRuntime.default(
+                settings.litellm_planner_alias,
+                settings.litellm_answer_alias,
+                policy_file=settings.model_policy_file,
+                run_max_tokens=settings.run_max_tokens,
+                run_max_usd=settings.run_max_usd,
+            ),
         )
     return BedrockLLMClient(
         settings.llm_model_id,
