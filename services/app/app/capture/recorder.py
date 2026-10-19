@@ -144,6 +144,8 @@ class CaptureRecorder:
             "conversation_id": run.conversation_id,
             "prompt_template_version": run.prompt_version,
             "run_status": run.status,
+            # Lets consumers order the runs of a conversation (ids are random).
+            "run_started_at": run.started_at,
         }
         include = self.settings.include_content
         records: list[dict[str, Any]] = []

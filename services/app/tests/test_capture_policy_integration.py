@@ -151,3 +151,21 @@ def test_zero_reported_tokens_are_kept_when_usage_known(tmp_path: Path) -> None:
         tmp_path, {"prompt_tokens": 7, "completion_tokens": 0}
     )
     assert planner["input_tokens"] == 7 and planner["output_tokens"] == 0
+
+
+def test_recorded_multi_turn_session_has_one_conversation_and_policy_fields(
+    tmp_path: Path,
+) -> None:
+    from capture_session_fixture import record_session
+
+    records = [json.loads(x) for x in record_session(tmp_path).read_text().splitlines()]
+    assert len({r["run_id"] for r in records}) == 2
+    assert len({r["conversation_id"] for r in records}) == 1
+    tools = [r["tool_name"] for r in records if r["record_type"] == "tool_call"]
+    assert tools == ["query_taxi_data", "compare_taxi_segments"]
+    models = [r for r in records if r["record_type"] == "model_call"]
+    assert {m["role"] for m in models} == {"planner", "answer"}
+    assert all(m["cost_usd"] is not None and m["input_tokens"] for m in models)
+    assert all(m["question"] and (m["role"] != "answer" or m["answer"]) for m in models)
+    assert all(r["run_started_at"] for r in records)
+    assert all(m["latency_ms"] > 0 for m in models)

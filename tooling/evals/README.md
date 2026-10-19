@@ -13,6 +13,10 @@ uv run --project tooling/evals --extra reference evals refresh-reference --data-
 EVALS_DATA_DIR=<dir> uv run --project tooling/evals pytest   # also runs the reference-drift test
 ```
 
+Captured traffic (#176; see docs/evals.md): `evals candidates --traces F`, then
+`evals session-report --traces F --matches M --origin live|local-scripted [--provisional]`.
+`fixtures/captured/` is a recorded NOT LIVE session (scripted provider) with its matches and report.
+
 Layout: `datasets/golden/v1/cases.jsonl` (37 reviewed-by-PR golden cases), `src/evals/` (schema,
 dataset, traces, graders, judge, manifest, report, synth, cli), `fixtures/{baseline,candidate,regressed}/`
 (synthetic `capture.v1` traces + recorded judge scores + run manifest; regenerate with `evals synth`,

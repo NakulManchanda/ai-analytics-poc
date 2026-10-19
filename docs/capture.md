@@ -11,13 +11,13 @@ One JSON object per line, one record per model call (`record_type=model_call`) o
 
 - Common: `schema_version`, `run_id`, `turn_id`, `step`, `call_id` (idempotency key), `tenant_id`,
   `trace_id`, `conversation_id`, `prompt_template_version`, `run_status`.
-- Model call: `role` (planner|answer), `model_alias` (null until #170), `provider_model_id`,
+- Model call: `role` (planner|answer), `model_alias`, `provider_model_id`,
   `input_tokens`/`output_tokens`/`reasoning_tokens`, `ttft_ms`, `latency_ms`, `finish_reason`,
   `error`, `cost_usd`, `cost_kind`, `question_sha256`, `answer_sha256`.
 - Tool call: `tool_name`, `tool_call_id`, `argument_keys`, `arguments_sha256`, `query_id`, `status`, `row_count`.
   Tool result rows are never captured.
 
-Unknown token counts are `null`, never `0` (a recorded `0` input/output count is treated as unknown).
+Unknown token counts are `null`, never `0`: input/output/reasoning tokens are `null` exactly when the provider result has `usage_known=false`; a reported `0` is kept as `0`. `model_alias`, `role`, `pricing_version`, `cost_usd`, `cost_kind` and `fallback_used` are copied from the provider result (`LLMResult`). Clients without the policy layer (direct Bedrock, local fake) fall back to the loop's own estimate. Every record also carries `conversation_id` and `run_started_at`, so the runs of one session can be grouped and ordered after an export sorts them by `run_id`.
 
 ## Privacy defaults
 

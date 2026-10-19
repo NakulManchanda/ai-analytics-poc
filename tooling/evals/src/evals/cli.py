@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
+from dataclasses import asdict
 from pathlib import Path
 
 from evals.dataset import DEFAULT_DATASET, load_cases, refresh_reference, write_cases
@@ -23,6 +25,25 @@ def main(argv: list[str] | None = None) -> int:
     rep.add_argument("--baseline", type=Path, required=True)
     rep.add_argument("--candidate", type=Path, required=True)
     rep.add_argument("--out", type=Path)
+    c = sub.add_parser(
+        "candidates",
+        help="propose golden-case candidates for captured runs (suggestions only)",
+    )
+    c.add_argument("--traces", type=Path, required=True)
+    sr = sub.add_parser("session-report", help="report for one captured session")
+    sr.add_argument("--traces", type=Path, required=True)
+    sr.add_argument("--matches", type=Path, required=True)
+    sr.add_argument(
+        "--origin",
+        required=True,
+        help="'live' or a non-live label such as local-scripted",
+    )
+    sr.add_argument(
+        "--provisional",
+        action="store_true",
+        help="grade against pending_human_review references (labelled)",
+    )
+    sr.add_argument("--out", type=Path)
     s = sub.add_parser("synth", help="regenerate synthetic fixtures")
     s.add_argument("--out", type=Path, required=True)
     args = ap.parse_args(argv)
@@ -40,6 +61,24 @@ def main(argv: list[str] | None = None) -> int:
         )
         write_cases(cases, DEFAULT_DATASET)
         print(f"refreshed {n} facts")
+        return 0
+    if args.cmd == "candidates":
+        from evals.matching import suggest_candidates
+        from evals.traces import build_run_views, load_records
+
+        views = build_run_views(load_records(args.traces)).values()
+        for cand in suggest_candidates(list(views), load_cases()):
+            print(json.dumps(asdict(cand)))
+        return 0
+    if args.cmd == "session-report":
+        from evals.session import render_session_report
+
+        text = render_session_report(
+            args.traces, args.matches, load_cases(), args.origin, args.provisional
+        )
+        if args.out:
+            args.out.write_text(text)
+        print(text)
         return 0
     if args.cmd == "synth":
         from evals.synth import generate

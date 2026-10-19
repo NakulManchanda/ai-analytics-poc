@@ -91,6 +91,10 @@ class TraceRecord(BaseModel):
     call_id: str
     tenant_id: str | None = None
     trace_id: str | None = None
+    # real capture only (#173): session grouping and run ordering
+    conversation_id: str | None = None
+    run_started_at: str | None = None
+    run_status: str | None = None
     # model_call
     role: Literal["classifier", "planner", "answer"] | None = None
     model_alias: str | None = None
@@ -103,7 +107,7 @@ class TraceRecord(BaseModel):
     latency_ms: float | None = None
     finish_reason: str | None = None
     error: str | None = None
-    fallback_used: bool = False
+    fallback_used: bool | None = None
     cost_usd: float | None = None
     cost_kind: Literal["estimated", "billed", "unknown"] | None = None
     pricing_version: str | None = None
@@ -111,6 +115,7 @@ class TraceRecord(BaseModel):
     tool_name: str | None = None
     tool_call_id: str | None = None
     arguments: dict[str, object] | None = None
+    argument_keys: list[str] | None = None
     query_id: str | None = None
     status: str | None = None
     row_count: int | None = None
@@ -119,7 +124,8 @@ class TraceRecord(BaseModel):
     answer: str | None = None
     question_hash: str | None = None
     answer_hash: str | None = None
-    # eval linkage (synthetic fixtures only): which golden case/turn this run answers
+    # eval linkage (synthetic fixtures only): which golden case/turn this run answers.
+    # Real capture never carries these; link runs explicitly with evals.matching.
     case_id: str | None = None
     turn_index: int = 0
 

@@ -1,10 +1,8 @@
 # Evaluation foundations
 
-Scope: the offline `tooling/evals/` slice of #171. Live capture ingest (#169) and the live
-direct-Bedrock vs LiteLLM comparison are follow-ups; this slice runs on committed golden cases and
-synthetic `capture.v1` fixtures.
+Scope: the offline `tooling/evals/` slice of #171, plus real `capture.v1` ingest and the session report (#176). The live direct-Bedrock vs LiteLLM comparison is still a follow-up.
 
-**Status: all fixtures (traces, run manifests, recorded judge scores) are synthetic, and all 37 golden cases are `pending_human_review`.** Nothing here is a real model observation or a human-approved reference yet.
+**Status: the baseline/candidate/regressed fixtures (traces, run manifests, recorded judge scores) are synthetic. `fixtures/captured/` holds one recorded real-shaped session produced by the real loop with a scripted provider (NOT live Bedrock). All 37 golden cases are `pending_human_review`.** Nothing here is a live model observation or a human-approved reference yet.
 
 ## Feedback loop
 
@@ -47,10 +45,24 @@ is unverified against a real judge in this slice.
   `fixtures/` are synthetic.
 - Small dataset: a one-case swing moves pass rate ~2.7 points. Thresholds are initial guesses.
 
+## Captured traffic: candidate -> reviewed golden -> comparison (#176)
+
+Real `capture.v1` JSONL has `run_id`/`turn_id`/`call_id`/`conversation_id` but no `case_id`/`turn_index`.
+
+1. `evals candidates --traces captured.jsonl` lists each run with *suggested* golden turns (exact question match; may be several). A suggestion is not a label.
+2. A human writes a matches file (`evals.matches.v1`: `run_id`, `case_id`, `turn_index`, `confirmed_by`). Validation rejects unknown cases, bad turn indexes, a missing `confirmed_by`, and duplicate runs or targets.
+3. `resolve()` grades a matched run only if the golden case is `review.status == "reviewed"`. Runs that are unmatched, or matched to a still-pending case, stay *candidate only* and are not graded. `--provisional` grades against pending references and the report is then marked PROVISIONAL.
+4. `evals session-report --traces ... --matches ... --origin live|<label> [--provisional]` writes the per-session report: answer correctness, tool behavior (actual vs expected), tokens, cost, latency. Any origin other than `live` prints a NOT LIVE banner. Unknown tokens/cost render `n/a` and totals are marked as lower bounds.
+
+`build_turns()` no longer raises on unlinked records; it skips them (use `build_run_views()` for raw capture). Tool status `completed` (the app) and `ok` (synthetic) both count as success.
+
+`fixtures/captured/taxi-session.jsonl` is a two-turn session (`multi-001`) recorded by `services/app/tests/capture_session_fixture.py`: real `OrchestrationLoop`, `LiteLLMClient`, model policy/pricing and capture recorder; scripted provider (httpx mock) and scripted MCP. Answers, token counts and latency are scripted, so correctness passing is by construction; it proves the pipeline, not model quality. `matches.json` there is fixture wiring by the agent, not a golden review. `report.md` is the PROVISIONAL report for it. Replace with a live Bedrock capture (same commands, `--origin live`) once a run is available.
+
 ## Known gaps
 
-- **Real traces do not load yet.** Real `capture.v1` JSONL (from #173) carries `run_id`/`turn_id`/`call_id` but no `case_id`/`turn_index`, so `build_turns()` raises `TraceError` ("no case_id") on it; only the synthetic fixtures, which carry golden-case fields, load today. The integration PR must add an explicit matching step: captured run -> candidate case -> reviewed golden case -> eval comparison. Captured traffic is never auto-labeled as golden.
+- No live Bedrock session has been captured or reported yet; the committed session report is local-scripted.
+- Golden cases are all pending human review, so strict mode grades nothing; reviewing `multi-001` is the next human step.
+- Matching is manual by design; there is no automatic promotion of captured runs to golden cases.
 
-Fixtures are synthetic, so no real model quality or cost decision is supported yet. Ingest of real
-JSONL, the `app_runs` direct vs LiteLLM rerun, quality-qualified goodput joined with the benchmark SLO
+Fixtures are synthetic, so no real model quality or cost decision is supported yet. The `app_runs` direct vs LiteLLM rerun, quality-qualified goodput joined with the benchmark SLO
 goodput (here: pass rate only), failure clustering and judge calibration are follow-ups.
