@@ -17,17 +17,16 @@ from typing import Any
 
 import httpx
 
-# Standard globally shared system instructions for NYC taxi analytics
-DEFAULT_SYSTEM_PROMPT = (
-    "You are the NYC Taxi Analytics AI Assistant. You have access to governed "
-    "read-only analytics tools over the NYC yellow taxi dataset. Always base answers "
-    "strictly on governed query observations and dataset profiles."
-)
-
-DEFAULT_TAXI_RULES = (
-    "Dataset constraints: All queries run against the pinned NYC Taxi trip dataset. "
-    "Analyses are pre-governed: 'top_pickup_zones', 'trip_volume_by_hour', "
-    "'average_distance_by_weekday', and 'average_trip_metrics'."
+from app.prompts import (
+    ANSWER,
+    ANSWER_WITH_SCHEMA,
+    ASK,
+    DATASET_PROFILE,
+    DEFAULT_SYSTEM_PROMPT,
+    DEFAULT_TAXI_RULES,
+    PLANNER,
+    PromptAttribution,
+    PromptBundle,
 )
 
 
@@ -47,6 +46,8 @@ class PrefixPartition:
     prefix_id: str
     estimated_total_tokens: int
     estimated_shared_tokens: int
+    # Which versioned template rendered `global_shared`, with a hash of the exact text.
+    attribution: PromptAttribution | None = None
 
     @property
     def full_prompt(self) -> str:
@@ -81,8 +82,12 @@ def create_prefix_partition(
     global_shared: str = "",
     conversation_shared: str = "",
     unique_suffix: str = "",
+    bundle: PromptBundle | None = None,
 ) -> PrefixPartition:
-    """Create a PrefixPartition calculating stable prefix_id and token estimates."""
+    """Create a PrefixPartition calculating stable prefix_id and token estimates.
+
+    ``bundle`` is the versioned template that rendered ``global_shared``; the partition
+    then carries the per-call attribution (id, version, SHA-256 of the exact text)."""
     clean_global = global_shared.strip()
     clean_conv = conversation_shared.strip()
     clean_suffix = unique_suffix.strip()
@@ -100,7 +105,17 @@ def create_prefix_partition(
         prefix_id=prefix_id,
         estimated_total_tokens=total_tokens,
         estimated_shared_tokens=shared_tokens,
+        attribution=bundle.attribute(clean_global) if bundle is not None else None,
     )
+
+
+def _past_turns(
+    bundle: PromptBundle, prior_turns: Sequence[Mapping[str, Any]] | None
+) -> list[str]:
+    return [
+        bundle.render("past_turn", turn_json=json.dumps(turn, sort_keys=True))
+        for turn in prior_turns or []
+    ]
 
 
 def build_ask_partition(
@@ -113,14 +128,19 @@ def build_ask_partition(
     conv_parts = []
     if prior_messages:
         for msg in prior_messages:
-            role = msg.get("role", "user")
-            content = msg.get("content", "")
-            conv_parts.append(f"{role.upper()}: {content}")
+            conv_parts.append(
+                ASK.render(
+                    "history",
+                    role=msg.get("role", "user").upper(),
+                    content=msg.get("content", ""),
+                )
+            )
 
     return create_prefix_partition(
-        global_shared=system_prompt,
+        global_shared=ASK.render("global", system_prompt=system_prompt),
         conversation_shared="\n".join(conv_parts),
-        unique_suffix=f"USER: {prompt}",
+        unique_suffix=ASK.render("user", prompt=prompt),
+        bundle=ASK,
     )
 
 
@@ -133,24 +153,16 @@ def build_query_proposal_partition(
 ) -> PrefixPartition:
     """Build partition for proposing a governed taxi query."""
     schema_json = json.dumps(schema, separators=(",", ":"), sort_keys=True)
-    global_shared = (
-        f"{system_prompt}\n{DEFAULT_TAXI_RULES}\n"
-        f"Available Dataset Schema: {schema_json}\n"
-        "Choose exactly ONE governed analysis that answers the question. "
-        "Do not make multiple tool calls. To compare all boroughs across NYC, "
-        "call average_trip_metrics with region_name omitted."
-    )
-
-    conv_parts = []
-    if prior_turns:
-        for turn in prior_turns:
-            conv_parts.append(f"PAST_TURN: {json.dumps(turn, sort_keys=True)}")
-
-    unique_suffix = f"Question: {prompt}"
     return create_prefix_partition(
-        global_shared=global_shared,
-        conversation_shared="\n".join(conv_parts),
-        unique_suffix=unique_suffix,
+        global_shared=PLANNER.render(
+            "global",
+            system_prompt=system_prompt,
+            taxi_rules=DEFAULT_TAXI_RULES,
+            schema_json=schema_json,
+        ),
+        conversation_shared="\n".join(_past_turns(PLANNER, prior_turns)),
+        unique_suffix=PLANNER.render("user", question=prompt),
+        bundle=PLANNER,
     )
 
 
@@ -163,29 +175,33 @@ def build_query_answer_partition(
     prior_turns: Sequence[Mapping[str, Any]] | None = None,
 ) -> PrefixPartition:
     """Build partition for generating an answer from DuckDB query results."""
-    global_shared_parts = [system_prompt, DEFAULT_TAXI_RULES]
     if schema:
-        global_shared_parts.append(f"Schema: {json.dumps(schema, sort_keys=True)}")
-    global_shared = "\n".join(global_shared_parts)
+        bundle = ANSWER_WITH_SCHEMA
+        global_shared = bundle.render(
+            "global",
+            system_prompt=system_prompt,
+            taxi_rules=DEFAULT_TAXI_RULES,
+            schema_json=json.dumps(schema, sort_keys=True),
+        )
+    else:
+        bundle = ANSWER
+        global_shared = bundle.render(
+            "global", system_prompt=system_prompt, taxi_rules=DEFAULT_TAXI_RULES
+        )
 
-    conv_parts = []
-    if prior_turns:
-        for turn in prior_turns:
-            conv_parts.append(f"PAST_TURN: {json.dumps(turn, sort_keys=True)}")
-
-    # Tool observation belongs to conversation context
-    result_json = json.dumps(query_result, separators=(",", ":"), sort_keys=True)
-    conv_parts.append(f"Observation (query_result): {result_json}")
-
-    unique_suffix = (
-        f"Answer the user's question using only this governed query result.\n"
-        f"Question: {prompt}"
+    conv_parts = _past_turns(bundle, prior_turns)
+    # Tool observation belongs to conversation context, never to instructions.
+    conv_parts.append(
+        bundle.render(
+            "observation",
+            result_json=json.dumps(query_result, separators=(",", ":"), sort_keys=True),
+        )
     )
-
     return create_prefix_partition(
         global_shared=global_shared,
         conversation_shared="\n".join(conv_parts),
-        unique_suffix=unique_suffix,
+        unique_suffix=bundle.render("user", question=prompt),
+        bundle=bundle,
     )
 
 
@@ -304,13 +320,11 @@ def build_dataset_profile_partition(
 ) -> PrefixPartition:
     """Build partition for answering with a dataset profile."""
     profile_json = json.dumps(dataset_profile, separators=(",", ":"), sort_keys=True)
-    conv_shared = f"Dataset Profile: {profile_json}"
-    unique_suffix = (
-        f"Answer the user's question using only this governed dataset profile.\n"
-        f"Question: {prompt}"
-    )
     return create_prefix_partition(
-        global_shared=system_prompt,
-        conversation_shared=conv_shared,
-        unique_suffix=unique_suffix,
+        global_shared=DATASET_PROFILE.render("global", system_prompt=system_prompt),
+        conversation_shared=DATASET_PROFILE.render(
+            "observation", profile_json=profile_json
+        ),
+        unique_suffix=DATASET_PROFILE.render("user", question=prompt),
+        bundle=DATASET_PROFILE,
     )

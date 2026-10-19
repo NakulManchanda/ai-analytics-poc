@@ -1,0 +1,42 @@
+{
+  "agent-global": {
+    "version": "1.0.0",
+    "fingerprint": "ad137df5650974070c092373910b642bb6c5d7798cd0dd64f6360d88764bc927"
+  },
+  "answer": {
+    "version": "1.0.0",
+    "fingerprint": "c6ddc91b344b82914a94db405ca5663d05b749ae86ac74d0cd7d024863b300cf"
+  },
+  "answer-single-turn": {
+    "version": "1.0.0",
+    "fingerprint": "f35b693d3f16af95eaaacf763ce8570af4bbdac081b6ea6e3e83cf5814613458"
+  },
+  "answer-with-schema": {
+    "version": "1.0.0",
+    "fingerprint": "1f0308fc78df1fbaf98c721cbb63395d0c63d02b2d92482cf5df6b3ef1b024cb"
+  },
+  "ask": {
+    "version": "1.0.0",
+    "fingerprint": "48092c31bc026b334f1112c193f810ffda2f9c8442ae5c922e6997317e17ba71"
+  },
+  "dataset-profile": {
+    "version": "1.0.0",
+    "fingerprint": "39c941005e4476431e21926591fcacc5f30c4dae29be299571888af810880e83"
+  },
+  "dataset-profile-single-turn": {
+    "version": "1.0.0",
+    "fingerprint": "3535f69694edeb5d1e4e1e3fc7668a346ab8c7afca9ab81bed576d70a5bdee06"
+  },
+  "planner": {
+    "version": "1.0.0",
+    "fingerprint": "36770c532788cb10f9d482d4e98c3e6f88fba59c6c06276444abca87371dee53"
+  },
+  "planner-single-turn": {
+    "version": "1.0.0",
+    "fingerprint": "16783d6f012793b2407111f415badb45c84f53f5df230996faf0a2bb20c94b3e"
+  },
+  "taxi-base": {
+    "version": "1.0.0",
+    "fingerprint": "b7473ea25f4571dbb7d3c6c7783203eed5a9ecb3e7ba2a34fcf3196dcd915f60"
+  }
+}
