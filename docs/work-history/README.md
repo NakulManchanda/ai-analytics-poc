@@ -90,5 +90,4 @@ Monotonically numbered log of every post-bootstrap task. Each entry records the 
 - [0093 — #163 consolidate experiments and observability](0093-consolidate-experiments-observability.md) — `tooling/experiments/`, `infra/observability/{core,inference}/`; remote deploy layout unchanged
 - [0095 — #170 model-role policy](0095-model-policy-budgets.md) — role->alias policy, entitlements, run budgets, pricing and cost fields
 - [0096 — #169 run capture schema and JSONL export](0096-capture-schema.md)
-- [0095 — #171 eval foundations](0095-171-eval-foundations.md) — `tooling/evals/` golden dataset, deterministic graders, DeepEval setup, delta reports
 - [0097 — #171 eval foundations](0097-171-eval-foundations.md) — `tooling/evals/` golden dataset, deterministic graders, DeepEval setup, delta reports
