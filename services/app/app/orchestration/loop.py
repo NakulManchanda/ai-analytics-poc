@@ -38,6 +38,8 @@ from app.mcp_client import (
     sanitize_query_result,
 )
 from app.metrics import emit_run_metrics
+from app.model_policy import call_context
+from app.model_policy.context import DEFAULT_TENANT
 from app.orchestration.budgets import (
     BudgetExceededError,
     BudgetTracker,
@@ -145,6 +147,16 @@ class LLMCall:
     # query catalogue (skipping the model call), "model" otherwise. Only set
     # meaningfully on the proposal LLMCall; unused ("model") on the answer call.
     tool_source: str = "model"
+    # Model-policy accounting (#170) copied from the provider result. `cost_usd`
+    # above is the loop's own Bedrock-rate estimate; `result_cost_usd` is None
+    # when the policy layer could not price the call.
+    model_alias: str | None = None
+    role: str | None = None
+    pricing_version: str | None = None
+    result_cost_usd: float | None = None
+    cost_kind: str | None = None
+    usage_known: bool = True
+    fallback_used: bool = False
 
     def to_metadata(self) -> dict[str, Any]:
         return {
@@ -167,7 +179,27 @@ class LLMCall:
             "cost_source": self.cost_source,
             "error_code": self.error_code,
             "tool_source": self.tool_source,
+            "model_alias": self.model_alias,
+            "role": self.role,
+            "pricing_version": self.pricing_version,
+            "result_cost_usd": self.result_cost_usd,
+            "cost_kind": self.cost_kind,
+            "usage_known": self.usage_known,
+            "fallback_used": self.fallback_used,
         }
+
+
+def _policy_fields(result: object) -> dict[str, Any]:
+    """Policy/accounting fields of an LLMResult or ToolProposalResult (absent -> defaults)."""
+    return {
+        "model_alias": getattr(result, "model_alias", None),
+        "role": getattr(result, "role", None),
+        "pricing_version": getattr(result, "pricing_version", None),
+        "result_cost_usd": getattr(result, "cost_usd", None),
+        "cost_kind": getattr(result, "cost_kind", None),
+        "usage_known": getattr(result, "usage_known", True),
+        "fallback_used": getattr(result, "fallback_used", False),
+    }
 
 
 @dataclass(frozen=True)
@@ -486,22 +518,31 @@ class OrchestrationLoop:
         """Execute the orchestration loop using state prepared by prepare_run()."""
         answer: str | None = None
         try:
-            result = self._execute_loop(
-                prompt=submission.prompt,
-                conv_id=submission.conversation_id,
-                user_msg_id=submission.message_id,
-                run_id=submission.run_id,
-                next_seq=submission.next_seq,
-                # run.received was already emitted by prepare_run; start evt_sequence at 1
-                initial_evt_sequence=1,
-                budgets=budgets,
-            )
+            # Activates per-run budgets and tenant entitlements (#170) for every model
+            # call in this run; copied into worker threads by _run_with_cancellation.
+            with call_context(DEFAULT_TENANT, submission.run_id):
+                result = self._execute_loop(
+                    prompt=submission.prompt,
+                    conv_id=submission.conversation_id,
+                    user_msg_id=submission.message_id,
+                    run_id=submission.run_id,
+                    next_seq=submission.next_seq,
+                    # run.received was already emitted by prepare_run; start evt_sequence at 1
+                    initial_evt_sequence=1,
+                    budgets=budgets,
+                )
             answer = result.answer
             return result
         finally:
             if self._capture is not None:
                 self._capture.capture_run(
-                    self._repo, submission.run_id, submission.prompt, answer
+                    self._repo,
+                    submission.run_id,
+                    submission.prompt,
+                    answer,
+                    provider_client=(
+                        type(self._llm_client).__name__ if self._llm_client else None
+                    ),
                 )
 
     def run(
@@ -886,6 +927,7 @@ class OrchestrationLoop:
                             cost_usd=cost,
                             cost_source=cost_source,
                             tool_source="model",
+                            **_policy_fields(proposal),
                         )
                     )
                     emit(
@@ -1242,6 +1284,7 @@ class OrchestrationLoop:
                             ),
                             cost_usd=c_cost,
                             cost_source=c_cost_source,
+                            **_policy_fields(call_res),
                         )
                         llm_calls.append(recorded_call)
 
@@ -1482,6 +1525,7 @@ class OrchestrationLoop:
                             ),
                             cost_usd=ans_cost,
                             cost_source=ans_cost_source,
+                            **_policy_fields(answer_result),
                         )
                     )
                     emit(

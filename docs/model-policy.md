@@ -38,8 +38,7 @@ defense in depth only and are not relied on until verified. A policy fallback th
 (`PolicyConfigError`) unless `allow_cross_provider_fallback` is set explicitly; there is no silent cross-provider egress.
 A fallback the tenant is not entitled to is skipped and logged (`fallback_rejected`); the original error surfaces.
 
-**Not yet operational (pending integration):** per-run budgets and tenant entitlements do nothing until the integration PR binds `call_context(tenant_id, run_id)` in `orchestration/loop.py`; only the DynamoDB monthly guard is enforced today. Per-run budgets apply only when the loop binds identity with `call_context(tenant_id, run_id)` (see
-`model_policy/context.py`). Until the orchestration owner adds that call, tenant is `default` and no run budget is applied.
+**Binding:** `OrchestrationLoop.execute()` wraps each run in `call_context(DEFAULT_TENANT, run_id)` (#176), so per-run budgets and tenant entitlements apply to every model call of every normal run, including calls made in cancellation worker threads (the context is copied). The tenant is still the single `default` tenant; real tenant identity arrives with auth. A budget refusal surfaces as `OrchestrationError` code `run_budget_exhausted` (the run is persisted as `failed` and re-raised to the API layer).
 
 ## Cost accounting
 

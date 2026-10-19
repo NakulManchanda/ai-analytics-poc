@@ -12,6 +12,10 @@ class TraceError(ValueError):
     pass
 
 
+# Synthetic fixtures use "ok"; the app's durable run steps use "completed".
+TOOL_OK = frozenset({"ok", "completed"})
+
+
 @dataclass
 class ToolUse:
     name: str
@@ -19,13 +23,20 @@ class ToolUse:
     status: str | None
     query_id: str | None
     row_count: int | None
+    latency_ms: float | None = None
+
+    @property
+    def ok(self) -> bool:
+        return self.status in TOOL_OK
 
 
 @dataclass
 class TurnView:
     run_id: str
-    case_id: str
+    case_id: str | None
     turn_index: int
+    conversation_id: str | None = None
+    started_at: str | None = None
     question: str | None = None
     answer: str | None = None
     tools: list[ToolUse] = field(default_factory=list)
@@ -38,7 +49,7 @@ class TurnView:
     @property
     def errored(self) -> bool:
         return any(m.error for m in self.model_calls) or any(
-            t.status not in (None, "ok") for t in self.tools
+            t.status is not None and not t.ok for t in self.tools
         )
 
     def _sum(self, attr: str) -> int | None:
@@ -83,32 +94,56 @@ def load_records(path: Path) -> list[TraceRecord]:
     return sorted(records, key=lambda r: (r.run_id, r.step))
 
 
+def _add(view: TurnView, rec: TraceRecord) -> None:
+    if rec.record_type == "tool_call":
+        view.tools.append(
+            ToolUse(
+                rec.tool_name or "",
+                rec.arguments or {},
+                rec.status,
+                rec.query_id,
+                rec.row_count,
+                rec.latency_ms,
+            )
+        )
+    else:
+        view.model_calls.append(rec)
+        if rec.question:
+            view.question = rec.question
+        if rec.answer:
+            view.answer = rec.answer
+
+
+def build_run_views(records: list[TraceRecord]) -> dict[str, TurnView]:
+    """One view per captured run, keyed by run_id. No golden-case linkage is implied."""
+    views: dict[str, TurnView] = {}
+    for rec in records:
+        view = views.setdefault(
+            rec.run_id,
+            TurnView(
+                rec.run_id,
+                None,
+                0,
+                conversation_id=rec.conversation_id,
+                started_at=rec.run_started_at,
+            ),
+        )
+        _add(view, rec)
+    return views
+
+
 def build_turns(records: list[TraceRecord]) -> dict[tuple[str, int], TurnView]:
-    """Group records into turns keyed by (case_id, turn_index)."""
+    """Group records that already carry a (case_id, turn_index) link (synthetic fixtures).
+
+    Records without a link (real capture) are skipped, not guessed: use ``build_run_views``
+    plus ``evals.matching.resolve`` to link captured runs to reviewed golden cases."""
     turns: dict[tuple[str, int], TurnView] = {}
     for rec in records:
         if rec.case_id is None:
-            raise TraceError(
-                f"{rec.call_id}: record has no case_id (not linked to a golden case)"
-            )
+            continue
         key = (rec.case_id, rec.turn_index)
         view = turns.setdefault(key, TurnView(rec.run_id, rec.case_id, rec.turn_index))
-        if rec.record_type == "tool_call":
-            view.tools.append(
-                ToolUse(
-                    rec.tool_name or "",
-                    rec.arguments or {},
-                    rec.status,
-                    rec.query_id,
-                    rec.row_count,
-                )
-            )
-        else:
-            view.model_calls.append(rec)
-            if rec.question:
-                view.question = rec.question
-            if rec.answer:
-                view.answer = rec.answer
+        _add(view, rec)
     return turns
 
 

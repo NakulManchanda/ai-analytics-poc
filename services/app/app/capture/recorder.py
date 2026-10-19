@@ -29,6 +29,8 @@ class CaptureSettings:
     directory: Path | None = None
     include_content: bool = False
     max_field_bytes: int = 4096
+    # live | scripted | unverified. Recorded in every record; reports derive LIVE only from it.
+    execution_mode: str = "unverified"
 
     @classmethod
     def from_environment(cls) -> CaptureSettings:
@@ -38,12 +40,30 @@ class CaptureSettings:
             include_content=os.getenv("CAPTURE_CONTENT", "").lower()
             in ("1", "true", "yes"),
             max_field_bytes=int(os.getenv("CAPTURE_MAX_FIELD_BYTES", "4096")),
+            execution_mode=os.getenv("CAPTURE_EXECUTION_MODE", "unverified"),
         )
 
 
-def _tokens(value: int | None) -> int | None:
-    """Unknown token counts must stay null; a real call never has 0 input/output."""
-    return value if value else None
+def _usage(call: dict[str, Any], key: str) -> int | None:
+    """Token counts are null exactly when the provider reported no usage; 0 is a real count."""
+    if call.get("usage_known") is False:
+        return None
+    return call.get(key)
+
+
+def _cost(call: dict[str, Any]) -> tuple[float | None, str, str | None]:
+    """(cost_usd, cost_kind, pricing_version). Policy-priced calls report their own
+    cost; calls from clients without the policy layer fall back to the loop estimate."""
+    if call.get("cost_kind") is not None:
+        return (
+            call.get("result_cost_usd"),
+            call["cost_kind"],
+            call.get("pricing_version"),
+        )
+    legacy = call.get("cost_usd")
+    if legacy:
+        return legacy, "estimated", call.get("pricing_version")
+    return None, "unknown", call.get("pricing_version")
 
 
 def _trace_id() -> str | None:
@@ -79,11 +99,16 @@ class CaptureRecorder:
         return raw[:limit].decode("utf-8", errors="ignore") + TRUNCATED
 
     def capture_run(
-        self, repo: Any, run_id: str, question: str | None, answer: str | None
+        self,
+        repo: Any,
+        run_id: str,
+        question: str | None,
+        answer: str | None,
+        provider_client: str | None = None,
     ) -> None:
         """Best-effort: never raises."""
         try:
-            for record in self._build(repo, run_id, question, answer):
+            for record in self._build(repo, run_id, question, answer, provider_client):
                 try:
                     self.sink.write(record)
                 except Exception:
@@ -111,7 +136,12 @@ class CaptureRecorder:
         }
 
     def _build(
-        self, repo: Any, run_id: str, question: str | None, answer: str | None
+        self,
+        repo: Any,
+        run_id: str,
+        question: str | None,
+        answer: str | None,
+        provider_client: str | None = None,
     ) -> list[dict[str, Any]]:
         run = repo.get_run(run_id)
         if run is None:
@@ -127,6 +157,15 @@ class CaptureRecorder:
             "conversation_id": run.conversation_id,
             "prompt_template_version": run.prompt_version,
             "run_status": run.status,
+            # Lets consumers order the runs of a conversation (ids are random).
+            "run_started_at": run.started_at,
+            # Provenance: a fake client can never be recorded as live.
+            "execution_mode": (
+                "scripted"
+                if provider_client == "LocalFakeLLMClient"
+                else self.settings.execution_mode
+            ),
+            "provider_client": provider_client,
         }
         include = self.settings.include_content
         records: list[dict[str, Any]] = []
@@ -137,9 +176,12 @@ class CaptureRecorder:
             step_no = step.sequence if step else next_step
             if not step:
                 next_step += 1
-            role = _ROLE_BY_STEP.get(step.step_type, "answer") if step else "answer"
+            role = call.get("role") or (
+                _ROLE_BY_STEP.get(step.step_type, "answer") if step else "answer"
+            )
             is_answer = role == "answer"
-            reasoning = call.get("reasoning_tokens")
+            usage_known = call.get("usage_known") is not False
+            cost_usd, cost_kind, pricing_version = _cost(call)
             records.append(
                 {
                     **base,
@@ -147,24 +189,22 @@ class CaptureRecorder:
                     "call_id": call_id,
                     "step": step_no,
                     "role": role,
-                    # B (#170) supplies aliases/pricing; recorded as-is when present.
+                    # Aliases/pricing/cost come from the provider result (#170).
                     "model_alias": call.get("model_alias"),
                     "provider_model_id": call.get("model_id"),
-                    "input_tokens": _tokens(call.get("input_tokens")),
-                    "output_tokens": _tokens(call.get("output_tokens")),
-                    "reasoning_tokens": reasoning,
+                    "input_tokens": _usage(call, "input_tokens"),
+                    "output_tokens": _usage(call, "output_tokens"),
+                    "reasoning_tokens": (
+                        call.get("reasoning_tokens") if usage_known else None
+                    ),
                     "ttft_ms": call.get("ttft_ms"),
                     "latency_ms": call.get("latency_ms"),
                     "finish_reason": call.get("finish_reason"),
                     "error": call.get("error_code"),
-                    "fallback_used": call.get("fallback_used"),
-                    "cost_usd": call.get("cost_usd") if call.get("cost_usd") else None,
-                    "cost_kind": (
-                        (call.get("cost_kind") or "estimated")
-                        if call.get("cost_usd")
-                        else "unknown"
-                    ),
-                    "pricing_version": call.get("pricing_version"),
+                    "fallback_used": bool(call.get("fallback_used")),
+                    "cost_usd": cost_usd,
+                    "cost_kind": cost_kind,
+                    "pricing_version": pricing_version,
                     "tool_source": call.get("tool_source"),
                     "question_sha256": sha256_hex(question),
                     "answer_sha256": sha256_hex(answer) if is_answer else None,

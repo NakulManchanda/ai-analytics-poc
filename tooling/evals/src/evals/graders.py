@@ -127,9 +127,7 @@ def grade_turn(
         grade.checks["numeric_facts"] = bool(answer) and all(
             grade_fact(f, answer) for f in turn.reference.facts
         )
-        grade.checks["evidence_present"] = any(
-            t.status == "ok" and t.query_id for t in view.tools
-        )
+        grade.checks["evidence_present"] = any(t.ok and t.query_id for t in view.tools)
     else:
         low = answer.lower()
         grade.checks["states_limitation"] = any(
