@@ -157,6 +157,10 @@ class LLMCall:
     cost_kind: str | None = None
     usage_known: bool = True
     fallback_used: bool = False
+    # Per-call prompt attribution (#178): the template revision this call rendered.
+    prompt_template_id: str | None = None
+    prompt_template_version: str | None = None
+    prompt_sha256: str | None = None
 
     def to_metadata(self) -> dict[str, Any]:
         return {
@@ -186,7 +190,39 @@ class LLMCall:
             "cost_kind": self.cost_kind,
             "usage_known": self.usage_known,
             "fallback_used": self.fallback_used,
+            "prompt_template_id": self.prompt_template_id,
+            "prompt_template_version": self.prompt_template_version,
+            "prompt_sha256": self.prompt_sha256,
         }
+
+
+class _TracedCalls(list[LLMCall]):
+    """Call log that emits one OTEL span event per model call, so each call carries the
+    prompt revision it actually rendered (a run-level attribute could not)."""
+
+    def append(self, call: LLMCall) -> None:
+        super().append(call)
+        trace.get_current_span().add_event(
+            "ai.llm_call",
+            {
+                "ai.llm_call_id": call.llm_call_id,
+                "ai.llm.role": call.role or "",
+                "gen_ai.request.model": call.model_alias or call.model_id,
+                "ai.prompt.template_id": call.prompt_template_id or "",
+                "ai.prompt.template_version": call.prompt_template_version or "",
+                "ai.prompt.sha256": call.prompt_sha256 or "",
+            },
+        )
+
+
+def _prompt_fields(attribution: Any) -> dict[str, Any]:
+    if attribution is None:
+        return {}
+    return {
+        "prompt_template_id": attribution.template_id,
+        "prompt_template_version": attribution.version,
+        "prompt_sha256": attribution.sha256,
+    }
 
 
 def _policy_fields(result: object) -> dict[str, Any]:
@@ -199,6 +235,7 @@ def _policy_fields(result: object) -> dict[str, Any]:
         "cost_kind": getattr(result, "cost_kind", None),
         "usage_known": getattr(result, "usage_known", True),
         "fallback_used": getattr(result, "fallback_used", False),
+        **_prompt_fields(getattr(result, "prompt_attribution", None)),
     }
 
 
@@ -710,7 +747,7 @@ class OrchestrationLoop:
 
         steps: list[RunStep] = []
         step_seq = 1
-        llm_calls: list[LLMCall] = []
+        llm_calls: list[LLMCall] = _TracedCalls()
         executed_tool_signatures: set[str] = set()
         last_tool_call_id: str | None = None
         last_query_id: str | None = None
@@ -899,6 +936,7 @@ class OrchestrationLoop:
                                     cost_source=fail_cost_source,
                                     error_code=err.code,
                                     tool_source="model",
+                                    **_prompt_fields(err.prompt_attribution),
                                 )
                             )
                         raise OrchestrationError(

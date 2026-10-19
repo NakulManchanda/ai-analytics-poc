@@ -15,6 +15,7 @@ from app.prefix import (
     PrefixPartition,
     create_prefix_partition,
 )
+from app.prompts import AGENT_GLOBAL
 
 os.environ.setdefault("CREWAI_DISABLE_TELEMETRY", "true")
 
@@ -121,7 +122,9 @@ def run_two_agent_answer(
     governed_result_json = json.dumps(
         governed_result, separators=(",", ":"), sort_keys=True
     )
-    global_shared = f"{DEFAULT_SYSTEM_PROMPT}\n{DEFAULT_TAXI_RULES}"
+    global_shared = AGENT_GLOBAL.render(
+        "global", system_prompt=DEFAULT_SYSTEM_PROMPT, taxi_rules=DEFAULT_TAXI_RULES
+    )
     research_summary = ""
     calls: list[LLMResult] = []
 
@@ -142,6 +145,7 @@ def run_two_agent_answer(
                 global_shared=global_shared,
                 conversation_shared=f"Observation (query_result): {governed_result_json}",
                 unique_suffix=prompt_str,
+                bundle=AGENT_GLOBAL,
             )
         else:
             step = start_step + 1
@@ -153,6 +157,7 @@ def run_two_agent_answer(
                 global_shared=global_shared,
                 conversation_shared=writer_conv,
                 unique_suffix=prompt_str,
+                bundle=AGENT_GLOBAL,
             )
 
         result = active_invoke(role, partition, step)

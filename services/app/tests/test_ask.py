@@ -1,3 +1,5 @@
+import hashlib
+
 import pytest
 from app.config import Settings
 from app.llm import (
@@ -9,6 +11,7 @@ from app.llm import (
     create_llm_client,
 )
 from app.main import create_app
+from app.prompts import PromptAttribution
 from botocore.config import Config
 from botocore.exceptions import ClientError, ConnectTimeoutError, ReadTimeoutError
 from fastapi.testclient import TestClient
@@ -300,12 +303,18 @@ def test_bedrock_client_streams_real_answer_deltas_and_returns_final_metadata() 
     )
 
     assert deltas == ["Bedrock ", "answer."]
+    sent_text = runtime_client.request["messages"][0]["content"][0]["text"]
     assert result == LLMResult(
         text="Bedrock answer.",
         model_id="amazon.nova-micro-v1:0",
         input_tokens=6,
         output_tokens=4,
         latency_ms=23,
+        prompt_attribution=PromptAttribution(
+            "answer-single-turn",
+            "1.0.0",
+            hashlib.sha256(sent_text.encode()).hexdigest(),
+        ),
     )
     assert runtime_client.request == {
         "modelId": "amazon.nova-micro-v1:0",
