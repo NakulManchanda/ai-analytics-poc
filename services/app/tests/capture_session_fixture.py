@@ -117,7 +117,9 @@ def _provider(calls: list[int]):
 
 def record_session(capture_dir: Path) -> Path:
     recorder = CaptureRecorder(
-        CaptureSettings(directory=capture_dir, include_content=True),
+        CaptureSettings(
+            directory=capture_dir, include_content=True, execution_mode="scripted"
+        ),
         tenant_id="default",
     )
     client = LiteLLMClient(

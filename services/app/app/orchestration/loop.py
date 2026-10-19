@@ -536,7 +536,13 @@ class OrchestrationLoop:
         finally:
             if self._capture is not None:
                 self._capture.capture_run(
-                    self._repo, submission.run_id, submission.prompt, answer
+                    self._repo,
+                    submission.run_id,
+                    submission.prompt,
+                    answer,
+                    provider_client=(
+                        type(self._llm_client).__name__ if self._llm_client else None
+                    ),
                 )
 
     def run(

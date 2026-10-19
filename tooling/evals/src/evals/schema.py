@@ -95,6 +95,9 @@ class TraceRecord(BaseModel):
     conversation_id: str | None = None
     run_started_at: str | None = None
     run_status: str | None = None
+    # provenance written by the recorder: live | scripted | unverified
+    execution_mode: str | None = None
+    provider_client: str | None = None
     # model_call
     role: Literal["classifier", "planner", "answer"] | None = None
     model_alias: str | None = None

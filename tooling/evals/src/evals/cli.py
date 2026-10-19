@@ -35,13 +35,17 @@ def main(argv: list[str] | None = None) -> int:
     sr.add_argument("--matches", type=Path, required=True)
     sr.add_argument(
         "--origin",
-        required=True,
-        help="'live' or a non-live label such as local-scripted",
+        default=None,
+        help="optional cross-check only: 'live' is refused unless the capture records execution_mode=live",
     )
     sr.add_argument(
         "--provisional",
         action="store_true",
         help="grade against pending_human_review references (labelled)",
+    )
+    sr.add_argument(
+        "--conversation-id",
+        help="select one conversation from a multi-conversation file",
     )
     sr.add_argument("--out", type=Path)
     s = sub.add_parser("synth", help="regenerate synthetic fixtures")
@@ -71,11 +75,20 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(asdict(cand)))
         return 0
     if args.cmd == "session-report":
-        from evals.session import render_session_report
+        from evals.session import SessionError, render_session_report
 
-        text = render_session_report(
-            args.traces, args.matches, load_cases(), args.origin, args.provisional
-        )
+        try:
+            text = render_session_report(
+                args.traces,
+                args.matches,
+                load_cases(),
+                args.origin,
+                args.provisional,
+                args.conversation_id,
+            )
+        except SessionError as err:
+            print(f"error: {err}", file=sys.stderr)
+            return 2
         if args.out:
             args.out.write_text(text)
         print(text)

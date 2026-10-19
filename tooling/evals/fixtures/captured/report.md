@@ -1,6 +1,6 @@
 # Captured session report
 
-- origin: **local-scripted** - NOT LIVE: the model provider and dataset server were scripted; tokens, cost, latency and answers are not live Bedrock measurements. No live Bedrock run backs these numbers.
+- origin: **NOT LIVE (recorded execution_mode: scripted)** (derived from recorded provenance, not a CLI flag) - The model provider and dataset server were not verified live (scripted fixtures or unrecorded provenance); tokens, cost, latency and answers are not live Bedrock measurements. No live Bedrock run backs these numbers.
 - source: `taxi-session.jsonl` (capture.v1), runs: 2, conversations: 1
 - captured traffic is never golden; a graded comparison needs an explicit match to a human-reviewed golden case.
 - **PROVISIONAL**: graded against golden references that are still `pending_human_review`. Correctness below is not an approved result.
@@ -20,8 +20,8 @@
 | # | model calls | aliases | input | output | cost USD | model ms | tool ms |
 |---|---|---|---|---|---|---|---|
 | 0 | 1 | taxi-answer | 412 | 38 | 0.000020 | 35 | 0 |
-| 1 | 2 | taxi-answer, taxi-planner | 1158 | 102 | 0.000055 | 66 | 0 |
-| total | | | 1570 | 140 | 0.000075 | 101 | 0 |
+| 1 | 2 | taxi-answer, taxi-planner | 1158 | 102 | 0.000055 | 68 | 0 |
+| total | | | 1570 | 140 | 0.000075 | 103 | 0 |
 
 Totals are sums of known values only. `n/a` means the provider reported no usage; it is never counted as 0.
 Pricing versions: 2026-10-bedrock-nova-micro-v1; cost kinds: estimated; fallbacks used: 0.

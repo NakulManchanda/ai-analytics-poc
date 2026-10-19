@@ -29,6 +29,8 @@ class CaptureSettings:
     directory: Path | None = None
     include_content: bool = False
     max_field_bytes: int = 4096
+    # live | scripted | unverified. Recorded in every record; reports derive LIVE only from it.
+    execution_mode: str = "unverified"
 
     @classmethod
     def from_environment(cls) -> CaptureSettings:
@@ -38,6 +40,7 @@ class CaptureSettings:
             include_content=os.getenv("CAPTURE_CONTENT", "").lower()
             in ("1", "true", "yes"),
             max_field_bytes=int(os.getenv("CAPTURE_MAX_FIELD_BYTES", "4096")),
+            execution_mode=os.getenv("CAPTURE_EXECUTION_MODE", "unverified"),
         )
 
 
@@ -96,11 +99,16 @@ class CaptureRecorder:
         return raw[:limit].decode("utf-8", errors="ignore") + TRUNCATED
 
     def capture_run(
-        self, repo: Any, run_id: str, question: str | None, answer: str | None
+        self,
+        repo: Any,
+        run_id: str,
+        question: str | None,
+        answer: str | None,
+        provider_client: str | None = None,
     ) -> None:
         """Best-effort: never raises."""
         try:
-            for record in self._build(repo, run_id, question, answer):
+            for record in self._build(repo, run_id, question, answer, provider_client):
                 try:
                     self.sink.write(record)
                 except Exception:
@@ -128,7 +136,12 @@ class CaptureRecorder:
         }
 
     def _build(
-        self, repo: Any, run_id: str, question: str | None, answer: str | None
+        self,
+        repo: Any,
+        run_id: str,
+        question: str | None,
+        answer: str | None,
+        provider_client: str | None = None,
     ) -> list[dict[str, Any]]:
         run = repo.get_run(run_id)
         if run is None:
@@ -146,6 +159,13 @@ class CaptureRecorder:
             "run_status": run.status,
             # Lets consumers order the runs of a conversation (ids are random).
             "run_started_at": run.started_at,
+            # Provenance: a fake client can never be recorded as live.
+            "execution_mode": (
+                "scripted"
+                if provider_client == "LocalFakeLLMClient"
+                else self.settings.execution_mode
+            ),
+            "provider_client": provider_client,
         }
         include = self.settings.include_content
         records: list[dict[str, Any]] = []

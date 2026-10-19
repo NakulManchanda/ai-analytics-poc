@@ -7,7 +7,7 @@ import pytest
 
 from evals.dataset import load_cases
 from evals.matching import MatchError, load_matches, resolve, suggest_candidates
-from evals.session import render_session_report
+from evals.session import SessionError, render_session_report
 from evals.traces import TOOL_OK, build_run_views, build_turns, load_records
 
 CAP = Path(__file__).resolve().parents[1] / "fixtures/captured"
@@ -101,7 +101,7 @@ def test_duplicate_target_rejected(cases, tmp_path):
 
 
 def test_session_report_labels_origin_and_gates(cases):
-    kwargs = dict(traces=TRACES, matches=MATCHES, cases=cases, origin="local-scripted")
+    kwargs = dict(traces=TRACES, matches=MATCHES, cases=cases, claimed_origin=None)
     strict = render_session_report(**kwargs)
     assert "NOT LIVE" in strict and "candidate only" in strict.lower()
     assert "numeric_facts" not in strict  # nothing graded against a pending reference
@@ -115,9 +115,53 @@ def test_session_report_labels_origin_and_gates(cases):
     assert "live Bedrock" in prov
 
 
-def test_live_origin_requires_explicit_flag_text(cases):
-    text = render_session_report(TRACES, MATCHES, cases, origin="live")
-    assert "NOT LIVE" not in text and "LIVE" in text
+def test_claiming_live_on_scripted_capture_is_refused(cases):
+    with pytest.raises(SessionError, match="refused"):
+        render_session_report(TRACES, MATCHES, cases, claimed_origin="live")
+
+
+def _rewrite(tmp_path, **fields):
+    lines = [json.loads(x) for x in TRACES.read_text().splitlines()]
+    for r in lines:
+        r.update(fields)
+    f = tmp_path / "t.jsonl"
+    f.write_text("\n".join(json.dumps(r) for r in lines) + "\n")
+    return f
+
+
+def test_live_only_when_every_record_records_live(cases, tmp_path):
+    live = _rewrite(tmp_path, execution_mode="live")
+    text = render_session_report(live, MATCHES, cases, claimed_origin="live")
+    assert "origin: **LIVE**" in text and "NOT LIVE" not in text
+    missing = _rewrite(tmp_path, execution_mode=None)
+    assert "NOT LIVE" in render_session_report(missing, MATCHES, cases)
+
+
+def test_fixture_is_recorded_as_scripted(cases):
+    assert {r.execution_mode for r in load_records(TRACES)} == {"scripted"}
+    assert "NOT LIVE" in render_session_report(TRACES, MATCHES, cases)
+
+
+def test_multiple_conversations_rejected_unless_selected(cases, tmp_path):
+    lines = [json.loads(x) for x in TRACES.read_text().splitlines()]
+    other = [
+        dict(
+            r,
+            conversation_id="conv_other",
+            call_id=r["call_id"] + "x",
+            run_id=r["run_id"] + "x",
+        )
+        for r in lines
+    ]
+    f = tmp_path / "t.jsonl"
+    f.write_text("\n".join(json.dumps(r) for r in lines + other) + "\n")
+    with pytest.raises(SessionError, match="conversations"):
+        render_session_report(f, MATCHES, cases)
+    cid = lines[0]["conversation_id"]
+    text = render_session_report(f, MATCHES, cases, conversation_id=cid)
+    assert "runs: 2" in text
+    with pytest.raises(SessionError, match="no records"):
+        render_session_report(f, MATCHES, cases, conversation_id="nope")
 
 
 def test_unknown_tokens_render_as_na(cases, tmp_path):
@@ -133,6 +177,6 @@ def test_unknown_tokens_render_as_na(cases, tmp_path):
     f = tmp_path / "t.jsonl"
     f.write_text("\n".join(json.dumps(r) for r in lines) + "\n")
     text = render_session_report(
-        f, MATCHES, cases, origin="local-scripted", provisional=True
+        f, MATCHES, cases, claimed_origin=None, provisional=True
     )
     assert "n/a" in text and "incomplete" in text.lower()

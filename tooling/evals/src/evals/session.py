@@ -1,6 +1,6 @@
 """Report for one captured multi-turn session: correctness, tokens/cost, tools, latency.
 
-Origin is explicit so scripted/local results are never mistaken for live provider results.
+Origin is derived from recorded provenance so scripted/local results are never mistaken for live provider results.
 """
 
 from __future__ import annotations
@@ -13,7 +13,11 @@ from evals.matching import load_matches, resolve
 from evals.schema import GoldenCase
 from evals.traces import TurnView, build_run_views, load_records
 
-LOCAL = "NOT LIVE: the model provider and dataset server were scripted; tokens, cost, latency and answers are not live Bedrock measurements. No live Bedrock run backs these numbers."
+LOCAL = "The model provider and dataset server were not verified live (scripted fixtures or unrecorded provenance); tokens, cost, latency and answers are not live Bedrock measurements. No live Bedrock run backs these numbers."
+
+
+class SessionError(ValueError):
+    pass
 
 
 def _n(value: float | None, spec: str = "g") -> str:
@@ -34,11 +38,36 @@ def render_session_report(
     traces: Path,
     matches: Path,
     cases: list[GoldenCase],
-    origin: str,
+    claimed_origin: str | None = None,
     provisional: bool = False,
+    conversation_id: str | None = None,
 ) -> str:
-    live = origin == "live"
-    views = build_run_views(load_records(traces))
+    """Provenance comes from the capture itself (``execution_mode`` written by the recorder).
+
+    ``claimed_origin`` is only a cross-check: claiming ``live`` for a capture that is not recorded
+    as live is refused. LIVE requires every record to say ``live``; missing means NOT LIVE.
+    """
+    records = load_records(traces)
+    if conversation_id is not None:
+        records = [r for r in records if r.conversation_id == conversation_id]
+        if not records:
+            raise SessionError(f"no records for conversation {conversation_id}")
+    conversations = sorted({r.conversation_id or "(none)" for r in records})
+    if len(conversations) != 1:
+        raise SessionError(
+            f"{traces.name} holds {len(conversations)} conversations ({', '.join(conversations)}); "
+            "pass --conversation-id to select exactly one"
+        )
+    modes = sorted({r.execution_mode or "unverified" for r in records})
+    live = modes == ["live"]
+    if claimed_origin == "live" and not live:
+        raise SessionError(
+            f"--origin live refused: capture records execution_mode={','.join(modes)}"
+        )
+    origin = (
+        "live" if live else f"NOT LIVE (recorded execution_mode: {', '.join(modes)})"
+    )
+    views = build_run_views(records)
     res = resolve(views, load_matches(matches, cases), cases, provisional)
     ordered = sorted(views.values(), key=lambda v: v.started_at or "")
     by_id = {c.id: c for c in cases}
@@ -49,7 +78,8 @@ def render_session_report(
     out = [
         "# Captured session report",
         "",
-        f"- origin: **{'LIVE' if live else origin}**" + ("" if live else f" - {LOCAL}"),
+        f"- origin: **{'LIVE' if live else origin}** (derived from recorded provenance, not a CLI flag)"
+        + ("" if live else f" - {LOCAL}"),
         f"- source: `{traces.name}` (capture.v1), runs: {len(ordered)}, conversations: {len({v.conversation_id for v in ordered})}",
         "- captured traffic is never golden; a graded comparison needs an explicit match to a human-reviewed golden case.",
     ]
