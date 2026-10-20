@@ -1205,6 +1205,56 @@ def test_missing_usage_fails_closed_under_a_tight_run_limit() -> None:
     assert run.metadata["details"]["cost_indeterminate"] is True
 
 
+def test_reported_estimate_with_unknown_usage_is_not_authoritative_for_budget() -> None:
+    # A client-reported *estimate* on incomplete usage must not be trusted for budget
+    # accounting (review #194 P2): it gets the conservative bound instead.
+    llm = _PricedLLM(
+        input_tokens=0,
+        output_tokens=119,
+        cost_usd=1e-9,
+        cost_kind="estimated",
+        usage_known=False,
+    )
+    budgets = ExecutionBudgets()
+    _, run = _run_priced(llm, budgets)
+    for call in run.metadata["llm_calls"]:
+        assert call["cost_source"] == "estimate_incomplete_usage"
+        assert call["budget_cost_basis"] == "conservative_bound"
+        assert call["cost_indeterminate"] is True
+        assert call["budget_cost_usd"] > 1e-6
+
+
+def test_reported_estimate_with_unknown_usage_fails_closed_under_a_tight_limit() -> (
+    None
+):
+    llm = _PricedLLM(
+        input_tokens=0,
+        output_tokens=119,
+        cost_usd=1e-9,
+        cost_kind="estimated",
+        usage_known=False,
+    )
+    result, run = _run_priced(llm, ExecutionBudgets(max_estimated_cost_usd=5e-4))
+    assert result.status == "budget_exceeded"
+    assert run.metadata["details"]["cost_indeterminate"] is True
+
+
+def test_billed_cost_with_unknown_usage_stays_authoritative() -> None:
+    llm = _PricedLLM(
+        input_tokens=0,
+        output_tokens=119,
+        cost_usd=1e-4,
+        cost_kind="billed",
+        usage_known=False,
+    )
+    _, run = _run_priced(llm)
+    for call in run.metadata["llm_calls"]:
+        assert call["cost_source"] == "provider_billed"
+        assert call["budget_cost_basis"] == "reported"
+        assert call["cost_indeterminate"] is False
+        assert call["budget_cost_usd"] == pytest.approx(1e-4)
+
+
 def test_fallback_prices_by_alias_from_the_policy_table() -> None:
     from app.model_policy.pricing import PricingTable
 
