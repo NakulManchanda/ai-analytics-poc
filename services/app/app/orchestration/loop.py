@@ -111,14 +111,24 @@ class RunCancelledError(Exception):
         self.reason = reason
 
 
-# Standard Bedrock Claude 3.5 Sonnet rate estimates: $0.003 / 1k input, $0.015 / 1k output
-COST_PER_INPUT_TOKEN = 0.003 / 1_000.0
-COST_PER_OUTPUT_TOKEN = 0.015 / 1_000.0
+# Last-resort fallback price, used only when the LLM result carries no cost of its own
+# (fake clients, errors without usage). It is the pinned default model, Amazon Nova Micro:
+# $0.035 / 1M input, $0.14 / 1M output. The authoritative per-alias price lives in the
+# model-policy pricing table and arrives via `result.cost_usd`.
+FALLBACK_COST_PER_INPUT_TOKEN = 0.035 / 1_000_000.0
+FALLBACK_COST_PER_OUTPUT_TOKEN = 0.14 / 1_000_000.0
+
+# cost_source vocabulary: where LLMCall.cost_usd came from.
+COST_SOURCE_PROVIDER_BILLED = "provider_billed"  # result cost_kind == "billed"
+COST_SOURCE_POLICY_ESTIMATE = "policy_estimate"  # result cost_kind == "estimated"
+COST_SOURCE_FALLBACK = "fallback_estimate"  # no result cost; Nova Micro fallback price
+COST_SOURCE_INCOMPLETE = "estimate_incomplete_usage"  # fallback with missing usage
+COST_SOURCE_SELF_HOSTED = "self_hosted"
 
 
 def estimate_cost(input_tokens: int, output_tokens: int) -> float:
-    return (input_tokens * COST_PER_INPUT_TOKEN) + (
-        output_tokens * COST_PER_OUTPUT_TOKEN
+    return (input_tokens * FALLBACK_COST_PER_INPUT_TOKEN) + (
+        output_tokens * FALLBACK_COST_PER_OUTPUT_TOKEN
     )
 
 
@@ -159,7 +169,7 @@ class LLMCall:
     visible_answer_tokens: int | None = None
     visible_answer_tokens_unavailable_reason: str | None = None
     cost_usd: float = 0.0
-    cost_source: str = "bedrock_estimate"
+    cost_source: str = COST_SOURCE_FALLBACK
     # Set when this call represents a failed provider call (e.g. no_tool_call,
     # invalid_tool_call) recorded for telemetry rather than a successful result.
     error_code: str | None = None
@@ -874,12 +884,28 @@ class OrchestrationLoop:
                 "current_message_id": user_msg_id,
             }
 
-        def call_cost(input_tokens: int, output_tokens: int) -> tuple[float, str]:
+        def call_cost(
+            input_tokens: int, output_tokens: int, result: object | None = None
+        ) -> tuple[float, str]:
             # Serve mode runs on an owned, self-hosted vLLM gateway: it has no
-            # per-token billing, so it is never charged at the Bedrock rate.
+            # per-token billing.
             if is_self_hosted:
-                return 0.0, "self_hosted"
-            return estimate_cost(input_tokens, output_tokens), "bedrock_estimate"
+                return 0.0, COST_SOURCE_SELF_HOSTED
+            # The LLM client already priced the call (billed header or per-alias policy
+            # pricing); never re-price it with a single model's rate.
+            result_cost = getattr(result, "cost_usd", None)
+            if result_cost is not None:
+                if getattr(result, "cost_kind", None) == "billed":
+                    return float(result_cost), COST_SOURCE_PROVIDER_BILLED
+                return float(result_cost), COST_SOURCE_POLICY_ESTIMATE
+            incomplete = (
+                input_tokens <= 0
+                or output_tokens <= 0
+                or getattr(result, "usage_known", True) is False
+            )
+            return estimate_cost(input_tokens, output_tokens), (
+                COST_SOURCE_INCOMPLETE if incomplete else COST_SOURCE_FALLBACK
+            )
 
         def current_model_id() -> str:
             if llm_calls:
@@ -894,7 +920,7 @@ class OrchestrationLoop:
         def current_cost_source() -> str:
             if llm_calls:
                 return llm_calls[-1].cost_source
-            return "self_hosted" if is_self_hosted else "bedrock_estimate"
+            return COST_SOURCE_SELF_HOSTED if is_self_hosted else COST_SOURCE_FALLBACK
 
         try:
             check_cancellation()
@@ -1016,7 +1042,7 @@ class OrchestrationLoop:
                     proposal_latency_ms = call_latency_ms
 
                     cost, cost_source = call_cost(
-                        proposal.input_tokens, proposal.output_tokens
+                        proposal.input_tokens, proposal.output_tokens, proposal
                     )
                     tracker.record_llm_call(
                         proposal.input_tokens,
@@ -1283,7 +1309,7 @@ class OrchestrationLoop:
                             (self._monotonic() - call_start) * 1000
                         )
                         cost, cost_source = call_cost(
-                            proposal.input_tokens, proposal.output_tokens
+                            proposal.input_tokens, proposal.output_tokens, proposal
                         )
                         tracker.record_llm_call(
                             proposal.input_tokens, proposal.output_tokens, cost
@@ -1676,7 +1702,7 @@ class OrchestrationLoop:
 
                         # 5. Calculate cost
                         c_cost, c_cost_source = call_cost(
-                            call_res.input_tokens, call_res.output_tokens
+                            call_res.input_tokens, call_res.output_tokens, call_res
                         )
 
                         # 6. Append LLMCall first so completed physical call telemetry
@@ -1918,7 +1944,9 @@ class OrchestrationLoop:
                             logger.warning(f"Failed to synthesize audio: {err}")
 
                     ans_cost, ans_cost_source = call_cost(
-                        answer_result.input_tokens, answer_result.output_tokens
+                        answer_result.input_tokens,
+                        answer_result.output_tokens,
+                        answer_result,
                     )
                     tracker.record_llm_call(
                         answer_result.input_tokens,

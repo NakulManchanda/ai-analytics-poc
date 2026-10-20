@@ -931,7 +931,7 @@ def test_orchestration_loop_litellm_proxy_is_billed_bedrock_and_groups_session()
     assert result.status == "completed"
     run = repo.get_run(result.run_id)
     assert run is not None
-    assert run.metadata["cost_source"] == "bedrock_estimate"
+    assert run.metadata["cost_source"] == "policy_estimate"
     assert run.estimated_cost_usd > 0
     assert [model for model, _ in seen] == ["taxi-planner", "taxi-answer"]
     sessions = {session for _, session in seen}
@@ -1034,3 +1034,132 @@ def test_every_non_tool_planner_outcome_is_terminal_without_mcp_execution(
     assert run is not None
     assert run.metadata["telemetry"]["planner_outcome"] == outcome
     assert run.metadata["telemetry"]["rejected_outcome"] == outcome
+
+
+# --- #187: per-call cost comes from the LLM result, not a single hard-coded model rate ---
+
+NOVA_IN = 0.035 / 1_000_000
+NOVA_OUT = 0.14 / 1_000_000
+SONNET_RATE_537_504 = 0.009171  # the old (wrong) Claude 3.5 Sonnet-rate figure
+
+
+class _PricedLLM(LocalFakeLLMClient):
+    """Fake client whose proposal/answer results carry explicit tokens and cost fields."""
+
+    def __init__(
+        self,
+        *,
+        input_tokens: int,
+        output_tokens: int,
+        cost_usd: float | None,
+        cost_kind: str | None,
+        usage_known: bool = True,
+    ) -> None:
+        super().__init__()
+        self._fields = dict(
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cost_usd=cost_usd,
+            cost_kind=cost_kind,
+            usage_known=usage_known,
+        )
+
+    def propose_taxi_query(self, prompt, schema, **kwargs):  # type: ignore[no-untyped-def]
+        from dataclasses import replace
+
+        return replace(super().propose_taxi_query(prompt, schema), **self._fields)
+
+    def answer_with_query_result(self, prompt, query_result, **kwargs):  # type: ignore[no-untyped-def]
+        from dataclasses import replace
+
+        return replace(
+            super().answer_with_query_result(prompt, query_result), **self._fields
+        )
+
+
+def _run_priced(llm: LocalFakeLLMClient, budgets: ExecutionBudgets | None = None):  # type: ignore[no-untyped-def]
+    repo = InMemoryStateRepository()
+    loop = OrchestrationLoop(
+        llm_client=llm,
+        mcp_client=FakeMCPClient(),  # type: ignore[arg-type]
+        state_repository=repo,
+        **({"budgets": budgets} if budgets else {}),
+    )
+    # Uncatalogued phrasing so both the proposal and the answer call the model.
+    result = loop.run("Show an unusual ranking of pickup spots, please")
+    run = repo.get_run(result.run_id)
+    assert run is not None
+    return result, run
+
+
+def test_nova_micro_call_is_recorded_at_result_cost_not_sonnet_rate() -> None:
+    nova_cost = 537 * NOVA_IN + 504 * NOVA_OUT
+    llm = _PricedLLM(
+        input_tokens=537, output_tokens=504, cost_usd=nova_cost, cost_kind="estimated"
+    )
+    result, run = _run_priced(llm)
+    assert result.status == "completed"
+    calls = run.metadata["llm_calls"]
+    assert calls
+    for call in calls:
+        assert call["cost_usd"] == pytest.approx(nova_cost)
+        assert call["cost_usd"] == pytest.approx(8.9e-05, abs=1e-6)
+        assert call["cost_usd"] != pytest.approx(SONNET_RATE_537_504)
+    assert result.estimated_cost_usd == pytest.approx(nova_cost * len(calls))
+
+
+@pytest.mark.parametrize(
+    ("kind", "source"),
+    [("billed", "provider_billed"), ("estimated", "policy_estimate")],
+)
+def test_cost_kind_and_cost_source_are_consistent(kind: str, source: str) -> None:
+    llm = _PricedLLM(
+        input_tokens=100, output_tokens=50, cost_usd=0.0001, cost_kind=kind
+    )
+    _, run = _run_priced(llm)
+    for call in run.metadata["llm_calls"]:
+        assert call["cost_kind"] == kind
+        assert call["cost_source"] == source
+        assert call["result_cost_usd"] == call["cost_usd"] == 0.0001
+    assert run.metadata["cost_source"] == source
+
+
+def test_unknown_result_cost_falls_back_to_nova_rate_with_distinct_source() -> None:
+    llm = _PricedLLM(
+        input_tokens=537, output_tokens=504, cost_usd=None, cost_kind="unknown"
+    )
+    _, run = _run_priced(llm)
+    for call in run.metadata["llm_calls"]:
+        assert call["cost_source"] == "fallback_estimate"
+        assert call["cost_usd"] == pytest.approx(537 * NOVA_IN + 504 * NOVA_OUT)
+
+
+def test_missing_usage_without_result_cost_is_flagged_incomplete() -> None:
+    llm = _PricedLLM(
+        input_tokens=0,
+        output_tokens=119,
+        cost_usd=None,
+        cost_kind="unknown",
+        usage_known=False,
+    )
+    _, run = _run_priced(llm)
+    for call in run.metadata["llm_calls"]:
+        assert call["cost_source"] == "estimate_incomplete_usage"
+        assert call["cost_usd"] == pytest.approx(119 * NOVA_OUT)
+
+
+def test_per_run_budget_uses_corrected_cost() -> None:
+    # One call costs 1e-4. Limit 1.5e-4 allows the first call but not the second.
+    kwargs = dict(input_tokens=100, output_tokens=50, cost_usd=1e-4)
+    result, _ = _run_priced(
+        _PricedLLM(cost_kind="estimated", **kwargs),  # type: ignore[arg-type]
+        ExecutionBudgets(max_estimated_cost_usd=1.5e-4),
+    )
+    assert result.status == "budget_exceeded"
+    # At the old Sonnet rate (100 in/50 out ~ 1.05e-3) a 5e-4 limit would trip on the
+    # first call; at the corrected 1e-4 per call both calls (2e-4) fit.
+    result, _ = _run_priced(
+        _PricedLLM(cost_kind="estimated", **kwargs),  # type: ignore[arg-type]
+        ExecutionBudgets(max_estimated_cost_usd=5e-4),
+    )
+    assert result.status == "completed"
