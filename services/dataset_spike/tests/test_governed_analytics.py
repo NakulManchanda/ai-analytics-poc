@@ -158,7 +158,7 @@ class TestValidationBeforeExecution:
                 zones,
                 dimensions=["pickup_hour"],
                 measures=["trip_count"],
-                limit=21,
+                limit=65,
             )
 
 

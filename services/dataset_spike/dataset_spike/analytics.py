@@ -9,7 +9,7 @@ import sys
 import time
 import uuid
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +18,7 @@ import duckdb
 from dataset_spike.query_compiler import (
     compile_aggregate_query,
     compile_compare_segments_query,
+    compile_compare_whole_segments_query,
     compile_dimension_values_query,
 )
 from dataset_spike.query_spec import (
@@ -28,6 +29,7 @@ from dataset_spike.query_spec import (
     DimensionName,
     MeasureName,
     QueryValidationError,
+    TaxiFilters,
     build_aggregate_spec,
     validate_dimension,
     validate_filters,
@@ -588,20 +590,173 @@ def aggregate_taxi_data(
     return _augment_envelope(result, max_result_bytes, **extra)
 
 
+COMPARISON_MODES = ("by_dimension", "whole_segment")
+
+
+def _filters_label(filters: TaxiFilters) -> str:
+    """Stable, deterministic label for a filtered population (dataclass field order)."""
+    parts: list[str] = []
+    for item in fields(filters):
+        value = getattr(filters, item.name)
+        if item.name == "valid_records_only":
+            if value is False:
+                parts.append("valid_records_only=false")
+            continue
+        if value is None:
+            continue
+        rendered = str(value).lower() if isinstance(value, bool) else str(value)
+        parts.append(f"{item.name}={rendered}")
+    return ", ".join(parts) if parts else "all_valid_records"
+
+
+def _validate_comparison_mode(
+    comparison_mode: object, segment_dimension: object
+) -> str:
+    if comparison_mode not in COMPARISON_MODES:
+        raise QueryValidationError(
+            "invalid_comparison_mode",
+            f"comparison_mode must be one of {list(COMPARISON_MODES)}",
+        )
+    if comparison_mode == "whole_segment" and segment_dimension is not None:
+        raise QueryValidationError(
+            "invalid_comparison_combination",
+            "segment_dimension must be omitted when comparison_mode is whole_segment",
+        )
+    if comparison_mode == "by_dimension" and segment_dimension is None:
+        raise QueryValidationError(
+            "invalid_comparison_combination",
+            "segment_dimension is required when comparison_mode is by_dimension",
+        )
+    return str(comparison_mode)
+
+
+def _compare_whole_segments(
+    parquet_path: Path,
+    zone_csv_path: Path,
+    *,
+    measures: object,
+    baseline_filters: object,
+    comparison_filters: object,
+    limit: object,
+    max_result_bytes: int,
+    timeout_seconds: float,
+    query_id_factory: Callable[[], str] | None,
+) -> dict[str, object]:
+    validated_measures = validate_measures(measures)
+    if MeasureName.TRIP_SHARE in validated_measures:
+        raise QueryValidationError(
+            "invalid_measures",
+            "trip_share is not meaningful for whole_segment comparison "
+            "(each population is 100% of itself)",
+        )
+    validated_limit = validate_limit(limit)
+    validated_baseline = validate_filters(baseline_filters)
+    validated_comparison = validate_filters(comparison_filters)
+
+    compiled = compile_compare_whole_segments_query(
+        measures=validated_measures,
+        baseline_filters=validated_baseline,
+        comparison_filters=validated_comparison,
+    )
+    raw = _run_governed_query(
+        parquet_path,
+        zone_csv_path,
+        query=compiled.sql,
+        query_parameters=compiled.parameters,
+        result_limit=1,
+        max_result_bytes=65_536,
+        timeout_seconds=timeout_seconds,
+        query_id_factory=query_id_factory,
+    )
+    # The single-row intermediate is not returned; the envelope below is rebuilt.
+    raw_rows = raw["rows"]
+    if not isinstance(raw_rows, list) or len(raw_rows) != 1:
+        raise RuntimeError("whole-segment comparison returned no aggregate row")
+    cells = raw_rows[0]
+    baseline_population, comparison_population = cells[0], cells[1]
+    no_data: list[str] = []
+    if not baseline_population:
+        no_data.append("baseline")
+    if not comparison_population:
+        no_data.append("comparison")
+
+    rows: list[list[object]] = []
+    for index, measure in enumerate(validated_measures):
+        baseline_value = cells[2 + 2 * index] if baseline_population else None
+        comparison_value = cells[3 + 2 * index] if comparison_population else None
+        delta: object = None
+        delta_pct: object = None
+        if (
+            isinstance(baseline_value, (int, float))
+            and not isinstance(baseline_value, bool)
+            and isinstance(comparison_value, (int, float))
+            and not isinstance(comparison_value, bool)
+        ):
+            delta = round(comparison_value - baseline_value, 4)
+            if baseline_value != 0:
+                delta_pct = round(
+                    (comparison_value - baseline_value) / baseline_value * 100, 4
+                )
+        rows.append([measure.value, baseline_value, comparison_value, delta, delta_pct])
+
+    truncated = len(rows) > validated_limit
+    rows = rows[:validated_limit]
+    result: dict[str, object] = {
+        "columns": ["measure", "baseline", "comparison", "delta", "delta_pct"],
+        "rows": rows,
+        "row_count": len(rows),
+        "execution_duration_ms": raw["execution_duration_ms"],
+        "query_id": raw["query_id"],
+        "truncated": truncated,
+        "query_class": "compare_segments",
+        "comparison_mode": "whole_segment",
+        "baseline_label": _filters_label(validated_baseline),
+        "comparison_label": _filters_label(validated_comparison),
+        "measures": [measure.value for measure in validated_measures],
+    }
+    if no_data:
+        result["no_data_sides"] = no_data
+    if any(measure in _TIP_MEASURES for measure in validated_measures):
+        result["tip_rate_semantics"] = TIP_RATE_SEMANTICS
+    if any(
+        f.airport_trip is not None for f in (validated_baseline, validated_comparison)
+    ):
+        result["airport_trip_rule"] = AIRPORT_TRIP_RULE
+    return _augment_envelope(result, max_result_bytes)
+
+
 def compare_taxi_segments(
     parquet_path: Path,
     zone_csv_path: Path,
     *,
-    segment_dimension: object,
+    segment_dimension: object = None,
     measures: object,
     baseline_filters: object,
     comparison_filters: object,
+    comparison_mode: object = "by_dimension",
     limit: object = 20,
     max_result_bytes: int = MAX_RESULT_BYTES,
     timeout_seconds: float = DEFAULT_QUERY_TIMEOUT_SECONDS,
     query_id_factory: Callable[[], str] | None = None,
 ) -> dict[str, object]:
-    """Align baseline vs comparison segments for the same dimension/measures."""
+    """Compare two filtered populations.
+
+    ``by_dimension`` (default) aligns baseline vs comparison per segment of a shared
+    dimension. ``whole_segment`` aggregates each population as a whole (no dimension).
+    """
+    mode = _validate_comparison_mode(comparison_mode, segment_dimension)
+    if mode == "whole_segment":
+        return _compare_whole_segments(
+            parquet_path,
+            zone_csv_path,
+            measures=measures,
+            baseline_filters=baseline_filters,
+            comparison_filters=comparison_filters,
+            limit=limit,
+            max_result_bytes=max_result_bytes,
+            timeout_seconds=timeout_seconds,
+            query_id_factory=query_id_factory,
+        )
     validated_dimension = validate_dimension(segment_dimension)
     validated_measures = validate_measures(measures)
     validated_limit = validate_limit(limit)

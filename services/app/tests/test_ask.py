@@ -646,9 +646,8 @@ def test_bedrock_propose_taxi_query_schema_includes_borough_enum() -> None:
     ]
 
 
-def test_bedrock_propose_taxi_query_resolves_multiple_borough_tools_to_all_boroughs() -> (
-    None
-):
+def test_bedrock_propose_taxi_query_rejects_multiple_borough_tool_calls() -> None:
+    # Review #193: filtered calls must never collapse into one unfiltered call.
     class MultiToolRuntimeClient:
         def converse(self, **request: object) -> dict[str, object]:
             return {
@@ -685,6 +684,7 @@ def test_bedrock_propose_taxi_query_resolves_multiple_borough_tools_to_all_borou
         "amazon.nova-micro-v1:0",
         runtime_client=MultiToolRuntimeClient(),
     )
-    result = llm_client.propose_taxi_query("Compare boroughs", {"dataset": "nyc-taxi"})
-    assert result.name == "average_trip_metrics"
-    assert result.arguments == {}
+    with pytest.raises(LLMProviderError) as err:
+        llm_client.propose_taxi_query("Compare boroughs", {"dataset": "nyc-taxi"})
+    assert err.value.code == "multiple_tool_calls"
+    assert err.value.retryable is False

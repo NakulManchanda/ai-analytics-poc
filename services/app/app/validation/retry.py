@@ -10,7 +10,10 @@ passes through here.
 
 from __future__ import annotations
 
-from app.orchestration.budgets import BudgetTracker
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app.orchestration.budgets import BudgetTracker
 from app.validation.proposal import ProposalValidation
 
 MAX_VALIDATION_RETRIES = 1

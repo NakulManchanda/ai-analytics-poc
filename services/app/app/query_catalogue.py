@@ -56,17 +56,15 @@ _RAW_CATALOGUE: dict[str, tuple[str, ToolArguments]] = {
             "measures": ["trip_count"],
             "filters": None,
             "order_by": None,
-            "limit": 20,
+            "limit": 50,
         },
     ),
     "How do airport trips compare with non-airport trips on fare and duration?": (
         "compare_taxi_segments",
         {
-            # segment_dimension must be shared across both filtered sides for
-            # compare_taxi_segments' FULL OUTER JOIN to align rows; segmenting
-            # on the same field being filtered (airport_trip) would give every
-            # row a null delta since baseline and comparison keys never match.
-            "segment_dimension": "payment_type",
+            # whole_segment: the populations are defined by the airport_trip filter
+            # itself, so a shared segment_dimension would never align (no overlap).
+            "comparison_mode": "whole_segment",
             "measures": ["average_fare", "average_duration_minutes"],
             "baseline_filters": {"airport_trip": False},
             "comparison_filters": {"airport_trip": True},
@@ -135,10 +133,9 @@ _RAW_CATALOGUE: dict[str, tuple[str, ToolArguments]] = {
     "Compare Manhattan and Queens on trip count, average fare, and average tip": (
         "compare_taxi_segments",
         {
-            # segment_dimension shared across both sides (see the airport-vs-
-            # non-airport entry above for why segmenting on pickup_borough
-            # itself, while also filtering on it, would misalign every row).
-            "segment_dimension": "payment_type",
+            # whole_segment: the populations are defined by the pickup_borough
+            # filter itself, so a shared segment_dimension would never align.
+            "comparison_mode": "whole_segment",
             "measures": ["trip_count", "average_fare", "average_tip"],
             "baseline_filters": {"pickup_borough": "Manhattan"},
             "comparison_filters": {"pickup_borough": "Queens"},
@@ -165,7 +162,7 @@ _RAW_CATALOGUE: dict[str, tuple[str, ToolArguments]] = {
             "measures": ["trip_count"],
             "filters": None,
             "order_by": {"key": "trip_count", "direction": "desc"},
-            "limit": 20,
+            "limit": 64,
         },
     ),
     "Compare the first and last complete weeks of the dataset on trip count and average fare": (
@@ -173,8 +170,7 @@ _RAW_CATALOGUE: dict[str, tuple[str, ToolArguments]] = {
         {
             # segment_dimension shared across both weeks (pickup_weekday
             # recurs in every week, unlike pickup_date which would give two
-            # disjoint key sets and an all-null join -- see the
-            # airport-vs-non-airport entry above for the general reason).
+            # disjoint key sets and an all-null join).
             # Last complete Mon-Sun week in the pinned Jan 2024 dataset is
             # Jan 22-28; the first complete week is Jan 1-7 (dataset starts
             # on a Monday).
@@ -207,6 +203,30 @@ _RAW_CATALOGUE: dict[str, tuple[str, ToolArguments]] = {
 QUERY_CATALOGUE: dict[str, tuple[str, ToolArguments]] = {
     normalize_question(question): value for question, value in _RAW_CATALOGUE.items()
 }
+
+MULTI_STEP_QUESTIONS: frozenset[str] = frozenset(
+    {
+        normalize_question(
+            "Which borough contributed most to the busiest pickup hour, "
+            "and which zones inside it dominate?"
+        )
+    }
+)
+
+
+def requires_multi_step_analysis(question: str) -> bool:
+    """Detect whether a question requires multiple sequential analyses (e.g. react-001).
+
+    These questions must not be satisfied with an incomplete single catalogue hit;
+    they are routed to the multi-step agent loop instead.
+    """
+    normalized = normalize_question(question)
+    if normalized in MULTI_STEP_QUESTIONS:
+        return True
+    return bool(
+        ("busiest" in normalized or "peak" in normalized)
+        and ("which zones inside" in normalized or "zones dominate" in normalized)
+    )
 
 
 def lookup(question: str) -> tuple[str, ToolArguments] | None:

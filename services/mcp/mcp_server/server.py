@@ -229,10 +229,11 @@ def run_pinned_aggregate_taxi_data(
 
 def run_pinned_compare_taxi_segments(
     *,
-    segment_dimension: object,
+    segment_dimension: object = None,
     measures: object,
     baseline_filters: object,
     comparison_filters: object,
+    comparison_mode: object = "by_dimension",
     limit: object = 20,
     tracer: trace.Tracer | None = None,
 ) -> dict[str, object]:
@@ -249,6 +250,7 @@ def run_pinned_compare_taxi_segments(
             measures=measures,
             baseline_filters=baseline_filters,
             comparison_filters=comparison_filters,
+            comparison_mode=comparison_mode,
             limit=limit,
             timeout_seconds=30.0,
         ),
@@ -433,13 +435,24 @@ def build_mcp(
 
     @server.tool()
     def compare_taxi_segments(
-        segment_dimension: str,
         measures: list[str],
         baseline_filters: dict[str, object],
         comparison_filters: dict[str, object],
+        segment_dimension: str | None = None,
+        comparison_mode: str | None = None,
         limit: int = 20,
     ) -> dict[str, object]:
-        """Compare baseline vs comparison segments for one dimension and measure set."""
+        """Compare baseline vs comparison populations.
+
+        comparison_mode "by_dimension" (default) needs segment_dimension and aligns
+        per-segment values; "whole_segment" forbids it and compares each population
+        as a whole.
+        """
+        # The mode is forwarded only when the caller chose one, so the default
+        # call shape (and every existing runner) is unchanged.
+        mode_kwargs: dict[str, object] = (
+            {} if comparison_mode is None else {"comparison_mode": comparison_mode}
+        )
         if compare_segments_runner is run_pinned_compare_taxi_segments:
             return run_pinned_compare_taxi_segments(
                 segment_dimension=segment_dimension,
@@ -448,6 +461,7 @@ def build_mcp(
                 comparison_filters=comparison_filters,
                 limit=limit,
                 tracer=active_tracer,
+                **mode_kwargs,
             )
         return _run_governed_analytics_tool(
             tracer=active_tracer,
@@ -458,6 +472,7 @@ def build_mcp(
                 baseline_filters=baseline_filters,
                 comparison_filters=comparison_filters,
                 limit=limit,
+                **mode_kwargs,
             ),
         )
 

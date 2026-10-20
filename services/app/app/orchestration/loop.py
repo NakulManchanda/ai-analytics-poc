@@ -24,6 +24,7 @@ from app.events import (
     terminal_run_payload,
 )
 from app.llm import (
+    TAXI_PROPOSAL_TOOL_SPECS,
     LiteLLMClient,
     LLMClient,
     LLMProviderError,
@@ -48,7 +49,12 @@ from app.orchestration.budgets import (
 )
 from app.orchestration.reducer import ContextReducer
 from app.prefix import PrefixPartition
-from app.query_catalogue import lookup as catalogue_lookup
+from app.query_catalogue import (
+    lookup as catalogue_lookup,
+)
+from app.query_catalogue import (
+    requires_multi_step_analysis,
+)
 from app.state import (
     Conversation,
     InMemoryStateRepository,
@@ -71,6 +77,7 @@ from app.validation import (
     summarize_arguments,
     validate_proposal,
 )
+from app.validation.proposal import MAX_ROWS, NON_TOOL_OUTCOMES
 
 logger = logging.getLogger(__name__)
 EXPECTED_TOOL_NAME = "query_taxi_data"
@@ -84,7 +91,12 @@ AVERAGE_METRICS_TOOL_NAME = "average_trip_metrics"
 # sanitize_governed_query_result) before the result reaches this loop, so no
 # further app-side sanitization happens here.
 EXTENDED_GOVERNED_TOOL_NAMES = frozenset(
-    {"describe_taxi_dataset", "list_taxi_dimension_values", "aggregate_taxi_data"}
+    {
+        "describe_taxi_dataset",
+        "list_taxi_dimension_values",
+        "aggregate_taxi_data",
+        "compare_taxi_segments",
+    }
 )
 
 
@@ -297,7 +309,11 @@ def _parse_list_taxi_dimension_values(arguments: object) -> dict[str, object] | 
         return None
     if search is not None and not isinstance(search, str):
         return None
-    if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 20:
+    if (
+        isinstance(limit, bool)
+        or not isinstance(limit, int)
+        or not 1 <= limit <= MAX_ROWS
+    ):
         return None
     return {"dimension": dimension, "search": search, "limit": limit}
 
@@ -324,7 +340,11 @@ def _parse_aggregate_taxi_data(arguments: object) -> dict[str, object] | None:
         return None
     if order_by is not None and not isinstance(order_by, Mapping):
         return None
-    if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 20:
+    if (
+        isinstance(limit, bool)
+        or not isinstance(limit, int)
+        or not 1 <= limit <= MAX_ROWS
+    ):
         return None
     return {
         "dimensions": dimensions,
@@ -338,6 +358,7 @@ def _parse_aggregate_taxi_data(arguments: object) -> dict[str, object] | None:
 def _parse_compare_taxi_segments(arguments: object) -> dict[str, object] | None:
     if not isinstance(arguments, Mapping) or set(arguments) - {
         "segment_dimension",
+        "comparison_mode",
         "measures",
         "baseline_filters",
         "comparison_filters",
@@ -345,11 +366,18 @@ def _parse_compare_taxi_segments(arguments: object) -> dict[str, object] | None:
     }:
         return None
     segment_dimension = arguments.get("segment_dimension")
+    comparison_mode = arguments.get("comparison_mode")
     measures = arguments.get("measures")
     baseline_filters = arguments.get("baseline_filters")
     comparison_filters = arguments.get("comparison_filters")
     limit = arguments.get("limit", 20)
-    if not isinstance(segment_dimension, str) or not segment_dimension:
+    if segment_dimension is not None and (
+        not isinstance(segment_dimension, str) or not segment_dimension
+    ):
+        return None
+    if comparison_mode is not None and (
+        not isinstance(comparison_mode, str) or not comparison_mode
+    ):
         return None
     if not _is_str_list(measures) or not measures:
         return None
@@ -357,15 +385,25 @@ def _parse_compare_taxi_segments(arguments: object) -> dict[str, object] | None:
         comparison_filters, Mapping
     ):
         return None
-    if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 20:
+    if (
+        isinstance(limit, bool)
+        or not isinstance(limit, int)
+        or not 1 <= limit <= MAX_ROWS
+    ):
         return None
-    return {
-        "segment_dimension": segment_dimension,
+    parsed: dict[str, object] = {
         "measures": measures,
         "baseline_filters": dict(baseline_filters),
         "comparison_filters": dict(comparison_filters),
         "limit": limit,
     }
+    # Optional fields are passed through only when given, so the by_dimension
+    # call shape is unchanged; the proposal validator enforces the combination.
+    if segment_dimension is not None:
+        parsed["segment_dimension"] = segment_dimension
+    if comparison_mode is not None:
+        parsed["comparison_mode"] = comparison_mode
+    return parsed
 
 
 _EXTENDED_TOOL_PARSERS: dict[str, Callable[[object], dict[str, object] | None]] = {
@@ -379,6 +417,8 @@ _EXTENDED_TOOL_PARSERS: dict[str, Callable[[object], dict[str, object] | None]] 
 def parse_query_proposal(
     proposal: ToolProposalResult,
 ) -> tuple[str, dict[str, object]] | None:
+    if proposal.outcome in NON_TOOL_OUTCOMES or not proposal.name:
+        return None
     arguments = proposal.arguments
     if proposal.name in _EXTENDED_TOOL_PARSERS:
         parsed = _EXTENDED_TOOL_PARSERS[proposal.name](arguments)
@@ -795,11 +835,22 @@ class OrchestrationLoop:
                 "tool_latency_ms": tool_latency_ms,
                 "final_answer_llm_latency_ms": final_answer_latency_ms,
                 "ttft": ttft_data,
+                "tool_source": active_tool_source,
+                "planner_outcome": active_planner_outcome,
+                "selected_tool": active_selected_tool,
+                "rejected_outcome": active_rejected_outcome,
+                "offered_tools": [spec["name"] for spec in TAXI_PROPOSAL_TOOL_SPECS],
             }
 
         def check_cancellation(partial_text: str = "") -> None:
             if self.is_cancelled(run_id):
                 raise RunCancelledError(partial_text=partial_text)
+
+        # Active tool and outcome attribution
+        active_tool_source = "model"
+        active_planner_outcome = "tool_call"
+        active_selected_tool: str | None = None
+        active_rejected_outcome: str | None = None
 
         # Whether the active LLM client is the owned, self-hosted vLLM gateway (serve
         # mode). Determined below once the client is obtained; defaults to False so the
@@ -885,10 +936,21 @@ class OrchestrationLoop:
 
                 # Step B: catalogue lookup (D19), else LLM Propose Taxi Query
                 check_cancellation()
-                catalogue_entry = catalogue_lookup(prompt)
+                active_tool_source = "model"
+                active_planner_outcome = "tool_call"
+                active_selected_tool = None
+                active_rejected_outcome = None
+
+                catalogue_entry = (
+                    None
+                    if requires_multi_step_analysis(prompt)
+                    else catalogue_lookup(prompt)
+                )
                 if catalogue_entry is not None:
+                    active_tool_source = "catalogue"
                     llm_call_id = None
                     tool_name, tool_arguments = catalogue_entry
+                    active_selected_tool = tool_name
                     proposal_step = RunStep(
                         step_id=generate_step_id(),
                         run_id=run_id,
@@ -990,6 +1052,11 @@ class OrchestrationLoop:
                         llm_call_id=llm_call_id,
                     )
 
+                    output_summary = (
+                        f"tool: {proposal.name}"
+                        if proposal.name
+                        else f"outcome: {proposal.outcome}"
+                    )
                     proposal_step = RunStep(
                         step_id=generate_step_id(),
                         run_id=run_id,
@@ -998,13 +1065,146 @@ class OrchestrationLoop:
                         status="completed",
                         llm_call_id=llm_call_id,
                         input_summary=f"prompt: {prompt[:80]}",
-                        output_summary=f"tool: {proposal.name}",
+                        output_summary=output_summary,
                         duration_ms=call_latency_ms,
-                        metadata=llm_calls[-1].to_metadata(),
+                        metadata={
+                            "outcome": proposal.outcome,
+                            "tool_source": "model",
+                            **llm_calls[-1].to_metadata(),
+                        },
                     )
                     self._repo.add_run_step(proposal_step)
                     steps.append(proposal_step)
                     step_seq += 1
+
+                    active_planner_outcome = proposal.outcome
+                    active_selected_tool = proposal.name if proposal.name else None
+
+                    # Every non-tool outcome is terminal: no validation of an empty
+                    # proposal and no MCP execution.
+                    if proposal.outcome in (
+                        "unsupported",
+                        "clarification_required",
+                        "no_tool",
+                    ):
+                        outcome = proposal.outcome
+                        active_rejected_outcome = outcome
+                        emit(
+                            "run.declined",
+                            {
+                                "outcome": outcome,
+                                "reason": proposal.decline_reason,
+                                "tool_source": "model",
+                            },
+                        )
+                        if outcome == "no_tool":
+                            # Unclassified model prose is ungrounded: never show it.
+                            decline_answer = (
+                                "I could not determine which analysis answers that "
+                                "question. Please rephrase it in terms of the taxi "
+                                "dataset."
+                            )
+                        else:
+                            decline_answer = proposal.decline_reason or (
+                                "I cannot determine that: the dataset does not "
+                                "contain this information."
+                            )
+                        answer_step = RunStep(
+                            step_id=generate_step_id(),
+                            run_id=run_id,
+                            sequence=step_seq,
+                            step_type="answer",
+                            status="completed",
+                            input_summary=f"question: {prompt[:80]}",
+                            output_summary=f"answer: {decline_answer[:80]}",
+                            duration_ms=0,
+                            metadata={"outcome": outcome, "tool_source": "model"},
+                        )
+                        self._repo.add_run_step(answer_step)
+                        steps.append(answer_step)
+                        step_seq += 1
+
+                        # Persist assistant Message
+                        asst_msg_id = generate_message_id()
+                        self._repo.add_message(
+                            Message(
+                                message_id=asst_msg_id,
+                                conversation_id=conv_id,
+                                sequence=next_seq,
+                                role="assistant",
+                                content=decline_answer,
+                            )
+                        )
+
+                        loop_duration_ms = int((self._monotonic() - start_mono) * 1000)
+                        run_telemetry = telemetry(loop_duration_ms)
+                        run_telemetry.update(
+                            {
+                                "tool_source": "model",
+                                "planner_outcome": outcome,
+                                "rejected_outcome": outcome,
+                            }
+                        )
+                        completed_run = Run(
+                            run_id=run_id,
+                            conversation_id=conv_id,
+                            message_id=user_msg_id,
+                            status="completed",
+                            model=current_model_id(),
+                            prompt_version="m9.v1",
+                            started_at=run.started_at,
+                            completed_at=utcnow_isoformat(),
+                            input_tokens=tracker.input_tokens,
+                            output_tokens=tracker.output_tokens,
+                            estimated_cost_usd=tracker.estimated_cost_usd,
+                            metadata={
+                                "telemetry": run_telemetry,
+                                "cost_source": current_cost_source(),
+                                "llm_calls": [call.to_metadata() for call in llm_calls],
+                            },
+                        )
+                        self._repo.update_run(completed_run)
+
+                        emit(
+                            "run.completed",
+                            terminal_run_payload(
+                                status="completed",
+                                input_tokens=tracker.input_tokens,
+                                output_tokens=tracker.output_tokens,
+                                estimated_cost_usd=tracker.estimated_cost_usd,
+                                failure_code=None,
+                                telemetry=run_telemetry,
+                            ),
+                        )
+                        emit_run_metrics(
+                            run_id=run_id,
+                            conversation_id=conv_id,
+                            milestone="v3.1",
+                            model=current_model_id(),
+                            turn_type="text",
+                            status="completed",
+                            telemetry=run_telemetry,
+                            input_tokens=tracker.input_tokens,
+                            output_tokens=tracker.output_tokens,
+                            estimated_cost_usd=tracker.estimated_cost_usd,
+                            cost_source=current_cost_source(),
+                            llm_calls=[call.to_metadata() for call in llm_calls],
+                        )
+
+                        return LoopResult(
+                            answer=decline_answer,
+                            status="completed",
+                            run_id=run_id,
+                            conversation_id=conv_id,
+                            steps=steps,
+                            llm_calls=llm_calls,
+                            input_tokens=tracker.input_tokens,
+                            output_tokens=tracker.output_tokens,
+                            total_tokens=tracker.total_tokens,
+                            estimated_cost_usd=tracker.estimated_cost_usd,
+                            latency_ms=loop_duration_ms,
+                            telemetry=run_telemetry,
+                        )
 
                     # Step C: deterministic validation (#180) before any tool runs,
                     # with at most one bounded feedback retry for recoverable errors.

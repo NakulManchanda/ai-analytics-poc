@@ -112,7 +112,7 @@ def test_tool_proposal_uses_planner_alias() -> None:
     proposal = _client(handler).propose_taxi_query("top zones?", {"columns": []})
     assert seen[0]["model"] == "taxi-planner"
     assert seen[0]["tools"]
-    assert seen[0]["tool_choice"] == "required"
+    assert seen[0]["tool_choice"] == "auto"
     assert seen[0]["temperature"] == 0.0
     assert proposal.name == "query_taxi_data"
     assert proposal.arguments == {"analysis": "top_pickup_zones", "limit": 5}

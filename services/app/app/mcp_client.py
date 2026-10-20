@@ -62,10 +62,11 @@ class DatasetProfileMCPClient(Protocol):
     def compare_taxi_segments(
         self,
         *,
-        segment_dimension: str,
+        segment_dimension: str | None = None,
         measures: list[str],
         baseline_filters: dict[str, object],
         comparison_filters: dict[str, object],
+        comparison_mode: str | None = None,
         limit: int = 20,
     ) -> dict[str, object]: ...
 
@@ -181,10 +182,11 @@ class FastMCPDatasetProfileClient:
     def compare_taxi_segments(
         self,
         *,
-        segment_dimension: str,
+        segment_dimension: str | None = None,
         measures: list[str],
         baseline_filters: dict[str, object],
         comparison_filters: dict[str, object],
+        comparison_mode: str | None = None,
         limit: int = 20,
     ) -> dict[str, object]:
         try:
@@ -194,6 +196,7 @@ class FastMCPDatasetProfileClient:
                     measures=measures,
                     baseline_filters=baseline_filters,
                     comparison_filters=comparison_filters,
+                    comparison_mode=comparison_mode,
                     limit=limit,
                 )
             )
@@ -254,19 +257,25 @@ class FastMCPDatasetProfileClient:
     async def _compare_taxi_segments(
         self,
         *,
-        segment_dimension: str,
+        segment_dimension: str | None,
         measures: list[str],
         baseline_filters: dict[str, object],
         comparison_filters: dict[str, object],
+        comparison_mode: str | None,
         limit: int,
     ) -> dict[str, object]:
         arguments: dict[str, object] = {
-            "segment_dimension": segment_dimension,
             "measures": measures,
             "baseline_filters": baseline_filters,
             "comparison_filters": comparison_filters,
             "limit": limit,
         }
+        # Optional fields are sent only when the caller chose them, so the
+        # default by_dimension call keeps its original wire shape.
+        if segment_dimension is not None:
+            arguments["segment_dimension"] = segment_dimension
+        if comparison_mode is not None:
+            arguments["comparison_mode"] = comparison_mode
         async with self._client() as client:
             result = await client.call_tool("compare_taxi_segments", arguments)
         if not isinstance(result.data, dict):
@@ -363,11 +372,14 @@ _GOVERNED_RESULT_STRING_EXTRAS = frozenset(
         "query_class",
         "dimension",
         "segment_dimension",
+        "comparison_mode",
+        "baseline_label",
+        "comparison_label",
         "tip_rate_semantics",
         "airport_trip_rule",
     }
 )
-_GOVERNED_RESULT_LIST_EXTRAS = frozenset({"dimensions", "measures"})
+_GOVERNED_RESULT_LIST_EXTRAS = frozenset({"dimensions", "measures", "no_data_sides"})
 
 
 def sanitize_governed_query_result(payload: Mapping[str, Any]) -> dict[str, object]:

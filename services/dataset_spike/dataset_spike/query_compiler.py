@@ -391,3 +391,54 @@ def compile_compare_segments_query(
     for measure in measures:
         output_columns += [f"baseline_{measure.value}", f"comparison_{measure.value}"]
     return CompiledQuery(sql=sql, parameters=parameters, output_columns=output_columns)
+
+
+def compile_compare_whole_segments_query(
+    *,
+    measures: list[MeasureName],
+    baseline_filters: TaxiFilters,
+    comparison_filters: TaxiFilters,
+) -> CompiledQuery:
+    """One query: two independent whole-population aggregates, one output row.
+
+    Each side reuses the governed filter and measure compilers (including the
+    valid-record filter), is aggregated with no GROUP BY, and the two single-row
+    results are cross joined. ``baseline_population`` / ``comparison_population``
+    carry each side's row count so an empty side is distinguishable from a real 0.
+    """
+    zone_join = _requires_zone_join([], baseline_filters) or _requires_zone_join(
+        [], comparison_filters
+    )
+    measure_selects = ", ".join(
+        f'{_MEASURE_EXPRESSIONS[measure]} AS "{measure.value}"' for measure in measures
+    )
+    from_sql = _from_clause(zone_join)
+
+    def side_cte(filters: TaxiFilters) -> tuple[str, list[object]]:
+        where, params = _compile_filters(filters, zone_join)
+        where_sql = f"WHERE {' AND '.join(where)}" if where else ""
+        return (
+            f'SELECT count(*)::BIGINT AS "population", {measure_selects} {from_sql} {where_sql}',
+            params,
+        )
+
+    baseline_cte, baseline_params = side_cte(baseline_filters)
+    comparison_cte, comparison_params = side_cte(comparison_filters)
+
+    select_columns = ['b."population" AS "baseline_population"']
+    select_columns.append('c."population" AS "comparison_population"')
+    output_columns = ["baseline_population", "comparison_population"]
+    for measure in measures:
+        select_columns.append(f'b."{measure.value}" AS "baseline_{measure.value}"')
+        select_columns.append(f'c."{measure.value}" AS "comparison_{measure.value}"')
+        output_columns += [f"baseline_{measure.value}", f"comparison_{measure.value}"]
+    sql = (
+        f"WITH baseline AS ({baseline_cte}), comparison AS ({comparison_cte}) "
+        f"SELECT {', '.join(select_columns)} "
+        "FROM baseline AS b CROSS JOIN comparison AS c"
+    )
+    return CompiledQuery(
+        sql=sql,
+        parameters=list(baseline_params) + list(comparison_params),
+        output_columns=output_columns,
+    )

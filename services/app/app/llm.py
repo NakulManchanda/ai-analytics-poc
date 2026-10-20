@@ -46,6 +46,18 @@ from app.prompts import (
     PromptAttribution,
     PromptBundle,
 )
+from app.validation.proposal import (
+    BOROUGHS,
+    DIMENSIONS,
+    MAX_ROWS,
+    MEASURES,
+    PAYMENT_TYPE_CODES,
+    RATE_CODE_CODES,
+    VENDOR_CODES,
+    WEEK_PARTS,
+    WEEKDAYS,
+    classify_non_tool_outcome,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -223,6 +235,8 @@ class ToolProposalResult:
     usage_known: bool = True
     fallback_used: bool = False
     prompt_attribution: PromptAttribution | None = None
+    outcome: str = "tool_call"
+    decline_reason: str | None = None
 
 
 def _attributed(result: Any, attribution: PromptAttribution | None) -> Any:
@@ -329,6 +343,296 @@ TAXI_PROPOSAL_TOOL_SPECS: list[dict[str, Any]] = [
             "additionalProperties": False,
         },
     },
+    {
+        "name": "describe_taxi_dataset",
+        "description": (
+            "Describe taxi dataset metadata, coverage dates, record counts, and schema columns."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "include_column_stats": {
+                    "type": "boolean",
+                    "description": (
+                        "Whether to include summary statistics for columns. Defaults to false."
+                    ),
+                }
+            },
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "list_taxi_dimension_values",
+        "description": "List distinct values for an allowlisted taxi dataset dimension.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "dimension": {
+                    "type": "string",
+                    "description": "Allowlisted dimension name to list distinct values for.",
+                    "enum": sorted(DIMENSIONS),
+                },
+                "search": {
+                    "type": "string",
+                    "description": "Optional substring match filter for dimension values.",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": (
+                        f"Maximum number of distinct values to return (1-{MAX_ROWS}). "
+                        "Defaults to 20."
+                    ),
+                    "minimum": 1,
+                    "maximum": MAX_ROWS,
+                },
+            },
+            "required": ["dimension"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "aggregate_taxi_data",
+        "description": (
+            "Run flexible governed aggregations over allowlisted dimensions "
+            "and measures with optional filters."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "dimensions": {
+                    "type": "array",
+                    "description": "List of allowlisted dimensions to group by.",
+                    "items": {"type": "string", "enum": sorted(DIMENSIONS)},
+                    "minItems": 1,
+                    "maxItems": 16,
+                },
+                "measures": {
+                    "type": "array",
+                    "description": "List of allowlisted measures to aggregate.",
+                    "items": {"type": "string", "enum": sorted(MEASURES)},
+                    "minItems": 1,
+                    "maxItems": 16,
+                },
+                "filters": {
+                    "type": "object",
+                    "description": "Optional filter predicates.",
+                    "properties": {
+                        "start_timestamp": {"type": "string"},
+                        "end_timestamp": {"type": "string"},
+                        "pickup_hour_min": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 23,
+                        },
+                        "pickup_hour_max": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 23,
+                        },
+                        "pickup_weekday": {"type": "string", "enum": sorted(WEEKDAYS)},
+                        "pickup_week_part": {
+                            "type": "string",
+                            "enum": sorted(WEEK_PARTS),
+                        },
+                        "pickup_zone": {"type": "string"},
+                        "dropoff_zone": {"type": "string"},
+                        "pickup_borough": {"type": "string", "enum": sorted(BOROUGHS)},
+                        "dropoff_borough": {"type": "string", "enum": sorted(BOROUGHS)},
+                        "payment_type": {
+                            "type": "integer",
+                            "enum": sorted(PAYMENT_TYPE_CODES),
+                        },
+                        "rate_code": {
+                            "type": "integer",
+                            "enum": sorted(RATE_CODE_CODES),
+                        },
+                        "vendor": {"type": "integer", "enum": sorted(VENDOR_CODES)},
+                        "passenger_count_min": {"type": "integer", "minimum": 0},
+                        "passenger_count_max": {"type": "integer", "minimum": 0},
+                        "trip_distance_min": {"type": "number", "minimum": 0},
+                        "trip_distance_max": {"type": "number", "minimum": 0},
+                        "trip_duration_min": {"type": "number", "minimum": 0},
+                        "trip_duration_max": {"type": "number", "minimum": 0},
+                        "fare_amount_min": {"type": "number", "minimum": 0},
+                        "fare_amount_max": {"type": "number", "minimum": 0},
+                        "airport_trip": {"type": "boolean"},
+                        "valid_records_only": {"type": "boolean"},
+                    },
+                    "additionalProperties": False,
+                },
+                "order_by": {
+                    "type": "object",
+                    "description": "Optional order by clause.",
+                    "properties": {
+                        "key": {
+                            "type": "string",
+                            "enum": sorted(DIMENSIONS | MEASURES),
+                        },
+                        "direction": {"type": "string", "enum": ["asc", "desc"]},
+                    },
+                    "required": ["key"],
+                    "additionalProperties": False,
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": (
+                        f"Maximum number of rows to return (1-{MAX_ROWS}). Defaults to 20."
+                    ),
+                    "minimum": 1,
+                    "maximum": MAX_ROWS,
+                },
+            },
+            "required": ["dimensions", "measures"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "compare_taxi_segments",
+        "description": (
+            "Compare a baseline and a comparison population. comparison_mode "
+            "'by_dimension' (default) aligns them per segment of a shared "
+            "segment_dimension and needs the filters to differ on something other "
+            "than that dimension; 'whole_segment' compares the two filtered "
+            "populations as wholes (use it when the two populations are defined by "
+            "the same field, e.g. Manhattan vs Queens) and must omit segment_dimension."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "segment_dimension": {
+                    "type": "string",
+                    "description": (
+                        "Shared dimension along which to compare segments. Required "
+                        "for by_dimension; must be omitted for whole_segment."
+                    ),
+                    "enum": sorted(DIMENSIONS),
+                },
+                "comparison_mode": {
+                    "type": "string",
+                    "description": (
+                        "'by_dimension' (default) or 'whole_segment'. Chosen "
+                        "explicitly; never inferred by the server."
+                    ),
+                    "enum": ["by_dimension", "whole_segment"],
+                },
+                "measures": {
+                    "type": "array",
+                    "description": "List of allowlisted measures to compare.",
+                    "items": {"type": "string", "enum": sorted(MEASURES)},
+                    "minItems": 1,
+                    "maxItems": 16,
+                },
+                "baseline_filters": {
+                    "type": "object",
+                    "description": "Filters defining the baseline segment.",
+                    "properties": {
+                        "start_timestamp": {"type": "string"},
+                        "end_timestamp": {"type": "string"},
+                        "pickup_hour_min": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 23,
+                        },
+                        "pickup_hour_max": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 23,
+                        },
+                        "pickup_weekday": {"type": "string", "enum": sorted(WEEKDAYS)},
+                        "pickup_week_part": {
+                            "type": "string",
+                            "enum": sorted(WEEK_PARTS),
+                        },
+                        "pickup_zone": {"type": "string"},
+                        "dropoff_zone": {"type": "string"},
+                        "pickup_borough": {"type": "string", "enum": sorted(BOROUGHS)},
+                        "dropoff_borough": {"type": "string", "enum": sorted(BOROUGHS)},
+                        "payment_type": {
+                            "type": "integer",
+                            "enum": sorted(PAYMENT_TYPE_CODES),
+                        },
+                        "rate_code": {
+                            "type": "integer",
+                            "enum": sorted(RATE_CODE_CODES),
+                        },
+                        "vendor": {"type": "integer", "enum": sorted(VENDOR_CODES)},
+                        "passenger_count_min": {"type": "integer", "minimum": 0},
+                        "passenger_count_max": {"type": "integer", "minimum": 0},
+                        "trip_distance_min": {"type": "number", "minimum": 0},
+                        "trip_distance_max": {"type": "number", "minimum": 0},
+                        "trip_duration_min": {"type": "number", "minimum": 0},
+                        "trip_duration_max": {"type": "number", "minimum": 0},
+                        "fare_amount_min": {"type": "number", "minimum": 0},
+                        "fare_amount_max": {"type": "number", "minimum": 0},
+                        "airport_trip": {"type": "boolean"},
+                        "valid_records_only": {"type": "boolean"},
+                    },
+                    "additionalProperties": False,
+                },
+                "comparison_filters": {
+                    "type": "object",
+                    "description": "Filters defining the comparison segment.",
+                    "properties": {
+                        "start_timestamp": {"type": "string"},
+                        "end_timestamp": {"type": "string"},
+                        "pickup_hour_min": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 23,
+                        },
+                        "pickup_hour_max": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 23,
+                        },
+                        "pickup_weekday": {"type": "string", "enum": sorted(WEEKDAYS)},
+                        "pickup_week_part": {
+                            "type": "string",
+                            "enum": sorted(WEEK_PARTS),
+                        },
+                        "pickup_zone": {"type": "string"},
+                        "dropoff_zone": {"type": "string"},
+                        "pickup_borough": {"type": "string", "enum": sorted(BOROUGHS)},
+                        "dropoff_borough": {"type": "string", "enum": sorted(BOROUGHS)},
+                        "payment_type": {
+                            "type": "integer",
+                            "enum": sorted(PAYMENT_TYPE_CODES),
+                        },
+                        "rate_code": {
+                            "type": "integer",
+                            "enum": sorted(RATE_CODE_CODES),
+                        },
+                        "vendor": {"type": "integer", "enum": sorted(VENDOR_CODES)},
+                        "passenger_count_min": {"type": "integer", "minimum": 0},
+                        "passenger_count_max": {"type": "integer", "minimum": 0},
+                        "trip_distance_min": {"type": "number", "minimum": 0},
+                        "trip_distance_max": {"type": "number", "minimum": 0},
+                        "trip_duration_min": {"type": "number", "minimum": 0},
+                        "trip_duration_max": {"type": "number", "minimum": 0},
+                        "fare_amount_min": {"type": "number", "minimum": 0},
+                        "fare_amount_max": {"type": "number", "minimum": 0},
+                        "airport_trip": {"type": "boolean"},
+                        "valid_records_only": {"type": "boolean"},
+                    },
+                    "additionalProperties": False,
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": (
+                        f"Maximum number of rows to return (1-{MAX_ROWS}). Defaults to 20."
+                    ),
+                    "minimum": 1,
+                    "maximum": MAX_ROWS,
+                },
+            },
+            "required": [
+                "measures",
+                "baseline_filters",
+                "comparison_filters",
+            ],
+            "additionalProperties": False,
+        },
+    },
 ]
 
 
@@ -377,6 +681,22 @@ class LocalFakeLLMClient:
         if not isinstance(schema.get("columns"), list):
             raise LLMProviderError(retryable=False)
         normalized_prompt = prompt.lower()
+        if any(
+            w in normalized_prompt
+            for w in ("why", "predict", "driver", "weather", "delete", "cannot")
+        ):
+            return ToolProposalResult(
+                name="",
+                arguments=None,
+                outcome="unsupported",
+                decline_reason=(
+                    "I cannot determine that: the dataset does not contain this information."
+                ),
+                model_id=DEFAULT_MODEL_ID,
+                input_tokens=max(1, len(prompt.split())),
+                output_tokens=12,
+                latency_ms=0,
+            )
         if "fare" in normalized_prompt and (
             "borough" in normalized_prompt or "region" in normalized_prompt
         ):
@@ -394,6 +714,7 @@ class LocalFakeLLMClient:
         return ToolProposalResult(
             name=name,
             arguments=arguments,
+            outcome="tool_call",
             model_id=DEFAULT_MODEL_ID,
             input_tokens=max(1, len(prompt.split())),
             output_tokens=4,
@@ -572,7 +893,7 @@ class BedrockLLMClient:
                         }
                         for spec in TAXI_PROPOSAL_TOOL_SPECS
                     ],
-                    "toolChoice": {"any": {}},
+                    "toolChoice": {"auto": {}},
                 },
             )
         except LLMProviderError as error:
@@ -583,17 +904,30 @@ class BedrockLLMClient:
         if len(tool_uses) == 1:
             name = tool_uses[0].get("name", "")
             arguments = tool_uses[0].get("input")
-        elif len(tool_uses) > 1 and all(
-            u.get("name") == "average_trip_metrics" for u in tool_uses
-        ):
-            name = "average_trip_metrics"
-            arguments = {}
+            outcome = "tool_call"
+            decline_reason = None
+        elif len(tool_uses) > 1:
+            # One call per planner step: never substitute a different operation.
+            raise LLMProviderError(
+                retryable=False,
+                code="multiple_tool_calls",
+                model_id=response.get("modelId", self._model_id),
+                input_tokens=response["usage"]["inputTokens"],
+                output_tokens=response["usage"]["outputTokens"],
+                prompt_attribution=attribution,
+            )
         else:
-            name: object = ""
-            arguments: object = None
+            name = ""
+            arguments = None
+            decline_reason = "".join(
+                block.get("text", "") for block in content if "text" in block
+            ).strip()
+            outcome = classify_non_tool_outcome(decline_reason, prompt)
         return ToolProposalResult(
             name=name if isinstance(name, str) else "",
             arguments=arguments,
+            outcome=outcome,
+            decline_reason=decline_reason,
             model_id=response.get("modelId", self._model_id),
             input_tokens=response["usage"]["inputTokens"],
             output_tokens=response["usage"]["outputTokens"],
@@ -1247,16 +1581,46 @@ class ServeLLMClient:
 
         tool_calls = message.get("tool_calls", [])
         if not tool_calls or not isinstance(tool_calls, list):
+            content_text = (message.get("content", "") or "").strip()
+            user_msg = payload.get("messages", [{}])[-1].get("content", "")
+            outcome = classify_non_tool_outcome(content_text, str(user_msg))
+            if outcome == "no_tool":
+                raise LLMProviderError(
+                    retryable=False,
+                    code="no_tool_call",
+                    model_id=served_model_id,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    latency_ms=latency_ms,
+                    finish_reason=finish_reason,
+                )
+            return ToolProposalResult(
+                name="",
+                arguments=None,
+                outcome=outcome,
+                decline_reason=content_text,
+                model_id=served_model_id,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                latency_ms=latency_ms,
+                finish_reason=finish_reason,
+                configured_max_tokens=payload.get("max_tokens"),
+                usage_known=usage_known,
+                **self._cost_fields(
+                    response.headers, payload, input_tokens, output_tokens, usage_known
+                ),
+            )
+
+        if len(tool_calls) > 1:
             raise LLMProviderError(
                 retryable=False,
-                code="no_tool_call",
+                code="multiple_tool_calls",
                 model_id=served_model_id,
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
                 latency_ms=latency_ms,
                 finish_reason=finish_reason,
             )
-
         call = tool_calls[0]
         func = call.get("function", {})
         name = func.get("name", "")
@@ -1291,6 +1655,7 @@ class ServeLLMClient:
         return ToolProposalResult(
             name=name,
             arguments=arguments,
+            outcome="tool_call",
             model_id=served_model_id,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
@@ -1702,7 +2067,7 @@ class LiteLLMClient(ServeLLMClient):
         # forced for proposals (LiteLLM maps "required" to Bedrock toolChoice any).
         payload["temperature"] = 0.0
         if payload.get("tools"):
-            payload["tool_choice"] = "required"
+            payload["tool_choice"] = "auto"
         if payload.get("stream"):
             payload["stream_options"] = {"include_usage": True}
         # Group a conversation's planner/answer calls in the proxy's Logs view.
