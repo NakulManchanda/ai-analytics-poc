@@ -1054,6 +1054,8 @@ class _PricedLLM(LocalFakeLLMClient):
         cost_usd: float | None,
         cost_kind: str | None,
         usage_known: bool = True,
+        pricing: object | None = None,
+        **extra: object,
     ) -> None:
         super().__init__()
         self._fields = dict(
@@ -1062,7 +1064,10 @@ class _PricedLLM(LocalFakeLLMClient):
             cost_usd=cost_usd,
             cost_kind=cost_kind,
             usage_known=usage_known,
+            **extra,
         )
+        if pricing is not None:
+            self.pricing = pricing
 
     def propose_taxi_query(self, prompt, schema, **kwargs):  # type: ignore[no-untyped-def]
         from dataclasses import replace
@@ -1163,3 +1168,81 @@ def test_per_run_budget_uses_corrected_cost() -> None:
         ExecutionBudgets(max_estimated_cost_usd=5e-4),
     )
     assert result.status == "completed"
+
+
+def test_missing_usage_is_charged_a_conservative_bound_not_the_naive_price() -> None:
+    llm = _PricedLLM(
+        input_tokens=0,
+        output_tokens=119,
+        cost_usd=None,
+        cost_kind="unknown",
+        usage_known=False,
+    )
+    budgets = ExecutionBudgets()
+    _, run = _run_priced(llm, budgets)
+    naive = 119 * NOVA_OUT
+    ceiling = budgets.max_input_tokens * NOVA_IN + budgets.max_output_tokens * NOVA_OUT
+    for call in run.metadata["llm_calls"]:
+        assert call["cost_source"] == "estimate_incomplete_usage"
+        assert call["cost_usd"] == pytest.approx(naive)  # informational only
+        assert call["budget_cost_basis"] == "conservative_bound"
+        assert call["cost_indeterminate"] is True
+        assert naive < call["budget_cost_usd"] <= ceiling + 1e-12
+
+
+def test_missing_usage_fails_closed_under_a_tight_run_limit() -> None:
+    llm = _PricedLLM(
+        input_tokens=0,
+        output_tokens=119,
+        cost_usd=None,
+        cost_kind="unknown",
+        usage_known=False,
+    )
+    # Two naive charges (~3.3e-5) would fit in 5e-4; the conservative bound does not.
+    result, run = _run_priced(llm, ExecutionBudgets(max_estimated_cost_usd=5e-4))
+    assert result.status == "budget_exceeded"
+    assert run.metadata["details"]["limit"] == "max_estimated_cost_usd"
+    assert run.metadata["details"]["cost_indeterminate"] is True
+
+
+def test_fallback_prices_by_alias_from_the_policy_table() -> None:
+    from app.model_policy.pricing import PricingTable
+
+    pricing = PricingTable("test", {"taxi-pricey": (3.0, 15.0)})
+    llm = _PricedLLM(
+        input_tokens=537,
+        output_tokens=504,
+        cost_usd=None,
+        cost_kind="unknown",
+        pricing=pricing,
+        model_alias="taxi-pricey",
+        model_id="provider/unlisted",
+    )
+    _, run = _run_priced(llm)
+    expected = pricing.estimate("taxi-pricey", 537, 504)
+    assert expected == pytest.approx(537 * 3e-6 + 504 * 15e-6)
+    for call in run.metadata["llm_calls"]:
+        assert call["cost_source"] == "fallback_estimate"
+        assert call["cost_usd"] == pytest.approx(expected)
+        assert call["budget_cost_usd"] == pytest.approx(expected)
+        assert call["budget_cost_basis"] == "reported"
+        assert call["cost_usd"] > 100 * (537 * NOVA_IN + 504 * NOVA_OUT)
+
+
+def test_unpriced_model_fails_closed_and_refuses_further_calls() -> None:
+    llm = _PricedLLM(
+        input_tokens=537,
+        output_tokens=504,
+        cost_usd=None,
+        cost_kind="unknown",
+        model_alias="taxi-mystery",
+        model_id="provider/unlisted",
+    )
+    result, run = _run_priced(llm)
+    assert result.status == "budget_exceeded"
+    assert run.metadata["details"]["limit"] == "cost_indeterminate"
+    (call,) = run.metadata["llm_calls"]  # the answer call was refused
+    assert call["cost_source"] == "unpriced_model"
+    assert call["budget_cost_usd"] is None
+    assert call["budget_cost_basis"] == "unresolvable"
+    assert call["cost_indeterminate"] is True

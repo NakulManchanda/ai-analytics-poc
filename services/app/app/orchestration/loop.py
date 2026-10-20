@@ -42,6 +42,7 @@ from app.mcp_client import (
 from app.metrics import emit_run_metrics
 from app.model_policy import call_context
 from app.model_policy.context import DEFAULT_TENANT
+from app.model_policy.pricing import PricingTable, default_pricing
 from app.orchestration.budgets import (
     BudgetExceededError,
     BudgetTracker,
@@ -111,25 +112,37 @@ class RunCancelledError(Exception):
         self.reason = reason
 
 
-# Last-resort fallback price, used only when the LLM result carries no cost of its own
-# (fake clients, errors without usage). It is the pinned default model, Amazon Nova Micro:
-# $0.035 / 1M input, $0.14 / 1M output. The authoritative per-alias price lives in the
-# model-policy pricing table and arrives via `result.cost_usd`.
-FALLBACK_COST_PER_INPUT_TOKEN = 0.035 / 1_000_000.0
-FALLBACK_COST_PER_OUTPUT_TOKEN = 0.14 / 1_000_000.0
-
-# cost_source vocabulary: where LLMCall.cost_usd came from.
+# cost_source vocabulary: where LLMCall.cost_usd (the informational, displayed cost) came from.
 COST_SOURCE_PROVIDER_BILLED = "provider_billed"  # result cost_kind == "billed"
 COST_SOURCE_POLICY_ESTIMATE = "policy_estimate"  # result cost_kind == "estimated"
-COST_SOURCE_FALLBACK = "fallback_estimate"  # no result cost; Nova Micro fallback price
+# No result cost: priced from the model-policy table by alias (or model id) and tokens.
+COST_SOURCE_FALLBACK = "fallback_estimate"
 COST_SOURCE_INCOMPLETE = "estimate_incomplete_usage"  # fallback with missing usage
+COST_SOURCE_UNPRICED = "unpriced_model"  # alias/model not in the pricing table
 COST_SOURCE_SELF_HOSTED = "self_hosted"
 
+# budget_cost_basis vocabulary: what the per-run dollar limit was charged for a call.
+BUDGET_BASIS_REPORTED = "reported"  # the informational cost itself (known or estimated)
+BUDGET_BASIS_CONSERVATIVE = "conservative_bound"  # largest call the run could make
+BUDGET_BASIS_UNRESOLVABLE = "unresolvable"  # no price at all: run fails closed
+BUDGET_BASIS_SELF_HOSTED = "self_hosted"
 
-def estimate_cost(input_tokens: int, output_tokens: int) -> float:
-    return (input_tokens * FALLBACK_COST_PER_INPUT_TOKEN) + (
-        output_tokens * FALLBACK_COST_PER_OUTPUT_TOKEN
-    )
+
+@dataclass(frozen=True)
+class CallCost:
+    """Informational cost of one call plus what the per-run budget is charged."""
+
+    cost_usd: float
+    source: str
+    budget_cost_usd: float | None  # None: unresolvable, run fails closed
+    budget_basis: str
+
+    @property
+    def indeterminate(self) -> bool:
+        return self.budget_basis in (
+            BUDGET_BASIS_CONSERVATIVE,
+            BUDGET_BASIS_UNRESOLVABLE,
+        )
 
 
 @dataclass(frozen=True)
@@ -170,6 +183,11 @@ class LLMCall:
     visible_answer_tokens_unavailable_reason: str | None = None
     cost_usd: float = 0.0
     cost_source: str = COST_SOURCE_FALLBACK
+    # What the per-run dollar budget was charged (None: unresolvable, run failed closed).
+    # Equals cost_usd unless the cost was unknown or usage incomplete.
+    budget_cost_usd: float | None = None
+    budget_cost_basis: str = BUDGET_BASIS_REPORTED
+    cost_indeterminate: bool = False
     # Set when this call represents a failed provider call (e.g. no_tool_call,
     # invalid_tool_call) recorded for telemetry rather than a successful result.
     error_code: str | None = None
@@ -211,6 +229,9 @@ class LLMCall:
             ),
             "cost_usd": self.cost_usd,
             "cost_source": self.cost_source,
+            "budget_cost_usd": self.budget_cost_usd,
+            "budget_cost_basis": self.budget_cost_basis,
+            "cost_indeterminate": self.cost_indeterminate,
             "error_code": self.error_code,
             "tool_source": self.tool_source,
             "model_alias": self.model_alias,
@@ -884,27 +905,104 @@ class OrchestrationLoop:
                 "current_message_id": user_msg_id,
             }
 
+        def priced_key(
+            result: object | None, model_id: str | None
+        ) -> tuple[PricingTable, str] | None:
+            """The (policy pricing table, key) for a call: its alias in the client's table
+            (LiteLLM), else its model id there, else its model id in the default table.
+            """
+            alias = getattr(result, "model_alias", None)
+            model_id = getattr(result, "model_id", None) or model_id
+            tables = [
+                getattr(llm, "pricing", None),
+                default_pricing((DEFAULT_MODEL_ID,)),
+            ]
+            for table in tables:
+                if not isinstance(table, PricingTable):
+                    continue
+                for key in (alias, model_id):
+                    if key and key in table.rates:
+                        return table, key
+            return None
+
         def call_cost(
-            input_tokens: int, output_tokens: int, result: object | None = None
-        ) -> tuple[float, str]:
+            input_tokens: int,
+            output_tokens: int,
+            result: object | None = None,
+            *,
+            model_id: str | None = None,
+        ) -> CallCost:
             # Serve mode runs on an owned, self-hosted vLLM gateway: it has no
             # per-token billing.
             if is_self_hosted:
-                return 0.0, COST_SOURCE_SELF_HOSTED
+                return CallCost(
+                    0.0, COST_SOURCE_SELF_HOSTED, 0.0, BUDGET_BASIS_SELF_HOSTED
+                )
             # The LLM client already priced the call (billed header or per-alias policy
             # pricing); never re-price it with a single model's rate.
             result_cost = getattr(result, "cost_usd", None)
             if result_cost is not None:
-                if getattr(result, "cost_kind", None) == "billed":
-                    return float(result_cost), COST_SOURCE_PROVIDER_BILLED
-                return float(result_cost), COST_SOURCE_POLICY_ESTIMATE
+                source = (
+                    COST_SOURCE_PROVIDER_BILLED
+                    if getattr(result, "cost_kind", None) == "billed"
+                    else COST_SOURCE_POLICY_ESTIMATE
+                )
+                return CallCost(
+                    float(result_cost),
+                    source,
+                    float(result_cost),
+                    BUDGET_BASIS_REPORTED,
+                )
+            # Unknown cost: price by alias from the model-policy table. Missing tokens
+            # are never priced as zero for the budget.
             incomplete = (
                 input_tokens <= 0
                 or output_tokens <= 0
                 or getattr(result, "usage_known", True) is False
             )
-            return estimate_cost(input_tokens, output_tokens), (
-                COST_SOURCE_INCOMPLETE if incomplete else COST_SOURCE_FALLBACK
+            priced = priced_key(result, model_id)
+            if priced is None:
+                return CallCost(
+                    0.0, COST_SOURCE_UNPRICED, None, BUDGET_BASIS_UNRESOLVABLE
+                )
+            table, key = priced
+            estimate = table.estimate(key, input_tokens, output_tokens) or 0.0
+            if not incomplete:
+                return CallCost(
+                    estimate, COST_SOURCE_FALLBACK, estimate, BUDGET_BASIS_REPORTED
+                )
+            # Largest call the run could have made: the run's input-token budget plus the
+            # call's configured (or the run's) output ceiling.
+            bound = table.estimate(
+                key,
+                active_budgets.max_input_tokens,
+                getattr(result, "configured_max_tokens", None)
+                or active_budgets.max_output_tokens,
+            )
+            return CallCost(
+                estimate,
+                COST_SOURCE_INCOMPLETE,
+                max(estimate, bound or 0.0),
+                BUDGET_BASIS_CONSERVATIVE,
+            )
+
+        def llm_call_cost_fields(cost: CallCost) -> dict[str, Any]:
+            return {
+                "cost_usd": cost.cost_usd,
+                "cost_source": cost.source,
+                "budget_cost_usd": cost.budget_cost_usd,
+                "budget_cost_basis": cost.budget_basis,
+                "cost_indeterminate": cost.indeterminate,
+            }
+
+        def record_call(input_tokens: int, output_tokens: int, cost: CallCost) -> None:
+            tracker.record_llm_call(
+                input_tokens,
+                output_tokens,
+                cost.cost_usd,
+                budget_cost_usd=cost.budget_cost_usd,
+                cost_indeterminate=cost.indeterminate,
+                cost_unresolvable=cost.budget_cost_usd is None,
             )
 
         def current_model_id() -> str:
@@ -997,6 +1095,7 @@ class OrchestrationLoop:
                         "llm.started",
                         {"llm_call_id": llm_call_id, "phase": "proposal"},
                     )
+                    tracker.ensure_cost_determinate()
                     call_start = self._monotonic()
                     try:
                         proposal_kwargs: dict[str, Any] = conversation_kwargs()
@@ -1017,8 +1116,10 @@ class OrchestrationLoop:
                             # invalid_tool_call) before failing our validation, so
                             # real telemetry exists -- record it as a failed call
                             # instead of discarding it.
-                            fail_cost, fail_cost_source = call_cost(
-                                err.input_tokens or 0, err.output_tokens or 0
+                            fail_cost = call_cost(
+                                err.input_tokens or 0,
+                                err.output_tokens or 0,
+                                model_id=err.model_id,
                             )
                             llm_calls.append(
                                 LLMCall(
@@ -1028,8 +1129,7 @@ class OrchestrationLoop:
                                     output_tokens=err.output_tokens or 0,
                                     latency_ms=err.latency_ms or 0,
                                     finish_reason=err.finish_reason,
-                                    cost_usd=fail_cost,
-                                    cost_source=fail_cost_source,
+                                    **llm_call_cost_fields(fail_cost),
                                     error_code=err.code,
                                     tool_source="model",
                                     **_prompt_fields(err.prompt_attribution),
@@ -1041,14 +1141,10 @@ class OrchestrationLoop:
                     call_latency_ms = int((self._monotonic() - call_start) * 1000)
                     proposal_latency_ms = call_latency_ms
 
-                    cost, cost_source = call_cost(
+                    cost = call_cost(
                         proposal.input_tokens, proposal.output_tokens, proposal
                     )
-                    tracker.record_llm_call(
-                        proposal.input_tokens,
-                        proposal.output_tokens,
-                        cost,
-                    )
+                    record_call(proposal.input_tokens, proposal.output_tokens, cost)
                     llm_calls.append(
                         LLMCall(
                             llm_call_id=llm_call_id,
@@ -1058,8 +1154,7 @@ class OrchestrationLoop:
                             latency_ms=proposal.latency_ms,
                             finish_reason=proposal.finish_reason,
                             configured_max_tokens=proposal.configured_max_tokens,
-                            cost_usd=cost,
-                            cost_source=cost_source,
+                            **llm_call_cost_fields(cost),
                             tool_source="model",
                             **_policy_fields(proposal),
                         )
@@ -1291,6 +1386,7 @@ class OrchestrationLoop:
                             "llm.started",
                             {"llm_call_id": llm_call_id, "phase": "proposal_retry"},
                         )
+                        tracker.ensure_cost_determinate()
                         call_start = self._monotonic()
                         try:
                             proposal = self._run_with_cancellation(
@@ -1308,12 +1404,10 @@ class OrchestrationLoop:
                         proposal_latency_ms += int(
                             (self._monotonic() - call_start) * 1000
                         )
-                        cost, cost_source = call_cost(
+                        cost = call_cost(
                             proposal.input_tokens, proposal.output_tokens, proposal
                         )
-                        tracker.record_llm_call(
-                            proposal.input_tokens, proposal.output_tokens, cost
-                        )
+                        record_call(proposal.input_tokens, proposal.output_tokens, cost)
                         llm_calls.append(
                             LLMCall(
                                 llm_call_id=llm_call_id,
@@ -1323,8 +1417,7 @@ class OrchestrationLoop:
                                 latency_ms=proposal.latency_ms,
                                 finish_reason=proposal.finish_reason,
                                 configured_max_tokens=proposal.configured_max_tokens,
-                                cost_usd=cost,
-                                cost_source=cost_source,
+                                **llm_call_cost_fields(cost),
                                 tool_source="model",
                                 **_policy_fields(proposal),
                             )
@@ -1666,6 +1759,7 @@ class OrchestrationLoop:
                         )
 
                         # 4. Call provider with cancellation runner
+                        tracker.ensure_cost_determinate()
                         call_start = self._monotonic()
                         try:
                             if hasattr(llm, "execute_partitioned_call") and callable(
@@ -1701,7 +1795,7 @@ class OrchestrationLoop:
                         call_latency_ms = int((self._monotonic() - call_start) * 1000)
 
                         # 5. Calculate cost
-                        c_cost, c_cost_source = call_cost(
+                        c_cost = call_cost(
                             call_res.input_tokens, call_res.output_tokens, call_res
                         )
 
@@ -1729,8 +1823,7 @@ class OrchestrationLoop:
                             visible_answer_tokens_unavailable_reason=(
                                 call_res.visible_answer_tokens_unavailable_reason
                             ),
-                            cost_usd=c_cost,
-                            cost_source=c_cost_source,
+                            **llm_call_cost_fields(c_cost),
                             **_policy_fields(call_res),
                         )
                         llm_calls.append(recorded_call)
@@ -1768,10 +1861,8 @@ class OrchestrationLoop:
                         step_seq += 1
 
                         # 9. Record cost and tracker (checks post-call limits)
-                        tracker.record_llm_call(
-                            call_res.input_tokens,
-                            call_res.output_tokens,
-                            c_cost,
+                        record_call(
+                            call_res.input_tokens, call_res.output_tokens, c_cost
                         )
 
                         # 10. Post-call cancellation check
@@ -1882,6 +1973,7 @@ class OrchestrationLoop:
                         )
                         check_cancellation("".join(_chunks))
 
+                    tracker.ensure_cost_determinate()
                     try:
                         stream_answer = getattr(
                             llm, "stream_answer_with_query_result", None
@@ -1943,12 +2035,12 @@ class OrchestrationLoop:
                         except Exception as err:
                             logger.warning(f"Failed to synthesize audio: {err}")
 
-                    ans_cost, ans_cost_source = call_cost(
+                    ans_cost = call_cost(
                         answer_result.input_tokens,
                         answer_result.output_tokens,
                         answer_result,
                     )
-                    tracker.record_llm_call(
+                    record_call(
                         answer_result.input_tokens,
                         answer_result.output_tokens,
                         ans_cost,
@@ -1972,8 +2064,7 @@ class OrchestrationLoop:
                             visible_answer_tokens_unavailable_reason=(
                                 answer_result.visible_answer_tokens_unavailable_reason
                             ),
-                            cost_usd=ans_cost,
-                            cost_source=ans_cost_source,
+                            **llm_call_cost_fields(ans_cost),
                             **_policy_fields(answer_result),
                         )
                     )

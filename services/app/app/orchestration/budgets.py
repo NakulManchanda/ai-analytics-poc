@@ -38,7 +38,14 @@ class BudgetTracker:
     tool_call_count: int = 0
     input_tokens: int = 0
     output_tokens: int = 0
+    # Informational run cost (what events show); equals the budget charge whenever the
+    # per-call cost is known.
     estimated_cost_usd: float = 0.0
+    # What the per-run dollar limit is enforced against. Unknown/incomplete calls are
+    # charged a conservative bound here, never zero.
+    budget_cost_usd: float = 0.0
+    cost_indeterminate: bool = False  # some charge is a conservative bound
+    cost_unresolvable: bool = False  # a call could not be priced at all: fail closed
 
     @property
     def elapsed_seconds(self) -> float:
@@ -69,7 +76,14 @@ class BudgetTracker:
         input_tokens: int,
         output_tokens: int,
         estimated_cost_usd: float = 0.0,
+        budget_cost_usd: float | None = None,
+        cost_indeterminate: bool = False,
+        cost_unresolvable: bool = False,
     ) -> None:
+        """Record one completed call. ``budget_cost_usd`` defaults to the informational
+        cost. ``cost_unresolvable`` means the call could not be priced even
+        conservatively: the run then refuses further LLM calls
+        (``ensure_cost_determinate``)."""
         self.llm_call_count += 1
         if self.llm_call_count > self.budgets.max_llm_calls:
             raise BudgetExceededError(
@@ -89,15 +103,31 @@ class BudgetTracker:
                 {"limit": "max_output_tokens", "current": self.output_tokens},
             )
         self.estimated_cost_usd += estimated_cost_usd
-        if self.estimated_cost_usd > self.budgets.max_estimated_cost_usd:
+        self.budget_cost_usd += (
+            estimated_cost_usd if budget_cost_usd is None else budget_cost_usd
+        )
+        self.cost_indeterminate = self.cost_indeterminate or cost_indeterminate
+        self.cost_unresolvable = self.cost_unresolvable or cost_unresolvable
+        if cost_unresolvable:
+            self.cost_indeterminate = True
+        if self.budget_cost_usd > self.budgets.max_estimated_cost_usd:
             raise BudgetExceededError(
                 f"Exceeded max estimated cost limit of ${self.budgets.max_estimated_cost_usd:.4f}",
                 {
                     "limit": "max_estimated_cost_usd",
-                    "current": self.estimated_cost_usd,
+                    "current": self.budget_cost_usd,
+                    "cost_indeterminate": self.cost_indeterminate,
                 },
             )
         self.check_deadline()
+
+    def ensure_cost_determinate(self) -> None:
+        """Refuse a further LLM call once a prior call's cost could not be bounded."""
+        if self.cost_unresolvable:
+            raise BudgetExceededError(
+                "Run cost is indeterminate: a prior LLM call had no resolvable price",
+                {"limit": "cost_indeterminate", "current": self.budget_cost_usd},
+            )
 
     def record_tool_call(self, result_bytes: int = 0) -> None:
         self.tool_call_count += 1
