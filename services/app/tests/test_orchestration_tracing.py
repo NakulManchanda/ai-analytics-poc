@@ -226,3 +226,36 @@ def test_tracer_failure_is_fail_open(tmp_path) -> None:
 
     assert result.status == "completed"
     assert {r["trace_id"] for r in _capture_records(tmp_path)} == {None}
+
+
+def test_eval_run_id_is_a_span_attribute_and_in_capture_alongside_trace_id(
+    tmp_path,
+) -> None:
+    import threading
+
+    tracer, exporter = _tracer_and_exporter()
+    loop = _make_loop(tracer, tmp_path)
+
+    submission = loop.prepare_run(
+        "Which pickup zones have the most trips?", eval_run_id="batch-1"
+    )
+    thread = threading.Thread(target=loop.execute, args=(submission,))
+    thread.start()
+    thread.join()
+
+    (span,) = exporter.get_finished_spans()
+    assert span.attributes["ai.eval_run_id"] == "batch-1"
+    records = _capture_records(tmp_path)
+    assert records
+    assert {r["eval_run_id"] for r in records} == {"batch-1"}
+    assert {r["trace_id"] for r in records} == {
+        format(span.get_span_context().trace_id, "032x")
+    }
+
+
+def test_span_has_no_eval_run_id_attribute_by_default(tmp_path) -> None:
+    tracer, exporter = _tracer_and_exporter()
+    loop = _make_loop(tracer, tmp_path)
+    loop.run("Which pickup zones have the most trips?")
+    (span,) = exporter.get_finished_spans()
+    assert "ai.eval_run_id" not in span.attributes

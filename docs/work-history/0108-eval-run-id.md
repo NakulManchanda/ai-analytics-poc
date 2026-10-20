@@ -13,7 +13,7 @@ Let a baseline be selected by one label instead of an external manifest: an opt-
 - `RunEvent.eval_run_id` is optional and serialized (`to_dict`, `to_sse`) only when set; `from_dict` reads it back. Golden event shapes are unchanged.
 - capture.v1 gains an optional `eval_run_id` on every record, emitted only when set (documented in `docs/capture.md`). `tooling/evals` `TraceRecord` ignores extras, so it is untouched.
 - `CallContext` gained an optional `eval_run_id` (default None) so PR-C can read it; it is not used yet.
-- No `ai.eval_run_id` span attribute: the only existing span (`ai.run`) lives in the synchronous `run()` path, which never receives an eval id; the `/api/runs` path has no span until the trace work lands.
+- `ai.eval_run_id` is set on the `ai.run` span when present (span now owned by `execute()` after #196); absent by default.
 
 ## Verification
 - New `services/app/tests/test_eval_run_id.py` (13 tests): malformed/empty/oversized body and header rejected, header fallback, body precedence, absent passes nothing, event serialization, and a full loop run showing the id on Run.metadata, every event, every capture record (model and tool call) and the call context; absent leaves no key anywhere.
