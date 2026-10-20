@@ -16,7 +16,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
-MAX_ROWS = 20
+MAX_ROWS = 64
 MAX_LIST_LENGTH = 16
 MAX_STRING_LENGTH = 128
 

@@ -56,17 +56,13 @@ _RAW_CATALOGUE: dict[str, tuple[str, ToolArguments]] = {
             "measures": ["trip_count"],
             "filters": None,
             "order_by": None,
-            "limit": 20,
+            "limit": 50,
         },
     ),
     "How do airport trips compare with non-airport trips on fare and duration?": (
         "compare_taxi_segments",
         {
-            # segment_dimension must be shared across both filtered sides for
-            # compare_taxi_segments' FULL OUTER JOIN to align rows; segmenting
-            # on the same field being filtered (airport_trip) would give every
-            # row a null delta since baseline and comparison keys never match.
-            "segment_dimension": "payment_type",
+            "segment_dimension": "airport_trip",
             "measures": ["average_fare", "average_duration_minutes"],
             "baseline_filters": {"airport_trip": False},
             "comparison_filters": {"airport_trip": True},
@@ -135,10 +131,7 @@ _RAW_CATALOGUE: dict[str, tuple[str, ToolArguments]] = {
     "Compare Manhattan and Queens on trip count, average fare, and average tip": (
         "compare_taxi_segments",
         {
-            # segment_dimension shared across both sides (see the airport-vs-
-            # non-airport entry above for why segmenting on pickup_borough
-            # itself, while also filtering on it, would misalign every row).
-            "segment_dimension": "payment_type",
+            "segment_dimension": "pickup_borough",
             "measures": ["trip_count", "average_fare", "average_tip"],
             "baseline_filters": {"pickup_borough": "Manhattan"},
             "comparison_filters": {"pickup_borough": "Queens"},
@@ -152,19 +145,6 @@ _RAW_CATALOGUE: dict[str, tuple[str, ToolArguments]] = {
             "measures": ["average_duration_minutes"],
             "baseline_filters": {"pickup_hour_min": 7, "pickup_hour_max": 10},
             "comparison_filters": {"pickup_hour_min": 16, "pickup_hour_max": 19},
-            "limit": 20,
-        },
-    ),
-    (
-        "Which borough contributed most to the busiest pickup hour, and "
-        "which zones inside it dominate?"
-    ): (
-        "aggregate_taxi_data",
-        {
-            "dimensions": ["pickup_hour", "pickup_borough"],
-            "measures": ["trip_count"],
-            "filters": None,
-            "order_by": {"key": "trip_count", "direction": "desc"},
             "limit": 20,
         },
     ),

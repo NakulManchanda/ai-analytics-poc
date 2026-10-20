@@ -12,7 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import StrEnum
 
-MAX_ROWS = 20
+MAX_ROWS = 64
 MAX_COLUMNS = 16
 MAX_LIST_LENGTH = 16
 MAX_STRING_LENGTH = 128
