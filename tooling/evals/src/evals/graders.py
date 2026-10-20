@@ -533,6 +533,85 @@ def _truncated_incomplete(use: ToolUse) -> bool:
     )
 
 
+_EQUIVALENT_TOOL_PAIRS: frozenset[frozenset[str]] = frozenset(
+    {
+        frozenset({"aggregate_taxi_data", "query_taxi_data"}),
+        frozenset({"aggregate_taxi_data", "average_trip_metrics"}),
+    }
+)
+
+
+def _is_tool_proven_equivalent(expected: ExpectedTool, actual: ToolUse) -> bool:
+    """Return True only if actual tool has established equivalence to expected tool
+    and matches required dimensions, measures, and filters.
+    Matching numbers in output cells NEVER infer equivalence on their own.
+    """
+    if expected.name == actual.name:
+        return False
+    pair = frozenset({expected.name, actual.name})
+    if pair not in _EQUIVALENT_TOOL_PAIRS:
+        return False
+
+    exp_args = expected.arguments
+    act_args = actual.arguments
+
+    # For legacy average_trip_metrics <-> aggregate_taxi_data:
+    if pair == frozenset({"aggregate_taxi_data", "average_trip_metrics"}):
+        unsupported_dims = {
+            "airport_trip",
+            "payment_type",
+            "rate_code",
+            "trip_distance_bucket",
+            "pickup_hour",
+            "pickup_week_part",
+        }
+        exp_dims = set(exp_args.get("dimensions") or [])
+        if exp_dims & unsupported_dims:
+            return False
+        exp_filters = (
+            exp_args.get("filters") if isinstance(exp_args.get("filters"), dict) else {}
+        )
+        if any(k in unsupported_dims for k in exp_filters):
+            return False
+        exp_borough = exp_filters.get("pickup_borough")
+        act_region = act_args.get("region_name")
+        return not (exp_borough and act_region and exp_borough != act_region)
+
+    # Verify measures
+    exp_measures = exp_args.get("measures")
+    if isinstance(exp_measures, list):
+        act_measures = act_args.get("measures")
+        if not isinstance(act_measures, list) or not set(
+            map(str, exp_measures)
+        ).issubset(set(map(str, act_measures))):
+            return False
+
+    # Verify dimensions
+    exp_dims = exp_args.get("dimensions")
+    if isinstance(exp_dims, list):
+        act_dims = act_args.get("dimensions")
+        if not isinstance(act_dims, list) or set(map(str, exp_dims)) != set(
+            map(str, act_dims)
+        ):
+            return False
+
+    # Verify filters
+    exp_filters = exp_args.get("filters")
+    if isinstance(exp_filters, dict):
+        act_filters = act_args.get("filters")
+        if not isinstance(act_filters, dict) or not all(
+            k in act_filters and act_filters[k] == v for k, v in exp_filters.items()
+        ):
+            return False
+
+    # Comparison filters must match strictly
+    for key in ("baseline_filters", "comparison_filters"):
+        if key in exp_args and act_args.get(key) != exp_args[key]:
+            return False
+
+    return True
+
+
 def _grade_tools(
     turn: Turn, view: TurnView, facts_verified: bool, reasons: list[str]
 ) -> Outcome:
@@ -574,29 +653,30 @@ def _grade_tools(
             )
             return "incorrect"
         return "correct"
-    names = {t.name for t in actual}
-    if all(e.name not in names for e in unmet) and facts_verified:
-        missing_segmentation = False
-        for e in unmet:
-            if "baseline_filters" in e.arguments or "comparison_filters" in e.arguments:
-                has_filters = any(
-                    bool(t.arguments.get("filters"))
-                    or bool(t.arguments.get("baseline_filters"))
-                    or bool(t.arguments.get("dimensions"))
-                    for t in actual
-                )
-                if not has_filters:
-                    missing_segmentation = True
-                    break
-        if not missing_segmentation:
-            reasons.append(
-                "tool: equivalence: "
-                + ", ".join(sorted(names))
-                + " instead of "
-                + ", ".join(e.name for e in unmet)
-                + "; reference value verified in the other tool's output"
-            )
-            return "needs_review"
+    # Check if every unmet expected tool is proven equivalent to an available actual tool
+    matched_equiv: list[tuple[ExpectedTool, ToolUse]] = []
+    unmatched_unmet: list[ExpectedTool] = []
+    for exp in unmet:
+        hit_act = next(
+            (act for act in actual if _is_tool_proven_equivalent(exp, act)),
+            None,
+        )
+        if hit_act:
+            matched_equiv.append((exp, hit_act))
+        else:
+            unmatched_unmet.append(exp)
+
+    facts = [f for f in turn.reference.facts if f.value is not None]
+    if matched_equiv and not unmatched_unmet and (not facts or facts_verified):
+        reasons.append(
+            "tool: equivalence: "
+            + ", ".join(sorted({act.name for _, act in matched_equiv}))
+            + " instead of "
+            + ", ".join(exp.name for exp, _ in matched_equiv)
+            + "; proven semantic equivalence of dimensions and filters"
+        )
+        return "needs_review"
+
     reasons.append(
         "tool: expected " + ", ".join(e.name for e in unmet) + " not matched"
     )
@@ -660,16 +740,6 @@ def grade_turn_v2(
         )
     )
     res.tool = _grade_tools(turn, view, facts_verified, res.reasons)
-    if (
-        res.tool == "incorrect"
-        and turn.expected_tools
-        and facts
-        and facts_found
-        and not available
-        and all(e.name not in {t.name for t in view.tools} for e in turn.expected_tools)
-    ):
-        res.tool = "needs_review"
-        res.reasons.append("tool: equivalence unverifiable: tool output unavailable")
 
     if turn.behavior == "answer" and res.tool == "correct" and available:
         for use in ok_tools:

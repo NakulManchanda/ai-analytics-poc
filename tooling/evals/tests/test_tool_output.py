@@ -104,3 +104,37 @@ def test_mismatched_run_id_in_event_is_ignored(tmp_path):
     # File is run_5.txt but event claims run_other
     (tmp_path / "run_5.txt").write_text(_event("run_other", msgs))
     assert load_tool_outputs(tmp_path)["run_5"] == []
+
+
+def test_conflicting_metadata_in_tool_output_is_discarded(tmp_path):
+    # Identical rows and columns, but conflicting truncated metadata
+    msgs1 = [
+        {
+            "role": "tool",
+            "content": json.dumps(
+                {
+                    "query_id": "q_meta",
+                    "columns": ["x"],
+                    "rows": [[1]],
+                    "truncated": False,
+                    "row_count": 1,
+                }
+            ),
+        }
+    ]
+    msgs2 = [
+        {
+            "role": "tool",
+            "content": json.dumps(
+                {
+                    "query_id": "q_meta",
+                    "columns": ["x"],
+                    "rows": [[1]],
+                    "truncated": True,
+                    "row_count": 100,
+                }
+            ),
+        }
+    ]
+    (tmp_path / "run_6.txt").write_text(_event("run_6", msgs1) + _event("run_6", msgs2))
+    assert load_tool_outputs(tmp_path)["run_6"] == []

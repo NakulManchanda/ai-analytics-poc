@@ -151,7 +151,12 @@ def load_tool_outputs(events_dir: Path) -> dict[str, list[ToolOutput]]:
                 qid = parsed.query_id
                 if qid in seen:
                     prev = seen[qid]
-                    if prev.rows != parsed.rows or prev.columns != parsed.columns:
+                    if (
+                        prev.rows != parsed.rows
+                        or prev.columns != parsed.columns
+                        or prev.truncated != parsed.truncated
+                        or prev.row_count != parsed.row_count
+                    ):
                         conflicting.add(qid)
                 else:
                     seen[qid] = parsed

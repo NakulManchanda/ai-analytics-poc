@@ -556,3 +556,54 @@ def test_unsegmented_tool_equivalence_rejected_when_filters_expected():
     res = _v2grade(turn, view)
     assert res.tool == "incorrect"
     assert any("expected compare_taxi_segments not matched" in r for r in res.reasons)
+
+
+def test_tool_equivalence_accepted_when_proven_equivalent():
+    expected = ExpectedTool(
+        name="aggregate_taxi_data",
+        arguments={
+            "dimensions": ["pickup_borough"],
+            "measures": ["average_fare"],
+        },
+    )
+    turn = _v2_turn(tools=[expected])
+    # query_taxi_data with matching dimensions and measures is proven equivalent
+    actual_tool = ToolUse(
+        "query_taxi_data",
+        {
+            "dimensions": ["pickup_borough"],
+            "measures": ["average_fare"],
+        },
+        "completed",
+        "q1",
+        1,
+    )
+    view = TurnView("r", "c", 0, answer="Manhattan fare is 15.05", tools=[actual_tool])
+    res = _v2grade(turn, view)
+    assert res.tool == "needs_review"
+    assert any("proven semantic equivalence" in r for r in res.reasons)
+
+
+def test_tool_equivalence_rejected_when_filters_differ_even_with_matching_number():
+    expected = ExpectedTool(
+        name="compare_taxi_segments",
+        arguments={
+            "baseline_filters": {"airport_trip": False},
+            "comparison_filters": {"airport_trip": True},
+        },
+    )
+    fact = _num_fact("airport_fare", 55.99)
+    turn = _v2_turn(tools=[expected], facts=[fact])
+    # Manhattan query happens to output 55.99, but has completely wrong filters
+    actual_tool = ToolUse(
+        "aggregate_taxi_data",
+        {"filters": {"pickup_borough": "Manhattan"}},
+        "completed",
+        "q1",
+        1,
+        output=ToolOutput(["fare"], [[55.99]], False, 1, "q1"),
+    )
+    view = TurnView("r", "c", 0, answer="Airport fare is 55.99", tools=[actual_tool])
+    res = _v2grade(turn, view)
+    assert res.tool == "incorrect"
+    assert any("expected compare_taxi_segments not matched" in r for r in res.reasons)
