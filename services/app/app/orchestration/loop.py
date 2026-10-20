@@ -941,7 +941,14 @@ class OrchestrationLoop:
             # The LLM client already priced the call (billed header or per-alias policy
             # pricing); never re-price it with a single model's rate.
             result_cost = getattr(result, "cost_usd", None)
-            if result_cost is not None:
+            # A reported cost is authoritative when it is independently billed, or when
+            # it was computed from known usage. A non-billed estimate on unknown usage
+            # is not: fall through to the conservative path below.
+            reported_is_authoritative = (
+                getattr(result, "cost_kind", None) == "billed"
+                or getattr(result, "usage_known", True) is not False
+            )
+            if result_cost is not None and reported_is_authoritative:
                 source = (
                     COST_SOURCE_PROVIDER_BILLED
                     if getattr(result, "cost_kind", None) == "billed"
