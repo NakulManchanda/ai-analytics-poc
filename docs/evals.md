@@ -61,6 +61,7 @@ Real `capture.v1` JSONL has `run_id`/`turn_id`/`call_id`/`conversation_id` but n
 ## Known gaps
 
 - No live Bedrock session has been captured or reported yet; the committed session report is local-scripted.
+- `multi-001` carries the `diagnostic` tag: it is graded and listed in a separate "Diagnostic cases" section of delta reports, but excluded from the aggregate pass rate, tool-correctness mean, per-category rates and regression gates. It is retained for query-resolution (#110) diagnosis until the filter contract between `query_taxi_data` and the governed tools is reconciled. Its turn 2 asserts the entities (nested subset match on `baseline_filters`/`comparison_filters`: JFK Airport vs Midtown Center); subset matching recurses into nested objects, `exact` still requires identical keys.
 - Golden cases are all pending human review, so strict mode grades nothing; reviewing `multi-001` is the next human step.
 - Matching is manual by design; there is no automatic promotion of captured runs to golden cases.
 

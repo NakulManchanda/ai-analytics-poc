@@ -25,14 +25,24 @@ class RunScore:
     views: dict[tuple[str, int], TurnView]
     judge: dict[str, float]  # mean per metric (empty when no recorded judge)
     by_category: dict[str, float] = field(default_factory=dict)
+    diagnostic_ids: frozenset[str] = frozenset()
+
+    @property
+    def gated(self) -> list[TurnGrade]:
+        """Grades that count toward aggregate quality gates (diagnostic cases excluded)."""
+        return [g for g in self.grades if g.case_id not in self.diagnostic_ids]
+
+    @property
+    def diagnostics(self) -> list[TurnGrade]:
+        return [g for g in self.grades if g.case_id in self.diagnostic_ids]
 
     @property
     def pass_rate(self) -> float:
-        return sum(g.passed for g in self.grades) / len(self.grades)
+        return sum(g.passed for g in self.gated) / len(self.gated)
 
     @property
     def tool_correctness(self) -> float:
-        return statistics.fmean(g.tool_score for g in self.grades if not g.missing)
+        return statistics.fmean(g.tool_score for g in self.gated if not g.missing)
 
     @property
     def failure_rate(self) -> float:
@@ -105,10 +115,13 @@ def score_run(run_dir: Path, cases: list[GoldenCase] | None = None) -> RunScore:
             vals = [r[name] for r in rows if name in r]
             if vals:
                 judge[name] = statistics.fmean(vals)
-    score = RunScore(manifest, grades, views, judge)
+    diagnostic = frozenset(c.id for c in cases if "diagnostic" in c.tags)
+    score = RunScore(manifest, grades, views, judge, diagnostic_ids=diagnostic)
     cat = {c.id: c.category for c in cases}
     for category in sorted(set(cat.values())):
-        gs = [g for g in grades if cat[g.case_id] == category]
+        gs = [g for g in score.gated if cat[g.case_id] == category]
+        if not gs:
+            continue
         score.by_category[category] = sum(g.passed for g in gs) / len(gs)
     return score
 
@@ -223,15 +236,27 @@ def render_markdown(
         lines.append(
             f"| {d.metric} | {fmt(d.baseline)} | {fmt(d.candidate)} | {fmt(d.delta)} | {status} | {d.rule} |"
         )
-    failing = [g for g in candidate.grades if not g.passed]
+
+    def why(g: TurnGrade) -> str:
+        if g.missing:
+            return "missing trace"
+        return ", ".join(k for k, v in g.checks.items() if not v)
+
+    failing = [g for g in candidate.gated if not g.passed]
     lines += ["", f"## Candidate failures ({len(failing)})", ""]
     for g in failing:
-        bad = (
-            "missing trace"
-            if g.missing
-            else ", ".join(k for k, v in g.checks.items() if not v)
-        )
-        lines.append(f"- `{g.case_id}#{g.turn_index}`: {bad}")
+        lines.append(f"- `{g.case_id}#{g.turn_index}`: {why(g)}")
+    if candidate.diagnostics:
+        lines += [
+            "",
+            "## Diagnostic cases (excluded from aggregate pass rate and gates)",
+            "",
+        ]
+        for g in candidate.diagnostics:
+            lines.append(
+                f"- `{g.case_id}#{g.turn_index}`: "
+                + ("pass" if g.passed else f"FAIL ({why(g)})")
+            )
     lines += [
         "",
         "Judge scores are recorded verdicts, not ground truth; see docs/evals.md for limits.",

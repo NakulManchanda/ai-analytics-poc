@@ -73,16 +73,18 @@ def fabricated_numbers(answer: str) -> list[float]:
 
 
 def args_match(expected: ExpectedTool, actual: dict[str, object]) -> bool:
+    exact = expected.match == "exact"
+
     def eq(a: object, b: object) -> bool:
         if isinstance(a, list) and isinstance(b, list):
             return sorted(map(str, a)) == sorted(map(str, b))
         if isinstance(a, dict) and isinstance(b, dict):
-            return a.keys() == b.keys() and all(eq(a[k], b[k]) for k in a)
+            if exact and a.keys() != b.keys():
+                return False
+            return all(k in b and eq(v, b[k]) for k, v in a.items())
         return a == b
 
-    if expected.match == "exact":
-        return eq(expected.arguments, actual)
-    return all(k in actual and eq(v, actual[k]) for k, v in expected.arguments.items())
+    return eq(expected.arguments, actual)
 
 
 def tool_score(expected: list[ExpectedTool], actual: list[ToolUse]) -> float:
