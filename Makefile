@@ -276,7 +276,7 @@ observability-dev-down: ## Stop only the issue-owned local observability project
 		docker compose -p "$(OBSERVABILITY_PROJECT)" -f docker-compose.yml -f docker-compose.observability.yml down --remove-orphans
 
 # LITELLM_OTEL=1 adds the Collector/Jaeger overlay and points the proxy's otel callback at it (#189).
-LITELLM_COMPOSE = -f docker-compose.yml -f docker-compose.aws.yml -f docker-compose.litellm.yml $(if $(LITELLM_OTEL),-f docker-compose.observability.yml -f docker-compose.litellm-otel.yml)
+LITELLM_COMPOSE = -f docker-compose.yml -f docker-compose.aws.yml -f docker-compose.litellm.yml $(if $(filter 1,$(LITELLM_OTEL)),-f docker-compose.observability.yml -f docker-compose.litellm-otel.yml)
 AWS_DIRECT_COMPOSE = -f docker-compose.yml -f docker-compose.aws.yml
 # The proxy master key lives in the git-ignored .env (see litellm-env); it is sourced, never printed.
 LITELLM_ENV = set -a; [ -f .env ] && . ./.env; set +a; : "$${LITELLM_MASTER_KEY:?run make litellm-env}";
