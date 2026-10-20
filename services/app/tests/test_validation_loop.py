@@ -222,3 +222,16 @@ def test_grounded_answer_has_no_caveat_or_extra_step() -> None:
     assert all(
         s.step_type != "grounding_check" for s in repo.list_run_steps(result.run_id)
     )
+
+
+def test_raw_arguments_not_persisted_in_steps_or_errors() -> None:
+    secret = "SECRET-VALUE-123"
+    bad = ("query_taxi_data", {"analysis": secret, "limit": 5})
+    llm = ScriptedLLM([bad])
+    loop, repo = run_loop(llm, RecordingMCP())
+    with pytest.raises(ValueError) as err:
+        loop.run(QUESTION)
+    assert secret not in str(err.value)
+    dumped = repr(repo._run_steps) + repr(repo._runs)
+    assert secret not in dumped
+    assert "arguments_sha256" in dumped and "argument_keys" in dumped

@@ -459,3 +459,27 @@ def validate_proposal(
     else:
         _validate_compare(arguments, schema, out)
     return ProposalValidation(tuple(out.items))
+
+
+def summarize_arguments(
+    arguments: object, *, include_content: bool = False
+) -> dict[str, object]:
+    """Durable-safe description of model-supplied arguments (no raw values by default)."""
+    import hashlib
+    import json
+
+    try:
+        blob = json.dumps(arguments, sort_keys=True, default=str)
+    except (TypeError, ValueError):
+        blob = repr(type(arguments))
+    summary: dict[str, object] = {
+        "argument_keys": (
+            sorted(str(k) for k in arguments)[:32]
+            if isinstance(arguments, Mapping)
+            else []
+        ),
+        "arguments_sha256": hashlib.sha256(blob.encode()).hexdigest(),
+    }
+    if include_content:
+        summary["arguments"] = blob[:1000]
+    return summary

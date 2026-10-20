@@ -29,5 +29,7 @@ checks are deterministic Python outside the model. Prompt wording is not a contr
 - The pre-flight allowlists mirror `dataset_spike.query_spec`; a catalogue test catches drift. MCP stays the source of truth.
 - Time scope is the pinned month in the schema; zone names are bounded text, validated by MCP.
 - Grounding is syntactic: it cannot judge whether a true number answers the question, and small integers (0-31) and years are not checked. Causal detection is phrase based.
+- Numeric grounding is syntactic: a number may occur in, or be derivable from, the observation without proving it belongs to the right zone, metric or period.
+- Rejected proposals persist only violation codes, argument keys and a SHA-256 of the arguments; raw values appear only with `CAPTURE_CONTENT` enabled (step metadata).
 - Retry feedback is appended to the user question argument; prompt templates are owned by #178 and not changed here.
 - No few-shot examples were added: none is tied to a validated failure cluster yet.

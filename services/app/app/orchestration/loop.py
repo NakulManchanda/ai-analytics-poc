@@ -5,6 +5,7 @@ import concurrent.futures
 import contextvars
 import json
 import logging
+import os
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
@@ -67,6 +68,7 @@ from app.validation import (
     check_answer_grounding,
     retry_allowed,
     scan_observation,
+    summarize_arguments,
     validate_proposal,
 )
 
@@ -1017,17 +1019,26 @@ class OrchestrationLoop:
                     )
                     validation_retries = 0
                     while query_request is None:
+                        arg_summary = summarize_arguments(
+                            proposal.arguments,
+                            include_content=os.getenv("CAPTURE_CONTENT", "").lower()
+                            in ("1", "true", "yes", "on"),
+                        )
                         invalid_step = RunStep(
                             step_id=generate_step_id(),
                             run_id=run_id,
                             sequence=step_seq,
                             step_type="validation_error",
                             status="failed",
-                            input_summary=f"arguments: {proposal.arguments}",
+                            input_summary=(
+                                f"arguments keys={arg_summary['argument_keys']} "
+                                f"sha256={str(arg_summary['arguments_sha256'])[:16]}"
+                            ),
                             output_summary="invalid tool arguments",
                             metadata={
                                 "violations": [v.code for v in validation.violations],
                                 "retries_used": validation_retries,
+                                **arg_summary,
                             },
                         )
                         self._repo.add_run_step(invalid_step)
@@ -1045,7 +1056,8 @@ class OrchestrationLoop:
                                 "tool_validation_error",
                                 False,
                                 llm_call_id,
-                                f"Invalid tool proposal ({codes}): {proposal.arguments}",
+                                f"Invalid tool proposal ({codes}) "
+                                f"sha256={str(arg_summary['arguments_sha256'])[:16]}",
                             )
                         validation_retries += 1
                         llm_call_id = self._llm_call_id_factory()

@@ -48,3 +48,14 @@ def test_not_allowed_without_time_headroom() -> None:
 def test_not_allowed_without_llm_call_headroom() -> None:
     t = tracker(budgets=ExecutionBudgets(max_llm_calls=2), llm_call_count=1)
     assert not retry_allowed(recoverable(), t, 10, 5, retries_used=0)
+
+
+def test_denied_when_retry_fits_but_retry_plus_answer_does_not() -> None:
+    t = tracker(
+        budgets=ExecutionBudgets(max_input_tokens=25, max_output_tokens=100),
+        llm_call_count=1,
+        input_tokens=10,
+        output_tokens=5,
+    )
+    # one more call (10) would fit under 25, but retry + answer (20) would not
+    assert not retry_allowed(recoverable(), t, 10, 5, retries_used=0)

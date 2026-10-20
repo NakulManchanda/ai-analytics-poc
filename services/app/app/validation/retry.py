@@ -34,8 +34,11 @@ def retry_allowed(
         return False
     if tracker.elapsed_seconds > budgets.timeout_seconds * MAX_ELAPSED_FRACTION:
         return False
-    if tracker.input_tokens + last_input_tokens > budgets.max_input_tokens:
+    # Reserve conservatively for BOTH remaining calls (retry + final answer),
+    # each estimated at the last proposal's size, so a retry can never leave
+    # the run unable to answer.
+    if tracker.input_tokens + 2 * last_input_tokens > budgets.max_input_tokens:
         return False
-    if tracker.output_tokens + last_output_tokens > budgets.max_output_tokens:
+    if tracker.output_tokens + 2 * last_output_tokens > budgets.max_output_tokens:
         return False
     return True
