@@ -162,8 +162,6 @@ There is no single baseline ID: the baseline label lives only in the driver's fi
 
 ## Grading outcomes and basis tags
 
-> DRAFT (#188 slice B1): check and CLI-flag details are TODO for slice B2; remove this banner when finalised.
-
 **Tag vocabulary** (case-level `tags`, additive; golden values are never changed by tagging):
 
 - `basis-dependent` plus exactly one of `basis:legacy_unfiltered` (legacy `query_taxi_data`, `average_trip_metrics`, `describe_taxi_dataset`: no valid-records filter), `basis:governed_valid_records` (`aggregate_taxi_data`, `compare_taxi_segments`, `list_taxi_dimension_values`) or `basis:mixed` (turns use tools from both bases). A basis-dependent reference can legitimately differ from another tool's answer to the same question, so reports separate cases by basis.
@@ -174,7 +172,22 @@ There is no single baseline ID: the baseline label lives only in the driver's fi
 
 **Tool output source**: `capture.v1` does not carry tool results, so checks that need them read an optional run-events directory (`context.reduced` events, joined by query id). Without it those checks report `needs_review` or `not_applicable`, never a silent pass.
 
-TODO (slice B2): the list of checks, the CLI flag for the events directory, and the report sections.
+**Grader v2 checks**:
+- `required_args` / `forbidden_args`: verifies expected tool call arguments strictly beyond simple subset matching.
+- `_truncated_incomplete`: detects truncated tool evidence (`truncated=True` or `row_count == limit`) on non-ranking queries and ensures the model does not present partial results as complete.
+- `check_entity_value_association`: enforces clause/token window proximity between entity labels and numeric values.
+- `check_comparative_claims`: verifies superlative/comparative claims (e.g. longest, shortest, highest) against actual row values.
+- `ungrounded_numbers`: ensures numbers in answers originate from tool result rows rather than model hallucination.
+- `tool_equivalence`: when a different tool provides verified reference values (e.g. `multi-004#0`), tool outcome is marked `needs_review` while answer is evaluated on its own.
+
+**CLI usage**:
+```bash
+uv run --project tooling/evals evals session-report \
+  --traces <traces.jsonl> \
+  --matches <matches.json> \
+  --events-dir <path_to_events> \
+  --provisional
+```
 
 ## Known gaps
 

@@ -94,7 +94,7 @@ def test_cost_unknown_is_not_reported_as_zero():
 
 def test_diagnostic_cases_are_graded_but_excluded_from_aggregates():
     score = score_run(FIX / "baseline")
-    assert score.diagnostic_ids == {"multi-001"}
+    assert score.diagnostic_ids == {"multi-001", "fail-003"}
     assert any(g.case_id == "multi-001" for g in score.grades)
     assert all(g.case_id != "multi-001" for g in score.gated)
     md = render_markdown(score, score, compare(score, score))

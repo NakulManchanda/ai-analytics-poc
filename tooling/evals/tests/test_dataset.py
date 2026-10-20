@@ -126,7 +126,11 @@ def _main_dataset_lines() -> list[dict]:
 
 
 def test_golden_values_unchanged_vs_main_only_tags_and_notes_differ():
-    current = [json.loads(line) for line in DEFAULT_DATASET.read_text().splitlines() if line.strip()]
+    current = [
+        json.loads(line)
+        for line in DEFAULT_DATASET.read_text().splitlines()
+        if line.strip()
+    ]
     main = _main_dataset_lines()
     assert [c["id"] for c in current] == [c["id"] for c in main]
     for cur, old in zip(current, main):

@@ -9,14 +9,28 @@ The first live baseline showed the legacy graders passing wrong answers and fail
 ## Decisions
 - Slice B1: tags only in `cases.jsonl` (`basis-dependent` + one `basis:*`, `diagnostic` on `multi-001` and `fail-003`, `fault-injection` on `fail-001`, `fail-002`, `fail-004`); existing tags kept, only `tags`/`notes` edited, no reference, facts, tools, question, review or version changes.
 - A dataset test compares against the `main` copy and asserts only tags/notes differ.
-- Tool output comes from an optional events directory (capture gap documented in `docs/evals.md`).
-- TODO: slice A (traces/graders/schema) and slice B2 (checks, CLI flag, report sections) decisions.
+- Tool output comes from an optional events directory (`load_tool_outputs` from `run_<id>.txt` SSE events), joined to `TurnView.tools` via `attach_outputs`. Without it, output-dependent grounding checks degrade to `needs_review`.
+- Grader v2 (`grade_turn_v2`) returns independent `execution`, `tool`, and `answer` outcomes (`correct`, `incorrect`, `needs_review`, `not_applicable`) along with detailed human-readable `reasons`.
+- `session.py` enhanced with `--events-dir` argument, reporting three outcome rates, diagnostic-separated counts, fault-injection exclusions, and tool basis breakdowns.
 
 ## Verification
-- TODO: `uv run python -m evals.cli validate` and `uv run pytest -q` results, dataset sha256, full suite, ruff, diff and secret scan.
+- Unit test suite: `uv run --project tooling/evals pytest tooling/evals/tests` -> 77 passed, 2 skipped in 0.25s.
+- Linter: `uv run --project tooling/evals ruff check tooling/evals` -> all clean.
+- Dataset validation: `uv run --project tooling/evals evals validate` -> `ok: 37 cases`.
+- Dataset integrity check: all facts and reference values verified 100% byte-identical to `main`.
+- Regrade: evaluated frozen snapshot `864e0cdebd...` without calling Bedrock:
+  - Gated execution: 37/37 correct (100%).
+  - Gated tool: 13 correct, 23 incorrect, 1 needs_review.
+  - Gated answer: 10 correct, 22 incorrect, 5 needs_review.
+  - Diagnostic: 3 turns (1 correct, 1 incorrect, 1 needs_review).
+  - Fault injection: 3 turns (3 not_applicable).
+  - False positives eliminated: `det-006` (truncation), `det-007` (missing facts), `det-009` (false comparative), `det-010` (label mismatch), `det-013` (fabricated numbers) now correctly fail.
+  - False negatives eliminated: `multi-004#0` correctly passes answer with `needs_review` tool equivalence; `uns-004` cleanly separates incorrect tool call from correct answer decline.
 
 ## PR / merge state
-TODO
+- PR NakulManchanda/ai-analytics-poc#192.
+- Branch `feat/188-grader-basis-tags`.
 
 ## Lessons
-TODO
+- Separating execution, tool correctness, and answer correctness prevents false conflations (e.g. an unneeded tool call on an unsupported query should not fail an otherwise correct decline answer).
+- Reading tool result rows from SSE events bridges the capture schema gap without requiring breaking changes to the core application schema.

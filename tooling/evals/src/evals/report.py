@@ -165,8 +165,9 @@ def compare(
 
     add(
         "pass_rate",
-        lambda bv, cv: cv < th.min_pass_rate_deterministic
-        or bv - cv > th.max_pass_rate_drop,
+        lambda bv, cv: (
+            cv < th.min_pass_rate_deterministic or bv - cv > th.max_pass_rate_drop
+        ),
         f"candidate >= {th.min_pass_rate_deterministic} and drop <= {th.max_pass_rate_drop}",
     )
     add(

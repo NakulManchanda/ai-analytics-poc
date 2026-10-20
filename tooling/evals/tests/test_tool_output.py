@@ -1,6 +1,12 @@
 import json
 
-from evals.traces import ToolOutput, ToolUse, TurnView, attach_outputs, load_tool_outputs
+from evals.traces import (
+    ToolOutput,
+    ToolUse,
+    TurnView,
+    attach_outputs,
+    load_tool_outputs,
+)
 
 
 def _event(run_id: str, messages: list[dict]) -> str:
@@ -30,7 +36,7 @@ def test_load_tool_outputs_parses_rows_and_skips_text(tmp_path):
         {"role": "assistant", "content": "{not json at all"},
     ]
     (tmp_path / "run_1.txt").write_text(
-        "event: run.received\ndata: {\"event_type\": \"run.received\"}\n\n"
+        'event: run.received\ndata: {"event_type": "run.received"}\n\n'
         + _event("run_1", msgs)
         + _event("run_1", msgs)  # repeated context snapshot: deduplicated
     )

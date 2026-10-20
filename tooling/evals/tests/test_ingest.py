@@ -204,3 +204,14 @@ def test_session_report_lists_prompt_revisions_by_role_when_captured() -> None:
     ) == [
         "Prompt revisions by role: answer: answer@1.0.0; planner: planner-single-turn@1.0.0."
     ]
+
+
+def test_session_report_renders_v2_outcomes_and_events(cases, tmp_path):
+    # Empty events dir: grounding degrades to needs_review, outcome tables render
+    text = render_session_report(
+        TRACES, MATCHES, cases, provisional=True, events_dir=tmp_path
+    )
+    assert "Grader Outcomes (v2)" in text
+    assert "Three Outcome Rates" in text
+    assert "tool output events: **available**" in text
+    assert "reasons" in text.lower()
