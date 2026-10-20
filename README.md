@@ -163,22 +163,24 @@ Folders are organised by ownership: deployable services, offline tooling, infras
 
 | Path | Owns | Notes |
 |---|---|---|
-| `services/app/` | FastAPI orchestration, ReAct loop, run/job state, async worker | Production app image; imports nothing from `tooling/` |
+| `services/app/` | FastAPI orchestration, ReAct loop, run/job state, async worker | Production app image; imports nothing from `tooling/`. Owns every LLM call. Packages: `orchestration/` (loop, budgets), `capture/` (`capture.v1` JSONL), `model_policy/` (role aliases, run budgets, pricing), `validation/` (proposal checks, bounded retry, grounding), `prompts/` (versioned templates), `state/`, `events/`, `routers/` |
 | `services/mcp/` | FastMCP analytical server (DuckDB + Parquet) | Never calls an LLM |
 | `services/gateway/` | Inference gateway: guard, quota, admission, placement, queue, hop, overflow | Deployed by `infra/inference/` as a ConfigMap |
 | `services/dataset_spike/` | NYC TLC dataset profiling spike | |
 | `web/` | React UI | |
 | `tooling/benchmarks/` | Scenario replayer (`app_runs`, `gateway_chat`), goodput, trace CLI | Own uv project; scenario fixtures in `config/scenarios/` |
 | `tooling/experiments/` | Evidence analysis package, notebook builder, plots | Reads pulled run directories under `metrics/` |
-| `tooling/evals/` | Reserved for answer-quality evals | Not implemented yet |
+| `tooling/evals/` | Golden dataset (`datasets/golden/v1`), deterministic graders, DeepEval metrics, capture ingest, baseline-vs-candidate and session reports | Own uv project; runs offline on recorded fixtures (`make evals-test`); live judging is opt-in |
 | `infra/terraform/` | AWS infrastructure | |
+| `infra/litellm/` | LiteLLM Proxy config (model aliases to Bedrock) | Opt-in service selected with `LLM_PROVIDER=litellm`; see [docs/litellm-proxy.md](docs/litellm-proxy.md) |
 | `infra/inference/` | GPU cluster deploy: K8s, HAMi, vLLM workers, KV transfer, scripts, experiment runners and manifests | Experiment runners (`experiments/`) run against the remote host |
 | `infra/observability/core/` | Local Compose stack: OTEL Collector, Jaeger, Prometheus, Loki, Grafana | Mounted by `docker-compose.observability.yml` |
 | `infra/observability/inference/` | Inference-cluster Prometheus, Grafana, DCGM, alerts, dashboards | Deployed by `infra/inference/scripts/` |
 | `config/scenarios/` | Replay workload fixtures | Single source for `tooling/benchmarks` |
 | `tests/` | Cross-service, infra and experiments tests | Service-local tests stay with their service |
 | `scripts/` | Smoke scripts and developer commands | |
-| `docs/` | Architecture, plans, ADRs, work history | |
+| `docs/` | Architecture, plans, ADRs, work history | Feature guides: [capture](docs/capture.md), [model policy](docs/model-policy.md), [evals](docs/evals.md), [prompts](docs/prompts.md), [validation](docs/validation.md) |
+| `.worktrees/`, `.vscode/myfiles/` | Local only, git-ignored | One worktree per change under `.worktrees/<issue>-<slug>`; plans and scratch under `.vscode/myfiles/<issue>-<slug>/` (see `AGENTS.md`) |
 
 The Grafana/Prometheus configuration under `infra/observability/` is separate from application tracing
 instrumentation (`services/app/app/telemetry.py`).
@@ -198,6 +200,8 @@ flowchart LR
     RP -- "app_runs" --> API
     LOOP -- "tool calls" --> MCP["services/mcp<br/>DuckDB + taxi data"]
     LOOP -- "model calls (/serve)" --> GW
+    LOOP -- "model calls (LLM_PROVIDER=litellm)" --> LLP["LiteLLM Proxy<br/>infra/litellm"]
+    LLP --> BR
     LOOP <--> STATE[("DynamoDB / in-memory state<br/>Redis events + SSE")]
 
     PROD --> RQ[("Redis job queue")] --> WK["Job worker"]
@@ -210,10 +214,12 @@ flowchart LR
     end
     GW --> VA["vLLM worker A"]
     GW --> VB["vLLM worker B"]
-    LOOP -. "other provider config" .-> BR["Bedrock"]
+    LOOP -. "LLM_PROVIDER=bedrock (rollback)" .-> BR["Bedrock"]
 ```
 
 - **Full app:** UI or replayer (`app_runs`) -> `/api/runs` -> loop -> MCP tools and gateway `/serve` -> vLLM.
+- **Full app with LiteLLM:** the same loop with `LLM_PROVIDER=litellm` sends model calls to the LiteLLM Proxy, which maps the `taxi-classifier`/`taxi-planner`/`taxi-answer` aliases to Bedrock. The proxy and the owned gateway are separate and never chained.
+- **Evidence and evals:** with `CAPTURE_DIR` set, each run writes `capture.v1` JSONL (model calls, tool calls, per-call prompt versions, tokens, cost); `tooling/evals` ingests it offline and grades it against the reviewed golden dataset.
 - **Direct gateway:** replayer (`gateway_chat`) -> gateway -> vLLM; bypasses the app, MCP, DuckDB and ReAct. Use it for inference benchmarks.
 - **Background jobs:** `/api/jobs` -> Redis queue -> worker. `/api/runs` does not go through Redis; Redis there is only transient events.
 
