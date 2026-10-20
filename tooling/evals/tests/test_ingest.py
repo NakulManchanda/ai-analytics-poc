@@ -180,3 +180,27 @@ def test_unknown_tokens_render_as_na(cases, tmp_path):
         f, MATCHES, cases, claimed_origin=None, provisional=True
     )
     assert "n/a" in text and "incomplete" in text.lower()
+
+
+def test_session_report_lists_prompt_revisions_by_role_when_captured() -> None:
+    from evals.schema import TraceRecord
+    from evals.session import _prompt_lines
+
+    def call(role: str, template: str | None) -> TraceRecord:
+        return TraceRecord(
+            record_type="model_call",
+            run_id="r",
+            turn_id="t",
+            step=1,
+            call_id=f"c-{role}",
+            role=role,
+            prompt_template_id=template,
+            prompt_template_version="1.0.0" if template else None,
+        )
+
+    assert _prompt_lines([call("planner", None)]) == []
+    assert _prompt_lines(
+        [call("planner", "planner-single-turn"), call("answer", "answer")]
+    ) == [
+        "Prompt revisions by role: answer: answer@1.0.0; planner: planner-single-turn@1.0.0."
+    ]

@@ -39,6 +39,13 @@ from app.prefix import (
     estimate_tokens,
 )
 from app.prefix_render import render_conversation_prompt
+from app.prompts import (
+    ANSWER_SINGLE_TURN,
+    DATASET_PROFILE_SINGLE_TURN,
+    PLANNER_SINGLE_TURN,
+    PromptAttribution,
+    PromptBundle,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +70,7 @@ class LLMProviderError(Exception):
         output_tokens: int | None = None,
         latency_ms: int | None = None,
         finish_reason: str | None = None,
+        prompt_attribution: PromptAttribution | None = None,
     ) -> None:
         super().__init__()
         self.retryable = retryable
@@ -74,6 +82,8 @@ class LLMProviderError(Exception):
         self.output_tokens = output_tokens
         self.latency_ms = latency_ms
         self.finish_reason = finish_reason
+        # Which prompt revision the failed call had rendered (set by the client).
+        self.prompt_attribution = prompt_attribution
 
 
 _THINK_OPEN = "<think>"
@@ -191,6 +201,8 @@ class LLMResult:
     # counts and consumers must record them as null.
     usage_known: bool = True
     fallback_used: bool = False
+    # Template id, version and SHA-256 of the prompt actually rendered for THIS call.
+    prompt_attribution: PromptAttribution | None = None
 
 
 @dataclass(frozen=True)
@@ -210,6 +222,28 @@ class ToolProposalResult:
     cost_kind: str | None = None
     usage_known: bool = True
     fallback_used: bool = False
+    prompt_attribution: PromptAttribution | None = None
+
+
+def _attributed(result: Any, attribution: PromptAttribution | None) -> Any:
+    return replace(result, prompt_attribution=attribution)
+
+
+def _single_turn(bundle: PromptBundle, **values: str) -> tuple[str, PromptAttribution]:
+    """Render a one-message prompt and its per-call attribution."""
+    text = bundle.render("message", **values)
+    return text, bundle.attribute(text)
+
+
+def _attribute_errors(
+    call: Callable[[], Any], attribution: PromptAttribution | None
+) -> Any:
+    """Run ``call``; a provider failure carries the prompt revision it had rendered."""
+    try:
+        return _attributed(call(), attribution)
+    except LLMProviderError as error:
+        error.prompt_attribution = attribution
+        raise
 
 
 class LLMClient(Protocol):
@@ -298,14 +332,15 @@ TAXI_PROPOSAL_TOOL_SPECS: list[dict[str, Any]] = [
 ]
 
 
-def taxi_proposal_prompt(prompt: str, schema: Mapping[str, object]) -> str:
+def _taxi_proposal(
+    prompt: str, schema: Mapping[str, object]
+) -> tuple[str, PromptAttribution]:
     schema_json = json.dumps(schema, separators=(",", ":"), allow_nan=False)
-    return (
-        "Choose exactly ONE governed analysis that answers the question. "
-        "Do not make multiple tool calls. To compare all boroughs "
-        "across NYC, call average_trip_metrics with region_name omitted. "
-        f"Dataset schema: {schema_json}\nQuestion: {prompt}"
-    )
+    return _single_turn(PLANNER_SINGLE_TURN, schema_json=schema_json, question=prompt)
+
+
+def taxi_proposal_prompt(prompt: str, schema: Mapping[str, object]) -> str:
+    return _taxi_proposal(prompt, schema)[0]
 
 
 class LocalFakeLLMClient:
@@ -507,47 +542,42 @@ class BedrockLLMClient:
         profile_json = json.dumps(
             dataset_profile, separators=(",", ":"), allow_nan=False
         )
-        response = self._converse(
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "text": (
-                                "Answer the user's question using only this governed dataset "
-                                f"profile. Question: {prompt}\nDataset profile: {profile_json}"
-                            )
-                        }
-                    ],
-                }
-            ],
+        text, attribution = _single_turn(
+            DATASET_PROFILE_SINGLE_TURN, question=prompt, profile_json=profile_json
         )
-        return self._as_llm_result(response)
+        return _attribute_errors(
+            lambda: self._as_llm_result(
+                self._converse(
+                    messages=[{"role": "user", "content": [{"text": text}]}],
+                )
+            ),
+            attribution,
+        )
 
     def propose_taxi_query(
         self, prompt: str, schema: Mapping[str, object]
     ) -> ToolProposalResult:
-        response = self._converse(
-            messages=[
-                {
-                    "role": "user",
-                    "content": [{"text": taxi_proposal_prompt(prompt, schema)}],
-                }
-            ],
-            tool_config={
-                "tools": [
-                    {
-                        "toolSpec": {
-                            "name": spec["name"],
-                            "description": spec["description"],
-                            "inputSchema": {"json": spec["inputSchema"]},
+        text, attribution = _taxi_proposal(prompt, schema)
+        try:
+            response = self._converse(
+                messages=[{"role": "user", "content": [{"text": text}]}],
+                tool_config={
+                    "tools": [
+                        {
+                            "toolSpec": {
+                                "name": spec["name"],
+                                "description": spec["description"],
+                                "inputSchema": {"json": spec["inputSchema"]},
+                            }
                         }
-                    }
-                    for spec in TAXI_PROPOSAL_TOOL_SPECS
-                ],
-                "toolChoice": {"any": {}},
-            },
-        )
+                        for spec in TAXI_PROPOSAL_TOOL_SPECS
+                    ],
+                    "toolChoice": {"any": {}},
+                },
+            )
+        except LLMProviderError as error:
+            error.prompt_attribution = attribution
+            raise
         content = response["output"]["message"]["content"]
         tool_uses = [block["toolUse"] for block in content if "toolUse" in block]
         if len(tool_uses) == 1:
@@ -568,28 +598,24 @@ class BedrockLLMClient:
             input_tokens=response["usage"]["inputTokens"],
             output_tokens=response["usage"]["outputTokens"],
             latency_ms=response["metrics"]["latencyMs"],
+            prompt_attribution=attribution,
         )
 
     def answer_with_query_result(
         self, prompt: str, query_result: Mapping[str, object]
     ) -> LLMResult:
         result_json = json.dumps(query_result, separators=(",", ":"), allow_nan=False)
-        response = self._converse(
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "text": (
-                                "Answer the user's question using only this governed query "
-                                f"result. Question: {prompt}\nQuery result: {result_json}"
-                            )
-                        }
-                    ],
-                }
-            ],
+        text, attribution = _single_turn(
+            ANSWER_SINGLE_TURN, question=prompt, result_json=result_json
         )
-        return self._as_llm_result(response)
+        return _attribute_errors(
+            lambda: self._as_llm_result(
+                self._converse(
+                    messages=[{"role": "user", "content": [{"text": text}]}],
+                )
+            ),
+            attribution,
+        )
 
     def execute_partitioned_call(
         self,
@@ -604,12 +630,16 @@ class BedrockLLMClient:
         system_blocks = (
             [{"text": partition.global_shared}] if partition.global_shared else None
         )
-        response = self._converse(
-            messages=[{"role": "user", "content": [{"text": user_content}]}],
-            system=system_blocks,
-            max_tokens=1024,
+        return _attribute_errors(
+            lambda: self._as_llm_result(
+                self._converse(
+                    messages=[{"role": "user", "content": [{"text": user_content}]}],
+                    system=system_blocks,
+                    max_tokens=1024,
+                )
+            ),
+            partition.attribution,
         )
-        return self._as_llm_result(response)
 
     def stream_answer_with_query_result(
         self,
@@ -618,23 +648,21 @@ class BedrockLLMClient:
         on_delta: Callable[[str], None],
     ) -> LLMResult:
         result_json = json.dumps(query_result, separators=(",", ":"), allow_nan=False)
+        text, attribution = _single_turn(
+            ANSWER_SINGLE_TURN, question=prompt, result_json=result_json
+        )
         request = {
             "modelId": self._model_id,
-            "messages": [
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "text": (
-                                "Answer the user's question using only this governed query "
-                                f"result. Question: {prompt}\nQuery result: {result_json}"
-                            )
-                        }
-                    ],
-                }
-            ],
+            "messages": [{"role": "user", "content": [{"text": text}]}],
             "inferenceConfig": {"maxTokens": 128, "temperature": 0.0},
         }
+        return _attribute_errors(
+            lambda: self._stream_request(request, on_delta), attribution
+        )
+
+    def _stream_request(
+        self, request: dict[str, Any], on_delta: Callable[[str], None]
+    ) -> LLMResult:
         chunks: list[str] = []
         metadata: Mapping[str, Any] | None = None
         try:
@@ -824,7 +852,9 @@ class ServeLLMClient:
             "stream": False,
             "chat_template_kwargs": {"enable_thinking": self._answer_thinking_enabled},
         }
-        return self._post_completion(payload, headers)
+        return _attribute_errors(
+            lambda: self._post_completion(payload, headers), partition.attribution
+        )
 
     def execute_partitioned_call(
         self,
@@ -849,7 +879,9 @@ class ServeLLMClient:
             "stream": False,
             "chat_template_kwargs": {"enable_thinking": self._answer_thinking_enabled},
         }
-        return self._post_completion(payload, headers)
+        return _attribute_errors(
+            lambda: self._post_completion(payload, headers), partition.attribution
+        )
 
     def propose_dataset_profile(
         self, prompt: str, *, conversation_id: str | None = None
@@ -887,7 +919,9 @@ class ServeLLMClient:
             "stream": False,
             "chat_template_kwargs": {"enable_thinking": self._answer_thinking_enabled},
         }
-        return self._post_completion(payload, headers)
+        return _attribute_errors(
+            lambda: self._post_completion(payload, headers), partition.attribution
+        )
 
     def propose_taxi_query(
         self,
@@ -960,7 +994,9 @@ class ServeLLMClient:
             # D2: structured/tool-proposal calls always disable thinking.
             "chat_template_kwargs": {"enable_thinking": False},
         }
-        return self._post_tool_proposal(payload, headers)
+        return _attribute_errors(
+            lambda: self._post_tool_proposal(payload, headers), partition.attribution
+        )
 
     def answer_with_query_result(
         self,
@@ -987,7 +1023,9 @@ class ServeLLMClient:
             "stream": False,
             "chat_template_kwargs": {"enable_thinking": self._answer_thinking_enabled},
         }
-        return self._post_completion(payload, headers)
+        return _attribute_errors(
+            lambda: self._post_completion(payload, headers), partition.attribution
+        )
 
     def stream_answer_with_query_result(
         self,
@@ -1015,7 +1053,10 @@ class ServeLLMClient:
             "stream": True,
             "chat_template_kwargs": {"enable_thinking": self._answer_thinking_enabled},
         }
-        return self._stream_completion(payload, headers, delta_callback)
+        return _attribute_errors(
+            lambda: self._stream_completion(payload, headers, delta_callback),
+            partition.attribution,
+        )
 
     def _build_proposal_messages(
         self,
@@ -1629,11 +1670,10 @@ class LiteLLMClient(ServeLLMClient):
         headers = self._build_headers(
             partition=partition, agent_step=1, conversation_id=conversation_id
         )
+        message, attribution = _taxi_proposal(prompt, schema)
         payload: dict[str, Any] = {
             "model": self._planner_alias,
-            "messages": [
-                {"role": "user", "content": taxi_proposal_prompt(prompt, schema)}
-            ],
+            "messages": [{"role": "user", "content": message}],
             "tools": [
                 {
                     "type": "function",
@@ -1648,7 +1688,9 @@ class LiteLLMClient(ServeLLMClient):
             "max_tokens": 512,
             "stream": False,
         }
-        return self._post_tool_proposal(payload, headers)
+        return _attribute_errors(
+            lambda: self._post_tool_proposal(payload, headers), attribution
+        )
 
     def _prepare_request(
         self, payload: dict[str, Any], headers: dict[str, str]

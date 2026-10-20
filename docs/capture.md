@@ -10,10 +10,14 @@ One JSON object per line, one record per model call (`record_type=model_call`) o
 `OrchestrationLoop.execute()` finishes (success, failure, or cancellation).
 
 - Common: `schema_version`, `run_id`, `turn_id`, `step`, `call_id` (idempotency key), `tenant_id`,
-  `trace_id`, `conversation_id`, `prompt_template_version`, `run_status`.
+  `trace_id`, `conversation_id`, `prompt_config_version` (run-level config tag, not a template version), `run_status`.
 - Model call: `role` (planner|answer), `model_alias`, `provider_model_id`,
   `input_tokens`/`output_tokens`/`reasoning_tokens`, `ttft_ms`, `latency_ms`, `finish_reason`,
-  `error`, `cost_usd`, `cost_kind`, `question_sha256`, `answer_sha256`.
+  `error`, `cost_usd`, `cost_kind`, `question_sha256`, `answer_sha256`, and per-call prompt attribution
+  (`prompt_template_id`, `prompt_template_version`, `prompt_sha256`: the template revision and the SHA-256 of the
+  instruction text rendered for that call; null when the call used no versioned template, e.g. the local fake;
+  rendered text is never captured). `prompt_template_version` previously held the run-wide tag; that tag is now
+  `prompt_config_version`. See [prompts](prompts.md).
 - Tool call: `tool_name`, `tool_call_id`, `argument_keys`, `arguments_sha256`, `query_id`, `status`, `row_count`.
   Tool result rows are never captured.
 

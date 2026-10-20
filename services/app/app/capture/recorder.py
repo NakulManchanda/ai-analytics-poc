@@ -155,7 +155,9 @@ class CaptureRecorder:
             "tenant_id": self.tenant_id,
             "trace_id": _trace_id(),
             "conversation_id": run.conversation_id,
-            "prompt_template_version": run.prompt_version,
+            # Run-level prompt *config* tag only; the template revision of each model call
+            # is on its own record (prompt_template_id/_version/prompt_sha256).
+            "prompt_config_version": run.prompt_version,
             "run_status": run.status,
             # Lets consumers order the runs of a conversation (ids are random).
             "run_started_at": run.started_at,
@@ -206,6 +208,12 @@ class CaptureRecorder:
                     "cost_kind": cost_kind,
                     "pricing_version": pricing_version,
                     "tool_source": call.get("tool_source"),
+                    # Fingerprint of the exact instruction text rendered for THIS call.
+                    # Rendered text itself is never captured (metadata-only), so the
+                    # fingerprint is the same whether or not CAPTURE_CONTENT is on.
+                    "prompt_template_id": call.get("prompt_template_id"),
+                    "prompt_template_version": call.get("prompt_template_version"),
+                    "prompt_sha256": call.get("prompt_sha256"),
                     "question_sha256": sha256_hex(question),
                     "answer_sha256": sha256_hex(answer) if is_answer else None,
                     "question": self.cap(question) if include else None,
