@@ -5,6 +5,7 @@ import concurrent.futures
 import contextvars
 import json
 import logging
+import os
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
@@ -62,6 +63,13 @@ from app.state import (
     generate_step_id,
     generate_tool_call_id,
     utcnow_isoformat,
+)
+from app.validation import (
+    check_answer_grounding,
+    retry_allowed,
+    scan_observation,
+    summarize_arguments,
+    validate_proposal,
 )
 
 logger = logging.getLogger(__name__)
@@ -998,28 +1006,157 @@ class OrchestrationLoop:
                     steps.append(proposal_step)
                     step_seq += 1
 
-                    # Step C: Validate proposal & Check Repeated Calls
-                    query_request = parse_query_proposal(proposal)
-                    if query_request is None:
+                    # Step C: deterministic validation (#180) before any tool runs,
+                    # with at most one bounded feedback retry for recoverable errors.
+                    validation = validate_proposal(
+                        proposal.name,
+                        proposal.arguments,
+                        schema=schema,
+                        governed_calls_executed=len(executed_tool_signatures),
+                    )
+                    query_request = (
+                        parse_query_proposal(proposal) if validation.ok else None
+                    )
+                    validation_retries = 0
+                    while query_request is None:
+                        arg_summary = summarize_arguments(
+                            proposal.arguments,
+                            include_content=os.getenv("CAPTURE_CONTENT", "").lower()
+                            in ("1", "true", "yes", "on"),
+                        )
                         invalid_step = RunStep(
                             step_id=generate_step_id(),
                             run_id=run_id,
                             sequence=step_seq,
                             step_type="validation_error",
                             status="failed",
-                            input_summary=f"arguments: {proposal.arguments}",
+                            input_summary=(
+                                f"arguments keys={arg_summary['argument_keys']} "
+                                f"sha256={str(arg_summary['arguments_sha256'])[:16]}"
+                            ),
                             output_summary="invalid tool arguments",
+                            metadata={
+                                "violations": [v.code for v in validation.violations],
+                                "retries_used": validation_retries,
+                                **arg_summary,
+                            },
                         )
                         self._repo.add_run_step(invalid_step)
                         steps.append(invalid_step)
-                        raise OrchestrationError(
-                            "tool_validation_error",
-                            False,
-                            llm_call_id,
-                            f"Invalid tool proposal: {proposal.arguments}",
+                        step_seq += 1
+                        if not retry_allowed(
+                            validation,
+                            tracker,
+                            proposal.input_tokens,
+                            proposal.output_tokens,
+                            retries_used=validation_retries,
+                        ):
+                            codes = ",".join(v.code for v in validation.violations)
+                            raise OrchestrationError(
+                                "tool_validation_error",
+                                False,
+                                llm_call_id,
+                                f"Invalid tool proposal ({codes}) "
+                                f"sha256={str(arg_summary['arguments_sha256'])[:16]}",
+                            )
+                        validation_retries += 1
+                        llm_call_id = self._llm_call_id_factory()
+                        emit(
+                            "llm.started",
+                            {"llm_call_id": llm_call_id, "phase": "proposal_retry"},
+                        )
+                        call_start = self._monotonic()
+                        try:
+                            proposal = self._run_with_cancellation(
+                                llm.propose_taxi_query,
+                                f"{prompt}\n\nThe previous tool proposal failed "
+                                f"deterministic validation:\n{validation.feedback()}",
+                                schema,
+                                run_id=run_id,
+                                **conversation_kwargs(),
+                            )
+                        except LLMProviderError as err:
+                            raise OrchestrationError(
+                                err.code, err.retryable, llm_call_id, str(err)
+                            ) from err
+                        proposal_latency_ms += int(
+                            (self._monotonic() - call_start) * 1000
+                        )
+                        cost, cost_source = call_cost(
+                            proposal.input_tokens, proposal.output_tokens
+                        )
+                        tracker.record_llm_call(
+                            proposal.input_tokens, proposal.output_tokens, cost
+                        )
+                        llm_calls.append(
+                            LLMCall(
+                                llm_call_id=llm_call_id,
+                                model_id=proposal.model_id,
+                                input_tokens=proposal.input_tokens,
+                                output_tokens=proposal.output_tokens,
+                                latency_ms=proposal.latency_ms,
+                                finish_reason=proposal.finish_reason,
+                                configured_max_tokens=proposal.configured_max_tokens,
+                                cost_usd=cost,
+                                cost_source=cost_source,
+                                tool_source="model",
+                                **_policy_fields(proposal),
+                            )
+                        )
+                        emit(
+                            "llm.completed",
+                            {
+                                "llm_call_id": llm_call_id,
+                                "phase": "proposal_retry",
+                                "latency_ms": proposal.latency_ms,
+                                "tokens": {
+                                    "input": proposal.input_tokens,
+                                    "output": proposal.output_tokens,
+                                },
+                            },
+                            llm_call_id=llm_call_id,
+                        )
+                        retry_step = RunStep(
+                            step_id=generate_step_id(),
+                            run_id=run_id,
+                            sequence=step_seq,
+                            step_type="llm_proposal",
+                            status="completed",
+                            llm_call_id=llm_call_id,
+                            input_summary=f"prompt: {prompt[:80]} (validation retry)",
+                            output_summary=f"tool: {proposal.name}",
+                            duration_ms=proposal.latency_ms,
+                            metadata=llm_calls[-1].to_metadata(),
+                        )
+                        self._repo.add_run_step(retry_step)
+                        steps.append(retry_step)
+                        step_seq += 1
+                        validation = validate_proposal(
+                            proposal.name,
+                            proposal.arguments,
+                            schema=schema,
+                            governed_calls_executed=len(executed_tool_signatures),
+                        )
+                        query_request = (
+                            parse_query_proposal(proposal) if validation.ok else None
                         )
 
                     tool_name, tool_arguments = query_request
+
+                pre_exec = validate_proposal(
+                    tool_name,
+                    tool_arguments,
+                    schema=schema,
+                    governed_calls_executed=len(executed_tool_signatures),
+                )
+                if not pre_exec.ok:
+                    raise OrchestrationError(
+                        "tool_validation_error",
+                        False,
+                        llm_call_id or proposal_call_id,
+                        "Invalid tool proposal "
+                        f"({','.join(v.code for v in pre_exec.violations)})",
+                    )
 
                 emit(
                     "tool.requested",
@@ -1165,6 +1302,26 @@ class OrchestrationLoop:
                 steps.append(tool_step)
                 step_seq += 1
 
+                # Audit signal only (#180): instruction-like text in untrusted
+                # tool data is recorded; it never gates or edits anything.
+                injection_findings = scan_observation(query_result)
+                if injection_findings:
+                    scan_step = RunStep(
+                        step_id=generate_step_id(),
+                        run_id=run_id,
+                        sequence=step_seq,
+                        step_type="observation_scan",
+                        status="completed",
+                        query_id=query_id_val,
+                        output_summary="instruction-like text in tool observation",
+                        metadata={
+                            "findings": [f.to_dict() for f in injection_findings]
+                        },
+                    )
+                    self._repo.add_run_step(scan_step)
+                    steps.append(scan_step)
+                    step_seq += 1
+
                 # Persist the tool observation as a durable conversation message so
                 # the prefix renderer can reconstruct the real growing prefix from
                 # stored history (D18). Additive only: existing user/assistant
@@ -1219,6 +1376,32 @@ class OrchestrationLoop:
                 self._repo.add_run_step(context_step)
                 steps.append(context_step)
                 step_seq += 1
+
+                def apply_grounding(
+                    text: str,
+                    _evidence: Any = query_result,
+                    _query_id: str = query_id_val,
+                ) -> str:
+                    """Deterministic numeric/evidence check (#180); appends a caveat."""
+                    nonlocal step_seq
+                    report = check_answer_grounding(text, _evidence, question=prompt)
+                    caveat = report.caveat()
+                    if caveat is None:
+                        return text
+                    grounding_step = RunStep(
+                        step_id=generate_step_id(),
+                        run_id=run_id,
+                        sequence=step_seq,
+                        step_type="grounding_check",
+                        status="failed" if not report.ok else "completed",
+                        query_id=_query_id,
+                        output_summary=caveat[:200],
+                        metadata=report.to_metadata(),
+                    )
+                    self._repo.add_run_step(grounding_step)
+                    steps.append(grounding_step)
+                    step_seq += 1
+                    return f"{text}\n\n{caveat}"
 
                 answer_call_id = self._llm_call_id_factory()
                 final_answer_phase_reached = True
@@ -1402,7 +1585,7 @@ class OrchestrationLoop:
 
                     ans_latency_ms = int((self._monotonic() - ans_start) * 1000)
                     final_answer_latency_ms = ans_latency_ms
-                    final_answer_text = crew_answer.text
+                    final_answer_text = apply_grounding(crew_answer.text)
 
                     last_call_id = (
                         llm_calls[-1].llm_call_id if llm_calls else answer_call_id
@@ -1501,7 +1684,7 @@ class OrchestrationLoop:
                         ) from err
                     ans_latency_ms = int((self._monotonic() - ans_start) * 1000)
                     final_answer_latency_ms = ans_latency_ms
-                    final_answer_text = answer_result.text
+                    final_answer_text = apply_grounding(answer_result.text)
 
                     emit(
                         "answer.completed",

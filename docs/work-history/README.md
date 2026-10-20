@@ -93,4 +93,5 @@ Monotonically numbered log of every post-bootstrap task. Each entry records the 
 - [0097 — #171 eval foundations](0097-171-eval-foundations.md) — `tooling/evals/` golden dataset, deterministic graders, DeepEval setup, delta reports
 - [0098 — #176 capture, policy and evals integration](0098-176-integration.md) — loop binds call_context, capture nulls unknown usage, real capture ingest and session report
 - [0099 — #178 versioned prompt templates](0099-178-prompt-versioning.md) — planner/answer/agent bundles, strict rendering, per-call template id/version/SHA-256 in run state, OTEL and capture
+- [0100 — #180 structured validation and grounding](0100-180-validation-grounding.md) — pre-execution proposal validation, bounded validate-retry, answer grounding checks, injection tests
 - [0101 — fix multi-001 golden reference](0101-fix-multi-001-reference.md) — turn-1 filters, Midtown Center top zone
