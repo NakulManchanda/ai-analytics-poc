@@ -222,7 +222,9 @@ def test_invalid_model_proposals_are_rejected_before_mcp_execution(
     assert mcp.compare_calls == []
 
 
-def test_client_sends_optional_fields_only_when_chosen(monkeypatch) -> None:  # noqa: ANN001
+def test_client_sends_optional_fields_only_when_chosen(
+    monkeypatch,
+) -> None:  # noqa: ANN001
     sent: list[dict[str, object]] = []
 
     class _Result:

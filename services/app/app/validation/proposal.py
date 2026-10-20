@@ -447,7 +447,10 @@ def _validate_compare(
 ) -> None:
     required = {"measures", "baseline_filters", "comparison_filters"}
     _check_keys(
-        args, required | {"segment_dimension", "comparison_mode", "limit"}, required, out
+        args,
+        required | {"segment_dimension", "comparison_mode", "limit"},
+        required,
+        out,
     )
     segment = args.get("segment_dimension")
     segment_given = segment is not None
