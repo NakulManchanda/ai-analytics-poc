@@ -96,3 +96,4 @@ Monotonically numbered log of every post-bootstrap task. Each entry records the 
 - [0100 — #180 structured validation and grounding](0100-180-validation-grounding.md) — pre-execution proposal validation, bounded validate-retry, answer grounding checks, injection tests
 - [0101 — fix multi-001 golden reference](0101-fix-multi-001-reference.md) — turn-1 filters, Midtown Center top zone
 - [0102 — golden cases vs real MCP tools](0102-golden-vs-mcp.md) — multi-001 revert, det-009 basis, human-decision flags
+- [0103 — grader basis tags](0103-grader-basis-tags.md) — basis, diagnostic and fault-injection tags; three-outcome grading docs
