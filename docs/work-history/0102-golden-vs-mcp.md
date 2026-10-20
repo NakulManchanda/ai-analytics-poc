@@ -18,3 +18,8 @@ Check every golden turn with expected tools against the live MCP tools and corre
 
 ## Lessons
 Reference SQL must be checked per tool, not per case: legacy and governed tools use different record filters. Open question for a human: unify the bases.
+
+## Carried-over limitations from #181 (documented in `docs/validation.md`)
+- Validation retry reserves about 2x the previous proposal's tokens: an estimate, not a guarantee; runtime budgets enforce actual use.
+- Numeric grounding is syntactic and does not prove the number belongs to the right metric or region.
+- Fixtures: the captured session was regenerated after #183 so it carries prompt attribution.

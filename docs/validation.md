@@ -30,6 +30,8 @@ checks are deterministic Python outside the model. Prompt wording is not a contr
 - Time scope is the pinned month in the schema; zone names are bounded text, validated by MCP.
 - Grounding is syntactic: it cannot judge whether a true number answers the question, and small integers (0-31) and years are not checked. Causal detection is phrase based.
 - Numeric grounding is syntactic: a number may occur in, or be derivable from, the observation without proving it belongs to the right zone, metric or period.
+- The validation retry reserves roughly twice the previous proposal's token usage for the retry and the final answer. That is an estimate, not a guaranteed reservation: the final answer can use more tokens than the previous proposal. The runtime budgets (`BudgetTracker`) still enforce actual consumption, so an under-reserved retry can leave the run without a full answer.
+- Grounding checks do not guarantee a supported number is tied to the correct metric or geographic region; a wrongly associated number can still pass.
 - Rejected proposals persist only violation codes, argument keys and a SHA-256 of the arguments; raw values appear only with `CAPTURE_CONTENT` enabled (step metadata).
 - Retry feedback is appended to the user question argument; prompt templates are owned by #178 and not changed here.
 - No few-shot examples were added: none is tied to a validated failure cluster yet.
