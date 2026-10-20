@@ -97,3 +97,5 @@ Monotonically numbered log of every post-bootstrap task. Each entry records the 
 - [0101 — fix multi-001 golden reference](0101-fix-multi-001-reference.md) — turn-1 filters, Midtown Center top zone
 - [0102 — golden cases vs real MCP tools](0102-golden-vs-mcp.md) — multi-001 revert, det-009 basis, human-decision flags
 - [0103 — grader basis tags](0103-grader-basis-tags.md) — basis, diagnostic and fault-injection tags; three-outcome grading docs
+- [0104 — planner capability and catalogue repair](0104-planner-capability-repair.md) — governed tools exposed, typed declines, whole_segment comparison, terminal no_tool
+- [0105 — cost reconciliation](0105-cost-reconciliation.md) — event cost used Sonnet rates (~96x); result cost and consistent cost_source

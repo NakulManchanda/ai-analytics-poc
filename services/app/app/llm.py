@@ -27,6 +27,7 @@ from app.config import DEFAULT_MODEL_ID, Settings
 from app.model_policy import (
     ModelPolicyRuntime,
     PolicyDeniedError,
+    PricingTable,
     RunBudgetExceededError,
     current_call_context,
 )
@@ -1871,6 +1872,11 @@ class LiteLLMClient(ServeLLMClient):
         self._runtime = runtime or ModelPolicyRuntime.default(
             planner_alias, answer_alias
         )
+
+    @property
+    def pricing(self) -> PricingTable:
+        """The model-policy price table (alias -> rate), for cost estimation by callers."""
+        return self._runtime.pricing
 
     @staticmethod
     def _role(payload: Mapping[str, Any]) -> str:

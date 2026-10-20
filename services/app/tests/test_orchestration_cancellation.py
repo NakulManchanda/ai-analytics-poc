@@ -4,6 +4,7 @@ from collections.abc import Callable
 from typing import Any
 
 import pytest
+from app.config import DEFAULT_MODEL_ID
 from app.events.publisher import InMemoryEventPublisher
 from app.llm import LLMClient, LLMResult, ToolProposalResult
 from app.mcp_client import DatasetProfileMCPClient
@@ -34,7 +35,7 @@ class MockLLM(LLMClient):
 
     @property
     def model_id(self) -> str:
-        return "mock-llm"
+        return DEFAULT_MODEL_ID
 
     def propose_taxi_query(
         self, prompt: str, schema_context: dict[str, Any]
@@ -43,7 +44,7 @@ class MockLLM(LLMClient):
         return ToolProposalResult(
             name="average_trip_metrics",
             arguments={"region_name": "Manhattan"},
-            model_id="mock-llm",
+            model_id=DEFAULT_MODEL_ID,
             input_tokens=50,
             output_tokens=20,
             latency_ms=100,
@@ -62,7 +63,7 @@ class MockLLM(LLMClient):
             on_delta(delta)
         return LLMResult(
             text="".join(accumulated),
-            model_id="mock-llm",
+            model_id=DEFAULT_MODEL_ID,
             input_tokens=100,
             output_tokens=50,
             latency_ms=200,
@@ -73,7 +74,7 @@ class MockLLM(LLMClient):
     ) -> LLMResult:
         return LLMResult(
             text="full answer",
-            model_id="mock-llm",
+            model_id=DEFAULT_MODEL_ID,
             input_tokens=100,
             output_tokens=50,
             latency_ms=200,

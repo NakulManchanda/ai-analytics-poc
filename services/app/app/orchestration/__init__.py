@@ -8,7 +8,6 @@ from app.orchestration.loop import (
     LoopResult,
     OrchestrationError,
     OrchestrationLoop,
-    estimate_cost,
     parse_query_proposal,
 )
 from app.orchestration.reducer import (
@@ -28,7 +27,6 @@ __all__ = [
     "OrchestrationError",
     "OrchestrationLoop",
     "WorkingContext",
-    "estimate_cost",
     "parse_query_proposal",
     "sanitize_and_preview_tool_result",
     "summarize_messages",
