@@ -102,12 +102,16 @@ def _parse_output(content: str) -> ToolOutput | None:
     return ToolOutput(
         columns=columns if isinstance(columns, list) else [],
         rows=rows if isinstance(rows, list) else [],
-        truncated=payload.get("truncated")
-        if isinstance(payload.get("truncated"), bool)
-        else None,
-        row_count=payload.get("row_count")
-        if isinstance(payload.get("row_count"), int)
-        else None,
+        truncated=(
+            payload.get("truncated")
+            if isinstance(payload.get("truncated"), bool)
+            else None
+        ),
+        row_count=(
+            payload.get("row_count")
+            if isinstance(payload.get("row_count"), int)
+            else None
+        ),
         query_id=str(payload["query_id"]),
         raw=payload,
     )
@@ -117,7 +121,8 @@ def load_tool_outputs(events_dir: Path) -> dict[str, list[ToolOutput]]:
     """Parse ``run_<id>.txt`` SSE event files into tool outputs per run.
 
     Tool results appear in ``context.reduced`` events as JSON ``recent_messages``
-    content. Non-JSON messages are skipped; repeated results are de-duplicated by query_id."""
+    content. Non-JSON messages are skipped; repeated results are de-duplicated by query_id.
+    """
     out: dict[str, list[ToolOutput]] = {}
     for path in sorted(Path(events_dir).glob("run_*.txt")):
         seen: set[str] = set()

@@ -325,7 +325,8 @@ def check_entity_value_association(
     facts: list[Fact], answer: str
 ) -> tuple[list[str], list[str]]:
     """(incorrect reasons, needs_review reasons): a labelled number must sit in the same
-    clause or bullet group as its label, else the value is attached to the wrong entity."""
+    clause or bullet group as its label, else the value is attached to the wrong entity.
+    """
     bad: list[str] = []
     unsure: list[str] = []
     segs = _segments(answer)
