@@ -169,6 +169,9 @@ class CaptureRecorder:
             ),
             "provider_client": provider_client,
         }
+        if run.metadata.get("eval_run_id"):
+            # Opt-in batch label (#189); absent for default traffic so records are unchanged.
+            base["eval_run_id"] = run.metadata["eval_run_id"]
         include = self.settings.include_content
         records: list[dict[str, Any]] = []
         next_step = max([s.sequence for s in steps], default=0) + 1

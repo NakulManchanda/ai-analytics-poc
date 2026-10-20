@@ -101,3 +101,4 @@ Monotonically numbered log of every post-bootstrap task. Each entry records the 
 - [0105 — cost reconciliation](0105-cost-reconciliation.md) — event cost used Sonnet rates (~96x); result cost and consistent cost_source
 - [0106 — reported cost trust](0106-reported-cost-trust.md) — non-billed estimate on unknown usage gets the conservative budget bound
 - [0107 — run span trace id](0107-run-span-trace-id.md) — `ai.run` span moved into `execute()` so async runs get a non-null capture trace_id
+- [0108 — eval_run_id](0108-eval-run-id.md) — opt-in batch label on Run.metadata, run events and capture records (#189 PR-B)
