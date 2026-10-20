@@ -19,10 +19,11 @@
 
 | # | model calls | aliases | input | output | cost USD | model ms | tool ms |
 |---|---|---|---|---|---|---|---|
-| 0 | 1 | taxi-answer | 412 | 38 | 0.000020 | 30 | 0 |
-| 1 | 2 | taxi-answer, taxi-planner | 1158 | 102 | 0.000055 | 68 | 0 |
-| total | | | 1570 | 140 | 0.000075 | 98 | 0 |
+| 0 | 1 | taxi-answer | 412 | 38 | 0.000020 | 32 | 0 |
+| 1 | 2 | taxi-answer, taxi-planner | 1158 | 102 | 0.000055 | 70 | 0 |
+| total | | | 1570 | 140 | 0.000075 | 102 | 0 |
 
 Totals are sums of known values only. `n/a` means the provider reported no usage; it is never counted as 0.
 Pricing versions: 2026-10-bedrock-nova-micro-v1; cost kinds: estimated; fallbacks used: 0.
+Prompt revisions by role: answer: answer@1.0.0; planner: planner-single-turn@1.0.0.
 Judge metrics: not run on captured traffic (no recorded judge verdicts exist for it).
