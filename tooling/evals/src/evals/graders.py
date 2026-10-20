@@ -575,7 +575,9 @@ def _is_tool_proven_equivalent(expected: ExpectedTool, actual: ToolUse) -> bool:
             return False
         exp_borough = exp_filters.get("pickup_borough")
         act_region = act_args.get("region_name")
-        return not (exp_borough and act_region and exp_borough != act_region)
+        if exp_borough and act_region != exp_borough:
+            return False
+        return not (exp_args.get("dimensions") and not exp_borough and act_region)
 
     # Verify measures
     exp_measures = exp_args.get("measures")

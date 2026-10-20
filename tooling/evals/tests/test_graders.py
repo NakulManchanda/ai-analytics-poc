@@ -607,3 +607,27 @@ def test_tool_equivalence_rejected_when_filters_differ_even_with_matching_number
     res = _v2grade(turn, view)
     assert res.tool == "incorrect"
     assert any("expected compare_taxi_segments not matched" in r for r in res.reasons)
+
+
+def test_legacy_equivalence_rejected_when_expected_borough_missing_in_actual():
+    expected = ExpectedTool(
+        name="aggregate_taxi_data",
+        arguments={
+            "dimensions": ["pickup_borough"],
+            "measures": ["average_fare"],
+            "filters": {"pickup_borough": "Manhattan"},
+        },
+    )
+    turn = _v2_turn(tools=[expected])
+    # actual calls average_trip_metrics with empty arguments (no region_name)
+    actual_tool = ToolUse(
+        "average_trip_metrics",
+        {},
+        "completed",
+        "q1",
+        1,
+    )
+    view = TurnView("r", "c", 0, answer="Manhattan fare is 15.05", tools=[actual_tool])
+    res = _v2grade(turn, view)
+    assert res.tool == "incorrect"
+    assert any("expected aggregate_taxi_data not matched" in r for r in res.reasons)

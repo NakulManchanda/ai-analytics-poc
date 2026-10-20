@@ -16,11 +16,11 @@ The first live baseline showed the legacy graders passing wrong answers and fail
   - Unexpected extra tool calls rejected in `_grade_tools`.
   - SSE event parser requires `role == "tool"`, validates run identity, and discards conflicting duplicate query IDs across full grading payload (rows, columns, truncated, row_count).
   - Entity-to-metric attribution hardened using closest metric keyword to number span; returns `needs_review` when multi-entity multi-metric cases lack confident attribution.
-  - Tool equivalence strictly governed by `_is_tool_proven_equivalent`: only permitted for established equivalent tool pairs matching dimensions, measures, and filters; numbers matching in output never infer equivalence on their own.
+  - Tool equivalence strictly governed by `_is_tool_proven_equivalent`: only permitted for established equivalent tool pairs matching dimensions, measures, and filters; legacy `average_trip_metrics` strictly requires matching borough constraints and region filters; numbers matching in output never infer equivalence on their own.
   - Empty runs with no model calls or tools explicitly fail execution; execution represents observed activity without recorded failure (steps <= budget, no model/tool errors, non-empty activity).
 
 ## Verification
-- Unit test suite: `uv run --project tooling/evals pytest tooling/evals/tests` -> 88 passed, 2 skipped in 0.21s.
+- Unit test suite: `uv run --project tooling/evals pytest tooling/evals/tests` -> 89 passed, 2 skipped in 0.22s.
 - Linter: `uv run --project tooling/evals ruff check tooling/evals` -> all clean.
 - Dataset validation: `uv run --project tooling/evals evals validate` -> `ok: 37 cases`.
 - Dataset integrity check: all facts and reference values verified 100% byte-identical to `main`.
