@@ -12,6 +12,12 @@ The first live baseline showed the legacy graders passing wrong answers and fail
 - Tool output comes from an optional events directory (`load_tool_outputs` from `run_<id>.txt` SSE events), joined to `TurnView.tools` via `attach_outputs`. Without it, output-dependent grounding checks degrade to `needs_review`.
 - Grader v2 (`grade_turn_v2`) returns independent `execution`, `tool`, and `answer` outcomes (`correct`, `incorrect`, `needs_review`, `not_applicable`) along with detailed human-readable `reasons`.
 - `session.py` enhanced with `--events-dir` argument, reporting three outcome rates, diagnostic-separated counts, fault-injection exclusions, and tool basis breakdowns.
+- Post-review hardening:
+  - Unexpected extra tool calls rejected in `_grade_tools`.
+  - SSE event parser requires `role == "tool"`, validates run identity, and discards conflicting duplicate query IDs.
+  - Entity-to-metric attribution hardened using closest metric keyword to number span; returns `needs_review` when multi-entity multi-metric cases lack confident attribution.
+  - Tool equivalence requires that actual tools provide segmentation/filters if the expected tool specified them.
+  - Empty runs with no model calls or tools explicitly fail execution.
 
 ## Verification
 - Unit test suite: `uv run --project tooling/evals pytest tooling/evals/tests` -> 77 passed, 2 skipped in 0.25s.
