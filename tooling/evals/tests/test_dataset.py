@@ -96,3 +96,59 @@ def test_reference_values_match_sql_on_pinned_parquet():
         DATA_DIR / "taxi_zone_lookup.csv",
     )
     assert [c.model_dump() for c in cases] == [c.model_dump() for c in fresh]
+
+
+# --- #188 grader basis tags: tags/notes may change, golden values may not ---
+
+_BASIS_TAGS = {
+    "basis:legacy_unfiltered",
+    "basis:governed_valid_records",
+    "basis:mixed",
+}
+_NEW_TAGS = _BASIS_TAGS | {"basis-dependent", "diagnostic", "fault-injection"}
+
+
+def _main_dataset_lines() -> list[dict]:
+    import subprocess
+
+    repo = Path(__file__).resolve().parents[3]
+    try:
+        out = subprocess.run(
+            ["git", "show", "main:tooling/evals/datasets/golden/v1/cases.jsonl"],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        pytest.skip("main branch copy of the dataset is not available")
+    return [json.loads(line) for line in out.splitlines() if line.strip()]
+
+
+def test_golden_values_unchanged_vs_main_only_tags_and_notes_differ():
+    current = [json.loads(line) for line in DEFAULT_DATASET.read_text().splitlines() if line.strip()]
+    main = _main_dataset_lines()
+    assert [c["id"] for c in current] == [c["id"] for c in main]
+    for cur, old in zip(current, main):
+        assert len(cur["turns"]) == len(old["turns"]), cur["id"]
+        for ct, ot in zip(cur["turns"], old["turns"]):
+            for key in ("reference", "expected_tools", "question"):
+                assert json.dumps(ct[key], sort_keys=True) == json.dumps(
+                    ot[key], sort_keys=True
+                ), (cur["id"], key)
+            assert ct == ot, cur["id"]
+        strip = lambda c: {k: v for k, v in c.items() if k not in ("tags", "notes")}
+        assert strip(cur) == strip(old), cur["id"]
+        assert set(old["tags"]) <= set(cur["tags"]), cur["id"]
+
+
+def test_new_tag_vocabulary_and_one_basis_per_basis_dependent_case():
+    for case in load_cases():
+        new = {t for t in case.tags if t in _NEW_TAGS}
+        bad = [t for t in case.tags if t.startswith("basis") and t not in _NEW_TAGS]
+        assert not bad, (case.id, bad)
+        basis = [t for t in case.tags if t in _BASIS_TAGS]
+        if "basis-dependent" in new:
+            assert len(basis) == 1, case.id
+        else:
+            assert not basis, case.id
