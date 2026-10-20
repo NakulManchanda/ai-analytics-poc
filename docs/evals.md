@@ -86,7 +86,7 @@ sequenceDiagram
     A-)R: publish RunEvents at each step (SSE reads these)
     A->>A: query catalogue lookup (deterministic)
     alt catalogue hit (tool_source=catalogue)
-        Note over A,L: no planner call; LiteLLM sees nothing for this step
+        Note over A,L: no planner call, so LiteLLM sees nothing for this step
     else miss (tool_source=model)
         A->>A: model policy (entitlement, per-call cap, per-run reservation)
         A->>S: monthly Bedrock allowance reservation
