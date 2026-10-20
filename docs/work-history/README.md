@@ -100,3 +100,4 @@ Monotonically numbered log of every post-bootstrap task. Each entry records the 
 - [0104 — planner capability and catalogue repair](0104-planner-capability-repair.md) — governed tools exposed, typed declines, whole_segment comparison, terminal no_tool
 - [0105 — cost reconciliation](0105-cost-reconciliation.md) — event cost used Sonnet rates (~96x); result cost and consistent cost_source
 - [0106 — reported cost trust](0106-reported-cost-trust.md) — non-billed estimate on unknown usage gets the conservative budget bound
+- [0107 — run span trace id](0107-run-span-trace-id.md) — `ai.run` span moved into `execute()` so async runs get a non-null capture trace_id

@@ -114,3 +114,115 @@ def test_run_records_exception_and_preserves_original_failure() -> None:
     assert span.name == "ai.run"
     assert span.status.status_code is StatusCode.ERROR
     assert [event.name for event in span.events] == ["exception"]
+
+
+def _make_loop(tracer, tmp_path=None, llm=None):
+    from app.capture.recorder import CaptureRecorder, CaptureSettings
+
+    capture = (
+        CaptureRecorder(CaptureSettings(directory=tmp_path))
+        if tmp_path is not None
+        else None
+    )
+    return OrchestrationLoop(
+        llm_client=llm or LocalFakeLLMClient(),
+        mcp_client=FakeMCPClient(),  # type: ignore[arg-type]
+        state_repository=InMemoryStateRepository(),
+        voice_settings=VoiceSettings(enabled=False),
+        tracer=tracer,
+        capture=capture,
+    )
+
+
+def _capture_records(tmp_path):
+    import json
+
+    records = []
+    for path in tmp_path.rglob("*.jsonl"):
+        records += [json.loads(line) for line in path.read_text().splitlines() if line]
+    return records
+
+
+def test_async_path_capture_trace_id_matches_ai_run_span(tmp_path) -> None:
+    tracer, exporter = _tracer_and_exporter()
+    loop = _make_loop(tracer, tmp_path)
+
+    # /api/runs path: prepare_run, then execute in a separate thread with no ambient span.
+    submission = loop.prepare_run("Which pickup zones have the most trips?")
+    import threading
+
+    thread = threading.Thread(target=loop.execute, args=(submission,))
+    thread.start()
+    thread.join()
+
+    spans = exporter.get_finished_spans()
+    assert [s.name for s in spans] == ["ai.run"]
+    expected = format(spans[0].get_span_context().trace_id, "032x")
+    assert spans[0].attributes["ai.run_id"] == submission.run_id
+    assert spans[0].attributes["ai.conversation_id"] == submission.conversation_id
+    assert spans[0].attributes["ai.status"] == "completed"
+    records = _capture_records(tmp_path)
+    assert records
+    assert {r["trace_id"] for r in records} == {expected}
+
+
+def test_llm_call_sees_run_trace_context_and_traceparent(tmp_path) -> None:
+    from opentelemetry import propagate
+
+    seen: dict[str, object] = {}
+
+    def record() -> None:
+        seen["trace_id"] = trace.get_current_span().get_span_context().trace_id
+        headers: dict[str, str] = {}
+        propagate.inject(headers)
+        seen["traceparent"] = headers.get("traceparent")
+
+    class RecordingLLM(LocalFakeLLMClient):
+        def propose_dataset_profile(self, *args, **kwargs):  # type: ignore[override]
+            record()
+            return super().propose_dataset_profile(*args, **kwargs)
+
+        def propose_taxi_query(self, *args, **kwargs):  # type: ignore[override]
+            record()
+            return super().propose_taxi_query(*args, **kwargs)
+
+        def ask(self, *args, **kwargs):  # type: ignore[override]
+            record()
+            return super().ask(*args, **kwargs)
+
+        def answer_with_query_result(self, *args, **kwargs):  # type: ignore[override]
+            record()
+            return super().answer_with_query_result(*args, **kwargs)
+
+    tracer, exporter = _tracer_and_exporter()
+    loop = _make_loop(tracer, tmp_path, RecordingLLM())
+    submission = loop.prepare_run("Which pickup zones have the most trips?")
+    loop.execute(submission)
+
+    span = exporter.get_finished_spans()[0]
+    trace_id = span.get_span_context().trace_id
+    assert seen["trace_id"] == trace_id
+    assert str(seen["traceparent"]).split("-")[1] == format(trace_id, "032x")
+
+
+def test_noop_tracer_run_completes_with_null_trace_id(tmp_path) -> None:
+    loop = _make_loop(trace.NoOpTracer(), tmp_path)
+
+    result = loop.run("Which pickup zones have the most trips?")
+
+    assert result.status == "completed"
+    records = _capture_records(tmp_path)
+    assert records and {r["trace_id"] for r in records} == {None}
+
+
+def test_tracer_failure_is_fail_open(tmp_path) -> None:
+    class BrokenTracer:
+        def start_as_current_span(self, *args, **kwargs):
+            raise RuntimeError("tracer down")
+
+    loop = _make_loop(BrokenTracer(), tmp_path)  # type: ignore[arg-type]
+
+    result = loop.run("Which pickup zones have the most trips?")
+
+    assert result.status == "completed"
+    assert {r["trace_id"] for r in _capture_records(tmp_path)} == {None}

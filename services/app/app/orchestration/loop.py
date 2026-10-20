@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import base64
 import concurrent.futures
+import contextlib
 import contextvars
 import json
 import logging
 import os
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -488,6 +489,20 @@ def parse_query_proposal(
     return proposal.name, {"analysis": analysis, "limit": limit}
 
 
+def _safe_set_attribute(span: Any, key: str, value: Any) -> None:
+    if span is None:
+        return
+    try:
+        span.set_attribute(key, value)
+    except Exception:
+        logger.warning("Failed to set span attribute %s", key, exc_info=True)
+
+
+def _safe_set_attributes(span: Any, attributes: dict[str, Any]) -> None:
+    for key, value in attributes.items():
+        _safe_set_attribute(span, key, value)
+
+
 class OrchestrationLoop:
     """Application-owned bounded agent loop enforcing execution budgets and durable state."""
 
@@ -631,35 +646,80 @@ class OrchestrationLoop:
         submission: RunSubmission,
         budgets: ExecutionBudgets | None = None,
     ) -> LoopResult:
-        """Execute the orchestration loop using state prepared by prepare_run()."""
+        """Execute the orchestration loop using state prepared by prepare_run().
+
+        Owns the single ``ai.run`` span for the run, however it was dispatched (/api/ask
+        via run(), or /api/runs in a worker thread), and records capture inside it so
+        capture.v1 ``trace_id`` matches the exported trace.
+        """
         answer: str | None = None
+        with self._run_span(submission) as span:
+            try:
+                # Activates per-run budgets and tenant entitlements (#170) for every
+                # model call in this run; copied into worker threads by
+                # _run_with_cancellation.
+                with call_context(DEFAULT_TENANT, submission.run_id):
+                    result = self._execute_loop(
+                        prompt=submission.prompt,
+                        conv_id=submission.conversation_id,
+                        user_msg_id=submission.message_id,
+                        run_id=submission.run_id,
+                        next_seq=submission.next_seq,
+                        # run.received was already emitted by prepare_run
+                        initial_evt_sequence=1,
+                        budgets=budgets,
+                    )
+                answer = result.answer
+                _safe_set_attribute(span, "ai.status", result.status)
+                return result
+            finally:
+                if self._capture is not None:
+                    self._capture.capture_run(
+                        self._repo,
+                        submission.run_id,
+                        submission.prompt,
+                        answer,
+                        provider_client=(
+                            type(self._llm_client).__name__
+                            if self._llm_client
+                            else None
+                        ),
+                    )
+
+    @contextlib.contextmanager
+    def _run_span(self, submission: RunSubmission) -> Iterator[Any]:
+        """Open the ai.run span; tracer failures never fail the run (fail-open)."""
         try:
-            # Activates per-run budgets and tenant entitlements (#170) for every model
-            # call in this run; copied into worker threads by _run_with_cancellation.
-            with call_context(DEFAULT_TENANT, submission.run_id):
-                result = self._execute_loop(
-                    prompt=submission.prompt,
-                    conv_id=submission.conversation_id,
-                    user_msg_id=submission.message_id,
-                    run_id=submission.run_id,
-                    next_seq=submission.next_seq,
-                    # run.received was already emitted by prepare_run; start evt_sequence at 1
-                    initial_evt_sequence=1,
-                    budgets=budgets,
-                )
-            answer = result.answer
-            return result
-        finally:
-            if self._capture is not None:
-                self._capture.capture_run(
-                    self._repo,
-                    submission.run_id,
-                    submission.prompt,
-                    answer,
-                    provider_client=(
-                        type(self._llm_client).__name__ if self._llm_client else None
-                    ),
-                )
+            manager = self._tracer.start_as_current_span("ai.run")
+            span = manager.__enter__()
+        except Exception:
+            logger.warning("Failed to start ai.run span", exc_info=True)
+            yield None
+            return
+        _safe_set_attributes(
+            span,
+            {
+                "ai.run_id": submission.run_id,
+                "ai.conversation_id": submission.conversation_id,
+                "ai.turn_type": "text",
+                "gen_ai.request.model": self._configured_model_id(),
+            },
+        )
+        try:
+            yield span
+        except BaseException as error:
+            try:
+                suppressed = manager.__exit__(type(error), error, error.__traceback__)
+            except Exception:
+                logger.warning("Failed to end ai.run span", exc_info=True)
+                suppressed = False
+            if not suppressed:
+                raise
+        else:
+            try:
+                manager.__exit__(None, None, None)
+            except Exception:
+                logger.warning("Failed to end ai.run span", exc_info=True)
 
     def run(
         self,
@@ -668,19 +728,8 @@ class OrchestrationLoop:
         budgets: ExecutionBudgets | None = None,
     ) -> LoopResult:
         """Synchronous one-shot execution (preserves /api/ask compatibility)."""
-        with self._tracer.start_as_current_span("ai.run") as span:
-            submission = self.prepare_run(prompt, conversation_id)
-            span.set_attributes(
-                {
-                    "ai.run_id": submission.run_id,
-                    "ai.conversation_id": submission.conversation_id,
-                    "ai.turn_type": "text",
-                    "gen_ai.request.model": self._configured_model_id(),
-                }
-            )
-            result = self.execute(submission, budgets=budgets)
-            span.set_attribute("ai.status", result.status)
-            return result
+        submission = self.prepare_run(prompt, conversation_id)
+        return self.execute(submission, budgets=budgets)
 
     def request_cancellation(self, run_id: str) -> Run:
         """Mark an active run as cancel_requested in durable state,
