@@ -135,14 +135,28 @@ Catalogue-served turns make no planner call, so LiteLLM holds fewer rows than th
 
 ### Identifiers and sources of truth
 
-There is no single baseline ID: the baseline label lives only in the driver's files. `results.jsonl` is the index.
+There is no single baseline ID unless the driver sends one: pass the label as `eval_run_id` (`POST /api/runs` body field, or header `x-eval-run-id`; `^[A-Za-z0-9._:-]{1,64}$`). The driver's `results.jsonl` stays the index for `case_id`/`turn_index`.
 
 | ID | In | Notes |
 |---|---|---|
-| `conversation_id` | driver, capture, events, LiteLLM as `session_id` | one per case; the join key to LiteLLM |
-| `run_id` | driver, capture, events | one per turn; not in LiteLLM |
+| `eval_run_id` | capture records, every run event, LiteLLM `request_tags` (`eval_run_id:<id>`) and `metadata.spend_logs_metadata`, `ai.run` span attribute | opt-in batch label; correlation only, never an auth/tenant/billing boundary |
+| `conversation_id` | driver, capture, events, LiteLLM as `session_id` | one per case |
+| `run_id` | driver, capture, events, LiteLLM `spend_logs_metadata.run_id` | one per turn |
+| `call_id` | capture `call_id` = event `llm_call_id` = LiteLLM `spend_logs_metadata.call_id` | one logical model call |
+| `(call_id, attempt)` | LiteLLM `spend_logs_metadata` | one physical proxy request; a policy fallback gives one capture record several rows, and a failed attempt may emit none. Join capture -> spend as 1:N and sum `spend` per row. |
+| `trace_id` | capture `trace_id`, Jaeger | one per run (`ai.run`); joins app, MCP and LiteLLM spans when the stack runs with `LITELLM_OTEL=1` |
 | `case_id`, `turn_index` | driver, matches file | not in capture or LiteLLM |
-| capture `call_id` vs LiteLLM `request_id` | capture / LiteLLM | not the same value; pair by `session_id`, alias, order |
+| LiteLLM `request_id` | LiteLLM | proxy-generated; unrelated to `call_id` |
+
+**Correlating an eval run** (verified live, 2 cases, see work-history 0110):
+
+1. Start the stack with `LITELLM_OTEL=1 make local-aws-litellm-compose` plus app capture.
+2. Capture: select JSONL records with `eval_run_id == <id>`; `record_type == "model_call"` rows carry `call_id` and `trace_id`.
+3. Events: every run event has `eval_run_id`; `llm.completed` carries `llm_call_id`.
+4. LiteLLM: `GET /spend/logs` (no date params, master key) and keep rows whose `request_tags` contains `eval_run_id:<id>`; read `metadata.spend_logs_metadata.{run_id, call_id, attempt}`.
+5. Jaeger: `GET http://127.0.0.1:16686/api/traces/<capture trace_id>`; the trace holds `ai-analytics-app`, `analytics-mcp` and `litellm-proxy` spans.
+
+Expected invariants: every capture `call_id` has at least one spend row, every tagged spend row maps to a capture `call_id`, and `(call_id, attempt)` is unique among the rows actually emitted.
 
 | Need | Source |
 |---|---|
