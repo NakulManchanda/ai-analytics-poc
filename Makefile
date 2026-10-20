@@ -275,7 +275,8 @@ observability-dev-down: ## Stop only the issue-owned local observability project
 	GRAFANA_PORT="$(OBSERVABILITY_GRAFANA_PORT)" PROMETHEUS_PORT="$(OBSERVABILITY_PROMETHEUS_PORT)" \
 		docker compose -p "$(OBSERVABILITY_PROJECT)" -f docker-compose.yml -f docker-compose.observability.yml down --remove-orphans
 
-LITELLM_COMPOSE = -f docker-compose.yml -f docker-compose.aws.yml -f docker-compose.litellm.yml
+# LITELLM_OTEL=1 adds the Collector/Jaeger overlay and points the proxy's otel callback at it (#189).
+LITELLM_COMPOSE = -f docker-compose.yml -f docker-compose.aws.yml -f docker-compose.litellm.yml $(if $(LITELLM_OTEL),-f docker-compose.observability.yml -f docker-compose.litellm-otel.yml)
 AWS_DIRECT_COMPOSE = -f docker-compose.yml -f docker-compose.aws.yml
 # The proxy master key lives in the git-ignored .env (see litellm-env); it is sourced, never printed.
 LITELLM_ENV = set -a; [ -f .env ] && . ./.env; set +a; : "$${LITELLM_MASTER_KEY:?run make litellm-env}";
@@ -285,7 +286,7 @@ LITELLM_COMPOSE_ENV = LOCAL_UID=$$(id -u) DYNAMODB_TABLE_NAME=$(or $(DYNAMODB_TA
 litellm-env: ## Ensure LITELLM_MASTER_KEY exists in the git-ignored .env (generated once, never printed)
 	@touch .env; grep -q '^LITELLM_MASTER_KEY=' .env || { printf 'LITELLM_MASTER_KEY=sk-%s\n' "$$(openssl rand -hex 24)" >> .env; echo "Generated LITELLM_MASTER_KEY in .env (value not shown)"; }
 
-local-litellm-compose: litellm-env ## Start local Compose with real AWS, model calls routed through the LiteLLM proxy (default; LITELLM_CAPTURE=1 also stores prompts/responses and DEBUG-logs bodies)
+local-litellm-compose: litellm-env ## Start local Compose with real AWS, model calls routed through the LiteLLM proxy (default; LITELLM_CAPTURE=1 also stores prompts/responses and DEBUG-logs bodies; LITELLM_OTEL=1 adds Collector/Jaeger with proxy spans)
 	$(LITELLM_COMPOSE_ENV) \
 	LITELLM_STORE_PROMPTS=$(if $(LITELLM_CAPTURE),true,false) LITELLM_LOG=$(if $(LITELLM_CAPTURE),DEBUG,INFO) \
 	WEB_PORT=$(or $(WEB_PORT),3000) \

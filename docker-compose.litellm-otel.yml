@@ -1,0 +1,16 @@
+# LiteLLM proxy -> OTEL Collector (issue #189). Use only together with docker-compose.litellm.yml AND
+# docker-compose.observability.yml, which define the `litellm` and `otel-collector` services:
+#   docker compose -f docker-compose.yml -f docker-compose.aws.yml -f docker-compose.litellm.yml \
+#     -f docker-compose.observability.yml -f docker-compose.litellm-otel.yml up --build -d
+# The proxy's `otel` callback (infra/litellm/config.yaml) adopts the app's W3C traceparent, so its spans
+# join the app/MCP trace in Jaeger. Without this overlay the callback falls back to its console exporter.
+services:
+  litellm:
+    environment:
+      OTEL_EXPORTER: otlp_http
+      OTEL_ENDPOINT: http://otel-collector:4318
+      OTEL_SERVICE_NAME: litellm-proxy
+      OTEL_ENVIRONMENT_NAME: local-compose
+    depends_on:
+      otel-collector:
+        condition: service_started

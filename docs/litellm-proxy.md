@@ -66,7 +66,10 @@ The app sends these headers so a proxy spend-log row can be mapped to an app run
 
 - Readiness: `GET /health/readiness` (Compose healthcheck); liveness `GET /health/liveliness`.
 - The client injects W3C `traceparent` so proxy spans join the app trace; the proxy `otel` callback exports
-  via standard `OTEL_*` env vars.
+  via `OTEL_*` env vars. Locally, `LITELLM_OTEL=1 make local-aws-litellm-compose` adds
+  `docker-compose.observability.yml` and `docker-compose.litellm-otel.yml` (`OTEL_EXPORTER=otlp_http`,
+  `OTEL_ENDPOINT=http://otel-collector:4318`, service `litellm-proxy`); Jaeger is at `http://127.0.0.1:16686`.
+  Without that overlay the callback uses its console exporter.
 - The selected alias is the `model` in the request and the response's `model` field.
 
 ## Operational dependency and rollback
@@ -93,5 +96,5 @@ in the TOOL column and Logs has no request/response JSON. Deployed ECS never sto
 ## Known limitations
 
 - Terraform is validated only (no plan/apply); the ECS rollout is unverified.
-- OTEL: the proxy adopts the incoming `traceparent`, but no collector/exporter is configured for it yet.
+- OTEL: the proxy exporter is configured only for local Compose (`LITELLM_OTEL=1`); the deployed ECS proxy has no OTEL exporter configured.
 - Cancellation and deadline behaviour through the proxy have no proxy-specific tests.
