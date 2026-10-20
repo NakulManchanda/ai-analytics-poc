@@ -160,6 +160,35 @@ There is no single baseline ID: the baseline label lives only in the driver's fi
 - The deterministic graders can pass a wrong answer (numbers present but mislabelled or incomplete) and fail an acceptable one. Treat the pass rate as a legacy score until the graders check label association, completeness, and required arguments.
 - Mark cases with incompatible reference semantics (for example `multi-001`, `fail-003`) diagnostic, with the reason, instead of silently dropping them. Genuine model failures stay in the metrics.
 
+## Grading outcomes and basis tags
+
+**Tag vocabulary** (case-level `tags`, additive; golden values are never changed by tagging):
+
+- `basis-dependent` plus exactly one of `basis:legacy_unfiltered` (legacy `query_taxi_data`, `average_trip_metrics`, `describe_taxi_dataset`: no valid-records filter), `basis:governed_valid_records` (`aggregate_taxi_data`, `compare_taxi_segments`, `list_taxi_dimension_values`) or `basis:mixed` (turns use tools from both bases). A basis-dependent reference can legitimately differ from another tool's answer to the same question, so reports separate cases by basis.
+- `diagnostic`: graded and listed separately, excluded from aggregate rates and gates (reason in the case `notes`).
+- `fault-injection`: the scenario needs an injected tool or provider failure and cannot be executed live; it is reported in its own section and excluded from live rates.
+
+**Three separate outcomes** per turn: execution (did the workflow finish), tool (right tool and required arguments, or an accepted equivalent) and answer (facts, labels, completeness). Each is `correct`, `incorrect`, `needs_review` or `not_applicable`. `needs_review` is never counted as pass or fail; it has its own column and is resolved by a human.
+
+**Tool output source**: `capture.v1` does not carry tool results, so checks that need them read an optional run-events directory (`context.reduced` events, joined by query id). Without it those checks report `needs_review` or `not_applicable`, never a silent pass.
+
+**Grader v2 checks**:
+- `required_args` / `forbidden_args`: verifies expected tool call arguments strictly beyond simple subset matching.
+- `_truncated_incomplete`: detects truncated tool evidence (`truncated=True` or `row_count == limit`) on non-ranking queries and ensures the model does not present partial results as complete.
+- `check_entity_value_association`: enforces clause/token window proximity between entity labels and numeric values.
+- `check_comparative_claims`: verifies superlative/comparative claims (e.g. longest, shortest, highest) against actual row values.
+- `ungrounded_numbers`: ensures numbers in answers originate from tool result rows rather than model hallucination.
+- `tool_equivalence`: when a different tool provides verified reference values (e.g. `multi-004#0`), tool outcome is marked `needs_review` while answer is evaluated on its own.
+
+**CLI usage**:
+```bash
+uv run --project tooling/evals evals session-report \
+  --traces <traces.jsonl> \
+  --matches <matches.json> \
+  --events-dir <path_to_events> \
+  --provisional
+```
+
 ## Known gaps
 
 - A first live provisional baseline exists only as local, uncommitted evidence; the committed session report is local-scripted. Its legacy grader score is not a trusted quality metric.

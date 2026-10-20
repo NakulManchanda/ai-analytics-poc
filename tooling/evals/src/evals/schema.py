@@ -40,6 +40,9 @@ class ExpectedTool(BaseModel):
     name: str
     arguments: dict[str, object] = Field(default_factory=dict)
     match: Literal["subset", "exact"] = "subset"
+    # Argument keys that must be set / must not be set on the actual call (grade_turn_v2).
+    required_args: list[str] = Field(default_factory=list)
+    forbidden_args: list[str] = Field(default_factory=list)
 
 
 class FailureSpec(BaseModel):

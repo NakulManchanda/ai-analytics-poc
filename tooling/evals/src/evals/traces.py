@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -17,6 +18,18 @@ TOOL_OK = frozenset({"ok", "completed"})
 
 
 @dataclass
+class ToolOutput:
+    """Result of one tool call, read from run events (capture.v1 carries no rows)."""
+
+    columns: list[object]
+    rows: list[list[object]]
+    truncated: bool | None
+    row_count: int | None
+    query_id: str | None
+    raw: dict[str, object] = field(default_factory=dict)
+
+
+@dataclass
 class ToolUse:
     name: str
     arguments: dict[str, object]
@@ -24,6 +37,7 @@ class ToolUse:
     query_id: str | None
     row_count: int | None
     latency_ms: float | None = None
+    output: ToolOutput | None = None  # None means unknown, never guessed
 
     @property
     def ok(self) -> bool:
@@ -74,6 +88,89 @@ class TurnView:
     def latency_ms(self) -> float | None:
         known = [m.latency_ms for m in self.model_calls if m.latency_ms is not None]
         return sum(known) if known else None
+
+
+def _parse_output(content: str) -> ToolOutput | None:
+    try:
+        payload = json.loads(content)
+    except ValueError:
+        return None  # assistant/user text, not a tool result
+    if not isinstance(payload, dict) or not payload.get("query_id"):
+        return None
+    rows = payload.get("rows")
+    columns = payload.get("columns")
+    return ToolOutput(
+        columns=columns if isinstance(columns, list) else [],
+        rows=rows if isinstance(rows, list) else [],
+        truncated=(
+            payload.get("truncated")
+            if isinstance(payload.get("truncated"), bool)
+            else None
+        ),
+        row_count=(
+            payload.get("row_count")
+            if isinstance(payload.get("row_count"), int)
+            else None
+        ),
+        query_id=str(payload["query_id"]),
+        raw=payload,
+    )
+
+
+def load_tool_outputs(events_dir: Path) -> dict[str, list[ToolOutput]]:
+    """Parse ``run_<id>.txt`` SSE event files into tool outputs per run.
+
+    Tool results appear in ``context.reduced`` events as JSON ``recent_messages``
+    content with role="tool". Non-JSON messages are skipped; repeated results are
+    de-duplicated by query_id. Conflicting duplicates mark the query ambiguous
+    and are discarded to prevent corrupted evidence from certifying scores.
+    """
+    out: dict[str, list[ToolOutput]] = {}
+    for path in sorted(Path(events_dir).glob("run_*.txt")):
+        seen: dict[str, ToolOutput] = {}
+        conflicting: set[str] = set()
+        for line in path.read_text().splitlines():
+            if not line.startswith("data: ") or "context.reduced" not in line:
+                continue
+            try:
+                event = json.loads(line[6:])
+            except ValueError:
+                continue
+            if event.get("event_type") != "context.reduced":
+                continue
+            ev_run_id = event.get("run_id")
+            if ev_run_id and ev_run_id != path.stem:
+                continue
+            context = (event.get("payload") or {}).get("working_context") or {}
+            for msg in context.get("recent_messages") or []:
+                if msg.get("role") != "tool":
+                    continue
+                parsed = _parse_output(str(msg.get("content", "")))
+                if not parsed or not parsed.query_id:
+                    continue
+                qid = parsed.query_id
+                if qid in seen:
+                    prev = seen[qid]
+                    if (
+                        prev.rows != parsed.rows
+                        or prev.columns != parsed.columns
+                        or prev.truncated != parsed.truncated
+                        or prev.row_count != parsed.row_count
+                    ):
+                        conflicting.add(qid)
+                else:
+                    seen[qid] = parsed
+        out[path.stem] = [o for qid, o in seen.items() if qid not in conflicting]
+    return out
+
+
+def attach_outputs(view: TurnView, outputs: list[ToolOutput]) -> TurnView:
+    """Set ``ToolUse.output`` by query_id. Tools without a matching output stay None."""
+    by_id = {o.query_id: o for o in outputs if o.query_id}
+    for tool in view.tools:
+        if tool.query_id and tool.query_id in by_id:
+            tool.output = by_id[tool.query_id]
+    return view
 
 
 def load_records(path: Path) -> list[TraceRecord]:

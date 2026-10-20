@@ -121,7 +121,9 @@ def _answer(turn: Turn, case_id: str, p: Profile) -> str:
         if fact.kind == "number" and case_id in p.wrong_number and not corrupted:
             value = float(value) * 1.5  # type: ignore[arg-type]
             corrupted = True
-        parts.append(f"{fact.label.replace('_', ' ')}: {_fmt(float(value)) if fact.kind == 'number' else value}")  # type: ignore[arg-type]
+        parts.append(
+            f"{fact.label.replace('_', ' ')}: {_fmt(float(value)) if fact.kind == 'number' else value}"
+        )  # type: ignore[arg-type]
     return "Based on the governed query, " + "; ".join(parts) + "."
 
 

@@ -47,6 +47,11 @@ def main(argv: list[str] | None = None) -> int:
         "--conversation-id",
         help="select one conversation from a multi-conversation file",
     )
+    sr.add_argument(
+        "--events-dir",
+        type=Path,
+        help="optional directory with run_<id>.txt SSE event logs",
+    )
     sr.add_argument("--out", type=Path)
     s = sub.add_parser("synth", help="regenerate synthetic fixtures")
     s.add_argument("--out", type=Path, required=True)
@@ -85,6 +90,7 @@ def main(argv: list[str] | None = None) -> int:
                 args.origin,
                 args.provisional,
                 args.conversation_id,
+                events_dir=args.events_dir,
             )
         except SessionError as err:
             print(f"error: {err}", file=sys.stderr)

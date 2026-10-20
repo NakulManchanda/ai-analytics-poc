@@ -1,7 +1,7 @@
 {
   "run_label": "candidate",
   "dataset_version": "v1",
-  "dataset_sha256": "f884ec383b29b7c1d3cfd2dc27a102fb7d0446635b69d351cbf3487b14cb4e0b",
+  "dataset_sha256": "140d771627f120879e494768da017eb2d2ab922084c6b23dc79d79c1676e0f29",
   "duckdb_dataset": "nyc-yellow-taxi-2024-01 (config/datasets/nyc_yellow_taxi_2024_01.toml, sha256-pinned parquet)",
   "model_alias": "answer-small",
   "prompt_version": "prompt-v1",
