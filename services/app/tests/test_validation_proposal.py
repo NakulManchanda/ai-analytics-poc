@@ -197,3 +197,91 @@ def test_every_catalogue_entry_passes_validation(question, entry) -> None:  # ty
     name, arguments = entry
     result = validate_proposal(name, arguments, schema=SCHEMA)
     assert result.ok, (question, result.violations)
+
+
+def test_classify_non_tool_outcomes() -> None:
+    from app.validation.proposal import classify_non_tool_outcome
+
+    # Unsupported queries
+    assert (
+        classify_non_tool_outcome(
+            "I cannot determine that: driver info is not in the dataset.",
+            "Which driver earned the most money?",
+        )
+        == "unsupported"
+    )
+    assert (
+        classify_non_tool_outcome(
+            "The yellow taxi data does not contain weather records.",
+            "How did weather affect tipping?",
+        )
+        == "unsupported"
+    )
+    assert (
+        classify_non_tool_outcome(
+            "Forecasting is not supported: dataset only covers historical Jan 2024.",
+            "Predict trips for February 2024",
+        )
+        == "unsupported"
+    )
+    # Clarification queries
+    assert (
+        classify_non_tool_outcome(
+            "Could you clarify which borough you are interested in?",
+            "What was the trip count?",
+        )
+        == "clarification_required"
+    )
+    # Default non-declination
+    assert (
+        classify_non_tool_outcome(
+            "Here are the top zones.",
+            "What are the top pickup zones?",
+        )
+        == "no_tool"
+    )
+
+
+def test_validate_proposal_typed_outcomes() -> None:
+    unsupported = validate_proposal("unsupported", None)
+    assert unsupported.ok
+    assert unsupported.outcome == "unsupported"
+
+    clarify = validate_proposal("clarification_required", None)
+    assert clarify.ok
+    assert clarify.outcome == "clarification_required"
+
+    no_tool = validate_proposal("", None)
+    assert no_tool.ok
+    assert no_tool.outcome == "no_tool"
+
+
+def test_all_six_governed_tools_validation_and_max_rows_64() -> None:
+    assert validate_proposal(
+        "query_taxi_data", {"analysis": "top_pickup_zones", "limit": 64}
+    ).ok
+    assert validate_proposal("average_trip_metrics", {"region_name": "Manhattan"}).ok
+    assert validate_proposal("describe_taxi_dataset", {"include_column_stats": True}).ok
+    assert validate_proposal(
+        "list_taxi_dimension_values", {"dimension": "pickup_borough", "limit": 64}
+    ).ok
+    assert validate_proposal(
+        "aggregate_taxi_data",
+        {
+            "dimensions": ["pickup_week_part", "pickup_hour"],
+            "measures": ["trip_count", "average_fare"],
+            "limit": 64,
+        },
+        schema=SCHEMA,
+    ).ok
+    assert validate_proposal(
+        "compare_taxi_segments",
+        {
+            "segment_dimension": "airport_trip",
+            "measures": ["trip_count", "average_fare"],
+            "baseline_filters": {"airport_trip": False},
+            "comparison_filters": {"airport_trip": True},
+            "limit": 64,
+        },
+        schema=SCHEMA,
+    ).ok

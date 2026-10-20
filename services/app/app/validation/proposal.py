@@ -105,6 +105,53 @@ GOVERNED_TOOLS = frozenset(
         "compare_taxi_segments",
     }
 )
+NON_TOOL_OUTCOMES = frozenset({"no_tool", "unsupported", "clarification_required"})
+PLANNER_OUTCOMES = frozenset(
+    {"tool_call", "no_tool", "unsupported", "clarification_required"}
+)
+
+
+def classify_non_tool_outcome(text: str, question: str = "") -> str:
+    """Classify a non-tool planner response into a typed outcome:
+    'unsupported' | 'clarification_required' | 'no_tool'.
+    """
+    combined = f"{question} {text}".lower()
+    if any(
+        phrase in combined
+        for phrase in (
+            "please clarify",
+            "could you clarify",
+            "which borough did you mean",
+            "did you mean",
+            "please specify",
+            "clarification required",
+            "need more details",
+        )
+    ):
+        return "clarification_required"
+    if any(
+        phrase in combined
+        for phrase in (
+            "cannot",
+            "can't",
+            "not available",
+            "does not contain",
+            "no data",
+            "outside",
+            "unable",
+            "not possible",
+            "unsupported",
+            "read-only",
+            "no driver",
+            "no weather",
+            "predict",
+            "forecast",
+        )
+    ):
+        return "unsupported"
+    return "no_tool"
+
+
 _CONTROL = re.compile(r"[\x00-\x1f\x7f]")
 
 
@@ -118,6 +165,7 @@ class Violation:
 @dataclass(frozen=True)
 class ProposalValidation:
     violations: tuple[Violation, ...] = field(default_factory=tuple)
+    outcome: str = "tool_call"
 
     @property
     def ok(self) -> bool:
@@ -431,9 +479,13 @@ def validate_proposal(
 ) -> ProposalValidation:
     """Return every violation of a proposed governed tool call (empty -> safe to execute)."""
     out = _Collector()
+    if name in NON_TOOL_OUTCOMES:
+        return ProposalValidation(tuple(out.items), outcome=name)
+    if not name:
+        return ProposalValidation(tuple(out.items), outcome="no_tool")
     if name not in GOVERNED_TOOLS:
         out.add("unknown_tool", f"tool must be one of {sorted(GOVERNED_TOOLS)}")
-        return ProposalValidation(tuple(out.items))
+        return ProposalValidation(tuple(out.items), outcome="tool_call")
     if governed_calls_executed >= max_governed_analyses:
         out.add(
             "max_governed_analyses_exceeded",

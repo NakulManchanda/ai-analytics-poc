@@ -938,3 +938,48 @@ def test_orchestration_loop_litellm_proxy_is_billed_bedrock_and_groups_session()
     assert len(sessions) == 1 and None not in sessions
     # Stored vLLM-shaped history (role "tool") must never reach Bedrock via the proxy.
     assert all("tool" not in r for r in roles)
+
+
+def test_orchestration_loop_unsupported_declines_without_mcp_analytics() -> None:
+    events = []
+
+    class EventCollector:
+        def publish(self, event):  # type: ignore[no-untyped-def]
+            events.append(event)
+
+    class AnalyticDetectingMCPClient(FakeMCPClient):
+        def query_taxi_data(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+            raise AssertionError(
+                "Governed analytics tool must not be called on unsupported request"
+            )
+
+        def aggregate_taxi_data(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+            raise AssertionError(
+                "Governed analytics tool must not be called on unsupported request"
+            )
+
+    repo = InMemoryStateRepository()
+    loop = OrchestrationLoop(
+        llm_client=LocalFakeLLMClient(),
+        mcp_client=AnalyticDetectingMCPClient(),  # type: ignore[arg-type]
+        state_repository=repo,
+        event_publisher=EventCollector(),  # type: ignore[arg-type]
+    )
+
+    result = loop.run("Why did trip volume drop on January 15th?")
+    assert result.status == "completed"
+    assert "cannot" in result.answer.lower()
+
+    event_types = [e.event_type for e in events]
+    assert "run.declined" in event_types
+    assert "run.completed" in event_types
+    assert "tool.started" not in event_types
+
+    run = repo.get_run(result.run_id)
+    assert run is not None
+    telemetry = run.metadata["telemetry"]
+    assert telemetry["tool_source"] == "model"
+    assert telemetry["planner_outcome"] == "unsupported"
+    assert telemetry["rejected_outcome"] == "unsupported"
+    assert "query_taxi_data" in telemetry["offered_tools"]
+    assert "compare_taxi_segments" in telemetry["offered_tools"]

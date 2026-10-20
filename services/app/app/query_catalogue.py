@@ -148,6 +148,19 @@ _RAW_CATALOGUE: dict[str, tuple[str, ToolArguments]] = {
             "limit": 20,
         },
     ),
+    (
+        "Which borough contributed most to the busiest pickup hour, and "
+        "which zones inside it dominate?"
+    ): (
+        "aggregate_taxi_data",
+        {
+            "dimensions": ["pickup_hour", "pickup_borough"],
+            "measures": ["trip_count"],
+            "filters": None,
+            "order_by": {"key": "trip_count", "direction": "desc"},
+            "limit": 64,
+        },
+    ),
     "Compare the first and last complete weeks of the dataset on trip count and average fare": (
         "compare_taxi_segments",
         {
@@ -187,6 +200,30 @@ _RAW_CATALOGUE: dict[str, tuple[str, ToolArguments]] = {
 QUERY_CATALOGUE: dict[str, tuple[str, ToolArguments]] = {
     normalize_question(question): value for question, value in _RAW_CATALOGUE.items()
 }
+
+MULTI_STEP_QUESTIONS: frozenset[str] = frozenset(
+    {
+        normalize_question(
+            "Which borough contributed most to the busiest pickup hour, "
+            "and which zones inside it dominate?"
+        )
+    }
+)
+
+
+def requires_multi_step_analysis(question: str) -> bool:
+    """Detect whether a question requires multiple sequential analyses (e.g. react-001).
+
+    These questions must not be satisfied with an incomplete single catalogue hit;
+    they are routed to the multi-step agent loop instead.
+    """
+    normalized = normalize_question(question)
+    if normalized in MULTI_STEP_QUESTIONS:
+        return True
+    return bool(
+        ("busiest" in normalized or "peak" in normalized)
+        and ("which zones inside" in normalized or "zones dominate" in normalized)
+    )
 
 
 def lookup(question: str) -> tuple[str, ToolArguments] | None:

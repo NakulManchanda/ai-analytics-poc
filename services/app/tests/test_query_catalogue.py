@@ -122,19 +122,26 @@ def test_catalogue_repaired_dimensions_and_limits() -> None:
     assert det006[1]["limit"] == 50
 
     # det-007: segment_dimension must be airport_trip, not payment_type
-    det007 = lookup("How do airport trips compare with non-airport trips on fare and duration?")
+    det007 = lookup(
+        "How do airport trips compare with non-airport trips on fare and duration?"
+    )
     assert det007 is not None
     assert det007[0] == "compare_taxi_segments"
     assert det007[1]["segment_dimension"] == "airport_trip"
 
     # det-013: segment_dimension must be pickup_borough, not payment_type
-    det013 = lookup("Compare Manhattan and Queens on trip count, average fare, and average tip")
+    det013 = lookup(
+        "Compare Manhattan and Queens on trip count, average fare, and average tip"
+    )
     assert det013 is not None
     assert det013[0] == "compare_taxi_segments"
     assert det013[1]["segment_dimension"] == "pickup_borough"
 
-    # react-001: multi-step question must fall through to model planning
-    react001 = lookup(
-        "Which borough contributed most to the busiest pickup hour, and which zones inside it dominate?"
+    # react-001: multi-step question must be detected for multi-step routing
+    from app.query_catalogue import requires_multi_step_analysis
+
+    react001_q = (
+        "Which borough contributed most to the busiest pickup hour, "
+        "and which zones inside it dominate?"
     )
-    assert react001 is None
+    assert requires_multi_step_analysis(react001_q) is True
