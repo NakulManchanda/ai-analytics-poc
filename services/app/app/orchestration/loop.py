@@ -300,6 +300,7 @@ class RunSubmission:
     message_id: str
     run_id: str
     next_seq: int
+    eval_run_id: str | None = None
 
 
 class OrchestrationError(ValueError):
@@ -575,6 +576,7 @@ class OrchestrationLoop:
         self,
         prompt: str,
         conversation_id: str | None = None,
+        eval_run_id: str | None = None,
     ) -> RunSubmission:
         """Durably create conversation, user message, and in-progress run, then publish
         run.received.  Returns a RunSubmission token for use by execute()."""
@@ -618,6 +620,7 @@ class OrchestrationLoop:
             status="in_progress",
             model=self._configured_model_id(),
             prompt_version="m9.v1",
+            metadata={"eval_run_id": eval_run_id} if eval_run_id else {},
         )
         self._repo.create_run(run)
 
@@ -630,6 +633,7 @@ class OrchestrationLoop:
                     conversation_id=conv_id,
                     sequence=1,
                     payload={"prompt_summary": prompt[:80], "status": "in_progress"},
+                    eval_run_id=eval_run_id,
                 )
             )
 
@@ -639,6 +643,7 @@ class OrchestrationLoop:
             message_id=user_msg_id,
             run_id=run_id,
             next_seq=next_seq,
+            eval_run_id=eval_run_id,
         )
 
     def execute(
@@ -658,7 +663,9 @@ class OrchestrationLoop:
                 # Activates per-run budgets and tenant entitlements (#170) for every
                 # model call in this run; copied into worker threads by
                 # _run_with_cancellation.
-                with call_context(DEFAULT_TENANT, submission.run_id):
+                with call_context(
+                    DEFAULT_TENANT, submission.run_id, submission.eval_run_id
+                ):
                     result = self._execute_loop(
                         prompt=submission.prompt,
                         conv_id=submission.conversation_id,
@@ -703,6 +710,11 @@ class OrchestrationLoop:
                 "ai.conversation_id": submission.conversation_id,
                 "ai.turn_type": "text",
                 "gen_ai.request.model": self._configured_model_id(),
+                **(
+                    {"ai.eval_run_id": submission.eval_run_id}
+                    if submission.eval_run_id
+                    else {}
+                ),
             },
         )
         try:
@@ -784,6 +796,7 @@ class OrchestrationLoop:
                     conversation_id=run.conversation_id,
                     sequence=0,
                     payload={"status": "cancel_requested"},
+                    eval_run_id=run.metadata.get("eval_run_id"),
                 )
             )
         return updated_run
@@ -847,6 +860,9 @@ class OrchestrationLoop:
             run is not None
         ), f"Run {run_id} not found; prepare_run must be called first"
 
+        eval_run_id: str | None = run.metadata.get("eval_run_id")
+        eval_meta: dict[str, Any] = {"eval_run_id": eval_run_id} if eval_run_id else {}
+
         def emit(
             event_type: str,
             payload: dict[str, Any] | None = None,
@@ -868,6 +884,7 @@ class OrchestrationLoop:
                 llm_call_id=llm_call_id,
                 tool_call_id=tool_call_id,
                 query_id=query_id,
+                eval_run_id=eval_run_id,
             )
             self._publisher.publish(evt)
             evt_sequence += 1
@@ -1336,6 +1353,7 @@ class OrchestrationLoop:
                             estimated_cost_usd=tracker.estimated_cost_usd,
                             metadata={
                                 "telemetry": run_telemetry,
+                                **eval_meta,
                                 "cost_source": current_cost_source(),
                                 "llm_calls": [call.to_metadata() for call in llm_calls],
                             },
@@ -2182,6 +2200,7 @@ class OrchestrationLoop:
                     estimated_cost_usd=tracker.estimated_cost_usd,
                     metadata={
                         "telemetry": run_telemetry,
+                        **eval_meta,
                         "cost_source": current_cost_source(),
                         "llm_calls": [call.to_metadata() for call in llm_calls],
                     },
@@ -2266,6 +2285,7 @@ class OrchestrationLoop:
                     "reason": err.reason,
                     "partial_text": err.partial_text,
                     "telemetry": run_telemetry,
+                    **eval_meta,
                     "cost_source": current_cost_source(),
                     "llm_calls": [call.to_metadata() for call in llm_calls],
                 },
@@ -2338,6 +2358,7 @@ class OrchestrationLoop:
                     "reason": err.reason,
                     "details": err.details,
                     "telemetry": run_telemetry,
+                    **eval_meta,
                     "cost_source": current_cost_source(),
                     "llm_calls": [call.to_metadata() for call in llm_calls],
                 },
@@ -2408,6 +2429,7 @@ class OrchestrationLoop:
                     "error": str(err),
                     "retryable": err.retryable,
                     "telemetry": run_telemetry,
+                    **eval_meta,
                     "cost_source": current_cost_source(),
                     "llm_calls": [call.to_metadata() for call in llm_calls],
                 },

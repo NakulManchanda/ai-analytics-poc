@@ -11,6 +11,7 @@ One JSON object per line, one record per model call (`record_type=model_call`) o
 
 - Common: `schema_version`, `run_id`, `turn_id`, `step`, `call_id` (idempotency key), `tenant_id`,
   `trace_id`, `conversation_id`, `prompt_config_version` (run-level config tag, not a template version), `run_status`.
+- Optional (additive, #189): `eval_run_id` — the opt-in batch label supplied at `POST /api/runs`. Present on every record of a run only when one was supplied; the key is omitted otherwise, so default records are unchanged and consumers must treat it as optional.
 - Model call: `role` (planner|answer), `model_alias`, `provider_model_id`,
   `input_tokens`/`output_tokens`/`reasoning_tokens`, `ttft_ms`, `latency_ms`, `finish_reason`,
   `error`, `cost_usd`, `cost_kind`, `question_sha256`, `answer_sha256`, and per-call prompt attribution

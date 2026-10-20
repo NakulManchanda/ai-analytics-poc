@@ -85,6 +85,8 @@ class RunEvent:
     tool_call_id: str | None = None
     query_id: str | None = None
     timestamp: str = field(default_factory=utcnow_isoformat)
+    # Opt-in batch label (#189); serialized only when set so default shapes are unchanged.
+    eval_run_id: str | None = None
 
     def to_dict(self) -> dict[str, str]:
         """Serialize for Redis stream storage (string key-value pairs)."""
@@ -105,6 +107,8 @@ class RunEvent:
             data["tool_call_id"] = self.tool_call_id
         if self.query_id:
             data["query_id"] = self.query_id
+        if self.eval_run_id:
+            data["eval_run_id"] = self.eval_run_id
         return {k: str(v) for k, v in data.items()}
 
     @classmethod
@@ -131,25 +135,27 @@ class RunEvent:
             llm_call_id=data.get("llm_call_id"),
             tool_call_id=data.get("tool_call_id"),
             query_id=data.get("query_id"),
+            eval_run_id=data.get("eval_run_id"),
             payload=payload,
             timestamp=str(data.get("timestamp", "")),
         )
 
     def to_sse(self) -> str:
         """Format as Server-Sent Event frame."""
-        data_json = json.dumps(
-            {
-                "event_id": self.event_id,
-                "event_type": self.event_type,
-                "run_id": self.run_id,
-                "conversation_id": self.conversation_id,
-                "sequence": self.sequence,
-                "step_id": self.step_id,
-                "llm_call_id": self.llm_call_id,
-                "tool_call_id": self.tool_call_id,
-                "query_id": self.query_id,
-                "timestamp": self.timestamp,
-                "payload": self.payload,
-            }
-        )
+        envelope: dict[str, Any] = {
+            "event_id": self.event_id,
+            "event_type": self.event_type,
+            "run_id": self.run_id,
+            "conversation_id": self.conversation_id,
+            "sequence": self.sequence,
+            "step_id": self.step_id,
+            "llm_call_id": self.llm_call_id,
+            "tool_call_id": self.tool_call_id,
+            "query_id": self.query_id,
+            "timestamp": self.timestamp,
+            "payload": self.payload,
+        }
+        if self.eval_run_id:
+            envelope["eval_run_id"] = self.eval_run_id
+        data_json = json.dumps(envelope)
         return f"id: {self.event_id}\nevent: {self.event_type}\ndata: {data_json}\n\n"

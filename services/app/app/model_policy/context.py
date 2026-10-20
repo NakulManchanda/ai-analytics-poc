@@ -16,6 +16,7 @@ DEFAULT_TENANT = "default"
 class CallContext:
     tenant_id: str = DEFAULT_TENANT
     run_id: str | None = None
+    eval_run_id: str | None = None
 
 
 _CONTEXT: ContextVar[CallContext | None] = ContextVar("model_policy_call", default=None)
@@ -27,9 +28,11 @@ def current_call_context() -> CallContext:
 
 @contextmanager
 def call_context(
-    tenant_id: str = DEFAULT_TENANT, run_id: str | None = None
+    tenant_id: str = DEFAULT_TENANT,
+    run_id: str | None = None,
+    eval_run_id: str | None = None,
 ) -> Iterator[None]:
-    token = _CONTEXT.set(CallContext(tenant_id, run_id))
+    token = _CONTEXT.set(CallContext(tenant_id, run_id, eval_run_id))
     try:
         yield
     finally:
