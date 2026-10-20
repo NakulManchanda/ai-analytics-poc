@@ -489,15 +489,31 @@ TAXI_PROPOSAL_TOOL_SPECS: list[dict[str, Any]] = [
     {
         "name": "compare_taxi_segments",
         "description": (
-            "Compare baseline and comparison segments across a shared segment dimension."
+            "Compare a baseline and a comparison population. comparison_mode "
+            "'by_dimension' (default) aligns them per segment of a shared "
+            "segment_dimension and needs the filters to differ on something other "
+            "than that dimension; 'whole_segment' compares the two filtered "
+            "populations as wholes (use it when the two populations are defined by "
+            "the same field, e.g. Manhattan vs Queens) and must omit segment_dimension."
         ),
         "inputSchema": {
             "type": "object",
             "properties": {
                 "segment_dimension": {
                     "type": "string",
-                    "description": "Shared dimension along which to compare segments.",
+                    "description": (
+                        "Shared dimension along which to compare segments. Required "
+                        "for by_dimension; must be omitted for whole_segment."
+                    ),
                     "enum": sorted(DIMENSIONS),
+                },
+                "comparison_mode": {
+                    "type": "string",
+                    "description": (
+                        "'by_dimension' (default) or 'whole_segment'. Chosen "
+                        "explicitly; never inferred by the server."
+                    ),
+                    "enum": ["by_dimension", "whole_segment"],
                 },
                 "measures": {
                     "type": "array",
@@ -610,7 +626,6 @@ TAXI_PROPOSAL_TOOL_SPECS: list[dict[str, Any]] = [
                 },
             },
             "required": [
-                "segment_dimension",
                 "measures",
                 "baseline_filters",
                 "comparison_filters",

@@ -439,24 +439,49 @@ def _validate_aggregate(
     _check_limit(args, out)
 
 
+COMPARISON_MODES = ("by_dimension", "whole_segment")
+
+
 def _validate_compare(
     args: Mapping[str, Any], schema: Mapping[str, object] | None, out: _Collector
 ) -> None:
-    required = {
-        "segment_dimension",
-        "measures",
-        "baseline_filters",
-        "comparison_filters",
-    }
-    _check_keys(args, required | {"limit"}, required, out)
+    required = {"measures", "baseline_filters", "comparison_filters"}
+    _check_keys(
+        args, required | {"segment_dimension", "comparison_mode", "limit"}, required, out
+    )
     segment = args.get("segment_dimension")
-    if "segment_dimension" in args:
+    segment_given = segment is not None
+    if segment_given:
         if not isinstance(segment, str):
             out.add("invalid_type", "segment_dimension must be a string")
         elif segment not in DIMENSIONS:
             out.add(
                 "unknown_dimension",
                 "segment_dimension must be an allowlisted dimension",
+            )
+    mode = args.get("comparison_mode")
+    if mode is None:
+        mode = "by_dimension"
+    if not isinstance(mode, str) or mode not in COMPARISON_MODES:
+        out.add(
+            "invalid_value",
+            f"comparison_mode must be one of {list(COMPARISON_MODES)}",
+        )
+    elif mode == "whole_segment" and segment_given:
+        out.add(
+            "invalid_combination",
+            "segment_dimension must be omitted when comparison_mode is whole_segment",
+        )
+    elif mode == "by_dimension" and not segment_given:
+        out.add(
+            "missing_argument",
+            "segment_dimension is required when comparison_mode is by_dimension",
+        )
+    if mode == "whole_segment" and isinstance(args.get("measures"), list):
+        if "trip_share" in args["measures"]:
+            out.add(
+                "invalid_value",
+                "trip_share is not meaningful for whole_segment comparison",
             )
     if "measures" in args:
         _check_name_list(args["measures"], MEASURES, "measures", "unknown_measure", out)

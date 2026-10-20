@@ -68,7 +68,17 @@ def _validate_aggregate_arguments(arguments: dict[str, object]) -> None:
 def _validate_compare_arguments(arguments: dict[str, object]) -> None:
     # Mirrors dataset_spike.analytics.compare_taxi_segments's own validation
     # of these exact fields, run before it compiles/executes any SQL.
-    validate_dimension(arguments["segment_dimension"])
+    mode = arguments.get("comparison_mode", "by_dimension")
+    assert mode in ("by_dimension", "whole_segment")
+    if mode == "whole_segment":
+        assert "segment_dimension" not in arguments
+    else:
+        validate_dimension(arguments["segment_dimension"])
+        # A by_dimension comparison whose segment dimension is also filtered
+        # differently per side can never align keys (every delta would be null).
+        dimension = arguments["segment_dimension"]
+        assert dimension not in arguments["baseline_filters"]  # type: ignore[operator]
+        assert dimension not in arguments["comparison_filters"]  # type: ignore[operator]
     validate_measures(arguments["measures"])
     validate_limit(arguments["limit"])
     validate_filters(arguments["baseline_filters"])
@@ -121,21 +131,24 @@ def test_catalogue_repaired_dimensions_and_limits() -> None:
     assert det006[0] == "aggregate_taxi_data"
     assert det006[1]["limit"] == 50
 
-    # det-007: segment_dimension must be airport_trip, not payment_type
+    # det-007: populations are defined by the airport_trip filter, so it is a
+    # whole_segment comparison with no segment_dimension
     det007 = lookup(
         "How do airport trips compare with non-airport trips on fare and duration?"
     )
     assert det007 is not None
     assert det007[0] == "compare_taxi_segments"
-    assert det007[1]["segment_dimension"] == "airport_trip"
+    assert det007[1]["comparison_mode"] == "whole_segment"
+    assert "segment_dimension" not in det007[1]
 
-    # det-013: segment_dimension must be pickup_borough, not payment_type
+    # det-013: populations are defined by the pickup_borough filter -> whole_segment
     det013 = lookup(
         "Compare Manhattan and Queens on trip count, average fare, and average tip"
     )
     assert det013 is not None
     assert det013[0] == "compare_taxi_segments"
-    assert det013[1]["segment_dimension"] == "pickup_borough"
+    assert det013[1]["comparison_mode"] == "whole_segment"
+    assert "segment_dimension" not in det013[1]
 
     # react-001: multi-step question must be detected for multi-step routing
     from app.query_catalogue import requires_multi_step_analysis

@@ -62,7 +62,9 @@ _RAW_CATALOGUE: dict[str, tuple[str, ToolArguments]] = {
     "How do airport trips compare with non-airport trips on fare and duration?": (
         "compare_taxi_segments",
         {
-            "segment_dimension": "airport_trip",
+            # whole_segment: the populations are defined by the airport_trip filter
+            # itself, so a shared segment_dimension would never align (no overlap).
+            "comparison_mode": "whole_segment",
             "measures": ["average_fare", "average_duration_minutes"],
             "baseline_filters": {"airport_trip": False},
             "comparison_filters": {"airport_trip": True},
@@ -131,7 +133,9 @@ _RAW_CATALOGUE: dict[str, tuple[str, ToolArguments]] = {
     "Compare Manhattan and Queens on trip count, average fare, and average tip": (
         "compare_taxi_segments",
         {
-            "segment_dimension": "pickup_borough",
+            # whole_segment: the populations are defined by the pickup_borough
+            # filter itself, so a shared segment_dimension would never align.
+            "comparison_mode": "whole_segment",
             "measures": ["trip_count", "average_fare", "average_tip"],
             "baseline_filters": {"pickup_borough": "Manhattan"},
             "comparison_filters": {"pickup_borough": "Queens"},
@@ -166,8 +170,7 @@ _RAW_CATALOGUE: dict[str, tuple[str, ToolArguments]] = {
         {
             # segment_dimension shared across both weeks (pickup_weekday
             # recurs in every week, unlike pickup_date which would give two
-            # disjoint key sets and an all-null join -- see the
-            # airport-vs-non-airport entry above for the general reason).
+            # disjoint key sets and an all-null join).
             # Last complete Mon-Sun week in the pinned Jan 2024 dataset is
             # Jan 22-28; the first complete week is Jan 1-7 (dataset starts
             # on a Monday).

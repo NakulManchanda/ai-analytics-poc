@@ -358,6 +358,7 @@ def _parse_aggregate_taxi_data(arguments: object) -> dict[str, object] | None:
 def _parse_compare_taxi_segments(arguments: object) -> dict[str, object] | None:
     if not isinstance(arguments, Mapping) or set(arguments) - {
         "segment_dimension",
+        "comparison_mode",
         "measures",
         "baseline_filters",
         "comparison_filters",
@@ -365,11 +366,18 @@ def _parse_compare_taxi_segments(arguments: object) -> dict[str, object] | None:
     }:
         return None
     segment_dimension = arguments.get("segment_dimension")
+    comparison_mode = arguments.get("comparison_mode")
     measures = arguments.get("measures")
     baseline_filters = arguments.get("baseline_filters")
     comparison_filters = arguments.get("comparison_filters")
     limit = arguments.get("limit", 20)
-    if not isinstance(segment_dimension, str) or not segment_dimension:
+    if segment_dimension is not None and (
+        not isinstance(segment_dimension, str) or not segment_dimension
+    ):
+        return None
+    if comparison_mode is not None and (
+        not isinstance(comparison_mode, str) or not comparison_mode
+    ):
         return None
     if not _is_str_list(measures) or not measures:
         return None
@@ -383,13 +391,19 @@ def _parse_compare_taxi_segments(arguments: object) -> dict[str, object] | None:
         or not 1 <= limit <= MAX_ROWS
     ):
         return None
-    return {
-        "segment_dimension": segment_dimension,
+    parsed: dict[str, object] = {
         "measures": measures,
         "baseline_filters": dict(baseline_filters),
         "comparison_filters": dict(comparison_filters),
         "limit": limit,
     }
+    # Optional fields are passed through only when given, so the by_dimension
+    # call shape is unchanged; the proposal validator enforces the combination.
+    if segment_dimension is not None:
+        parsed["segment_dimension"] = segment_dimension
+    if comparison_mode is not None:
+        parsed["comparison_mode"] = comparison_mode
+    return parsed
 
 
 _EXTENDED_TOOL_PARSERS: dict[str, Callable[[object], dict[str, object] | None]] = {
