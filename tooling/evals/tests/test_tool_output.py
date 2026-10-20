@@ -77,3 +77,30 @@ def test_attach_outputs_by_query_id_and_missing_stays_none():
 
 def test_missing_events_dir_files_yield_nothing(tmp_path):
     assert load_tool_outputs(tmp_path) == {}
+
+
+def test_messages_with_non_tool_role_are_ignored(tmp_path):
+    msgs = [
+        {
+            "role": "assistant",
+            "content": json.dumps({"query_id": "q_fake", "rows": [[1]]}),
+        },
+        {"role": "user", "content": json.dumps({"query_id": "q_fake2", "rows": [[2]]})},
+    ]
+    (tmp_path / "run_3.txt").write_text(_event("run_3", msgs))
+    assert load_tool_outputs(tmp_path)["run_3"] == []
+
+
+def test_conflicting_duplicate_query_id_is_discarded(tmp_path):
+    msgs1 = [_tool_msg("q_dup", [[1]], False)]
+    msgs2 = [_tool_msg("q_dup", [[999]], True)]  # Conflicting rows & truncation
+    (tmp_path / "run_4.txt").write_text(_event("run_4", msgs1) + _event("run_4", msgs2))
+    # Conflicting query_id is discarded to avoid ambiguous/corrupted attribution
+    assert load_tool_outputs(tmp_path)["run_4"] == []
+
+
+def test_mismatched_run_id_in_event_is_ignored(tmp_path):
+    msgs = [_tool_msg("q_mismatch", [[1]], False)]
+    # File is run_5.txt but event claims run_other
+    (tmp_path / "run_5.txt").write_text(_event("run_other", msgs))
+    assert load_tool_outputs(tmp_path)["run_5"] == []

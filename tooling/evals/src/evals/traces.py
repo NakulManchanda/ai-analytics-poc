@@ -121,12 +121,14 @@ def load_tool_outputs(events_dir: Path) -> dict[str, list[ToolOutput]]:
     """Parse ``run_<id>.txt`` SSE event files into tool outputs per run.
 
     Tool results appear in ``context.reduced`` events as JSON ``recent_messages``
-    content. Non-JSON messages are skipped; repeated results are de-duplicated by query_id.
+    content with role="tool". Non-JSON messages are skipped; repeated results are
+    de-duplicated by query_id. Conflicting duplicates mark the query ambiguous
+    and are discarded to prevent corrupted evidence from certifying scores.
     """
     out: dict[str, list[ToolOutput]] = {}
     for path in sorted(Path(events_dir).glob("run_*.txt")):
-        seen: set[str] = set()
-        outputs: list[ToolOutput] = []
+        seen: dict[str, ToolOutput] = {}
+        conflicting: set[str] = set()
         for line in path.read_text().splitlines():
             if not line.startswith("data: ") or "context.reduced" not in line:
                 continue
@@ -136,21 +138,32 @@ def load_tool_outputs(events_dir: Path) -> dict[str, list[ToolOutput]]:
                 continue
             if event.get("event_type") != "context.reduced":
                 continue
+            ev_run_id = event.get("run_id")
+            if ev_run_id and ev_run_id != path.stem:
+                continue
             context = (event.get("payload") or {}).get("working_context") or {}
             for msg in context.get("recent_messages") or []:
+                if msg.get("role") != "tool":
+                    continue
                 parsed = _parse_output(str(msg.get("content", "")))
-                if parsed and parsed.query_id not in seen:
-                    seen.add(parsed.query_id or "")
-                    outputs.append(parsed)
-        out[path.stem] = outputs
+                if not parsed or not parsed.query_id:
+                    continue
+                qid = parsed.query_id
+                if qid in seen:
+                    prev = seen[qid]
+                    if prev.rows != parsed.rows or prev.columns != parsed.columns:
+                        conflicting.add(qid)
+                else:
+                    seen[qid] = parsed
+        out[path.stem] = [o for qid, o in seen.items() if qid not in conflicting]
     return out
 
 
 def attach_outputs(view: TurnView, outputs: list[ToolOutput]) -> TurnView:
     """Set ``ToolUse.output`` by query_id. Tools without a matching output stay None."""
-    by_id = {o.query_id: o for o in outputs}
+    by_id = {o.query_id: o for o in outputs if o.query_id}
     for tool in view.tools:
-        if tool.query_id in by_id:
+        if tool.query_id and tool.query_id in by_id:
             tool.output = by_id[tool.query_id]
     return view
 

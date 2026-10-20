@@ -321,6 +321,67 @@ def _entity_tokens(fact: Fact) -> set[str]:
     }
 
 
+_MEASURE_KEYWORDS: dict[str, set[str]] = {
+    "fare": {"fare", "fares", "cost", "price", "dollar", "dollars"},
+    "distance": {"distance", "dist", "mile", "miles"},
+    "tip": {"tip", "tips", "tipping"},
+    "trip_count": {"trips", "trip", "rides", "volume"},
+    "duration": {"minute", "minutes", "min", "mins", "duration", "time"},
+    "speed": {"mph", "speed"},
+}
+
+
+def _fact_measure(fact: Fact) -> str | None:
+    text = f"{fact.label} {fact.col}".lower()
+    for measure, kws in _MEASURE_KEYWORDS.items():
+        if any(kw in text for kw in kws):
+            return measure
+    return None
+
+
+def _number_spans(text: str, val: float) -> list[tuple[int, int]]:
+    spans: list[tuple[int, int]] = []
+    for m in re.finditer(r"[\$]?\b\d+(?:\.\d+)?%?\b", text):
+        raw = m.group(0).lstrip("$").rstrip("%")
+        try:
+            n = float(raw)
+        except ValueError:
+            continue
+        if _close(n, val) or (abs(val) < 1 and _close(n, val * 100)):
+            spans.append((m.start(), m.end()))
+    return spans
+
+
+def _metric_at_span(text: str, start: int, end: int) -> str | None:
+    """Find the metric keyword closest to the number span at text[start:end]."""
+    best_meas: str | None = None
+    min_dist = float("inf")
+
+    for m in re.finditer(r"\$", text):
+        pos = m.start()
+        dist = 0 if start <= pos <= end else (start - pos if pos < start else pos - end)
+        if dist < min_dist:
+            min_dist = dist
+            best_meas = "fare"
+
+    for meas, kws in _MEASURE_KEYWORDS.items():
+        pattern = rf"\b({'|'.join(re.escape(k) for k in sorted(kws, key=len, reverse=True))})\b"
+        for m in re.finditer(pattern, text, re.IGNORECASE):
+            pos_start, pos_end = m.start(), m.end()
+            dist = (
+                0
+                if (start <= pos_end and pos_start <= end)
+                else (start - pos_end if pos_end < start else pos_start - end)
+            )
+            if dist < min_dist:
+                min_dist = dist
+                best_meas = meas
+
+    if min_dist <= 40:
+        return best_meas
+    return None
+
+
 def check_entity_value_association(
     facts: list[Fact], answer: str
 ) -> tuple[list[str], list[str]]:
@@ -330,6 +391,14 @@ def check_entity_value_association(
     bad: list[str] = []
     unsure: list[str] = []
     segs = _segments(answer)
+    distinct_measures = {
+        _fact_measure(f) for f in facts if _fact_measure(f) is not None
+    }
+    distinct_entities = {
+        tuple(sorted(_entity_tokens(f))) for f in facts if _entity_tokens(f)
+    }
+    multi_entity_metric = len(distinct_measures) > 1 and len(distinct_entities) > 1
+
     for fact in facts:
         if fact.kind != "number" or fact.value is None:
             continue
@@ -343,6 +412,23 @@ def check_entity_value_association(
         if not with_entity:
             continue  # label never named: nothing to misattribute
         if any(number_matches(float(fact.value), s, fact.rel_tol) for s in with_entity):
+            # Check for metric attribution conflict inside the matching clause
+            meas = _fact_measure(fact)
+            if meas:
+                has_confident_meas = False
+                for s in with_entity:
+                    for s_start, s_end in _number_spans(s, float(fact.value)):
+                        closest_meas = _metric_at_span(s, s_start, s_end)
+                        if closest_meas and closest_meas != meas:
+                            bad.append(
+                                f"association: {fact.label} value {fact.value} is paired with conflicting metric '{closest_meas}' in clause"
+                            )
+                        elif closest_meas == meas:
+                            has_confident_meas = True
+                if multi_entity_metric and not has_confident_meas and not bad:
+                    unsure.append(
+                        f"association: {fact.label} value {fact.value} metric attribution uncertain"
+                    )
             continue
         name = " ".join(sorted(tokens))
         if any(extract_numbers(s) for s in with_entity):
@@ -481,17 +567,36 @@ def _grade_tools(
                 )
                 return "incorrect"
     if not unmet:
+        if remaining:
+            reasons.append(
+                "tool: unexpected extra call(s) "
+                + ", ".join(sorted({t.name for t in remaining}))
+            )
+            return "incorrect"
         return "correct"
     names = {t.name for t in actual}
     if all(e.name not in names for e in unmet) and facts_verified:
-        reasons.append(
-            "tool: equivalence: "
-            + ", ".join(sorted(names))
-            + " instead of "
-            + ", ".join(e.name for e in unmet)
-            + "; reference value verified in the other tool's output"
-        )
-        return "needs_review"
+        missing_segmentation = False
+        for e in unmet:
+            if "baseline_filters" in e.arguments or "comparison_filters" in e.arguments:
+                has_filters = any(
+                    bool(t.arguments.get("filters"))
+                    or bool(t.arguments.get("baseline_filters"))
+                    or bool(t.arguments.get("dimensions"))
+                    for t in actual
+                )
+                if not has_filters:
+                    missing_segmentation = True
+                    break
+        if not missing_segmentation:
+            reasons.append(
+                "tool: equivalence: "
+                + ", ".join(sorted(names))
+                + " instead of "
+                + ", ".join(e.name for e in unmet)
+                + "; reference value verified in the other tool's output"
+            )
+            return "needs_review"
     reasons.append(
         "tool: expected " + ", ".join(e.name for e in unmet) + " not matched"
     )
@@ -525,6 +630,9 @@ def grade_turn_v2(
         res.tool = res.answer = "not_applicable"
         res.reasons.append("execution: no captured run for this turn")
         return res
+    if not view.model_calls and not view.tools:
+        res.execution = "incorrect"
+        res.reasons.append("execution: empty run (no model calls or tools recorded)")
     answer = view.answer or ""
     if view.errored:
         res.execution = "incorrect"

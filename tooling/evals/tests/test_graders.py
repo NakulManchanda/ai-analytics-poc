@@ -461,3 +461,98 @@ def test_missing_view_is_execution_incorrect():
     res = _v2grade(_v2_turn(), None)
     assert res.execution == "incorrect"
     assert res.tool == res.answer == "not_applicable"
+
+
+def test_unexpected_extra_tool_calls_make_tool_incorrect():
+    turn = _v2_turn(
+        tools=[ExpectedTool(name="aggregate_taxi_data")],
+        facts=[_num_fact("manhattan_fare", 15.05)],
+    )
+    t1 = ToolUse(
+        "aggregate_taxi_data",
+        {},
+        "completed",
+        "q1",
+        1,
+        output=ToolOutput(["fare"], [[15.05]], False, 1, "q1"),
+    )
+    t2 = ToolUse("query_taxi_data", {}, "completed", "q2", 1)
+    view = TurnView("r", "c", 0, answer="Manhattan fare is $15.05.", tools=[t1, t2])
+    res = _v2grade(turn, view)
+    assert res.tool == "incorrect"
+    assert any("unexpected extra call" in r for r in res.reasons)
+
+
+def test_swapped_values_between_metrics_flag_association_error():
+    facts = [
+        _num_fact("manhattan_fare", 15.05),
+        _num_fact("manhattan_dist", 2.67),
+        _num_fact("queens_fare", 51.96),
+        _num_fact("queens_dist", 12.39),
+    ]
+    turn = _v2_turn(tools=[ExpectedTool(name="metrics")], facts=facts)
+    # Swapped: distance has fare numbers, fare has distance numbers
+    answer = (
+        "Manhattan average distance is 15.05 miles and average fare is $2.67. "
+        "Queens average distance is 51.96 miles and average fare is $12.39."
+    )
+    cols = ["borough", "fare", "dist"]
+    rows = [["Manhattan", 15.05, 2.67], ["Queens", 51.96, 12.39]]
+    view = _v2view(answer, "metrics", {}, cols, rows, question=turn.question)
+    res = _v2grade(turn, view)
+    assert res.answer == "incorrect"
+    assert any("conflicting metric" in r for r in res.reasons)
+
+
+def test_empty_run_is_execution_incorrect():
+    turn = _v2_turn()
+    view = TurnView("r", "c", 0, answer="", tools=[], model_calls=[])
+    res = _v2grade(turn, view)
+    assert res.execution == "incorrect"
+    assert any("empty run" in r for r in res.reasons)
+
+
+def test_uncertain_multimetric_attribution_returns_needs_review():
+    facts = [
+        _num_fact("manhattan_fare", 15.05),
+        _num_fact("manhattan_dist", 2.67),
+        _num_fact("queens_fare", 51.96),
+        _num_fact("queens_dist", 12.39),
+    ]
+    turn = _v2_turn(tools=[ExpectedTool(name="metrics")], facts=facts)
+    # Numbers listed without explicit metric keywords nearby
+    answer = (
+        "For Manhattan we report 15.05 and 2.67. "
+        "For Queens we report 51.96 and 12.39."
+    )
+    cols = ["borough", "fare", "dist"]
+    rows = [["Manhattan", 15.05, 2.67], ["Queens", 51.96, 12.39]]
+    view = _v2view(answer, "metrics", {}, cols, rows, question=turn.question)
+    res = _v2grade(turn, view)
+    assert res.answer == "needs_review"
+    assert any("metric attribution uncertain" in r for r in res.reasons)
+
+
+def test_unsegmented_tool_equivalence_rejected_when_filters_expected():
+    expected = ExpectedTool(
+        name="compare_taxi_segments",
+        arguments={
+            "baseline_filters": {"airport_trip": False},
+            "comparison_filters": {"airport_trip": True},
+        },
+    )
+    fact = _num_fact("airport_fare", 55.99)
+    turn = _v2_turn(tools=[expected], facts=[fact])
+    # Model calls aggregate_taxi_data without any filters
+    actual_tool = ToolUse(
+        "aggregate_taxi_data",
+        {},
+        "completed",
+        "q1",
+        1,
+        output=ToolOutput(["fare"], [[55.99]], False, 1, "q1"),
+    )
+    view = TurnView("r", "c", 0, answer="Airport fare is 55.99", tools=[actual_tool])
+    res = _v2grade(turn, view)
+    assert res.tool == "incorrect"
+    assert any("expected compare_taxi_segments not matched" in r for r in res.reasons)
