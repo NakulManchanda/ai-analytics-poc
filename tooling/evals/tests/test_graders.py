@@ -98,3 +98,50 @@ def test_grade_turn_unsupported_requires_limitation_and_no_numbers():
     assert not grade_turn(
         "c", 0, turn, _view("I cannot", [ToolUse("a", {}, "ok", "q", 1)])
     ).passed
+
+
+def _multi001_turn2():
+    from evals.dataset import DEFAULT_DATASET, load_cases
+
+    case = next(c for c in load_cases(DEFAULT_DATASET) if c.id == "multi-001")
+    return case.turns[1]
+
+
+def _compare(base, comp):
+    return ToolUse(
+        "compare_taxi_segments",
+        {
+            "segment_dimension": "pickup_zone",
+            "measures": ["trip_count"],
+            "baseline_filters": {"pickup_zone": base, "extra": 1},
+            "comparison_filters": {"pickup_zone": comp},
+            "limit": 5,
+        },
+        "ok",
+        "q",
+        1,
+    )
+
+
+def test_nested_subset_matches_entities_and_ignores_extra_nested_keys():
+    exp = _multi001_turn2().expected_tools
+    assert tool_score(exp, [_compare("JFK Airport", "Midtown Center")]) == 1.0
+    assert tool_score(exp, [_compare("Midtown Center", "JFK Airport")]) == 0.0
+
+
+def _grade(*tools):
+    turn = _multi001_turn2()
+    return grade_turn(
+        "multi-001",
+        1,
+        turn,
+        TurnView("r", "multi-001", 1, answer="x", tools=list(tools)),
+    )
+
+
+def test_multi001_turn2_fails_tool_arguments_for_wrong_zones_or_unrelated_tool():
+    assert _grade(_compare("JFK Airport", "Midtown Center")).checks["tool_arguments"]
+    assert not _grade(_compare("Chelsea", "SoHo")).checks["tool_arguments"]
+    # the real failed live turn: average_trip_metrics called with {}
+    live_failure = ToolUse("average_trip_metrics", {}, "ok", "q", 1)
+    assert not _grade(live_failure).checks["tool_arguments"]

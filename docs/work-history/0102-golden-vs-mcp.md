@@ -12,6 +12,7 @@ Check every golden turn with expected tools against the live MCP tools and corre
 - `det-009`: SQL now mirrors `average_trip_metrics` (`trip_distance >= 0`, `fare_amount >= 0`, no month filter): Manhattan 2.67 / 15.05.
 - Notes added on `det-004`, `det-005`, `fail-003` (basis or spelling sensitivity). All cases stay `pending_human_review`.
 - Regenerated synthetic fixtures, the scripted captured session, `matches.json` run ids and the provisional report.
+- Follow-up (review finding): `multi-001` turn 2 now asserts `compare_taxi_segments` with pickup_zone dimension and JFK Airport vs Midtown Center filters; `args_match` subset mode recurses into nested objects (negative tests: `average_trip_metrics({})` and wrong zones fail `tool_arguments`). `multi-001` is tagged `diagnostic` and excluded from aggregate pass rate/gates, listed separately in reports. Fixtures, run ids and provisional report regenerated.
 
 ## Verification
 `evals refresh-reference` (60 facts), `make evals-test` (47 passed, 2 skipped), `uv run --project services/app pytest services/app/tests` (273 passed).

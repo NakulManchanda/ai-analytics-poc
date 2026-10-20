@@ -19,8 +19,8 @@
 
 | # | model calls | aliases | input | output | cost USD | model ms | tool ms |
 |---|---|---|---|---|---|---|---|
-| 0 | 1 | taxi-answer | 412 | 38 | 0.000020 | 32 | 0 |
-| 1 | 2 | taxi-answer, taxi-planner | 1158 | 102 | 0.000055 | 70 | 0 |
+| 0 | 1 | taxi-answer | 412 | 38 | 0.000020 | 35 | 0 |
+| 1 | 2 | taxi-answer, taxi-planner | 1158 | 102 | 0.000055 | 67 | 0 |
 | total | | | 1570 | 140 | 0.000075 | 102 | 0 |
 
 Totals are sums of known values only. `n/a` means the provider reported no usage; it is never counted as 0.

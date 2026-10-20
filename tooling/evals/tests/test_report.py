@@ -90,3 +90,12 @@ def test_cost_unknown_is_not_reported_as_zero():
         json.loads((FIX / "baseline/manifest.json").read_text())["judge_mode"]
         == "recorded"
     )
+
+
+def test_diagnostic_cases_are_graded_but_excluded_from_aggregates():
+    score = score_run(FIX / "baseline")
+    assert score.diagnostic_ids == {"multi-001"}
+    assert any(g.case_id == "multi-001" for g in score.grades)
+    assert all(g.case_id != "multi-001" for g in score.gated)
+    md = render_markdown(score, score, compare(score, score))
+    assert "Diagnostic cases" in md and "multi-001#1" in md
