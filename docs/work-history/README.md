@@ -102,3 +102,4 @@ Monotonically numbered log of every post-bootstrap task. Each entry records the 
 - [0106 — reported cost trust](0106-reported-cost-trust.md) — non-billed estimate on unknown usage gets the conservative budget bound
 - [0107 — run span trace id](0107-run-span-trace-id.md) — `ai.run` span moved into `execute()` so async runs get a non-null capture trace_id
 - [0108 — eval_run_id](0108-eval-run-id.md) — opt-in batch label on Run.metadata, run events and capture records (#189 PR-B)
+- [0109 — LiteLLM correlation headers](0109-litellm-correlation-headers.md) — spend-log tags/metadata mapping proxy rows to run_id, capture call_id and eval_run_id (#189 PR-C)

@@ -39,7 +39,9 @@ def call_context(
         _CONTEXT.reset(token)
 
 
-_LLM_CALL_ID: ContextVar[str | None] = ContextVar("model_policy_llm_call_id", default=None)
+_LLM_CALL_ID: ContextVar[str | None] = ContextVar(
+    "model_policy_llm_call_id", default=None
+)
 
 
 def current_llm_call_id() -> str | None:

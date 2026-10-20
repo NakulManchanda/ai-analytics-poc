@@ -48,6 +48,20 @@ dedicated Bedrock-only task role and a Secrets Manager master key. Not applied b
 - `LITELLM_API_KEY` in the app is the proxy key it presents; `LITELLM_PROXY_URL`,
   `LITELLM_PLANNER_ALIAS`, `LITELLM_ANSWER_ALIAS` override defaults.
 
+## Correlation headers (#189)
+
+The app sends these headers so a proxy spend-log row can be mapped to an app run and, 1:1, to a capture `call_id`:
+
+| Header | Sent when | Lands in spend logs as |
+|---|---|---|
+| `x-litellm-session-id` | a conversation id exists | `session_id` |
+| `x-litellm-spend-logs-metadata` | a run id or call id exists (every orchestrated model call, not eval-only) | `metadata.spend_logs_metadata` = `{"run_id","call_id","attempt","eval_run_id"?}` |
+| `x-litellm-tags: eval_run_id:<id>` | only when the run has an `eval_run_id` | `request_tags` |
+
+- `call_id` is the app's `llm_call_id`, identical to the capture `call_id`. `attempt` is the 1-based physical proxy request within that logical call (policy fallbacks on transient errors issue several), so `(call_id, attempt)` identifies one spend row. The proxy's own `request_id` stays unrelated.
+- Calls outside a run (for example `ask`) send no correlation headers. Header construction is fail-open: an error is logged and the headers are omitted; the call is never failed.
+- `eval_run_id` is a correlation label only. It is not an authorization, tenant or billing boundary; budgets and entitlements never read it.
+
 ## Observability
 
 - Readiness: `GET /health/readiness` (Compose healthcheck); liveness `GET /health/liveliness`.

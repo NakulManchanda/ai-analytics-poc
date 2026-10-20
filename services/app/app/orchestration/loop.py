@@ -827,10 +827,13 @@ class OrchestrationLoop:
     ) -> Any:
         """Execute a blocking callable in a background thread with fast cooperative cancellation.
 
-        `llm_call_id` scopes the model call's id (see `llm_call_scope`) into the worker."""
+        `llm_call_id` scopes the model call's id (see `llm_call_scope`) into the worker.
+        """
         executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
         try:
-            with llm_call_scope(llm_call_id) if llm_call_id else contextlib.nullcontext():
+            with (
+                llm_call_scope(llm_call_id) if llm_call_id else contextlib.nullcontext()
+            ):
                 context = contextvars.copy_context()
             future = executor.submit(context.run, func, *args, **kwargs)
             while not future.done():

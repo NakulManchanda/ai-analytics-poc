@@ -157,9 +157,7 @@ def test_loop_request_call_ids_equal_capture_call_ids(tmp_path: Path) -> None:
     loop.execute(sub)
     lines = (tmp_path / "t1" / "captures.jsonl").read_text().splitlines()
     captured = [
-        r["call_id"]
-        for r in map(json.loads, lines)
-        if r["record_type"] == "model_call"
+        r["call_id"] for r in map(json.loads, lines) if r["record_type"] == "model_call"
     ]
     assert len(captured) == 2  # proposal + answer
     assert [_meta(h)["call_id"] for h in seen] == captured

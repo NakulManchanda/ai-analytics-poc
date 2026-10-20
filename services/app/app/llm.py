@@ -2081,7 +2081,8 @@ class LiteLLMClient(ServeLLMClient):
 
         `x-litellm-spend-logs-metadata` is sent whenever a run or call id exists (the
         1:1 map to capture call_id, not eval-only); `x-litellm-tags` only for eval runs.
-        `eval_run_id` is a correlation label, not an authorization or billing boundary."""
+        `eval_run_id` is a correlation label, not an authorization or billing boundary.
+        """
         try:
             ctx = current_call_context()
             call_id = current_llm_call_id()
