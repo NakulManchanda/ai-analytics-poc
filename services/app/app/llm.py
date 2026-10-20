@@ -1,3 +1,4 @@
+import contextvars
 import json
 import logging
 import time
@@ -31,6 +32,7 @@ from app.model_policy import (
     RunBudgetExceededError,
     current_call_context,
 )
+from app.model_policy.context import current_llm_call_id
 from app.prefix import (
     PrefixPartition,
     build_ask_partition,
@@ -61,6 +63,12 @@ from app.validation.proposal import (
 )
 
 logger = logging.getLogger(__name__)
+
+# 1-based physical proxy request number within one logical call (policy fallbacks
+# issue several requests under one llm_call_id); set by LiteLLMClient._governed.
+_PROXY_ATTEMPT: contextvars.ContextVar[int] = contextvars.ContextVar(
+    "litellm_proxy_attempt", default=1
+)
 
 RETRYABLE_BEDROCK_ERROR_CODES = {
     "InternalServerException",
@@ -1927,7 +1935,11 @@ class LiteLLMClient(ServeLLMClient):
                         retryable=False, code="run_budget_exhausted"
                     ) from error
             try:
-                result = call(attempt)
+                attempt_token = _PROXY_ATTEMPT.set(index + 1)
+                try:
+                    result = call(attempt)
+                finally:
+                    _PROXY_ATTEMPT.reset(attempt_token)
             except LLMProviderError as error:
                 if reservation:
                     rt.budgets.release(reservation)
@@ -2063,6 +2075,35 @@ class LiteLLMClient(ServeLLMClient):
             lambda: self._post_tool_proposal(payload, headers), attribution
         )
 
+    @staticmethod
+    def _add_correlation_headers(headers: dict[str, str]) -> None:
+        """Map proxy spend rows to app ids (#189); fail-open, never breaks a call.
+
+        `x-litellm-spend-logs-metadata` is sent whenever a run or call id exists (the
+        1:1 map to capture call_id, not eval-only); `x-litellm-tags` only for eval runs.
+        `eval_run_id` is a correlation label, not an authorization or billing boundary.
+        """
+        try:
+            ctx = current_call_context()
+            call_id = current_llm_call_id()
+            if ctx.run_id is None and call_id is None and ctx.eval_run_id is None:
+                return
+            meta: dict[str, Any] = {}
+            if ctx.run_id is not None:
+                meta["run_id"] = ctx.run_id
+            if call_id is not None:
+                meta["call_id"] = call_id
+            meta["attempt"] = _PROXY_ATTEMPT.get()
+            if ctx.eval_run_id:
+                meta["eval_run_id"] = ctx.eval_run_id
+            headers["x-litellm-spend-logs-metadata"] = json.dumps(
+                meta, separators=(",", ":"), ensure_ascii=True
+            )
+            if ctx.eval_run_id:
+                headers["x-litellm-tags"] = f"eval_run_id:{ctx.eval_run_id}"
+        except Exception:
+            logger.warning("litellm_correlation_headers_failed", exc_info=True)
+
     def _prepare_request(
         self, payload: dict[str, Any], headers: dict[str, str]
     ) -> None:
@@ -2079,6 +2120,7 @@ class LiteLLMClient(ServeLLMClient):
         # Group a conversation's planner/answer calls in the proxy's Logs view.
         if conversation_id := headers.get("x-conversation-id"):
             headers["x-litellm-session-id"] = conversation_id
+        self._add_correlation_headers(headers)
         if self._api_key:
             headers["authorization"] = f"Bearer {self._api_key}"
         # W3C trace context so proxy spans join the app trace.

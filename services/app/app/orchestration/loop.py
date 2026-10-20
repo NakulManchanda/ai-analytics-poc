@@ -42,7 +42,7 @@ from app.mcp_client import (
 )
 from app.metrics import emit_run_metrics
 from app.model_policy import call_context
-from app.model_policy.context import DEFAULT_TENANT
+from app.model_policy.context import DEFAULT_TENANT, llm_call_scope
 from app.model_policy.pricing import PricingTable, default_pricing
 from app.orchestration.budgets import (
     BudgetExceededError,
@@ -822,12 +822,19 @@ class OrchestrationLoop:
         run_id: str,
         poll_interval: float = 0.05,
         partial_text: str = "",
+        llm_call_id: str | None = None,
         **kwargs: Any,
     ) -> Any:
-        """Execute a blocking callable in a background thread with fast cooperative cancellation."""
+        """Execute a blocking callable in a background thread with fast cooperative cancellation.
+
+        `llm_call_id` scopes the model call's id (see `llm_call_scope`) into the worker.
+        """
         executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
         try:
-            context = contextvars.copy_context()
+            with (
+                llm_call_scope(llm_call_id) if llm_call_id else contextlib.nullcontext()
+            ):
+                context = contextvars.copy_context()
             future = executor.submit(context.run, func, *args, **kwargs)
             while not future.done():
                 if self.is_cancelled(run_id):
@@ -1177,6 +1184,7 @@ class OrchestrationLoop:
                             prompt,
                             schema,
                             run_id=run_id,
+                            llm_call_id=llm_call_id,
                             **proposal_kwargs,
                         )
                     except LLMConfigurationError as err:
@@ -1469,6 +1477,7 @@ class OrchestrationLoop:
                                 f"deterministic validation:\n{validation.feedback()}",
                                 schema,
                                 run_id=run_id,
+                                llm_call_id=llm_call_id,
                                 **conversation_kwargs(),
                             )
                         except LLMProviderError as err:
@@ -1845,6 +1854,7 @@ class OrchestrationLoop:
                                     conversation_id=conv_id,
                                     agent_step=agent_step,
                                     run_id=run_id,
+                                    llm_call_id=call_id,
                                 )
                             else:
                                 user_content = (
@@ -1856,6 +1866,7 @@ class OrchestrationLoop:
                                     llm.ask,
                                     prompt_text,
                                     run_id=run_id,
+                                    llm_call_id=call_id,
                                 )
                         except LLMConfigurationError as err:
                             raise OrchestrationError(
@@ -2053,19 +2064,20 @@ class OrchestrationLoop:
                             llm, "stream_answer_with_query_result", None
                         )
                         answer_kwargs: dict[str, Any] = conversation_kwargs()
-                        if callable(stream_answer):
-                            final_answer_stream_started = True
-                            answer_result = stream_answer(
-                                prompt,
-                                query_result,
-                                publish_answer_delta,
-                                **answer_kwargs,
-                            )
-                        else:
-                            final_answer_stream_started = False
-                            answer_result = llm.answer_with_query_result(
-                                prompt, query_result, **answer_kwargs
-                            )
+                        with llm_call_scope(answer_call_id):
+                            if callable(stream_answer):
+                                final_answer_stream_started = True
+                                answer_result = stream_answer(
+                                    prompt,
+                                    query_result,
+                                    publish_answer_delta,
+                                    **answer_kwargs,
+                                )
+                            else:
+                                final_answer_stream_started = False
+                                answer_result = llm.answer_with_query_result(
+                                    prompt, query_result, **answer_kwargs
+                                )
                     except LLMConfigurationError as err:
                         raise OrchestrationError(
                             "llm_configuration_error", False, answer_call_id, str(err)
