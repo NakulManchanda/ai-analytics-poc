@@ -17,7 +17,7 @@ Let a baseline be selected by one label instead of an external manifest: an opt-
 
 ## Verification
 - New `services/app/tests/test_eval_run_id.py` (13 tests): malformed/empty/oversized body and header rejected, header fallback, body precedence, absent passes nothing, event serialization, and a full loop run showing the id on Run.metadata, every event, every capture record (model and tool call) and the call context; absent leaves no key anywhere.
-- `services/app` 417 passed; `tests` 93 passed, 1 skipped; `infra/inference/tests` 396 passed; `tooling/evals` 89 passed, 2 skipped; `black --check` and `ruff check services/app` clean.
+- `services/app` 423 passed (after rebase onto #196; includes 2 span-attribute tests); `tests` 93 passed, 1 skipped; `infra/inference/tests` 396 passed; `tooling/evals` 89 passed, 2 skipped; `black --check` and `ruff check services/app` clean.
 
 ## Limitations
 - LiteLLM tagging is PR-C; live proof is PR-D. No live or Bedrock run.
