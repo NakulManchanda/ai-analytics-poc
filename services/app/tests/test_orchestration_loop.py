@@ -983,3 +983,54 @@ def test_orchestration_loop_unsupported_declines_without_mcp_analytics() -> None
     assert telemetry["rejected_outcome"] == "unsupported"
     assert "query_taxi_data" in telemetry["offered_tools"]
     assert "compare_taxi_segments" in telemetry["offered_tools"]
+
+
+@pytest.mark.parametrize(
+    "outcome", ["unsupported", "clarification_required", "no_tool"]
+)
+def test_every_non_tool_planner_outcome_is_terminal_without_mcp_execution(
+    outcome: str,
+) -> None:
+    """Review #193 finding 2: each declared non-tool outcome ends the run exactly once,
+    with no validation of an empty proposal and no MCP analytics call."""
+
+    class DecliningLLMClient(LocalFakeLLMClient):
+        def propose_taxi_query(
+            self, prompt: str, schema: Mapping[str, object]
+        ) -> ToolProposalResult:
+            return ToolProposalResult(
+                name="",
+                arguments=None,
+                outcome=outcome,
+                decline_reason="some model text",
+                model_id="m",
+                input_tokens=1,
+                output_tokens=1,
+                latency_ms=1,
+            )
+
+    class NoExecutionMCPClient(FakeMCPClient):
+        def __getattribute__(self, item: str) -> Any:
+            if item in {
+                "query_taxi_data",
+                "aggregate_taxi_data",
+                "compare_taxi_segments",
+                "average_trip_metrics",
+            }:
+                raise AssertionError(f"{item} must not run for outcome {outcome}")
+            return super().__getattribute__(item)
+
+    repo = InMemoryStateRepository()
+    loop = OrchestrationLoop(
+        llm_client=DecliningLLMClient(),
+        mcp_client=NoExecutionMCPClient(),  # type: ignore[arg-type]
+        state_repository=repo,
+    )
+
+    result = loop.run("Something the catalogue does not know about")
+
+    assert result.status == "completed"
+    run = repo.get_run(result.run_id)
+    assert run is not None
+    assert run.metadata["telemetry"]["planner_outcome"] == outcome
+    assert run.metadata["telemetry"]["rejected_outcome"] == outcome

@@ -891,13 +891,16 @@ class BedrockLLMClient:
             arguments = tool_uses[0].get("input")
             outcome = "tool_call"
             decline_reason = None
-        elif len(tool_uses) > 1 and all(
-            u.get("name") == "average_trip_metrics" for u in tool_uses
-        ):
-            name = "average_trip_metrics"
-            arguments = {}
-            outcome = "tool_call"
-            decline_reason = None
+        elif len(tool_uses) > 1:
+            # One call per planner step: never substitute a different operation.
+            raise LLMProviderError(
+                retryable=False,
+                code="multiple_tool_calls",
+                model_id=response.get("modelId", self._model_id),
+                input_tokens=response["usage"]["inputTokens"],
+                output_tokens=response["usage"]["outputTokens"],
+                prompt_attribution=attribution,
+            )
         else:
             name = ""
             arguments = None
@@ -1593,6 +1596,16 @@ class ServeLLMClient:
                 ),
             )
 
+        if len(tool_calls) > 1:
+            raise LLMProviderError(
+                retryable=False,
+                code="multiple_tool_calls",
+                model_id=served_model_id,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                latency_ms=latency_ms,
+                finish_reason=finish_reason,
+            )
         call = tool_calls[0]
         func = call.get("function", {})
         name = func.get("name", "")

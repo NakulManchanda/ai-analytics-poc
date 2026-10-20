@@ -1066,8 +1066,13 @@ class OrchestrationLoop:
                     active_planner_outcome = proposal.outcome
                     active_selected_tool = proposal.name if proposal.name else None
 
-                    # If model declined to call a tool (unsupported or clarification_required):
-                    if proposal.outcome in ("unsupported", "clarification_required"):
+                    # Every non-tool outcome is terminal: no validation of an empty
+                    # proposal and no MCP execution.
+                    if proposal.outcome in (
+                        "unsupported",
+                        "clarification_required",
+                        "no_tool",
+                    ):
                         outcome = proposal.outcome
                         active_rejected_outcome = outcome
                         emit(
@@ -1078,10 +1083,18 @@ class OrchestrationLoop:
                                 "tool_source": "model",
                             },
                         )
-                        decline_answer = proposal.decline_reason or (
-                            "I cannot determine that: the dataset does not contain "
-                            "this information."
-                        )
+                        if outcome == "no_tool":
+                            # Unclassified model prose is ungrounded: never show it.
+                            decline_answer = (
+                                "I could not determine which analysis answers that "
+                                "question. Please rephrase it in terms of the taxi "
+                                "dataset."
+                            )
+                        else:
+                            decline_answer = proposal.decline_reason or (
+                                "I cannot determine that: the dataset does not "
+                                "contain this information."
+                            )
                         answer_step = RunStep(
                             step_id=generate_step_id(),
                             run_id=run_id,
