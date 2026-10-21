@@ -203,6 +203,40 @@ uv run --project tooling/evals evals session-report \
   --provisional
 ```
 
+## Live eval runs (issue #200)
+
+A live golden run is one folder under `metrics/evals/` (gitignored, like `metrics/inference/`). `run_id = <label>-<UTC timestamp>`; `make eval-start` **refuses a label that already has a run**, so a finished eval is never silently repeated or overwritten. Output of every `eval-*` target is kept in the run's `logs/`.
+
+```text
+metrics/evals/
+  .current                    run_id of the active run
+  _capture/                   fixed capture mount of the app container (all runs); each run filters it by exact eval_run_id
+  <run_id>/
+    manifest.json             label, run_id, git head, dataset sha256, web url, cases
+    results.jsonl matches.json one row per turn / confirmed golden matches (driver output)
+    events/<run_id>.txt       SSE event logs (tool output for the grader)
+    smoke/                    optional smoke run, never mixed into results
+    captures.snapshot.jsonl   capture.v1 lines for this run only, plus .sha256
+    report/<conversation>.md  grader output, one per conversation
+    compare.md review.html    comparison with a frozen baseline / human-readable per-turn review
+    logs/<target>-<ts>.log    every make target's output (+ <target>.latest.log)
+```
+
+```bash
+make eval-stack-up                         # once: stack with live capture (LITELLM_OTEL=1 adds Jaeger)
+make eval-start LABEL=<name>               # new run, fails if the label was used before
+make eval-health
+make eval-smoke EVAL_CONFIRM=1             # one real case (det-001), a few tokens
+make eval-run EVAL_CONFIRM=1               # full golden set, real Bedrock
+make eval-freeze eval-grade
+make eval-compare EVAL_BASELINE=<regrade_results.jsonl>
+make eval-cost eval-review eval-open
+# or all at once (compare is skipped when EVAL_BASELINE is unset):
+make eval-all LABEL=<name> EVAL_CONFIRM=1 [EVAL_BASELINE=...]
+```
+
+`EVAL_CONFIRM=1` is required for every target that calls real Bedrock. `EVAL_RUN=<run_id>` selects a run other than `.current`. `eval_run_id` is a correlation label, not an authorization or billing boundary. `eval-cost` shows LiteLLM spend for the whole stack lifetime; the run's own capture cost is in `report/`.
+
 ## Known gaps
 
 - A first live provisional baseline exists only as local, uncommitted evidence; the committed session report is local-scripted. Its legacy grader score is not a trusted quality metric.

@@ -55,7 +55,12 @@ def main(argv: list[str] | None = None) -> int:
     sr.add_argument("--out", type=Path)
     s = sub.add_parser("synth", help="regenerate synthetic fixtures")
     s.add_argument("--out", type=Path, required=True)
+    from evals.runs_cli import add_parsers, dispatch
+
+    add_parsers(sub)
     args = ap.parse_args(argv)
+    if args.cmd.startswith("run-"):
+        return dispatch(args)
 
     if args.cmd == "validate":
         cases = load_cases()

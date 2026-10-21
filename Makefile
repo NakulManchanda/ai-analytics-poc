@@ -11,7 +11,7 @@ OBSERVABILITY_BURST_COUNT ?= 10
 OBSERVABILITY_LOG_TAIL ?= 200
 KV_BUNDLE_OUT = $(or $(OUT),work/kv-hop.yaml)
 
-.PHONY: help check-bootstrap dev app-serve-dev mcp-dev mcp-smoke dataset-test dataset-smoke smoke test bench-test evals-test evals-report gateway-test mcp-test infra-test web-test compose-smoke observability-up observability-down observability-smoke observability-dev-up observability-dev-info observability-dev-ask observability-dev-burst observability-dev-metrics observability-dev-logs observability-dev-down local-aws-litellm-compose local-aws-compose local-litellm-compose local-bedrock-direct-compose litellm-traffic litellm-env litellm-smoke litellm-calls litellm-spend litellm-errors litellm-ready litellm-ui litellm-traffic local-aws-refresh local-serve-compose local-serve-refresh local-bedrock-compose bedrock-smoke m5-bedrock-smoke m6-bedrock-smoke dashboard tf-dispatch tf-resume tf-park inference-validate inference-sync inference-config inference-secret inference-bootstrap inference-deploy inference-up inference-tunnel inference-connect inference-smoke inference-warmup inference-capacity inference-restart inference-gateway-restart inference-controls-on inference-controls-off inference-verify-workers inference-e1 inference-fresh-up inference-tmux-start inference-tmux-end inference-serve-smoke inference-run inference-pull-evidence inference-pull-range inference-kv-image inference-kv-render inference-kv-smoke evidence-analyze evidence-notebook evidence-notebook-open inference-teardown replay-fanout replay-multi-turn replay-compare-strategies replay-strategy-manual replay-strategy-crewai replay-e3-least-loaded replay-e3-prefix-then-load replay-e4-admission-on replay-e4-admission-off replay-e3-large-prefix-least-loaded replay-e3-large-prefix-prefix-then-load replay-e5 replay-arrival-rate trace-request
+.PHONY: help eval-stack-up eval-start eval-health eval-smoke eval-run eval-freeze eval-grade eval-compare eval-cost eval-review eval-open eval-all check-bootstrap dev app-serve-dev mcp-dev mcp-smoke dataset-test dataset-smoke smoke test bench-test evals-test evals-report gateway-test mcp-test infra-test web-test compose-smoke observability-up observability-down observability-smoke observability-dev-up observability-dev-info observability-dev-ask observability-dev-burst observability-dev-metrics observability-dev-logs observability-dev-down local-aws-litellm-compose local-aws-compose local-litellm-compose local-bedrock-direct-compose litellm-traffic litellm-env litellm-smoke litellm-calls litellm-spend litellm-errors litellm-ready litellm-ui litellm-traffic local-aws-refresh local-serve-compose local-serve-refresh local-bedrock-compose bedrock-smoke m5-bedrock-smoke m6-bedrock-smoke dashboard tf-dispatch tf-resume tf-park inference-validate inference-sync inference-config inference-secret inference-bootstrap inference-deploy inference-up inference-tunnel inference-connect inference-smoke inference-warmup inference-capacity inference-restart inference-gateway-restart inference-controls-on inference-controls-off inference-verify-workers inference-e1 inference-fresh-up inference-tmux-start inference-tmux-end inference-serve-smoke inference-run inference-pull-evidence inference-pull-range inference-kv-image inference-kv-render inference-kv-smoke evidence-analyze evidence-notebook evidence-notebook-open inference-teardown replay-fanout replay-multi-turn replay-compare-strategies replay-strategy-manual replay-strategy-crewai replay-e3-least-loaded replay-e3-prefix-then-load replay-e4-admission-on replay-e4-admission-off replay-e3-large-prefix-least-loaded replay-e3-large-prefix-prefix-then-load replay-e5 replay-arrival-rate trace-request
 
 
 help: ## Show available commands
@@ -381,6 +381,72 @@ evals-test: ## Run offline eval tooling tests on recorded fixtures (no paid mode
 
 evals-report: ## Baseline-vs-candidate eval delta report on recorded fixtures (CANDIDATE=candidate|regressed)
 	uv run --project tooling/evals evals report --baseline tooling/evals/fixtures/baseline --candidate tooling/evals/fixtures/$(or $(CANDIDATE),candidate)
+
+# Live eval runs (issue #200): each run lives in metrics/evals/<run_id>/ (gitignored), run_id = <label>-<UTC ts>.
+# Flow: eval-stack-up (once) -> eval-start LABEL=x -> eval-health -> eval-smoke -> eval-run -> eval-freeze -> eval-grade
+#       -> eval-compare -> eval-cost -> eval-review -> eval-open, or all of it with `make eval-all LABEL=x EVAL_CONFIRM=1`.
+# Every eval-* target tees its output to metrics/evals/<run_id>/logs/ (scripts/eval-log.sh). Real Bedrock calls
+# (eval-smoke, eval-run, eval-all) need EVAL_CONFIRM=1. EVAL_RUN selects another run than metrics/evals/.current.
+EVAL_ROOT := metrics/evals
+EVAL_LABEL ?= $(LABEL)
+EVAL_WEB ?= http://localhost:$(or $(WEB_PORT),3000)
+EVAL := uv run --project tooling/evals evals
+EVAL_RUN_ARG = --root $(EVAL_ROOT) $(if $(EVAL_RUN),--run $(EVAL_RUN))
+EVAL_LOG = EVAL_ROOT=$(EVAL_ROOT) scripts/eval-log.sh
+EVAL_COMPOSE = $(LITELLM_COMPOSE) -f docker-compose.eval-capture.yml
+EVAL_GUARD = @[ "$(EVAL_CONFIRM)" = "1" ] || { echo "Real Bedrock calls: re-run with EVAL_CONFIRM=1"; exit 2; }
+
+eval-stack-up: litellm-env ## Rebuild/start the local LiteLLM stack with live eval capture (metrics/evals/_capture); LITELLM_OTEL=1 adds Jaeger
+	@mkdir -p $(EVAL_ROOT)/_capture
+	$(LITELLM_COMPOSE_ENV) EVAL_CAPTURE_DIR=$(CURDIR)/$(EVAL_ROOT)/_capture \
+	LITELLM_STORE_PROMPTS=false LITELLM_LOG=INFO WEB_PORT=$(or $(WEB_PORT),3000) VOICE_ENABLED=$(or $(VOICE_ENABLED),false) \
+	docker compose $(EVAL_COMPOSE) up --build -d
+
+eval-start: ## Start a run (usage: make eval-start LABEL=<name>); refuses a label that was ever used
+	@[ -n "$(EVAL_LABEL)" ] || { echo "LABEL=<name> is required"; exit 2; }
+	@$(EVAL_LOG) eval-start -- $(EVAL) run-start --root $(EVAL_ROOT) --label $(EVAL_LABEL) --web $(EVAL_WEB)
+
+eval-health: ## Check the web app and LiteLLM proxy before a run (no spend)
+	@$(EVAL_LOG) eval-health -- sh -c 'curl -sf $(EVAL_WEB)/ -o /dev/null && echo web-ok && $(MAKE) --no-print-directory litellm-ready'
+
+eval-smoke: ## One real golden case (det-001) into <run>/smoke; needs EVAL_CONFIRM=1
+	$(EVAL_GUARD)
+	@$(EVAL_LOG) eval-smoke -- $(EVAL) run-live $(EVAL_RUN_ARG) --smoke --web $(EVAL_WEB) det-001
+
+eval-run: ## Full golden run (37 cases / 43 turns, no retries); needs EVAL_CONFIRM=1
+	$(EVAL_GUARD)
+	@$(EVAL_LOG) eval-run -- $(EVAL) run-live $(EVAL_RUN_ARG) --all --web $(EVAL_WEB)
+
+eval-freeze: ## Snapshot this run's capture lines (exact eval_run_id) + sha256
+	@$(EVAL_LOG) eval-freeze -- $(EVAL) run-freeze $(EVAL_RUN_ARG)
+
+eval-grade: ## Grade every conversation with the session-report grader into <run>/report/
+	@$(EVAL_LOG) eval-grade -- $(EVAL) run-grade $(EVAL_RUN_ARG)
+
+eval-compare: ## Compare with a frozen baseline (usage: make eval-compare EVAL_BASELINE=<regrade_results.jsonl>)
+	@[ -n "$(EVAL_BASELINE)" ] || { echo "EVAL_BASELINE=<regrade_results.jsonl> is required"; exit 2; }
+	@$(EVAL_LOG) eval-compare -- $(EVAL) run-compare $(EVAL_RUN_ARG) --baseline-results $(EVAL_BASELINE)
+
+eval-cost: ## LiteLLM spend and recent calls (stack lifetime, not only this run; the run's capture cost is in report/)
+	@$(EVAL_LOG) eval-cost -- sh -c '$(MAKE) --no-print-directory litellm-spend && $(MAKE) --no-print-directory litellm-calls LIMIT=60'
+
+eval-review: ## Build <run>/review.html
+	@$(EVAL_LOG) eval-review -- $(EVAL) run-review $(EVAL_RUN_ARG)
+
+eval-open: ## Open <run>/review.html in the browser
+	@r="$(or $(EVAL_RUN),$$(cat $(EVAL_ROOT)/.current 2>/dev/null))"; [ -f "$(EVAL_ROOT)/$$r/review.html" ] || { echo "no review.html for run '$$r' (make eval-review)"; exit 2; }; open "$(EVAL_ROOT)/$$r/review.html"
+
+eval-all: ## start -> health -> run -> freeze -> grade -> compare -> cost -> review -> open (LABEL=<name> EVAL_CONFIRM=1; EVAL_BASELINE optional)
+	$(EVAL_GUARD)
+	@$(MAKE) --no-print-directory eval-start
+	@$(MAKE) --no-print-directory eval-health
+	@$(MAKE) --no-print-directory eval-run
+	@$(MAKE) --no-print-directory eval-freeze
+	@$(MAKE) --no-print-directory eval-grade
+	@$(if $(EVAL_BASELINE),$(MAKE) --no-print-directory eval-compare,echo "skip eval-compare: EVAL_BASELINE not set")
+	@$(MAKE) --no-print-directory eval-cost
+	@$(MAKE) --no-print-directory eval-review
+	@$(MAKE) --no-print-directory eval-open
 
 mcp-test: ## Run MCP tests
 	uv run --project services/mcp pytest services/mcp/tests
