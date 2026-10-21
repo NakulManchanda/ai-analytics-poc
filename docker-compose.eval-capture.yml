@@ -1,0 +1,11 @@
+# Live eval capture for the app service (issue #200). Use together with the LiteLLM compose files via
+# `make eval-stack-up`. The host directory is mounted once at stack start, so it is fixed
+# (metrics/evals/_capture) and each run's snapshot is filtered out of it by exact eval_run_id.
+services:
+  app:
+    environment:
+      CAPTURE_DIR: /capture
+      CAPTURE_EXECUTION_MODE: live
+      CAPTURE_CONTENT: "1"
+    volumes:
+      - ${EVAL_CAPTURE_DIR:?set EVAL_CAPTURE_DIR}:/capture

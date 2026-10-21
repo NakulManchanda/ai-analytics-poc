@@ -66,11 +66,13 @@ def render_session_report(
     provisional: bool = False,
     conversation_id: str | None = None,
     events_dir: Path | None = None,
+    rows: list[dict] | None = None,
 ) -> str:
     """Provenance comes from the capture itself (``execution_mode`` written by the recorder).
 
     ``claimed_origin`` is only a cross-check: claiming ``live`` for a capture that is not recorded
     as live is refused. LIVE requires every record to say ``live``; missing means NOT LIVE.
+    ``rows``, when given, is filled with one structured dict per turn (the same data as the table).
     """
     records = load_records(traces)
     if conversation_id is not None and conversation_id != "all":
@@ -262,11 +264,13 @@ def render_session_report(
                 "candidate only (no confirmed match)",
             )
             golden, expected = "-", "-"
+            exp_names: list[str] = []
         else:
             case = by_id[target[0]]
             turn = case.turns[target[1]]
             golden = f"`{target[0]}#{target[1]}`"
-            expected = ", ".join(e.name for e in turn.expected_tools) or "none"
+            exp_names = [e.name for e in turn.expected_tools]
+            expected = ", ".join(exp_names) or "none"
             if i in graded_by_idx:
                 _, _, _, _, v2, legacy_state = graded_by_idx[i]
                 exec_res, tool_res, ans_res = v2.execution, v2.tool, v2.answer
@@ -281,6 +285,35 @@ def render_session_report(
         )
         if v.answer:
             notes.append(f"- turn {i} answer: {v.answer}")
+        if rows is not None:
+            rows.append(
+                {
+                    "turn": i,
+                    "case_id": target[0] if target else None,
+                    "turn_index": target[1] if target else None,
+                    "run_id": v.run_id,
+                    "graded": target is not None and i in graded_by_idx,
+                    "question": v.question,
+                    "execution": exec_res,
+                    "tool": tool_res,
+                    "answer": ans_res,
+                    "reasons": reasons,
+                    "actual": _tools(v),
+                    "tools": [
+                        {
+                            "name": t.name,
+                            "arguments": t.arguments,
+                            "status": t.status,
+                            "row_count": t.row_count,
+                        }
+                        for t in v.tools
+                    ],
+                    "expected": exp_names,
+                    "answer_text": v.answer or "",
+                    "cost_usd": v.cost_usd,
+                    "model_calls": len(v.model_calls),
+                }
+            )
     out += [
         "",
         *notes,

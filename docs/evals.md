@@ -203,6 +203,42 @@ uv run --project tooling/evals evals session-report \
   --provisional
 ```
 
+## Live eval runs (issue #200)
+
+A live golden run is one folder under `metrics/evals/` (gitignored, like `metrics/inference/`). `run_id = <label>-<UTC timestamp>`; `make eval-start` **refuses a label that already has a run**, so a finished eval is never silently repeated or overwritten. Output of every `eval-*` target is kept in the run's `logs/`.
+
+```text
+metrics/evals/
+  .current                    run_id of the active run
+  _capture/                   fixed capture mount of the app container (all runs); each run filters it by exact eval_run_id
+  <run_id>/
+    manifest.json             label, run_id, git head, dataset sha256, web url, cases
+    results.jsonl matches.json one row per turn / confirmed golden matches (driver output)
+    events/<run_id>.txt       SSE event logs (tool output for the grader)
+    smoke/                    optional smoke run, never mixed into results
+    captures.snapshot.jsonl   capture.v1 lines for this run only, plus .sha256
+    report/<conversation>.md  grader output, one per conversation
+    compare.md review.html    comparison with a frozen baseline / human-readable per-turn review
+    logs/<target>-<ts>.log    every make target's output (+ <target>.latest.log)
+```
+
+```bash
+make eval-stack-up                         # once: stack with live capture (LITELLM_OTEL=1 adds Jaeger)
+make eval-start LABEL=<name>               # new run, fails if the label was used before
+make eval-health
+make eval-smoke EVAL_CONFIRM=1             # one real case (det-001), a few tokens
+make eval-run EVAL_CONFIRM=1               # full golden set, real Bedrock
+make eval-freeze eval-grade
+make eval-compare EVAL_BASELINE=<regrade_results.jsonl>
+make eval-cost eval-review eval-open
+# or all at once (compare is skipped when EVAL_BASELINE is unset):
+make eval-all LABEL=<name> EVAL_CONFIRM=1 [EVAL_BASELINE=...]
+```
+
+**Failed and interrupted runs.** `run-live` checkpoints every turn (`results.jsonl`, `matches.json`) and keeps `state.json` (`running`, `incomplete` or `complete`; `complete` only when every expected case and turn of the manifest has a recorded row with complete evidence, `missing_turns` lists the rest) and journals each submitted run id to `submitted.jsonl` before waiting for events. A turn that ends in `run.failed` or `run.cancelled` is a *measured result* and is graded normally. A turn with no terminal event (submit error, timeout, broken stream) is *incomplete evidence*: `run-live` exits 3, `eval-all` stops, and `freeze`, `grade`, `compare` and `review` refuse until the run is `complete` (or `--allow-incomplete`). Re-running without `--resume` is refused; `evals run-live --resume` keeps fully recorded cases and re-runs the rest in a fresh conversation, moving the abandoned rows to `results.superseded.jsonl` (`run-freeze` keeps only capture lines whose `run_id` is a checkpointed result, so superseded and never-recorded attempts are dropped and orphans are listed). In a multi-turn case, turns after a `run.failed` or `run.cancelled` turn still run (so turn counts stay comparable) and are marked `after_failed_turn` in `results.jsonl`, so cascades can be separated from genuine follow-up failures. Grader output is also written as `report/<conversation>.json`; `compare` and `review` read the JSON, not the Markdown. `compare` classifies each change as improved, regressed, lateral (different value, equal rank), unchanged or missing_evidence.
+
+`EVAL_CONFIRM=1` is required for every target that calls real Bedrock. `EVAL_RUN=<run_id>` selects a run other than `.current`. `eval_run_id` is a correlation label, not an authorization or billing boundary. `eval-cost` shows LiteLLM spend for the whole stack lifetime; the run's own capture cost is in `report/`.
+
 ## Known gaps
 
 - A first live provisional baseline exists only as local, uncommitted evidence; the committed session report is local-scripted. Its legacy grader score is not a trusted quality metric.

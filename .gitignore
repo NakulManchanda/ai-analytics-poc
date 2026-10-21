@@ -54,6 +54,7 @@ artifacts/
 metrics/*.jsonl
 metrics/inference/
 metrics/evidence/
+metrics/evals/
 *.duckdb
 *.duckdb.wal
 
