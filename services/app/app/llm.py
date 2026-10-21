@@ -79,6 +79,11 @@ RETRYABLE_BEDROCK_ERROR_CODES = {
 }
 BEDROCK_RUNTIME_CONFIG = Config(retries={"total_max_attempts": 1})
 
+# Bedrock rejects a model-produced tool-use block it cannot parse; LiteLLM relays it as
+# a 4xx (observed: 424). Only this category survives -- never the response body.
+MALFORMED_TOOL_USE_MARKER = "Model produced invalid sequence as part of ToolUse"
+_PROVIDER_BODY_PEEK_CHARS = 2048
+
 
 class LLMProviderError(Exception):
     def __init__(
@@ -92,6 +97,9 @@ class LLMProviderError(Exception):
         latency_ms: int | None = None,
         finish_reason: str | None = None,
         prompt_attribution: PromptAttribution | None = None,
+        provider_status: int | None = None,
+        provider_call_id: str | None = None,
+        attempts: int | None = None,
     ) -> None:
         super().__init__()
         self.retryable = retryable
@@ -105,6 +113,11 @@ class LLMProviderError(Exception):
         self.finish_reason = finish_reason
         # Which prompt revision the failed call had rendered (set by the client).
         self.prompt_attribution = prompt_attribution
+        # Safe provider-failure facts (never the response body): the real HTTP status,
+        # the proxy's call id for log correlation, and how many requests were made.
+        self.provider_status = provider_status
+        self.provider_call_id = provider_call_id
+        self.attempts = attempts
 
 
 _THINK_OPEN = "<think>"
@@ -1570,6 +1583,20 @@ class ServeLLMClient:
             ) from exc
 
         if response.status_code != 200:
+            if (
+                payload.get("tools")
+                and 400 <= response.status_code < 500
+                and MALFORMED_TOOL_USE_MARKER
+                in response.text[:_PROVIDER_BODY_PEEK_CHARS]
+            ):
+                raise LLMProviderError(
+                    retryable=False,
+                    code="malformed_tool_use",
+                    model_id=payload.get("model") or self._model_id,
+                    provider_status=response.status_code,
+                    provider_call_id=response.headers.get("x-litellm-call-id"),
+                    attempts=1,
+                )
             retryable = response.status_code in (503, 504, 529)
             raise LLMProviderError(
                 retryable=retryable,

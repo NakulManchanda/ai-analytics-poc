@@ -105,3 +105,4 @@ Monotonically numbered log of every post-bootstrap task. Each entry records the 
 - [0109 — LiteLLM correlation headers](0109-litellm-correlation-headers.md) — spend-log tags/metadata mapping proxy rows to run_id, capture call_id and eval_run_id (#189 PR-C)
 - [0110 — live correlation proof](0110-live-correlation-proof.md) — LiteLLM OTEL overlay and live 2-case proof joining capture, events, spend rows and Jaeger by eval_run_id (#189 PR-D)
 - [0111 — eval run folder](0111-eval-run-folder.md) — `metrics/evals/<run_id>/` layout, label guard, tracked driver, logged `eval-*` targets and `review.html` (#200)
+- [0112 — malformed ToolUse classification](0112-malformed-tool-use-classification.md) — typed `malformed_tool_use`, null-usage failed-call record, conservative budget charge, failure-code histograms (#186 Slice A)

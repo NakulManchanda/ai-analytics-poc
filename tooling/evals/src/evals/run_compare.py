@@ -10,6 +10,8 @@ from evals.runs import (
     DIRECTIONS,
     TERMINAL_OK,
     direction,
+    failure_histogram,
+    format_histogram,
     load_baseline,
     load_run_reports,
     merge_failed,
@@ -91,6 +93,12 @@ def render_compare(
                 f"- {r['case_id']}#{r['turn_index']} {r.get('run_id')} {r['terminal']} - "
                 f"{r.get('question', '')[:70]}"
             )
+    L += [
+        "",
+        "## Failure codes (this run)",
+        "",
+        format_histogram(failure_histogram(run_dir, results)),
+    ]
     L += [
         "",
         "## Focus cases",

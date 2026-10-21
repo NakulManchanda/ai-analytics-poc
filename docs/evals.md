@@ -239,6 +239,8 @@ make eval-all LABEL=<name> EVAL_CONFIRM=1 [EVAL_BASELINE=...]
 
 `EVAL_CONFIRM=1` is required for every target that calls real Bedrock. `EVAL_RUN=<run_id>` selects a run other than `.current`. `eval_run_id` is a correlation label, not an authorization or billing boundary. `eval-cost` shows LiteLLM spend for the whole stack lifetime; the run's own capture cost is in `report/`.
 
+**Failure codes (#186).** `run.failed` carries a `failure_code`; `run-compare` and `run-review` show a per-run histogram of them (read from the run's events), so a change in failure mix is visible without grepping events. Codes seen on the golden set: `no_tool_call` (planner replied without a tool call), `multiple_tool_calls`, `mcp_tool_error`, `litellm_proxy_http_<status>` for unclassified proxy errors, and `malformed_tool_use`: a planner call that Bedrock rejected with "Model produced invalid sequence as part of ToolUse" (LiteLLM relays it as HTTP 424). `malformed_tool_use` is not retried and has no fallback alias. Its `run.failed` payload and run metadata carry `provider_error` = `{category, provider_status, provider_call_id, attempts}` (never the provider body or the prompt), and the failed attempt is an `LLMCall` with null usage and cost: the run budget is charged the existing conservative bound (or fails closed when the alias is unpriced) while the reported run tokens and cost stay unchanged. The span event `ai.llm_call` gains `ai.llm.error_category` and `ai.llm.provider_status`, and the run span `ai.error.category`.
+
 ## Known gaps
 
 - A first live provisional baseline exists only as local, uncommitted evidence; the committed session report is local-scripted. Its legacy grader score is not a trusted quality metric.
