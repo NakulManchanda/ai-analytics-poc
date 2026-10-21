@@ -53,6 +53,8 @@ def load_run_reports(run_dir: Path) -> tuple[dict[tuple[str, int], dict], float]
 
 
 def load_baseline(path: Path) -> dict[tuple[str, int], dict]:
+    if not Path(path).is_file():
+        raise RunError(f"baseline results file not found: {path}")
     return {
         (r["case_id"], r["turn_index"]): dict(
             execution=r["execution_v2"], tool=r["tool_v2"], answer=r["answer_v2"]

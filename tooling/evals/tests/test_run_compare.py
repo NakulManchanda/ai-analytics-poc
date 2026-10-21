@@ -2,8 +2,10 @@
 
 import json
 
+import pytest
+
 from evals.cli import main
-from evals.runs import direction, load_run_reports
+from evals.runs import RunError, direction, load_baseline, load_run_reports
 
 ROWS = [
     {
@@ -144,3 +146,8 @@ def test_review_escapes_and_is_offline(tmp_path, capsys):
     assert "http://" not in html and "https://" not in html
     assert "see app/LiteLLM logs" in html and "run.failed" in html
     assert 'data-dirs="missing_evidence regressed"' in html
+
+
+def test_missing_baseline_is_a_clean_error(tmp_path):
+    with pytest.raises(RunError, match="baseline results file not found"):
+        load_baseline(tmp_path / "nope.jsonl")
