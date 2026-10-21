@@ -221,6 +221,28 @@ def test_incomplete_exit_code_and_resume(tmp_path, stub, cases, monkeypatch, cap
     assert len(json.loads((run / "matches.json").read_text())["matches"]) == 4
 
 
+def test_resume_without_case_list_uses_manifest_or_dataset(
+    tmp_path, stub, cases, monkeypatch
+):
+    """Plain `run-live --resume` (no --all, no case ids, empty manifest cases) must work."""
+    MODE["drop_post_at"] = 2
+    root = tmp_path / "root"
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(lr, "CASES", cases)
+    monkeypatch.setattr(lr.run_live, "__defaults__", (cases, False))
+    assert main(["run-start", "--root", str(root), "--label", "r"]) == 0
+    run = root / (root / ".current").read_text()
+    base = ["--root", str(root), "--web", stub]
+    assert main(["run-live", *base, "--all"]) == 3
+    MODE["drop_post_at"] = None
+    assert main(["run-live", *base, "--resume"]) == 0
+    assert json.loads((run / "state.json").read_text())["status"] == "complete"
+    # resuming a finished run is a harmless no-op
+    seen = len(SEEN)
+    assert main(["run-live", *base, "--resume"]) == 0
+    assert len(SEEN) == seen
+
+
 def test_crash_leaves_running_and_resume_recovers(tmp_path, stub, cases, monkeypatch):
     run = mk(tmp_path)
     real = lr.read_events

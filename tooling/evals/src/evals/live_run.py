@@ -167,7 +167,9 @@ def run_live(
     wanted = (
         [c["id"] for c in cases]
         if all_cases
-        else case_ids or manifest.get("cases") or []
+        else case_ids
+        or manifest.get("cases")
+        or ([c["id"] for c in cases] if resume and not smoke else [])
     )
     unknown = [c for c in wanted if c not in by_id]
     if unknown or not wanted:
