@@ -21,15 +21,20 @@ table{border-collapse:collapse;width:100%}td,th{border:1px solid #ccc;padding:4p
 .b{padding:1px 6px;border-radius:8px;font-size:12px;background:#eee}
 .correct{background:#cfc}.incorrect,.failed,.regressed{background:#fbb}.needs_review{background:#fe9}
 .improved{background:#bdf}.unchanged{background:#eee}.lateral{background:#fdb}.missing_evidence{background:#ddd;font-style:italic}.fail{background:#fee}pre{white-space:pre-wrap;margin:0}
-.note{color:#900;font-size:12px}.hide{display:none}"""
+.note{color:#900;font-size:12px}.hide{display:none}
+button.on{background:#222;color:#fff}#shown{font-weight:600;margin-left:.5rem}"""
 
 JS = """const rows=[...document.querySelectorAll('tbody tr')];let mode='all';
-function apply(){const q=document.getElementById('q').value.toLowerCase();
-rows.forEach(r=>{let ok=true;
-if(mode=='bad')ok=r.dataset.bad=='1';else if(mode!='all')ok=(r.dataset.dirs||'').split(' ').includes(mode);
-if(ok&&q)ok=r.textContent.toLowerCase().includes(q);r.classList.toggle('hide',!ok)})}
-document.querySelectorAll('button[data-m]').forEach(b=>b.onclick=()=>{mode=b.dataset.m;apply()});
-document.getElementById('q').oninput=apply;"""
+function match(r,m){return m=='all'||(m=='bad'?r.dataset.bad=='1':(r.dataset.dirs||'').split(' ').includes(m))}
+const btns=[...document.querySelectorAll('button[data-m]')];
+btns.forEach(b=>{b.dataset.l=b.textContent;b.textContent=b.dataset.l+' ('+rows.filter(r=>match(r,b.dataset.m)).length+')'});
+function apply(){const q=document.getElementById('q').value.toLowerCase();let n=0;
+rows.forEach(r=>{let ok=match(r,mode);
+if(ok&&q)ok=r.textContent.toLowerCase().includes(q);r.classList.toggle('hide',!ok);if(ok)n++});
+btns.forEach(b=>b.classList.toggle('on',b.dataset.m==mode));
+document.getElementById('shown').textContent='Showing '+n+' of '+rows.length+' turns'}
+btns.forEach(b=>b.onclick=()=>{mode=b.dataset.m;apply()});
+document.getElementById('q').oninput=apply;apply();"""
 
 
 def _e(s: object) -> str:
@@ -76,7 +81,7 @@ def render_review(run_dir: Path, baseline: Path | None = None) -> str:
         f"<title>{_e(run_dir.name)}</title><style>{CSS}</style></head><body>"
         f"<h1>{_e(run_dir.name)}</h1>"
         '<p><button data-m="all">all</button> <button data-m="bad">failed / not correct</button> '
-        f'{reg_btn} <input id="q" placeholder="search"></p>'
+        f'{reg_btn} <input id="q" placeholder="search"> <span id="shown"></span></p>'
         "<table><thead><tr><th>turn</th><th>question</th><th>outcome</th><th>tools (actual)</th>"
         "<th>reasons</th><th>answer</th><th>terminal</th></tr></thead><tbody>"
         + "".join(body)

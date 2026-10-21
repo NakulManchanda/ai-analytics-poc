@@ -140,6 +140,7 @@ def test_review_escapes_and_is_offline(tmp_path, capsys):
         == 0
     )
     html = (run / "review.html").read_text()
+    assert 'id="shown"' in html and "Showing " in html  # running counts
     assert html.startswith("<!doctype html>")
     assert "<script>alert(1)</script>" not in html
     assert "&lt;script&gt;alert(1)&lt;/script&gt;" in html
