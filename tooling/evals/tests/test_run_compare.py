@@ -3,48 +3,69 @@
 import json
 
 from evals.cli import main
-from evals.runs import parse_report
+from evals.runs import direction, load_run_reports
 
-REPORT = """# Captured session report
+ROWS = [
+    {
+        "turn": 0,
+        "case_id": "det-001",
+        "turn_index": 0,
+        "graded": True,
+        "question": "Q one <script>alert(1)</script>",
+        "execution": "correct",
+        "tool": "correct",
+        "answer": "correct",
+        "reasons": "",
+        "actual": 'aggregate_taxi_data({"a": 1}) completed rows=1',
+        "expected": ["aggregate_taxi_data"],
+        "answer_text": "First line.\n\nSecond <b>x</b>.",
+        "cost_usd": 0.0001,
+        "model_calls": 2,
+    },
+    {
+        "turn": 1,
+        "case_id": "det-006",
+        "turn_index": 1,
+        "graded": True,
+        "question": "Q two",
+        "execution": "correct",
+        "tool": "incorrect",
+        "answer": "incorrect",
+        "reasons": "tool: not matched",
+        "actual": "none",
+        "expected": ["query_taxi_data"],
+        "answer_text": "Short.",
+        "cost_usd": 0.00015,
+        "model_calls": 1,
+    },
+]
 
-## Turns
 
-| # | question | linked golden turn | execution | tool | answer | legacy grading | tools (actual) | tools expected | reasons |
-|---|---|---|---|---|---|---|---|---|---|
-| 0 | Q one <script>alert(1)</script> | `det-001#0` | correct | correct | correct | pass | aggregate_taxi_data({"a": 1}) completed rows=1 | aggregate_taxi_data | |
-| 1 | Q two | `det-006#1` | correct | incorrect | incorrect | FAIL | none | query_taxi_data | tool: not matched |
-
-- turn 0 answer: First line.
-
-Second paragraph <b>x</b>.
-- turn 1 answer: Short.
-
-## Tokens, cost, latency
-
-| # | model calls | aliases | input | output | cost USD | model ms | tool ms |
-|---|---|---|---|---|---|---|---|
-| 0 | 2 | a | 10 | 5 | 0.000100 | 1 | 1 |
-| total | | | 20 | 10 | 0.000250 | 2 | 2 |
-"""
+def test_load_reports_and_cost(tmp_path):
+    (tmp_path / "report").mkdir()
+    (tmp_path / "report" / "c.json").write_text(json.dumps({"rows": ROWS}))
+    turns, cost = load_run_reports(tmp_path)
+    assert turns[("det-006", 1)]["expected"] == "query_taxi_data"
+    assert turns[("det-001", 0)]["answer_text"].startswith("First line.")
+    assert abs(cost - 0.00025) < 1e-12
 
 
-def test_parse_report():
-    p = parse_report(REPORT)
-    t = p["turns"][("det-006", 1)]
-    assert (t["execution"], t["tool"], t["answer"]) == (
-        "correct",
-        "incorrect",
-        "incorrect",
-    )
-    assert t["expected"] == "query_taxi_data" and t["answer_text"] == "Short."
-    assert "Second paragraph" in p["turns"][("det-001", 0)]["answer_text"]
-    assert p["cost"] == 0.00025  # 6th cell of the totals row
+def test_direction_four_states():
+    assert direction("incorrect", "correct") == "improved"
+    assert direction("correct", "incorrect") == "regressed"
+    assert direction("correct", "correct") == "unchanged"
+    for old, new in (
+        ("-", "correct"),
+        ("correct", "not_graded"),
+        ("missing", "correct"),
+    ):
+        assert direction(old, new) == "missing_evidence"
 
 
 def setup_run(tmp_path):
     run = tmp_path / "r-20200101T000000Z"
     (run / "report").mkdir(parents=True)
-    (run / "report" / "conv_a.md").write_text(REPORT)
+    (run / "report" / "conv_a.json").write_text(json.dumps({"rows": ROWS}))
     rows = [
         {
             "case_id": "det-001",
@@ -84,6 +105,7 @@ def setup_run(tmp_path):
             for c, t, e, to, a in b
         )
     )
+    (run / "state.json").write_text(json.dumps({"status": "complete"}))
     (tmp_path / ".current").write_text(run.name)
     return run, base
 
@@ -95,12 +117,13 @@ def test_compare(tmp_path, capsys):
         == 0
     )
     text = (run / "compare.md").read_text()
-    assert "improved: 2, regressed: 5" in text
+    assert "improved: 2, regressed: 3, unchanged: 2, missing_evidence: 2" in text
     assert "| det-006#1 | tool | correct | incorrect | regressed |" in text
     assert "| det-001#0 | tool | incorrect | correct | improved |" in text
     assert "| uns-001#0 | execution | correct | failed | regressed |" in text
     assert "- uns-001#0 r3 run.failed" in text
     assert "$0.000250" in text
+    assert "missing_evidence" in text
     assert "## Focus cases" in text and "uns-001#0" in text
 
 
@@ -116,4 +139,4 @@ def test_review_escapes_and_is_offline(tmp_path, capsys):
     assert "&lt;script&gt;alert(1)&lt;/script&gt;" in html
     assert "http://" not in html and "https://" not in html
     assert "see app/LiteLLM logs" in html and "run.failed" in html
-    assert 'data-reg="1"' in html
+    assert 'data-dirs="missing_evidence regressed"' in html

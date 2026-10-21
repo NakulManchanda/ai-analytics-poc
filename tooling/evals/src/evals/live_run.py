@@ -6,13 +6,16 @@ Nothing here touches the network at import time.
 
 from __future__ import annotations
 
+import http.client
 import json
+import os
 import time
-import urllib.error
 import urllib.request
+from datetime import UTC, datetime
 from pathlib import Path
+from urllib.parse import urlsplit
 
-from evals.runs import RunError
+from evals.runs import RunError, read_state, write_json_atomic
 
 CASES = Path("tooling/evals/datasets/golden/v1/cases.jsonl")
 TERMINAL = ("run.completed", "run.failed", "run.cancelled")
@@ -39,24 +42,99 @@ def post_run(
 
 
 def read_events(web: str, run_id: str, timeout_s: int) -> tuple[str, str]:
-    """Stream SSE until a terminal event or timeout; return (raw_text, terminal|'timeout')."""
+    """Read SSE frames until a terminal ``event:`` or the overall deadline.
+
+    Returns (raw_text, terminal | 'timeout' | 'stream_error'). Each read is bounded by the time left,
+    so neither a stalled nor a trickling stream can outlive ``timeout_s``.
+    """
     deadline = time.monotonic() + timeout_s
-    raw, terminal = [], "timeout"
+    u = urlsplit(web)
+    cls = (
+        http.client.HTTPSConnection
+        if u.scheme == "https"
+        else http.client.HTTPConnection
+    )
+    raw: list[str] = []
+    frame: list[str] = []
+    terminal = "timeout"
+    conn = cls(u.hostname, u.port, timeout=min(timeout_s, 30))
     try:
-        with urllib.request.urlopen(
-            f"{web}/api/runs/{run_id}/events", timeout=timeout_s
-        ) as r:
-            for line in r:
-                text = line.decode(errors="replace")
-                raw.append(text)
-                for t in TERMINAL:
-                    if t in text:
-                        terminal = t
-                if terminal != "timeout" or time.monotonic() > deadline:
-                    break
-    except (urllib.error.URLError, TimeoutError, OSError) as e:
+        conn.request("GET", f"/api/runs/{run_id}/events")
+        sock = conn.sock  # keep: conn.sock is cleared for will-close responses
+        resp = conn.getresponse()
+        if resp.status != 200:
+            raise OSError(f"events HTTP {resp.status}")
+        while True:
+            left = deadline - time.monotonic()
+            if left <= 0:
+                break
+            sock.settimeout(left)
+            line = resp.readline().decode(errors="replace")
+            if not line:
+                terminal = "stream_error"  # closed before a terminal event
+                raw.append("[driver] stream closed without terminal event\n")
+                break
+            raw.append(line)
+            if line.strip():
+                frame.append(line.rstrip("\r\n"))
+                continue
+            event = next((f[6:].strip() for f in frame if f.startswith("event:")), "")
+            frame = []
+            if event in TERMINAL:
+                terminal = event
+                break
+    except (OSError, http.client.HTTPException) as e:
+        if time.monotonic() < deadline:
+            terminal = "stream_error"
         raw.append(f"[driver] stream error: {e!r}\n")
+    finally:
+        conn.close()
     return "".join(raw), terminal
+
+
+def _now() -> str:
+    return datetime.now(UTC).isoformat()
+
+
+def _append_row(path: Path, row: dict) -> None:
+    with path.open("a") as f:
+        f.write(json.dumps(row) + "\n")
+        f.flush()
+        os.fsync(f.fileno())
+
+
+def _read_rows(path: Path) -> list[dict]:
+    if not path.is_file():
+        return []
+    return [json.loads(x) for x in path.read_text().splitlines() if x.strip()]
+
+
+def _write_rows(path: Path, rows: list[dict]) -> None:
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text("".join(json.dumps(r) + "\n" for r in rows))
+    tmp.replace(path)
+
+
+def _write_matches(out: Path, rows: list[dict]) -> None:
+    matches = [
+        {
+            "run_id": r["run_id"],
+            "case_id": r["case_id"],
+            "turn_index": r["turn_index"],
+            "confirmed_by": CONFIRMED_BY,
+        }
+        for r in rows
+        if r.get("run_id")
+    ]
+    write_json_atomic(
+        out / "matches.json", {"schema": "evals.matches.v1", "matches": matches}
+    )
+
+
+def _evidence(row: dict) -> str:
+    return row.get("evidence") or (
+        "complete" if row.get("terminal") in TERMINAL else "incomplete"
+    )
 
 
 def run_live(
@@ -68,15 +146,20 @@ def run_live(
     smoke: bool,
     timeout: int,
     cases_path: Path = CASES,
-) -> Path:
+    resume: bool = False,
+) -> tuple[Path, list[dict]]:
+    """Run the cases; return (output dir, incomplete turn records)."""
     manifest_p = run_dir / "manifest.json"
     if not manifest_p.is_file():
         raise RunError(f"{manifest_p} missing; run `evals run-start` first")
     manifest = json.loads(manifest_p.read_text())
     out = run_dir / "smoke" if smoke else run_dir
-    if not smoke and (out / "results.jsonl").exists():
+    results_p = out / "results.jsonl"
+    old_state = read_state(out)
+    if not smoke and not resume and (old_state is not None or results_p.exists()):
         raise RunError(
-            f"{out / 'results.jsonl'} exists; start a new run (no overwrite)"
+            f"{out} already has run state/results; start a new run, or pass --resume "
+            "to re-run incomplete cases (no overwrite)"
         )
     web = web or manifest.get("web") or "http://localhost:3100"
     cases = [json.loads(x) for x in cases_path.read_text().splitlines() if x.strip()]
@@ -92,7 +175,44 @@ def run_live(
     eval_run_id = f"{run_id}-smoke" if smoke else run_id
     (out / "events").mkdir(parents=True, exist_ok=True)
 
-    matches, rows = [], []
+    rows = _read_rows(results_p) if resume else []
+    if resume:
+        keep, superseded, todo = [], [], []
+        for cid in wanted:
+            mine = [r for r in rows if r["case_id"] == cid]
+            full = len(mine) == len(by_id[cid]["turns"])
+            if mine and full and all(_evidence(r) == "complete" for r in mine):
+                keep += mine
+                continue
+            superseded += mine
+            todo.append(cid)
+        keep += [r for r in rows if r["case_id"] not in wanted]
+        if superseded:
+            with (out / "results.superseded.jsonl").open("a") as f:
+                for r in superseded:
+                    f.write(json.dumps(dict(r, superseded_at=_now())) + "\n")
+        rows = keep
+        _write_rows(results_p, rows)
+        wanted = todo
+    total = sum(len(by_id[c]["turns"]) for c in wanted) + (len(rows) if resume else 0)
+    started = (old_state or {}).get("started_at") or _now()
+    incomplete: list[dict] = []
+
+    def save(status: str) -> None:
+        write_json_atomic(
+            out / "state.json",
+            {
+                "status": status,
+                "started_at": started,
+                "finished_at": None if status == "running" else _now(),
+                "turns_total": total,
+                "turns_recorded": len(rows),
+                "incomplete_turns": incomplete,
+            },
+        )
+
+    save("running")
+    _write_matches(out, rows)
     for cid in wanted:
         conv = None
         for idx, turn in enumerate(by_id[cid]["turns"]):
@@ -105,44 +225,34 @@ def run_live(
             }
             try:
                 acc = post_run(web, turn["question"], conv, eval_run_id)
-            except (
-                OSError,
-                ValueError,
-                KeyError,
-            ) as e:  # recorded, not retried (URLError is an OSError)
-                row.update(
-                    run_id=None,
-                    terminal=f"submit_error: {e!r}",
-                    wall_s=round(time.monotonic() - t0, 2),
-                )
-                rows.append(row)
-                print(f"{cid}[{idx}] SUBMIT ERROR {e!r}")
-                break
-            conv = acc["conversation_id"]
-            raw, terminal = read_events(web, acc["run_id"], timeout)
-            (out / "events" / f"{acc['run_id']}.txt").write_text(raw)
-            row.update(
-                conversation_id=conv,
-                run_id=acc["run_id"],
-                terminal=terminal,
-                wall_s=round(time.monotonic() - t0, 2),
-            )
+                conv = acc["conversation_id"]
+                run_ref = acc["run_id"]
+            except (OSError, ValueError, KeyError) as e:  # recorded, not retried
+                row.update(run_id=None, terminal=f"submit_error: {e!r}")
+                raw = terminal = None
+            else:
+                raw, terminal = read_events(web, run_ref, timeout)
+                (out / "events" / f"{run_ref}.txt").write_text(raw)
+                row.update(conversation_id=conv, run_id=run_ref, terminal=terminal)
+            row["evidence"] = "complete" if terminal in TERMINAL else "incomplete"
+            row["wall_s"] = round(time.monotonic() - t0, 2)
+            _append_row(results_p, row)
             rows.append(row)
-            matches.append(
-                {
-                    "run_id": acc["run_id"],
-                    "case_id": cid,
-                    "turn_index": idx,
-                    "confirmed_by": CONFIRMED_BY,
-                }
-            )
+            _write_matches(out, rows)
+            if row["evidence"] == "incomplete":
+                incomplete.append(
+                    {"case_id": cid, "turn_index": idx, "terminal": row["terminal"]}
+                )
+            save("running")
             print(
-                f"{cid}[{idx}] {acc['run_id']} conv={conv} {terminal} {row['wall_s']}s"
+                f"{cid}[{idx}] {row.get('run_id')} conv={conv} {row['terminal']} "
+                f"evidence={row['evidence']} {row['wall_s']}s"
             )
-            if terminal == "timeout":
+            if row["evidence"] == "incomplete":
                 break  # do not feed later turns on a run that never finished
-    (out / "results.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
-    (out / "matches.json").write_text(
-        json.dumps({"schema": "evals.matches.v1", "matches": matches}, indent=1)
+    save("incomplete" if incomplete else "complete")
+    n_ok = sum(_evidence(r) == "complete" for r in rows)
+    print(
+        f"summary: {n_ok}/{total} turns with complete evidence, {len(incomplete)} incomplete"
     )
-    return out
+    return out, incomplete

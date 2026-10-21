@@ -36,71 +36,19 @@ def read_jsonl(path: Path) -> list[dict]:
     return [json.loads(x) for x in path.read_text().splitlines() if x.strip()]
 
 
-def _cells(line: str) -> list[str]:
-    return [x.strip() for x in line.strip().strip("|").split("|")]
-
-
-def parse_report(text: str) -> dict:
-    """Parse one session report.
-
-    Returns ``{"turns": {(case_id, turn_index): {...}}, "cost": float}`` where each turn has
-    execution/tool/answer/actual/expected/reasons/question/answer_text.
-    """
-    turns: dict[tuple[str, int], dict] = {}
-    by_num: dict[int, tuple[str, int]] = {}
-    if "## Turns" in text:
-        sec = text.split("## Turns", 1)[1].split("\n## ", 1)[0]
-        for line in sec.splitlines():
-            if not re.match(r"\|\s*\d+\s*\|", line):
-                continue
-            c = _cells(line)
-            m = re.match(r"`?([\w-]+)#(\d+)`?", c[2]) if len(c) > 9 else None
-            if not m:
-                continue
-            key = (m[1], int(m[2]))
-            by_num[int(c[0])] = key
-            turns[key] = dict(
-                question=c[1],
-                execution=c[3],
-                tool=c[4],
-                answer=c[5],
-                actual=c[7],
-                expected=c[8],
-                reasons=c[9],
-                answer_text="",
-            )
-        cur: int | None = None
-        buf: list[str] = []
-
-        def flush() -> None:
-            if cur in by_num:
-                turns[by_num[cur]]["answer_text"] = "\n".join(buf).strip()
-
-        for line in sec.splitlines():
-            m = re.match(r"- turn (\d+) answer: ?(.*)$", line)
-            if m:
-                flush()
-                cur, buf = int(m[1]), [m[2]]
-            elif cur is not None:
-                buf.append(line)
-        flush()
-    cost = 0.0
-    m = re.search(r"\| total \|[^\n]*", text)
-    if m:
-        try:
-            cost = float(_cells(m[0])[5])
-        except (ValueError, IndexError):
-            pass
-    return {"turns": turns, "cost": cost}
-
-
 def load_run_reports(run_dir: Path) -> tuple[dict[tuple[str, int], dict], float]:
+    """Graded turns (keyed by golden case/turn) and total cost from ``report/*.json``."""
     turns: dict[tuple[str, int], dict] = {}
     cost = 0.0
-    for f in sorted((run_dir / "report").glob("*.md")):
-        p = parse_report(f.read_text())
-        turns.update(p["turns"])
-        cost += p["cost"]
+    for f in sorted((run_dir / "report").glob("*.json")):
+        for r in json.loads(f.read_text())["rows"]:
+            cost += r.get("cost_usd") or 0.0
+            if r.get("graded") and r["case_id"] is not None:
+                turns[(r["case_id"], r["turn_index"])] = dict(
+                    r,
+                    actual=r["actual"],
+                    expected=", ".join(r["expected"]) or "none",
+                )
     return turns, cost
 
 
@@ -123,6 +71,7 @@ def merge_failed(new: dict, results: list[dict]) -> dict:
         failed = r["terminal"] != TERMINAL_OK
         out[k] = dict(
             question=r.get("question", ""),
+            graded=False,
             execution="failed" if failed else "missing",
             tool="not_graded",
             answer="not_graded",
@@ -140,10 +89,37 @@ RANK = {
     "not_applicable": 1,
     "incorrect": 0,
     "failed": -1,
-    "not_graded": -1,
-    "missing": -1,
 }
+MISSING = {"-", "", "not_graded", "missing", None}
+DIRECTIONS = ("improved", "regressed", "unchanged", "missing_evidence")
 
 
-def direction(old: str, new: str) -> str:
+def direction(old: str | None, new: str | None) -> str:
+    if old in MISSING or new in MISSING:
+        return "missing_evidence"
+    if old == new:
+        return "unchanged"
     return "improved" if RANK.get(new, 0) > RANK.get(old, 0) else "regressed"
+
+
+def read_state(run_dir: Path) -> dict | None:
+    p = run_dir / "state.json"
+    return json.loads(p.read_text()) if p.is_file() else None
+
+
+def write_json_atomic(path: Path, obj: object) -> None:
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(obj, indent=1))
+    tmp.replace(path)
+
+
+def require_complete(run_dir: Path, allow_incomplete: bool) -> None:
+    if allow_incomplete:
+        return
+    st = read_state(run_dir)
+    status = st["status"] if st else "missing"
+    if status != "complete":
+        raise RunError(
+            f"{run_dir.name} state is {status!r}, not 'complete' (run-live must finish "
+            "with complete evidence); pass --allow-incomplete to override"
+        )

@@ -392,7 +392,7 @@ EVAL_LABEL ?= $(LABEL)
 EVAL_WEB ?= http://localhost:$(or $(WEB_PORT),3000)
 EVAL := uv run --project tooling/evals evals
 EVAL_RUN_ARG = --root $(EVAL_ROOT) $(if $(EVAL_RUN),--run $(EVAL_RUN))
-EVAL_LOG = EVAL_ROOT=$(EVAL_ROOT) scripts/eval-log.sh
+EVAL_LOG = EVAL_ROOT=$(EVAL_ROOT) EVAL_RUN=$(EVAL_RUN) scripts/eval-log.sh
 EVAL_COMPOSE = $(LITELLM_COMPOSE) -f docker-compose.eval-capture.yml
 EVAL_GUARD = @[ "$(EVAL_CONFIRM)" = "1" ] || { echo "Real Bedrock calls: re-run with EVAL_CONFIRM=1"; exit 2; }
 
@@ -404,7 +404,7 @@ eval-stack-up: litellm-env ## Rebuild/start the local LiteLLM stack with live ev
 
 eval-start: ## Start a run (usage: make eval-start LABEL=<name>); refuses a label that was ever used
 	@[ -n "$(EVAL_LABEL)" ] || { echo "LABEL=<name> is required"; exit 2; }
-	@$(EVAL_LOG) eval-start -- $(EVAL) run-start --root $(EVAL_ROOT) --label $(EVAL_LABEL) --web $(EVAL_WEB)
+	@EVAL_LOG_NEW_RUN=1 $(EVAL_LOG) eval-start -- $(EVAL) run-start --root $(EVAL_ROOT) --label $(EVAL_LABEL) --web $(EVAL_WEB)
 
 eval-health: ## Check the web app and LiteLLM proxy before a run (no spend)
 	@$(EVAL_LOG) eval-health -- sh -c 'curl -sf $(EVAL_WEB)/ -o /dev/null && echo web-ok && $(MAKE) --no-print-directory litellm-ready'
@@ -431,7 +431,7 @@ eval-cost: ## LiteLLM spend and recent calls (stack lifetime, not only this run;
 	@$(EVAL_LOG) eval-cost -- sh -c '$(MAKE) --no-print-directory litellm-spend && $(MAKE) --no-print-directory litellm-calls LIMIT=60'
 
 eval-review: ## Build <run>/review.html
-	@$(EVAL_LOG) eval-review -- $(EVAL) run-review $(EVAL_RUN_ARG)
+	@$(EVAL_LOG) eval-review -- $(EVAL) run-review $(EVAL_RUN_ARG) $(if $(EVAL_BASELINE),--baseline-results $(EVAL_BASELINE))
 
 eval-open: ## Open <run>/review.html in the browser
 	@r="$(or $(EVAL_RUN),$$(cat $(EVAL_ROOT)/.current 2>/dev/null))"; [ -f "$(EVAL_ROOT)/$$r/review.html" ] || { echo "no review.html for run '$$r' (make eval-review)"; exit 2; }; open "$(EVAL_ROOT)/$$r/review.html"

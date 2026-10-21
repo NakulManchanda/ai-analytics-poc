@@ -7,6 +7,7 @@ from pathlib import Path
 
 from evals.runs import (
     DIMS,
+    DIRECTIONS,
     TERMINAL_OK,
     direction,
     load_baseline,
@@ -24,15 +25,19 @@ def _is_focus(case_id: str, focus: tuple[str, ...]) -> bool:
     )
 
 
+def _md(s: object) -> str:
+    return str(s).replace("|", "\\|").replace("\n", " ")
+
+
 def changes(new: dict, old: dict) -> dict[tuple[str, int, str], str]:
-    """(case, turn, dim) -> improved|regressed for every differing dimension."""
-    out = {}
-    for k in sorted(set(new) | set(old)):
-        for dim in DIMS:
-            a, b = old.get(k, {}).get(dim, "-"), new.get(k, {}).get(dim, "-")
-            if a != b:
-                out[(k[0], k[1], dim)] = direction(a, b)
-    return out
+    """(case, turn, dim) -> improved|regressed|unchanged|missing_evidence."""
+    return {
+        (k[0], k[1], dim): direction(
+            old.get(k, {}).get(dim, "-"), new.get(k, {}).get(dim, "-")
+        )
+        for k in sorted(set(new) | set(old))
+        for dim in DIMS
+    }
 
 
 def render_compare(
@@ -68,6 +73,8 @@ def render_compare(
         "|---|---|---|---|---|",
     ]
     for (c, t, dim), d in ch.items():
+        if d == "unchanged":
+            continue
         L.append(
             f"| {c}#{t} | {dim} | {old.get((c, t), {}).get(dim, '-')} | "
             f"{new.get((c, t), {}).get(dim, '-')} | {d} |"
@@ -75,7 +82,7 @@ def render_compare(
     vals = list(ch.values())
     L += [
         "",
-        f"improved: {vals.count('improved')}, regressed: {vals.count('regressed')}",
+        ", ".join(f"{d}: {vals.count(d)}" for d in DIRECTIONS),
     ]
     L += ["", "## Failed runs (no graded row)", ""]
     for r in sorted(results, key=lambda r: (r["case_id"], r["turn_index"])):
@@ -97,6 +104,6 @@ def render_compare(
             L.append(
                 f"| {k[0]}#{k[1]} | "
                 + " | ".join(f"{o.get(d, '-')}→{n.get(d, '-')}" for d in DIMS)
-                + f" | {n.get('actual', '')[:90]} | {n.get('expected', '')} |"
+                + f" | {_md(n.get('actual', '')[:90])} | {_md(n.get('expected', ''))} |"
             )
     return "\n".join(L) + "\n"

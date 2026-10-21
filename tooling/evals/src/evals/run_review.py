@@ -8,6 +8,7 @@ from pathlib import Path
 from evals.run_compare import changes
 from evals.runs import (
     DIMS,
+    DIRECTIONS,
     TERMINAL_OK,
     load_baseline,
     load_run_reports,
@@ -19,13 +20,13 @@ CSS = """body{font:14px system-ui,sans-serif;margin:1rem;color:#222}
 table{border-collapse:collapse;width:100%}td,th{border:1px solid #ccc;padding:4px;vertical-align:top}
 .b{padding:1px 6px;border-radius:8px;font-size:12px;background:#eee}
 .correct{background:#cfc}.incorrect,.failed,.regressed{background:#fbb}.needs_review{background:#fe9}
-.improved{background:#bdf}.fail{background:#fee}pre{white-space:pre-wrap;margin:0}
+.improved{background:#bdf}.unchanged{background:#eee}.missing_evidence{background:#ddd;font-style:italic}.fail{background:#fee}pre{white-space:pre-wrap;margin:0}
 .note{color:#900;font-size:12px}.hide{display:none}"""
 
 JS = """const rows=[...document.querySelectorAll('tbody tr')];let mode='all';
 function apply(){const q=document.getElementById('q').value.toLowerCase();
 rows.forEach(r=>{let ok=true;
-if(mode=='bad')ok=r.dataset.bad=='1';if(mode=='reg')ok=r.dataset.reg=='1';
+if(mode=='bad')ok=r.dataset.bad=='1';else if(mode!='all')ok=(r.dataset.dirs||'').split(' ').includes(mode);
 if(ok&&q)ok=r.textContent.toLowerCase().includes(q);r.classList.toggle('hide',!ok)})}
 document.querySelectorAll('button[data-m]').forEach(b=>b.onclick=()=>{mode=b.dataset.m;apply()});
 document.getElementById('q').oninput=apply;"""
@@ -50,14 +51,14 @@ def render_review(run_dir: Path, baseline: Path | None = None) -> str:
         g = new[k]
         bad = r["terminal"] != TERMINAL_OK or any(g[d] != "correct" for d in DIMS)
         dirs = [(d, ch[(k[0], k[1], d)]) for d in DIMS if (k[0], k[1], d) in ch]
-        reg = any(v == "regressed" for _, v in dirs)
+        dirset = " ".join(sorted({v for _, v in dirs}))
         term = _e(r["terminal"])
         if r["terminal"] != TERMINAL_OK:
             term = f'<b>{term}</b><div class="note">see app/LiteLLM logs</div>'
         badges = " ".join(_badge(g[d], f"{d}: {g[d]}") for d in DIMS)
-        dbadges = " ".join(_badge(v, f"{d} {v}") for d, v in dirs)
+        dbadges = " ".join(_badge(v, f"{d} {v}") for d, v in dirs if v != "unchanged")
         body.append(
-            f'<tr data-bad="{int(bad)}" data-reg="{int(reg)}"'
+            f'<tr data-bad="{int(bad)}" data-dirs="{_e(dirset)}"'
             f'{" class=fail" if r["terminal"] != TERMINAL_OK else ""}>'
             f"<td>{_e(k[0])}#{k[1]}</td><td>{_e(r.get('question', ''))}</td>"
             f"<td>{badges} {dbadges}</td>"
@@ -65,7 +66,11 @@ def render_review(run_dir: Path, baseline: Path | None = None) -> str:
             f"<td>{_e(g['reasons'])}</td><td><pre>{_e(g['answer_text'])}</pre></td>"
             f"<td>{term}</td></tr>"
         )
-    reg_btn = '<button data-m="reg">regressed</button>' if baseline else ""
+    reg_btn = (
+        " ".join(f'<button data-m="{d}">{d}</button>' for d in DIRECTIONS)
+        if baseline
+        else ""
+    )
     return (
         f'<!doctype html><html lang="en"><head><meta charset="utf-8">'
         f"<title>{_e(run_dir.name)}</title><style>{CSS}</style></head><body>"

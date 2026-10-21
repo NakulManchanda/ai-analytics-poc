@@ -35,9 +35,11 @@ def test_prefix_label_not_blocked(tmp_path):
     assert start(tmp_path, "foo-bar") == 2
 
 
-def make_run(tmp_path):
+def make_run(tmp_path, status="complete"):
     start(tmp_path, "r")
-    return (tmp_path / ".current").read_text()
+    rid = (tmp_path / ".current").read_text()
+    (tmp_path / rid / "state.json").write_text(json.dumps({"status": status}))
+    return rid
 
 
 def test_freeze_exact_match_only(tmp_path):
@@ -66,6 +68,24 @@ def test_freeze_exact_match_only(tmp_path):
     assert main(["run-freeze", "--root", str(tmp_path)]) == 2  # immutable
 
 
+def test_freeze_drops_superseded_attempts(tmp_path):
+    rid = make_run(tmp_path)
+    run = tmp_path / rid
+    (run / "results.superseded.jsonl").write_text(
+        json.dumps({"run_id": "run_old"}) + "\n"
+    )
+    d = tmp_path / "_capture" / "default"
+    d.mkdir(parents=True)
+    lines = [
+        {"eval_run_id": rid, "run_id": "run_old", "n": 1},
+        {"eval_run_id": rid, "run_id": "run_new", "n": 2},
+    ]
+    (d / "captures.jsonl").write_text("\n".join(json.dumps(x) for x in lines) + "\n")
+    assert main(["run-freeze", "--root", str(tmp_path)]) == 0
+    snap = run / "captures.snapshot.jsonl"
+    assert [json.loads(x)["n"] for x in snap.read_text().splitlines()] == [2]
+
+
 def test_freeze_zero_matches_fails(tmp_path):
     make_run(tmp_path)
     d = tmp_path / "_capture" / "default"
@@ -89,3 +109,69 @@ def test_grade_one_report_per_conversation(tmp_path, capsys):
 
 def test_missing_current_is_clear_error(tmp_path):
     assert main(["run-grade", "--root", str(tmp_path)]) == 2
+
+
+def test_downstream_commands_refuse_unless_complete(tmp_path, capsys):
+    rid = make_run(tmp_path, "running")
+    base = tmp_path / "b.jsonl"
+    base.write_text("")
+    for argv in (
+        ["run-freeze"],
+        ["run-grade"],
+        ["run-compare", "--baseline-results", str(base)],
+        ["run-review"],
+    ):
+        assert main([*argv, "--root", str(tmp_path)]) == 2, argv
+    assert "not 'complete'" in capsys.readouterr().err
+    (tmp_path / rid / "state.json").unlink()  # no state at all also refuses
+    assert main(["run-grade", "--root", str(tmp_path)]) == 2
+    # override passes the guard (then fails later for a different reason)
+    assert main(["run-grade", "--root", str(tmp_path), "--allow-incomplete"]) == 2
+    assert "captures.snapshot.jsonl missing" in capsys.readouterr().err
+
+
+def test_grade_writes_json_with_special_characters(tmp_path):
+    rid = make_run(tmp_path)
+    run = tmp_path / rid
+    lines = []
+    for n, l in enumerate((CAP / "taxi-session.jsonl").read_text().splitlines()):
+        d = json.loads(l)
+        if (
+            d["record_type"] == "model_call"
+            and d.get("question") == "Which pickup zones have the most trips?"
+        ):
+            d["question"] = Q
+            if d.get("answer"):
+                d["answer"] = A
+        if d["record_type"] == "tool_call" and n == 1:
+            d["arguments"]["note"] = ARG
+        lines.append(json.dumps(d))
+    (run / "captures.snapshot.jsonl").write_text("\n".join(lines) + "\n")
+    shutil.copy(CAP / "matches.json", run / "matches.json")
+    (run / "events").mkdir()
+    assert main(["run-grade", "--root", str(tmp_path)]) == 0
+    (conv,) = (run / "report").glob("conv_*.json")
+    rows = json.loads(conv.read_text())["rows"]
+    first = rows[0]
+    assert first["question"] == Q and first["answer_text"] == A
+    assert ARG in first["actual"] and first["tools"][0]["arguments"]["note"] == ARG
+    assert first["case_id"] == "multi-001" and first["graded"] is True
+    assert set(first) >= {
+        "execution",
+        "tool",
+        "answer",
+        "expected",
+        "reasons",
+        "cost_usd",
+        "model_calls",
+    }
+    # downstream readers use the JSON, so the awkward characters survive
+    from evals.runs import load_run_reports
+
+    turns, _ = load_run_reports(run)
+    assert turns[("multi-001", 0)]["question"] == Q
+
+
+Q = "Zones | `top` <b>5</b> ?"
+A = "JFK | `145240` <i>trips</i>"
+ARG = "x|`y`<z>"

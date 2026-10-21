@@ -11,7 +11,15 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
-from evals.runs import DEFAULT_ROOT, LABEL_RE, TS_RE, RunError, resolve_run
+from evals.runs import (
+    DEFAULT_ROOT,
+    LABEL_RE,
+    TS_RE,
+    RunError,
+    require_complete,
+    resolve_run,
+    write_json_atomic,
+)
 
 DATASET = Path("tooling/evals/datasets/golden/v1/cases.jsonl")
 
@@ -21,6 +29,12 @@ def add_parsers(sub) -> None:
         p.add_argument("--root", type=Path, default=DEFAULT_ROOT)
         if run:
             p.add_argument("--run", help="run_id (default: <root>/.current)")
+            if p.prog.split()[-1] != "run-live":
+                p.add_argument(
+                    "--allow-incomplete",
+                    action="store_true",
+                    help="proceed although state.json is not 'complete'",
+                )
         return p
 
     p = common(sub.add_parser("run-start", help="create a labelled run folder"), False)
@@ -32,10 +46,11 @@ def add_parsers(sub) -> None:
     p.add_argument("--smoke", action="store_true")
     p.add_argument("--web")
     p.add_argument("--timeout", type=int, default=120)
+    p.add_argument("--resume", action="store_true", help="re-run incomplete cases")
     p.add_argument("case_ids", nargs="*")
     p = common(sub.add_parser("run-freeze", help="snapshot this run's captures"))
     p.add_argument("--capture-dir", type=Path)
-    common(sub.add_parser("run-grade", help="per-conversation provisional reports"))
+    p = common(sub.add_parser("run-grade", help="per-conversation provisional reports"))
     p = common(sub.add_parser("run-compare", help="compare with a frozen baseline"))
     p.add_argument("--baseline-results", type=Path, required=True)
     p.add_argument("--focus", help="comma list of case ids; trailing * = prefix")
@@ -51,6 +66,12 @@ def _git_head() -> str | None:
         return r.stdout.strip() or None
     except (OSError, subprocess.CalledProcessError):
         return None
+
+
+def _checked(a):
+    run_id, run_dir = resolve_run(a.root, a.run)
+    require_complete(run_dir, a.allow_incomplete)
+    return run_id, run_dir
 
 
 def run_start(a) -> int:
@@ -90,18 +111,39 @@ def run_live_cmd(a) -> int:
     from evals.live_run import run_live
 
     run_id, run_dir = resolve_run(a.root, a.run)
-    out = run_live(run_dir, run_id, a.web, a.case_ids, a.all, a.smoke, a.timeout)
+    out, incomplete = run_live(
+        run_dir,
+        run_id,
+        a.web,
+        a.case_ids,
+        a.all,
+        a.smoke,
+        a.timeout,
+        resume=a.resume,
+    )
     print(f"wrote {out}")
-    return 0
+    return 3 if incomplete else 0
+
+
+def _superseded_run_ids(run_dir: Path) -> set[str]:
+    f = run_dir / "results.superseded.jsonl"
+    if not f.is_file():
+        return set()
+    return {
+        r["run_id"]
+        for r in map(json.loads, filter(str.strip, f.read_text().splitlines()))
+        if r.get("run_id")
+    }
 
 
 def run_freeze(a) -> int:
-    run_id, run_dir = resolve_run(a.root, a.run)
+    run_id, run_dir = _checked(a)
     snap = run_dir / "captures.snapshot.jsonl"
     if snap.exists():
         raise RunError(f"{snap} already exists; snapshots are immutable")
     cap = a.capture_dir or a.root / "_capture"
-    kept, bad = [], 0
+    superseded = _superseded_run_ids(run_dir)
+    kept, bad, dropped = [], 0, 0
     for f in sorted(cap.glob("*/captures.jsonl")):
         for line in f.read_text().splitlines():
             if not line.strip():
@@ -112,7 +154,12 @@ def run_freeze(a) -> int:
                 bad += 1
                 continue
             if isinstance(rec, dict) and rec.get("eval_run_id") == run_id:
-                kept.append(line)
+                if (
+                    rec.get("run_id") in superseded
+                ):  # abandoned attempt kept in results.superseded.jsonl
+                    dropped += 1
+                else:
+                    kept.append(line)
     if not kept:
         raise RunError(
             f"no capture lines with eval_run_id == {run_id!r} under {cap} ({bad} malformed ignored)"
@@ -124,7 +171,10 @@ def run_freeze(a) -> int:
     (run_dir / "captures.snapshot.sha256").write_text(
         f"{hashlib.sha256(data).hexdigest()}  {snap.name}\n"
     )
-    print(f"froze {len(kept)} capture lines ({bad} malformed ignored) -> {snap}")
+    print(
+        f"froze {len(kept)} capture lines ({bad} malformed ignored, "
+        f"{dropped} from superseded attempts dropped) -> {snap}"
+    )
     return 0
 
 
@@ -132,7 +182,7 @@ def run_grade(a) -> int:
     from evals.dataset import load_cases
     from evals.session import SessionError, render_session_report
 
-    _, run_dir = resolve_run(a.root, a.run)
+    _, run_dir = _checked(a)
     snap = run_dir / "captures.snapshot.jsonl"
     if not snap.is_file():
         raise RunError(f"{snap} missing; run `evals run-freeze` first")
@@ -148,6 +198,7 @@ def run_grade(a) -> int:
     cases = load_cases()
     (run_dir / "report").mkdir(exist_ok=True)
     for conv in convs:
+        rows: list[dict] = []
         try:
             text = render_session_report(
                 snap,
@@ -157,10 +208,14 @@ def run_grade(a) -> int:
                 True,
                 conv,
                 events_dir=run_dir / "events",
+                rows=rows,
             )
         except SessionError as err:
             raise RunError(f"{conv}: {err}") from err
         (run_dir / "report" / f"{conv}.md").write_text(text)
+        write_json_atomic(
+            run_dir / "report" / f"{conv}.json", {"conversation_id": conv, "rows": rows}
+        )
     print(f"wrote {len(convs)} reports")
     return 0
 
@@ -168,7 +223,7 @@ def run_grade(a) -> int:
 def run_compare_cmd(a) -> int:
     from evals.run_compare import DEFAULT_FOCUS, render_compare
 
-    _, run_dir = resolve_run(a.root, a.run)
+    _, run_dir = _checked(a)
     focus = tuple(a.focus.split(",")) if a.focus else DEFAULT_FOCUS
     text = render_compare(run_dir, a.baseline_results, focus)
     (run_dir / "compare.md").write_text(text)
@@ -179,7 +234,7 @@ def run_compare_cmd(a) -> int:
 def run_review_cmd(a) -> int:
     from evals.run_review import render_review
 
-    _, run_dir = resolve_run(a.root, a.run)
+    _, run_dir = _checked(a)
     out = run_dir / "review.html"
     out.write_text(render_review(run_dir, a.baseline_results))
     print(out)
