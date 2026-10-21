@@ -20,7 +20,7 @@ CSS = """body{font:14px system-ui,sans-serif;margin:1rem;color:#222}
 table{border-collapse:collapse;width:100%}td,th{border:1px solid #ccc;padding:4px;vertical-align:top}
 .b{padding:1px 6px;border-radius:8px;font-size:12px;background:#eee}
 .correct{background:#cfc}.incorrect,.failed,.regressed{background:#fbb}.needs_review{background:#fe9}
-.improved{background:#bdf}.unchanged{background:#eee}.missing_evidence{background:#ddd;font-style:italic}.fail{background:#fee}pre{white-space:pre-wrap;margin:0}
+.improved{background:#bdf}.unchanged{background:#eee}.lateral{background:#fdb}.missing_evidence{background:#ddd;font-style:italic}.fail{background:#fee}pre{white-space:pre-wrap;margin:0}
 .note{color:#900;font-size:12px}.hide{display:none}"""
 
 JS = """const rows=[...document.querySelectorAll('tbody tr')];let mode='all';

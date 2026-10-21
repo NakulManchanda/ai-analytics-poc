@@ -125,15 +125,11 @@ def run_live_cmd(a) -> int:
     return 3 if incomplete else 0
 
 
-def _superseded_run_ids(run_dir: Path) -> set[str]:
-    f = run_dir / "results.superseded.jsonl"
-    if not f.is_file():
-        return set()
-    return {
-        r["run_id"]
-        for r in map(json.loads, filter(str.strip, f.read_text().splitlines()))
-        if r.get("run_id")
-    }
+def _jsonl_run_ids(path: Path) -> list[str]:
+    if not path.is_file():
+        return []
+    rows = map(json.loads, filter(str.strip, path.read_text().splitlines()))
+    return [r["run_id"] for r in rows if r.get("run_id")]
 
 
 def run_freeze(a) -> int:
@@ -142,7 +138,8 @@ def run_freeze(a) -> int:
     if snap.exists():
         raise RunError(f"{snap} already exists; snapshots are immutable")
     cap = a.capture_dir or a.root / "_capture"
-    superseded = _superseded_run_ids(run_dir)
+    allowed = set(_jsonl_run_ids(run_dir / "results.jsonl"))
+    orphans = sorted(set(_jsonl_run_ids(run_dir / "submitted.jsonl")) - allowed)
     kept, bad, dropped = [], 0, 0
     for f in sorted(cap.glob("*/captures.jsonl")):
         for line in f.read_text().splitlines():
@@ -154,15 +151,14 @@ def run_freeze(a) -> int:
                 bad += 1
                 continue
             if isinstance(rec, dict) and rec.get("eval_run_id") == run_id:
-                if (
-                    rec.get("run_id") in superseded
-                ):  # abandoned attempt kept in results.superseded.jsonl
-                    dropped += 1
-                else:
+                if rec.get("run_id") in allowed:  # allowlist: checkpointed turns only
                     kept.append(line)
+                else:  # superseded or never checkpointed
+                    dropped += 1
     if not kept:
         raise RunError(
-            f"no capture lines with eval_run_id == {run_id!r} under {cap} ({bad} malformed ignored)"
+            f"no capture lines for {run_id!r} with a recorded run_id under {cap} "
+            f"(dropped {dropped}, malformed {bad})"
         )
     data = ("\n".join(kept) + "\n").encode()
     tmp = snap.with_name(snap.name + ".tmp")
@@ -172,9 +168,10 @@ def run_freeze(a) -> int:
         f"{hashlib.sha256(data).hexdigest()}  {snap.name}\n"
     )
     print(
-        f"froze {len(kept)} capture lines ({bad} malformed ignored, "
-        f"{dropped} from superseded attempts dropped) -> {snap}"
+        f"froze: kept {len(kept)}, dropped {dropped} (not in results.jsonl: superseded or "
+        f"unrecorded), malformed {bad} -> {snap}"
     )
+    print(f"orphan run_ids (submitted, not in results): {', '.join(orphans) or 'none'}")
     return 0
 
 

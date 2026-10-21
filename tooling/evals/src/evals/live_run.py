@@ -172,6 +172,7 @@ def run_live(
     unknown = [c for c in wanted if c not in by_id]
     if unknown or not wanted:
         raise RunError(f"unknown or empty case list: {unknown}")
+    wanted_all = list(wanted)
     eval_run_id = f"{run_id}-smoke" if smoke else run_id
     (out / "events").mkdir(parents=True, exist_ok=True)
 
@@ -194,22 +195,38 @@ def run_live(
         rows = keep
         _write_rows(results_p, rows)
         wanted = todo
-    total = sum(len(by_id[c]["turns"]) for c in wanted) + (len(rows) if resume else 0)
+    scope = wanted_all if smoke else (manifest.get("cases") or list(by_id))
+    expected = [(c, i) for c in scope for i in range(len(by_id[c]["turns"]))]
     started = (old_state or {}).get("started_at") or _now()
-    incomplete: list[dict] = []
+    mine_incomplete: list[dict] = []  # this invocation only (drives the exit code)
 
     def save(status: str) -> None:
+        recorded = {(r["case_id"], r["turn_index"]): r for r in rows}
+        inc = [
+            {"case_id": c, "turn_index": i, "terminal": recorded[(c, i)]["terminal"]}
+            for c, i in expected
+            if (c, i) in recorded and _evidence(recorded[(c, i)]) != "complete"
+        ]
+        missing = [
+            {"case_id": c, "turn_index": i}
+            for c, i in expected
+            if (c, i) not in recorded
+        ]
+        if status != "running":
+            status = "incomplete" if inc or missing else "complete"
         write_json_atomic(
             out / "state.json",
             {
                 "status": status,
                 "started_at": started,
                 "finished_at": None if status == "running" else _now(),
-                "turns_total": total,
-                "turns_recorded": len(rows),
-                "incomplete_turns": incomplete,
+                "turns_total": len(expected),
+                "turns_recorded": len(recorded),
+                "incomplete_turns": inc,
+                "missing_turns": missing,
             },
         )
+        return status
 
     save("running")
     _write_matches(out, rows)
@@ -231,6 +248,16 @@ def run_live(
                 row.update(run_id=None, terminal=f"submit_error: {e!r}")
                 raw = terminal = None
             else:
+                _append_row(
+                    out / "submitted.jsonl",
+                    {
+                        "run_id": run_ref,
+                        "case_id": cid,
+                        "turn_index": idx,
+                        "conversation_id": conv,
+                        "ts": _now(),
+                    },
+                )
                 raw, terminal = read_events(web, run_ref, timeout)
                 (out / "events" / f"{run_ref}.txt").write_text(raw)
                 row.update(conversation_id=conv, run_id=run_ref, terminal=terminal)
@@ -240,7 +267,7 @@ def run_live(
             rows.append(row)
             _write_matches(out, rows)
             if row["evidence"] == "incomplete":
-                incomplete.append(
+                mine_incomplete.append(
                     {"case_id": cid, "turn_index": idx, "terminal": row["terminal"]}
                 )
             save("running")
@@ -250,9 +277,10 @@ def run_live(
             )
             if row["evidence"] == "incomplete":
                 break  # do not feed later turns on a run that never finished
-    save("incomplete" if incomplete else "complete")
+    status = save("final")
     n_ok = sum(_evidence(r) == "complete" for r in rows)
     print(
-        f"summary: {n_ok}/{total} turns with complete evidence, {len(incomplete)} incomplete"
+        f"summary: status={status}; expected {len(expected)} turns, recorded {len(rows)}, "
+        f"{n_ok} with complete evidence; {len(mine_incomplete)} incomplete in this invocation"
     )
-    return out, incomplete
+    return out, mine_incomplete

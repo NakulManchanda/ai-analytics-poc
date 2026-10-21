@@ -93,7 +93,7 @@ def cases(tmp_path):
 def mk(tmp_path):
     run = tmp_path / "r-20200101T000000Z"
     run.mkdir()
-    (run / "manifest.json").write_text("{}")
+    (run / "manifest.json").write_text(json.dumps({"cases": ["c-1"]}))
     return run
 
 
@@ -243,3 +243,80 @@ def test_crash_leaves_running_and_resume_recovers(tmp_path, stub, cases, monkeyp
     _, inc = run_live(run, run.name, stub, ["c-1"], False, False, 5, cases, resume=True)
     assert inc == [] and len(rows_of(run / "results.jsonl")) == 2
     assert len(rows_of(run / "results.superseded.jsonl")) == 1
+
+
+def _cli_run(tmp_path, cases, monkeypatch, n_cases=2):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(lr.run_live, "__defaults__", (cases, False))
+    root = tmp_path / "root"
+    assert (
+        main(
+            ["run-start", "--root", str(root), "--label", "r", "--cases", "c-1", "c-2"]
+        )
+        == 0
+    )
+    rid = (root / ".current").read_text()
+    return root, root / rid
+
+
+def state_of(run):
+    return json.loads((run / "state.json").read_text())
+
+
+def test_subset_run_stays_incomplete_then_completes(tmp_path, stub, cases, monkeypatch):
+    root, run = _cli_run(tmp_path, cases, monkeypatch)
+    base = ["--root", str(root), "--web", stub]
+    assert (
+        main(["run-live", *base, "c-1"]) == 0
+    )  # nothing incomplete in this invocation
+    st = state_of(run)
+    assert st["status"] == "incomplete" and st["turns_total"] == 4
+    assert st["missing_turns"] == [
+        {"case_id": "c-2", "turn_index": 0},
+        {"case_id": "c-2", "turn_index": 1},
+    ]
+    assert main(["run-freeze", "--root", str(root)]) == 2
+    assert main(["run-live", *base, "c-2", "--resume"]) == 0
+    st = state_of(run)
+    assert (
+        st["status"] == "complete"
+        and st["missing_turns"] == []
+        and st["incomplete_turns"] == []
+    )
+
+
+def test_incomplete_case_survives_resume_of_other_case(
+    tmp_path, stub, cases, monkeypatch
+):
+    MODE["drop_post_at"] = 2  # c-1 turn 1 lost
+    root, run = _cli_run(tmp_path, cases, monkeypatch)
+    base = ["--root", str(root), "--web", stub]
+    assert main(["run-live", *base, "c-1"]) == 3
+    MODE["drop_post_at"] = None
+    assert main(["run-live", *base, "c-2", "--resume"]) == 0  # this invocation is clean
+    st = state_of(run)
+    assert st["status"] == "incomplete"
+    assert [(t["case_id"], t["turn_index"]) for t in st["incomplete_turns"]] == [
+        ("c-1", 1)
+    ]
+    assert main(["run-freeze", "--root", str(root)]) == 2
+    assert main(["run-live", *base, "c-1", "--resume"]) == 0
+    assert state_of(run)["status"] == "complete"
+
+
+def test_submit_journal_written_before_events(tmp_path, stub, cases, monkeypatch):
+    run = mk(tmp_path)
+
+    def boom(*a):
+        assert [
+            json.loads(x)["run_id"]
+            for x in (run / "submitted.jsonl").read_text().splitlines()
+        ] == ["run_1"]
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(lr, "read_events", boom)
+    with pytest.raises(KeyboardInterrupt):
+        run_live(run, run.name, stub, ["c-1"], False, False, 5, cases)
+    j = json.loads((run / "submitted.jsonl").read_text().splitlines()[0])
+    assert set(j) >= {"run_id", "case_id", "turn_index", "conversation_id", "ts"}
+    assert not (run / "results.jsonl").exists()  # crashed before checkpoint

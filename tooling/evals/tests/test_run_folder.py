@@ -47,12 +47,13 @@ def test_freeze_exact_match_only(tmp_path):
     d = tmp_path / "_capture" / "default"
     d.mkdir(parents=True)
     lines = [
-        {"eval_run_id": rid, "n": 1},
-        {"eval_run_id": rid + "-smoke", "n": 2},
-        {"eval_run_id": "other", "n": 3},
+        {"eval_run_id": rid, "run_id": "r1", "n": 1},
+        {"eval_run_id": rid + "-smoke", "run_id": "r1", "n": 2},
+        {"eval_run_id": "other", "run_id": "r1", "n": 3},
         {"note": rid},
-        {"eval_run_id": rid, "n": 4},
+        {"eval_run_id": rid, "run_id": "r1", "n": 4},
     ]
+    (tmp_path / rid / "results.jsonl").write_text(json.dumps({"run_id": "r1"}) + "\n")
     (d / "captures.jsonl").write_text(
         "\n".join(json.dumps(x) for x in lines) + "\n{broken " + rid + "\n"
     )
@@ -74,6 +75,7 @@ def test_freeze_drops_superseded_attempts(tmp_path):
     (run / "results.superseded.jsonl").write_text(
         json.dumps({"run_id": "run_old"}) + "\n"
     )
+    (run / "results.jsonl").write_text(json.dumps({"run_id": "run_new"}) + "\n")
     d = tmp_path / "_capture" / "default"
     d.mkdir(parents=True)
     lines = [
@@ -90,7 +92,7 @@ def test_freeze_zero_matches_fails(tmp_path):
     make_run(tmp_path)
     d = tmp_path / "_capture" / "default"
     d.mkdir(parents=True)
-    (d / "captures.jsonl").write_text('{"eval_run_id": "x"}\n')
+    (d / "captures.jsonl").write_text('{"eval_run_id": "x", "run_id": "r1"}\n')
     assert main(["run-freeze", "--root", str(tmp_path)]) == 2
 
 
@@ -175,3 +177,36 @@ def test_grade_writes_json_with_special_characters(tmp_path):
 Q = "Zones | `top` <b>5</b> ?"
 A = "JFK | `145240` <i>trips</i>"
 ARG = "x|`y`<z>"
+
+
+def test_freeze_allowlist_excludes_unrecorded_and_superseded(tmp_path, capsys):
+    rid = make_run(tmp_path)
+    run = tmp_path / rid
+    (run / "results.jsonl").write_text(json.dumps({"run_id": "run_ok"}) + "\n")
+    (run / "results.superseded.jsonl").write_text(
+        json.dumps({"run_id": "run_old"}) + "\n"
+    )
+    (run / "submitted.jsonl").write_text(
+        "".join(
+            json.dumps({"run_id": r}) + "\n"
+            for r in ("run_ok", "run_old", "run_orphan")
+        )
+    )
+    d = tmp_path / "_capture" / "default"
+    d.mkdir(parents=True)
+    recs = [
+        {"eval_run_id": rid, "run_id": "run_ok", "n": 1},
+        {"eval_run_id": rid, "run_id": "run_old", "n": 2},
+        {"eval_run_id": rid, "run_id": "run_orphan", "n": 3},
+        {"eval_run_id": rid, "run_id": "run_unknown", "n": 4},
+        {"eval_run_id": rid, "n": 5},
+        {"eval_run_id": "other", "run_id": "run_ok", "n": 6},
+    ]
+    (d / "captures.jsonl").write_text("\n".join(map(json.dumps, recs)) + "\nnot json\n")
+    capsys.readouterr()
+    assert main(["run-freeze", "--root", str(tmp_path)]) == 0
+    out = capsys.readouterr().out
+    snap = run / "captures.snapshot.jsonl"
+    assert [json.loads(x)["n"] for x in snap.read_text().splitlines()] == [1]
+    assert "kept 1" in out and "dropped 4" in out and "malformed 1" in out
+    assert "run_orphan" in out

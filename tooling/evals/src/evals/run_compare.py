@@ -30,7 +30,7 @@ def _md(s: object) -> str:
 
 
 def changes(new: dict, old: dict) -> dict[tuple[str, int, str], str]:
-    """(case, turn, dim) -> improved|regressed|unchanged|missing_evidence."""
+    """(case, turn, dim) -> improved|regressed|lateral|unchanged|missing_evidence."""
     return {
         (k[0], k[1], dim): direction(
             old.get(k, {}).get(dim, "-"), new.get(k, {}).get(dim, "-")

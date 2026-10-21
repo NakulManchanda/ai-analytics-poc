@@ -54,6 +54,7 @@ def test_direction_four_states():
     assert direction("incorrect", "correct") == "improved"
     assert direction("correct", "incorrect") == "regressed"
     assert direction("correct", "correct") == "unchanged"
+    assert direction("needs_review", "not_applicable") == "lateral"
     for old, new in (
         ("-", "correct"),
         ("correct", "not_graded"),
@@ -117,7 +118,10 @@ def test_compare(tmp_path, capsys):
         == 0
     )
     text = (run / "compare.md").read_text()
-    assert "improved: 2, regressed: 3, unchanged: 2, missing_evidence: 2" in text
+    assert (
+        "improved: 2, regressed: 3, lateral: 0, unchanged: 2, missing_evidence: 2"
+        in text
+    )
     assert "| det-006#1 | tool | correct | incorrect | regressed |" in text
     assert "| det-001#0 | tool | incorrect | correct | improved |" in text
     assert "| uns-001#0 | execution | correct | failed | regressed |" in text

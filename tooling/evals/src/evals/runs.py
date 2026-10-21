@@ -91,7 +91,7 @@ RANK = {
     "failed": -1,
 }
 MISSING = {"-", "", "not_graded", "missing", None}
-DIRECTIONS = ("improved", "regressed", "unchanged", "missing_evidence")
+DIRECTIONS = ("improved", "regressed", "lateral", "unchanged", "missing_evidence")
 
 
 def direction(old: str | None, new: str | None) -> str:
@@ -99,7 +99,8 @@ def direction(old: str | None, new: str | None) -> str:
         return "missing_evidence"
     if old == new:
         return "unchanged"
-    return "improved" if RANK.get(new, 0) > RANK.get(old, 0) else "regressed"
+    a, b = RANK.get(old, 0), RANK.get(new, 0)
+    return "lateral" if a == b else "improved" if b > a else "regressed"
 
 
 def read_state(run_dir: Path) -> dict | None:
