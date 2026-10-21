@@ -221,6 +221,32 @@ def test_incomplete_exit_code_and_resume(tmp_path, stub, cases, monkeypatch, cap
     assert len(json.loads((run / "matches.json").read_text())["matches"]) == 4
 
 
+def test_turns_after_a_failed_turn_still_run_and_are_marked(
+    tmp_path, stub, cases, monkeypatch
+):
+    """run.failed is valid evidence and the case continues; the next turn carries a cascade marker."""
+    MODE["events"] = "failed"
+    root = tmp_path / "root"
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(lr, "CASES", cases)
+    monkeypatch.setattr(lr.run_live, "__defaults__", (cases, False))
+    assert main(["run-start", "--root", str(root), "--label", "r"]) == 0
+    run = root / (root / ".current").read_text()
+    assert main(["run-live", "--root", str(root), "--web", stub, "--all"]) == 0
+    rows = rows_of(run / "results.jsonl")
+    assert len(rows) == 4 and {r["terminal"] for r in rows} == {"run.failed"}
+    assert {r["evidence"] for r in rows} == {"complete"}
+    assert [
+        (r["case_id"], r["turn_index"], r.get("after_failed_turn", False)) for r in rows
+    ] == [
+        ("c-1", 0, False),
+        ("c-1", 1, True),
+        ("c-2", 0, False),
+        ("c-2", 1, True),
+    ]
+    assert json.loads((run / "state.json").read_text())["status"] == "complete"
+
+
 def test_resume_without_case_list_uses_manifest_or_dataset(
     tmp_path, stub, cases, monkeypatch
 ):

@@ -234,6 +234,7 @@ def run_live(
     _write_matches(out, rows)
     for cid in wanted:
         conv = None
+        prev_failed = False
         for idx, turn in enumerate(by_id[cid]["turns"]):
             t0 = time.monotonic()
             row = {
@@ -264,6 +265,11 @@ def run_live(
                 (out / "events" / f"{run_ref}.txt").write_text(raw)
                 row.update(conversation_id=conv, run_id=run_ref, terminal=terminal)
             row["evidence"] = "complete" if terminal in TERMINAL else "incomplete"
+            # Turns after run.failed/run.cancelled still run on purpose (comparable turn counts, the
+            # follow-up is its own measurement); the marker lets analysis separate cascades.
+            if prev_failed:
+                row["after_failed_turn"] = True
+            prev_failed = terminal in ("run.failed", "run.cancelled")
             row["wall_s"] = round(time.monotonic() - t0, 2)
             _append_row(results_p, row)
             rows.append(row)

@@ -17,10 +17,11 @@ Baseline 2 ran from untracked scratch scripts: files were spread across two fold
 - `tooling/evals` suite: 101 passed, 2 skipped; black and ruff clean.
 - `run-compare`/`run-review` on the real Baseline 2 run reproduce the hand-run numbers; `review.html` has no external URLs.
 - Make flow on a throwaway root: start, refused reuse, spend guard, failing freeze keeps its exit status, logs land in the run folder. This caught a real bug (targets did not pass `--root`), fixed before the PR.
-- Not yet run against the live stack: `eval-stack-up`, `run-live`, `eval-all`.
+- Live, from an isolated compose project of the worktree (fresh LiteLLM DB): smoke, two full end-to-end runs (43/43 recorded, 96 capture lines kept, 37 reports, compare, cost, `review.html`); the same 7 `run.failed` turns as the manual Baseline 2, graded as valid evidence; counts match Baseline 2 (tool correct 20, answer correct 12); LiteLLM $0.005428 vs capture $0.005360.
+- Not demonstrated live: Ctrl-C interruption and `--resume` (covered by tests only; the live attempt completed before it could be interrupted and exposed a `--resume` default bug, fixed).
 
 ## PR / merge state
-Draft PR #201.
+PR #201 (reviewed three times; findings: incomplete-evidence exit, checkpoints/resume, SSE frames, structured reports, completeness over the full manifest, submit journal + allowlist, `lateral`, multi-turn continuation after a failed turn documented and marked).
 
 ## Lessons
 - `make -n` still executes recipe lines that contain `$(MAKE)`; keep such lines free of side effects.
