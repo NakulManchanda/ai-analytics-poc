@@ -19,7 +19,7 @@ Baseline 2 ended 7 of 43 turns in `run.failed`. multi-004#1 failed 8 of 8 times 
 - Not run: any live Bedrock validation (targeted multi-004#1 replay and a full eval-all are pending the owner's approval).
 
 ## PR / merge state
-Draft PR (see #186); `Refs #186`, not closing it.
+PR #202, merged 2026-10-22 (CI green, reviewed; non-blocking follow-ups logged on #186 and #187: monthly reservation reconciliation, and a `usage_complete` flag so a run-level cost of 0 does not look free). `Refs #186`; the issue stays open.
 
 ## Lessons
 - Do not generalise a cause from one log line: read the structured `failure_code` per failed run before writing it down.
