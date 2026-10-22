@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import collections
 import json
 import re
 from pathlib import Path
@@ -126,3 +127,49 @@ def require_complete(run_dir: Path, allow_incomplete: bool) -> None:
             f"{run_dir.name} state is {status!r}, not 'complete' (run-live must finish "
             "with complete evidence); pass --allow-incomplete to override"
         )
+
+
+def event_failure_code(events_file: Path) -> str:
+    """``failure_code`` of the ``run.failed`` frame in a saved SSE capture, else ``unknown``."""
+    try:
+        lines = events_file.read_text().splitlines()
+    except OSError:
+        return "unknown"
+    for i, line in enumerate(lines):
+        if line.strip() != "event: run.failed":
+            continue
+        for data in lines[i + 1 :]:
+            if not data.strip():
+                break
+            if data.startswith("data:"):
+                try:
+                    obj = json.loads(data[5:])
+                except ValueError:
+                    break
+                payload = obj.get("payload", obj) if isinstance(obj, dict) else {}
+                code = (
+                    payload.get("failure_code") if isinstance(payload, dict) else None
+                )
+                return code if isinstance(code, str) and code else "unknown"
+    return "unknown"
+
+
+def failure_histogram(run_dir: Path, results: list[dict]) -> collections.Counter:
+    """Count ``failure_code`` over results rows whose terminal is ``run.failed``."""
+    hist: collections.Counter = collections.Counter()
+    for r in results:
+        if r.get("terminal") != "run.failed":
+            continue
+        run_id = r.get("run_id")
+        hist[
+            (
+                event_failure_code(run_dir / "events" / f"{run_id}.txt")
+                if run_id
+                else "unknown"
+            )
+        ] += 1
+    return hist
+
+
+def format_histogram(hist: collections.Counter) -> str:
+    return ", ".join(f"{k}: {v}" for k, v in sorted(hist.items())) or "none"

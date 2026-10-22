@@ -171,8 +171,9 @@ class LoopResult:
 class LLMCall:
     llm_call_id: str
     model_id: str
-    input_tokens: int
-    output_tokens: int
+    # None only for a failed attempt whose usage the provider never reported.
+    input_tokens: int | None
+    output_tokens: int | None
     latency_ms: int
     finish_reason: str | None = None
     configured_max_tokens: int | None = None
@@ -182,7 +183,7 @@ class LLMCall:
     reasoning_tokens_unavailable_reason: str | None = None
     visible_answer_tokens: int | None = None
     visible_answer_tokens_unavailable_reason: str | None = None
-    cost_usd: float = 0.0
+    cost_usd: float | None = 0.0
     cost_source: str = COST_SOURCE_FALLBACK
     # What the per-run dollar budget was charged (None: unresolvable, run failed closed).
     # Equals cost_usd unless the cost was unknown or usage incomplete.
@@ -210,6 +211,8 @@ class LLMCall:
     prompt_template_id: str | None = None
     prompt_template_version: str | None = None
     prompt_sha256: str | None = None
+    # HTTP status of a failed provider call (a safe fact; never the response body).
+    provider_status: int | None = None
 
     def to_metadata(self) -> dict[str, Any]:
         return {
@@ -245,6 +248,11 @@ class LLMCall:
             "prompt_template_id": self.prompt_template_id,
             "prompt_template_version": self.prompt_template_version,
             "prompt_sha256": self.prompt_sha256,
+            **(
+                {"provider_status": self.provider_status}
+                if self.provider_status is not None
+                else {}
+            ),
         }
 
 
@@ -263,6 +271,16 @@ class _TracedCalls(list[LLMCall]):
                 "ai.prompt.template_id": call.prompt_template_id or "",
                 "ai.prompt.template_version": call.prompt_template_version or "",
                 "ai.prompt.sha256": call.prompt_sha256 or "",
+                **(
+                    {"ai.llm.error_category": call.error_code}
+                    if call.error_code
+                    else {}
+                ),
+                **(
+                    {"ai.llm.provider_status": call.provider_status}
+                    if call.provider_status is not None
+                    else {}
+                ),
             },
         )
 
@@ -306,12 +324,35 @@ class RunSubmission:
 class OrchestrationError(ValueError):
     """A controlled application-boundary failure from the orchestration loop."""
 
-    def __init__(self, code: str, retryable: bool, llm_call_id: str, message: str):
+    def __init__(
+        self,
+        code: str,
+        retryable: bool,
+        llm_call_id: str,
+        message: str,
+        *,
+        details: dict[str, Any] | None = None,
+    ):
         super().__init__(message)
+        # Safe structured facts for run.failed (e.g. provider_error); never raw bodies.
+        self.details = details
         self.code = code
         self.retryable = retryable
         self.llm_call_id = llm_call_id
         self.message = message
+
+
+def _provider_error_details(err: LLMProviderError) -> dict[str, Any] | None:
+    """Safe structured provider failure (category + ids only), or None when the error
+    carries no provider facts."""
+    if err.provider_status is None:
+        return None
+    return {
+        "category": err.code,
+        "provider_status": err.provider_status,
+        "provider_call_id": err.provider_call_id,
+        "attempts": err.attempts,
+    }
 
 
 def _is_str_list(value: object) -> bool:
@@ -1085,6 +1126,38 @@ class OrchestrationLoop:
                 cost_unresolvable=cost.budget_cost_usd is None,
             )
 
+        def record_unknown_usage_failure(
+            err: LLMProviderError, failed_call_id: str, latency_ms: int
+        ) -> None:
+            """Record a failed provider attempt whose usage is unknown (e.g.
+            malformed_tool_use). Usage and informational cost stay null, never 0, but
+            the per-run budget is charged the existing conservative bound (unknown is
+            not free). The run is already failing, so a budget overrun here must not
+            mask the provider failure code."""
+            assert err.model_id is not None
+            fail_cost = call_cost(0, 0, model_id=err.model_id)
+            llm_calls.append(
+                LLMCall(
+                    llm_call_id=failed_call_id,
+                    model_id=err.model_id,
+                    input_tokens=None,
+                    output_tokens=None,
+                    latency_ms=latency_ms,
+                    **{**llm_call_cost_fields(fail_cost), "cost_usd": None},
+                    error_code=err.code,
+                    tool_source="model",
+                    model_alias=err.model_id,
+                    role="planner",
+                    usage_known=False,
+                    provider_status=err.provider_status,
+                    **_prompt_fields(err.prompt_attribution),
+                )
+            )
+            try:
+                record_call(0, 0, fail_cost)
+            except BudgetExceededError:
+                pass  # charge is already applied; keep the provider failure code
+
         def current_model_id() -> str:
             if llm_calls:
                 return llm_calls[-1].model_id
@@ -1192,7 +1265,13 @@ class OrchestrationLoop:
                             "llm_configuration_error", False, llm_call_id, str(err)
                         ) from err
                     except LLMProviderError as err:
-                        if err.model_id is not None:
+                        if err.model_id is not None and err.input_tokens is None:
+                            record_unknown_usage_failure(
+                                err,
+                                llm_call_id,
+                                int((self._monotonic() - call_start) * 1000),
+                            )
+                        elif err.model_id is not None:
                             # The provider returned a response (e.g. no_tool_call,
                             # invalid_tool_call) before failing our validation, so
                             # real telemetry exists -- record it as a failed call
@@ -1217,7 +1296,11 @@ class OrchestrationLoop:
                                 )
                             )
                         raise OrchestrationError(
-                            err.code, err.retryable, llm_call_id, str(err)
+                            err.code,
+                            err.retryable,
+                            llm_call_id,
+                            str(err),
+                            details=_provider_error_details(err),
                         ) from err
                     call_latency_ms = int((self._monotonic() - call_start) * 1000)
                     proposal_latency_ms = call_latency_ms
@@ -1481,8 +1564,18 @@ class OrchestrationLoop:
                                 **conversation_kwargs(),
                             )
                         except LLMProviderError as err:
+                            if err.model_id is not None and err.input_tokens is None:
+                                record_unknown_usage_failure(
+                                    err,
+                                    llm_call_id,
+                                    int((self._monotonic() - call_start) * 1000),
+                                )
                             raise OrchestrationError(
-                                err.code, err.retryable, llm_call_id, str(err)
+                                err.code,
+                                err.retryable,
+                                llm_call_id,
+                                str(err),
+                                details=_provider_error_details(err),
                             ) from err
                         proposal_latency_ms += int(
                             (self._monotonic() - call_start) * 1000
@@ -2422,6 +2515,7 @@ class OrchestrationLoop:
                 telemetry=run_telemetry,
             )
         except OrchestrationError as err:
+            trace.get_current_span().set_attribute("ai.error.category", err.code)
             total_latency_ms = int((self._monotonic() - start_mono) * 1000)
             run_telemetry = telemetry(total_latency_ms)
             failed_run = Run(
@@ -2441,6 +2535,7 @@ class OrchestrationLoop:
                     "error": str(err),
                     "retryable": err.retryable,
                     "telemetry": run_telemetry,
+                    **({"provider_error": err.details} if err.details else {}),
                     **eval_meta,
                     "cost_source": current_cost_source(),
                     "llm_calls": [call.to_metadata() for call in llm_calls],
@@ -2458,6 +2553,7 @@ class OrchestrationLoop:
                     telemetry=run_telemetry,
                     retryable=err.retryable,
                     error=err.message or str(err),
+                    provider_error=err.details or None,
                 ),
                 llm_call_id=err.llm_call_id or None,
             )
