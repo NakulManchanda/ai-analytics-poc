@@ -213,6 +213,10 @@ class LLMCall:
     prompt_sha256: str | None = None
     # HTTP status of a failed provider call (a safe fact; never the response body).
     provider_status: int | None = None
+    # Safe structural facts when a decline rested on hidden reasoning (#186); no text.
+    reasoning_present: bool | None = None
+    reasoning_chars: int | None = None
+    decline_basis: str | None = None
 
     def to_metadata(self) -> dict[str, Any]:
         return {
@@ -251,6 +255,15 @@ class LLMCall:
             **(
                 {"provider_status": self.provider_status}
                 if self.provider_status is not None
+                else {}
+            ),
+            **(
+                {
+                    "reasoning_present": self.reasoning_present,
+                    "reasoning_chars": self.reasoning_chars,
+                    "decline_basis": self.decline_basis,
+                }
+                if self.decline_basis is not None
                 else {}
             ),
         }
@@ -1318,6 +1331,14 @@ class OrchestrationLoop:
                             latency_ms=proposal.latency_ms,
                             finish_reason=proposal.finish_reason,
                             configured_max_tokens=proposal.configured_max_tokens,
+                            reasoning_tokens=getattr(
+                                proposal, "reasoning_tokens", None
+                            ),
+                            reasoning_present=getattr(
+                                proposal, "reasoning_present", None
+                            ),
+                            reasoning_chars=getattr(proposal, "reasoning_chars", None),
+                            decline_basis=getattr(proposal, "decline_basis", None),
                             **llm_call_cost_fields(cost),
                             tool_source="model",
                             **_policy_fields(proposal),
