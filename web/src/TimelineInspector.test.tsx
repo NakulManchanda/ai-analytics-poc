@@ -2,7 +2,7 @@ import { cleanup, render, screen } from "@testing-library/react";
 import { act } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { TimelineInspector } from "./TimelineInspector";
+import { KNOWN_EVENT_TYPES, TimelineInspector } from "./TimelineInspector";
 import { RunEvent, RunTelemetry, WorkingContextData } from "./types";
 
 class MockEventSource {
@@ -266,5 +266,57 @@ describe("TimelineInspector SSE lifecycle", () => {
 
     expect(screen.getByText(/Run completed successfully/)).toBeVisible();
     expect(screen.getByText("run.declined")).toBeVisible();
+  });
+
+  it("renders answer.completed and job.started as non-terminal events", async () => {
+    render(<TimelineInspector runId="run_same" />);
+
+    const stream = MockEventSource.instances[0];
+    await act(async () => {
+      stream.emit("run.received", runReceived);
+      stream.emit("job.started", {
+        event_id: "evt_job_started",
+        event_type: "job.started",
+        run_id: "run_same",
+        conversation_id: "conversation_1",
+        sequence: 2,
+        timestamp: "2026-08-25T00:00:01Z",
+        payload: { job_id: "run_same", status: "RUNNING", job_type: "create_full_report" },
+      });
+      stream.emit("answer.completed", {
+        event_id: "evt_answer",
+        event_type: "answer.completed",
+        run_id: "run_same",
+        conversation_id: "conversation_1",
+        sequence: 3,
+        timestamp: "2026-08-25T00:00:02Z",
+        payload: { answer: "Hello" },
+      });
+    });
+
+    expect(screen.getByText("job.started")).toBeVisible();
+    expect(screen.getByText("Job started: create_full_report (RUNNING)")).toBeVisible();
+    expect(screen.getByText("answer.completed")).toBeVisible();
+    expect(screen.getByText("Answer completed · 5 chars")).toBeVisible();
+    expect(screen.queryByText(/Run completed successfully/)).toBeNull();
+
+    await act(async () => {
+      stream.emit("run.completed", runCompleted);
+    });
+
+    expect(screen.getByText(/Run completed successfully/)).toBeVisible();
+  });
+
+  it("KNOWN_EVENT_TYPES keeps every backend timeline event type", () => {
+    const backendTimelineEvents = [
+      "run.received", "run.cancel_requested", "run.cancelled", "context.loading",
+      "llm.started", "llm.completed", "tool.requested", "tool.started",
+      "tool.completed", "tool.failed", "context.reduced", "run.completed",
+      "run.budget_exceeded", "run.failed", "run.declined", "answer.completed",
+      "job.started", "job.completed", "job.failed",
+    ];
+    for (const type of backendTimelineEvents) {
+      expect(KNOWN_EVENT_TYPES).toContain(type);
+    }
   });
 });

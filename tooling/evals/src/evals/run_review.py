@@ -10,6 +10,7 @@ from evals.runs import (
     DIMS,
     DIRECTIONS,
     TERMINAL_OK,
+    declined_histogram,
     failure_histogram,
     format_histogram,
     load_baseline,
@@ -84,6 +85,8 @@ def render_review(run_dir: Path, baseline: Path | None = None) -> str:
         f"<h1>{_e(run_dir.name)}</h1>"
         f'<p id="failure-codes">Failure codes: '
         f"{_e(format_histogram(failure_histogram(run_dir, results)))}</p>"
+        f'<p id="declined-outcomes">Declined outcomes: '
+        f"{_e(format_histogram(declined_histogram(run_dir, results)))}</p>"
         '<p><button data-m="all">all</button> <button data-m="bad">failed / not correct</button> '
         f'{reg_btn} <input id="q" placeholder="search"> <span id="shown"></span></p>'
         "<table><thead><tr><th>turn</th><th>question</th><th>outcome</th><th>tools (actual)</th>"

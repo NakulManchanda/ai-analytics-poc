@@ -129,14 +129,17 @@ def require_complete(run_dir: Path, allow_incomplete: bool) -> None:
         )
 
 
-def event_failure_code(events_file: Path) -> str:
-    """``failure_code`` of the ``run.failed`` frame in a saved SSE capture, else ``unknown``."""
+def _frame_field(events_file: Path, event: str, field: str) -> str | None:
+    """``field`` of the first ``event`` frame in a saved SSE capture.
+
+    ``None`` when there is no such frame; ``unknown`` when the frame has no usable field.
+    """
     try:
         lines = events_file.read_text().splitlines()
     except OSError:
-        return "unknown"
+        return None
     for i, line in enumerate(lines):
-        if line.strip() != "event: run.failed":
+        if line.strip() != f"event: {event}":
             continue
         for data in lines[i + 1 :]:
             if not data.strip():
@@ -147,11 +150,19 @@ def event_failure_code(events_file: Path) -> str:
                 except ValueError:
                     break
                 payload = obj.get("payload", obj) if isinstance(obj, dict) else {}
-                code = (
-                    payload.get("failure_code") if isinstance(payload, dict) else None
-                )
-                return code if isinstance(code, str) and code else "unknown"
-    return "unknown"
+                value = payload.get(field) if isinstance(payload, dict) else None
+                return value if isinstance(value, str) and value else "unknown"
+    return None
+
+
+def event_failure_code(events_file: Path) -> str:
+    """``failure_code`` of the ``run.failed`` frame in a saved SSE capture, else ``unknown``."""
+    return _frame_field(events_file, "run.failed", "failure_code") or "unknown"
+
+
+def event_declined_outcome(events_file: Path) -> str | None:
+    """``outcome`` of the ``run.declined`` frame in a saved capture; ``None`` if no such frame."""
+    return _frame_field(events_file, "run.declined", "outcome")
 
 
 def failure_histogram(run_dir: Path, results: list[dict]) -> collections.Counter:
@@ -168,6 +179,19 @@ def failure_histogram(run_dir: Path, results: list[dict]) -> collections.Counter
                 else "unknown"
             )
         ] += 1
+    return hist
+
+
+def declined_histogram(run_dir: Path, results: list[dict]) -> collections.Counter:
+    """Count ``outcome`` over results rows whose capture has a ``run.declined`` frame."""
+    hist: collections.Counter = collections.Counter()
+    for r in results:
+        run_id = r.get("run_id")
+        if not run_id:
+            continue
+        outcome = event_declined_outcome(run_dir / "events" / f"{run_id}.txt")
+        if outcome is not None:
+            hist[outcome] += 1
     return hist
 
 
