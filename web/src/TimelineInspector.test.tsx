@@ -238,4 +238,33 @@ describe("TimelineInspector SSE lifecycle", () => {
       }),
     );
   });
+
+  it("renders run.declined as a non-terminal event and still completes on run.completed", async () => {
+    render(<TimelineInspector runId="run_same" />);
+
+    const stream = MockEventSource.instances[0];
+    await act(async () => {
+      stream.emit("run.received", runReceived);
+      stream.emit("run.declined", {
+        event_id: "evt_declined",
+        event_type: "run.declined",
+        run_id: "run_same",
+        conversation_id: "conversation_1",
+        sequence: 2,
+        timestamp: "2026-08-25T00:00:01Z",
+        payload: { outcome: "no_visible_output", reason: null, tool_source: "model" },
+      });
+    });
+
+    expect(screen.getByText("run.declined")).toBeVisible();
+    expect(screen.getByText("Run declined: no_visible_output")).toBeVisible();
+    expect(screen.queryByText(/Run completed successfully/)).toBeNull();
+
+    await act(async () => {
+      stream.emit("run.completed", runCompleted);
+    });
+
+    expect(screen.getByText(/Run completed successfully/)).toBeVisible();
+    expect(screen.getByText("run.declined")).toBeVisible();
+  });
 });
