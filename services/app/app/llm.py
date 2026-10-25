@@ -263,7 +263,7 @@ class ToolProposalResult:
     reasoning_tokens: int | None = None
     reasoning_present: bool | None = None
     reasoning_chars: int | None = None
-    decline_basis: str | None = None  # "content" | "reasoning"
+    output_basis: str | None = None  # "content" | "reasoning_only" | "reasoning_length"
 
 
 def _reasoning_facts(message: dict[str, Any], usage: dict[str, Any]) -> dict[str, Any]:
@@ -1643,17 +1643,22 @@ class ServeLLMClient:
             outcome = classify_non_tool_outcome(content_text, str(user_msg))
             reasoning = _reasoning_facts(message, usage)
             if outcome == "no_tool" and not content_text and reasoning["present"]:
-                # Blank content but the model reasoned: its decline lives in hidden
-                # reasoning. Classify structurally; the text is never read or kept.
+                # Blank content but the model reasoned. That is NOT necessarily a
+                # decline (data may exist), so it is a distinct no_visible_output
+                # outcome. finish_reason "length" means generation was exhausted.
                 return ToolProposalResult(
                     name="",
                     arguments=None,
-                    outcome="no_tool",
+                    outcome="no_visible_output",
                     decline_reason=None,
                     reasoning_tokens=reasoning["tokens"],
                     reasoning_present=True,
                     reasoning_chars=reasoning["chars"],
-                    decline_basis="reasoning",
+                    output_basis=(
+                        "reasoning_length"
+                        if finish_reason == "length"
+                        else "reasoning_only"
+                    ),
                     model_id=served_model_id,
                     input_tokens=input_tokens,
                     output_tokens=output_tokens,
@@ -1684,7 +1689,7 @@ class ServeLLMClient:
                 arguments=None,
                 outcome=outcome,
                 decline_reason=content_text,
-                decline_basis="content",
+                output_basis="content",
                 model_id=served_model_id,
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,

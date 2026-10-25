@@ -213,10 +213,11 @@ class LLMCall:
     prompt_sha256: str | None = None
     # HTTP status of a failed provider call (a safe fact; never the response body).
     provider_status: int | None = None
-    # Safe structural facts when a decline rested on hidden reasoning (#186); no text.
+    # Safe structural facts when output_basis is set (#186); no text.
     reasoning_present: bool | None = None
     reasoning_chars: int | None = None
-    decline_basis: str | None = None
+    output_basis: str | None = None
+    planner_outcome: str | None = None
 
     def to_metadata(self) -> dict[str, Any]:
         return {
@@ -261,9 +262,10 @@ class LLMCall:
                 {
                     "reasoning_present": self.reasoning_present,
                     "reasoning_chars": self.reasoning_chars,
-                    "decline_basis": self.decline_basis,
+                    "output_basis": self.output_basis,
+                    "outcome": self.planner_outcome,
                 }
-                if self.decline_basis is not None
+                if self.output_basis is not None
                 else {}
             ),
         }
@@ -1338,7 +1340,8 @@ class OrchestrationLoop:
                                 proposal, "reasoning_present", None
                             ),
                             reasoning_chars=getattr(proposal, "reasoning_chars", None),
-                            decline_basis=getattr(proposal, "decline_basis", None),
+                            output_basis=getattr(proposal, "output_basis", None),
+                            planner_outcome=proposal.outcome,
                             **llm_call_cost_fields(cost),
                             tool_source="model",
                             **_policy_fields(proposal),
@@ -1392,6 +1395,7 @@ class OrchestrationLoop:
                         "unsupported",
                         "clarification_required",
                         "no_tool",
+                        "no_visible_output",
                     ):
                         outcome = proposal.outcome
                         active_rejected_outcome = outcome
@@ -1409,6 +1413,12 @@ class OrchestrationLoop:
                                 "I could not determine which analysis answers that "
                                 "question. Please rephrase it in terms of the taxi "
                                 "dataset."
+                            )
+                        elif outcome == "no_visible_output":
+                            # Not a decline: the model produced no visible output.
+                            decline_answer = (
+                                "The model did not return a usable response for "
+                                "that question. Please try again or rephrase it."
                             )
                         else:
                             decline_answer = proposal.decline_reason or (

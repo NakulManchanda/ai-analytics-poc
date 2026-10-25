@@ -221,17 +221,18 @@ class CaptureRecorder:
                     "answer_sha256": sha256_hex(answer) if is_answer else None,
                     "question": self.cap(question) if include else None,
                     "answer": self.cap(answer) if include and is_answer else None,
-                    # Safe reasoning facts (#186), only when a decline rested on them.
+                    # Safe reasoning facts (#186), only when output_basis is set.
                     **(
                         {
                             k: call.get(k)
                             for k in (
                                 "reasoning_present",
                                 "reasoning_chars",
-                                "decline_basis",
+                                "output_basis",
+                                "outcome",
                             )
                         }
-                        if call.get("decline_basis")
+                        if call.get("output_basis")
                         else {}
                     ),
                 }
