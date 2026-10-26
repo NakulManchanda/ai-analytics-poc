@@ -37,7 +37,7 @@ Target questions under F: the weather question and both delete phrasings decline
 - Not run: the live eval-all against Bedrock is pending.
 
 ## PR / merge state
-Uncommitted at the time of writing; PR not yet opened.
+Draft PR open; not mergeable until the classifier interaction above is resolved.
 
 ## Lessons
 - Instruction text written in the imperative ("call no tool") can be echoed back to users on unrelated questions; third-person wording plus a positive anchor avoided it.
