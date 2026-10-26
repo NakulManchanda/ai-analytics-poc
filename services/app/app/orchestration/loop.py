@@ -347,14 +347,22 @@ class OrchestrationError(ValueError):
         message: str,
         *,
         details: dict[str, Any] | None = None,
+        tool_error: dict[str, Any] | None = None,
     ):
         super().__init__(message)
         # Safe structured facts for run.failed (e.g. provider_error); never raw bodies.
         self.details = details
+        # Closed MCP failure reason plus tool name for run.failed; never row data.
+        self.tool_error = tool_error
         self.code = code
         self.retryable = retryable
         self.llm_call_id = llm_call_id
         self.message = message
+
+
+def _tool_error(err: MCPToolError, tool_name: str | None = None) -> dict[str, Any]:
+    """Safe run.failed facts for an MCP failure: closed reason and tool name only."""
+    return {"reason": err.reason, **({"tool_name": tool_name} if tool_name else {})}
 
 
 def _provider_error_details(err: LLMProviderError) -> dict[str, Any] | None:
@@ -626,7 +634,11 @@ class OrchestrationLoop:
             return self._mcp_client
         if self._mcp_client_factory is not None:
             return self._mcp_client_factory()
-        raise MCPToolError("No MCP client or factory configured", retryable=False)
+        raise MCPToolError(
+            retryable=False,
+            message="No MCP client or factory configured",
+            reason="not_configured",
+        )
 
     def prepare_run(
         self,
@@ -1206,7 +1218,11 @@ class OrchestrationLoop:
                 ) from err
             except MCPToolError as err:
                 raise OrchestrationError(
-                    "mcp_tool_error", err.retryable, proposal_call_id, str(err)
+                    "mcp_tool_error",
+                    err.retryable,
+                    proposal_call_id,
+                    str(err),
+                    tool_error=_tool_error(err),
                 ) from err
 
             # Main bounded orchestration loop
@@ -1223,7 +1239,11 @@ class OrchestrationLoop:
                     schema = sanitize_dataset_schema(raw_schema)
                 except MCPToolError as err:
                     raise OrchestrationError(
-                        "mcp_tool_error", err.retryable, proposal_call_id, str(err)
+                        "mcp_tool_error",
+                        err.retryable,
+                        proposal_call_id,
+                        str(err),
+                        tool_error=_tool_error(err, "get_dataset_schema"),
                     ) from err
 
                 # Step B: catalogue lookup (D19), else LLM Propose Taxi Query
@@ -1759,6 +1779,7 @@ class OrchestrationLoop:
                         raise MCPToolError(
                             retryable=False,
                             message=f"Unknown governed tool '{tool_name}'",
+                            reason="unknown_tool",
                         )
                 except MCPToolError as err:
                     fail_duration_ms = int((self._monotonic() - tool_start) * 1000)
@@ -1769,6 +1790,7 @@ class OrchestrationLoop:
                             "tool_call_id": tool_call_id,
                             "tool_name": tool_name,
                             "error": error_msg,
+                            "reason": err.reason,
                             "duration_ms": fail_duration_ms,
                         },
                         tool_call_id=tool_call_id,
@@ -1784,12 +1806,17 @@ class OrchestrationLoop:
                         input_summary=json.dumps(tool_arguments, sort_keys=True),
                         output_summary=f"error: {error_msg}",
                         duration_ms=fail_duration_ms,
+                        metadata={"reason": err.reason},
                     )
                     self._repo.add_run_step(failed_tool_step)
                     steps.append(failed_tool_step)
                     step_seq += 1
                     raise OrchestrationError(
-                        "mcp_tool_error", err.retryable, llm_call_id, error_msg
+                        "mcp_tool_error",
+                        err.retryable,
+                        llm_call_id,
+                        error_msg,
+                        tool_error=_tool_error(err, tool_name),
                     ) from err
                 tool_duration_ms = int((self._monotonic() - tool_start) * 1000)
                 tool_latency_ms = tool_duration_ms
@@ -2572,6 +2599,7 @@ class OrchestrationLoop:
                     "retryable": err.retryable,
                     "telemetry": run_telemetry,
                     **({"provider_error": err.details} if err.details else {}),
+                    **({"tool_error": err.tool_error} if err.tool_error else {}),
                     **eval_meta,
                     "cost_source": current_cost_source(),
                     "llm_calls": [call.to_metadata() for call in llm_calls],
@@ -2590,6 +2618,7 @@ class OrchestrationLoop:
                     retryable=err.retryable,
                     error=err.message or str(err),
                     provider_error=err.details or None,
+                    tool_error=err.tool_error or None,
                 ),
                 llm_call_id=err.llm_call_id or None,
             )
