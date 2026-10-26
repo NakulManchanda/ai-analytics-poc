@@ -37,8 +37,9 @@ services:
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
       interval: 1s
-      timeout: 1s
-      retries: 10
+      timeout: 3s
+      retries: 30
+      start_period: 30s
 
   worker:
     build: ./services/app
