@@ -259,6 +259,27 @@ class ToolProposalResult:
     prompt_attribution: PromptAttribution | None = None
     outcome: str = "tool_call"
     decline_reason: str | None = None
+    # Safe structural facts about hidden reasoning (#186): never its text.
+    reasoning_tokens: int | None = None
+    reasoning_present: bool | None = None
+    reasoning_chars: int | None = None
+    output_basis: str | None = None  # "content" | "reasoning_only" | "reasoning_length"
+
+
+def _reasoning_facts(message: dict[str, Any], usage: dict[str, Any]) -> dict[str, Any]:
+    """Structural facts about provider reasoning. Only presence, a count and a length
+    are returned; the reasoning text itself is never read into any result."""
+    chars = 0
+    rc = message.get("reasoning_content")
+    if isinstance(rc, str):
+        chars = len(rc)
+    blocks = message.get("thinking_blocks")
+    has_blocks = isinstance(blocks, list) and len(blocks) > 0
+    details = usage.get("completion_tokens_details")
+    tokens = details.get("reasoning_tokens") if isinstance(details, dict) else None
+    tokens = tokens if isinstance(tokens, int) else None
+    present = chars > 0 or has_blocks or bool(tokens and tokens > 0)
+    return {"present": present, "tokens": tokens, "chars": chars}
 
 
 def _attributed(result: Any, attribution: PromptAttribution | None) -> Any:
@@ -1620,6 +1641,39 @@ class ServeLLMClient:
             content_text = (message.get("content", "") or "").strip()
             user_msg = payload.get("messages", [{}])[-1].get("content", "")
             outcome = classify_non_tool_outcome(content_text, str(user_msg))
+            reasoning = _reasoning_facts(message, usage)
+            if outcome == "no_tool" and not content_text and reasoning["present"]:
+                # Blank content but the model reasoned. That is NOT necessarily a
+                # decline (data may exist), so it is a distinct no_visible_output
+                # outcome. finish_reason "length" means generation was exhausted.
+                return ToolProposalResult(
+                    name="",
+                    arguments=None,
+                    outcome="no_visible_output",
+                    decline_reason=None,
+                    reasoning_tokens=reasoning["tokens"],
+                    reasoning_present=True,
+                    reasoning_chars=reasoning["chars"],
+                    output_basis=(
+                        "reasoning_length"
+                        if finish_reason == "length"
+                        else "reasoning_only"
+                    ),
+                    model_id=served_model_id,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    latency_ms=latency_ms,
+                    finish_reason=finish_reason,
+                    configured_max_tokens=payload.get("max_tokens"),
+                    usage_known=usage_known,
+                    **self._cost_fields(
+                        response.headers,
+                        payload,
+                        input_tokens,
+                        output_tokens,
+                        usage_known,
+                    ),
+                )
             if outcome == "no_tool":
                 raise LLMProviderError(
                     retryable=False,
@@ -1635,6 +1689,7 @@ class ServeLLMClient:
                 arguments=None,
                 outcome=outcome,
                 decline_reason=content_text,
+                output_basis="content",
                 model_id=served_model_id,
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,

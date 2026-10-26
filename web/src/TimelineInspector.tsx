@@ -41,6 +41,7 @@ export const KNOWN_EVENT_TYPES = [
   "context.loading",
   "llm.started",
   "llm.completed",
+  "run.declined",
   "tool.requested",
   "tool.started",
   "tool.completed",
@@ -56,14 +57,16 @@ export const KNOWN_EVENT_TYPES = [
   "step.tool_call",
   "step.llm_final_answer",
   "step.validation_error",
+  "answer.completed",
+  "job.started",
   "job.completed",
   "job.failed",
 ];
 
 export function getEventBadgeClass(eventType: string): string {
-  if (eventType === "run.cancel_requested" || eventType === "run.cancelled") return "badge-warning";
+  if (eventType === "run.cancel_requested" || eventType === "run.cancelled" || eventType === "run.declined") return "badge-warning";
   if (eventType === "tool.failed" || eventType === "run.budget_exceeded" || eventType === "run.failed" || eventType === "job.failed") return "badge-danger";
-  if (eventType.startsWith("llm.") || eventType === "step.llm_proposal" || eventType === "step.tool_proposal" || eventType === "step.final_answer" || eventType === "step.llm_final_answer") return "badge-llm";
+  if (eventType.startsWith("llm.") || eventType === "answer.completed" || eventType === "step.llm_proposal" || eventType === "step.tool_proposal" || eventType === "step.final_answer" || eventType === "step.llm_final_answer") return "badge-llm";
   if (eventType.startsWith("tool.") || eventType === "step.tool_execution" || eventType === "step.tool_call") return "badge-tool";
   if (eventType.startsWith("context.")) return "badge-context";
   if (eventType === "run.completed" || eventType === "job.completed") return "badge-success";
@@ -85,6 +88,12 @@ export function formatEventSummary(event: RunEvent): string {
       return `Model call started (${p.phase || "generation"})`;
     case "llm.completed":
       return `Model completed (${p.phase || "generation"}) · ${p.latency_ms ?? 0}ms · ${p.tokens?.input ?? 0} in / ${p.tokens?.output ?? 0} out`;
+    case "run.declined":
+      return `Run declined: ${p.outcome || "unknown"}${typeof p.reason === "string" && p.reason ? ` · ${p.reason}` : ""}`;
+    case "answer.completed":
+      return typeof p.answer === "string" ? `Answer completed · ${p.answer.length} chars` : "Answer completed";
+    case "job.started":
+      return p.job_type ? `Job started: ${p.job_type}${p.status ? ` (${p.status})` : ""}` : "Job started";
     case "tool.requested":
     case "step.tool_proposal":
     case "step.llm_proposal":

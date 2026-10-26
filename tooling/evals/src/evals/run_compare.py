@@ -9,6 +9,7 @@ from evals.runs import (
     DIMS,
     DIRECTIONS,
     TERMINAL_OK,
+    declined_histogram,
     direction,
     failure_histogram,
     format_histogram,
@@ -98,6 +99,10 @@ def render_compare(
         "## Failure codes (this run)",
         "",
         format_histogram(failure_histogram(run_dir, results)),
+        "",
+        "## Declined outcomes (this run)",
+        "",
+        format_histogram(declined_histogram(run_dir, results)),
     ]
     L += [
         "",

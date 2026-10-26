@@ -146,7 +146,7 @@ export type RunEvent = {
     total_tokens?: number;
     estimated_cost_usd?: number;
     failure_code?: string;
-    reason?: string;
+    reason?: string | null;
     error?: string;
     input_summary?: string;
     output_summary?: string;

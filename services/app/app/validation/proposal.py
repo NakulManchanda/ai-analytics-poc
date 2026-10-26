@@ -105,9 +105,17 @@ GOVERNED_TOOLS = frozenset(
         "compare_taxi_segments",
     }
 )
-NON_TOOL_OUTCOMES = frozenset({"no_tool", "unsupported", "clarification_required"})
+NON_TOOL_OUTCOMES = frozenset(
+    {"no_tool", "unsupported", "clarification_required", "no_visible_output"}
+)
 PLANNER_OUTCOMES = frozenset(
-    {"tool_call", "no_tool", "unsupported", "clarification_required"}
+    {
+        "tool_call",
+        "no_tool",
+        "unsupported",
+        "clarification_required",
+        "no_visible_output",
+    }
 )
 
 
