@@ -797,7 +797,10 @@ class LocalFakeLLMClient:
             )
             return self._result(prompt, text)
         if len(first_row) != 2:
-            raise LLMProviderError(retryable=False)
+            # Aggregate/compare results have arbitrary column shapes.
+            return self._result(
+                prompt, f"The governed query returned {len(rows)} rows."
+            )
         if columns == ["pickup_zone", "trip_count"]:
             text = f"{first_row[0]} has the most pickups with {first_row[1]} trips."
         elif columns == ["pickup_hour", "trip_count"]:

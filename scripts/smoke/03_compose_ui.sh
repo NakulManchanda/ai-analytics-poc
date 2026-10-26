@@ -110,6 +110,27 @@ PY
     run_event_types "Delete all trips with zero distance." 3
     echo "SSE check: decline after stream growth"
     check_events decline
+    # Every catalogue prompt must complete against the real MCP service: the
+    # catalogue path skips the model, so a failure here is a contract mismatch
+    # between catalogue limits and the app/MCP layers (#186 det-006).
+    catalogue_prompts="$(python - <<'PY'
+import importlib.util
+import json
+
+spec = importlib.util.spec_from_file_location(
+    "query_catalogue", "services/app/app/query_catalogue.py"
+)
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+for key in module.QUERY_CATALOGUE:
+    print(json.dumps(key)[1:-1])
+PY
+)"
+    while IFS= read -r prompt; do
+      run_event_types "${prompt}"
+      echo "SSE check: catalogue prompt: ${prompt}"
+      check_events tool
+    done <<< "${catalogue_prompts}"
     rm -f "${sse_out}"
     echo "Compose UI smoke passed"
     exit 0
