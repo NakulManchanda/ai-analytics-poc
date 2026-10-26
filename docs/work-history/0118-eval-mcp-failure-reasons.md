@@ -17,7 +17,7 @@
 - `uv run --project tooling/evals pytest tooling/evals/tests -q`, `black --check tooling/evals`, `ruff check tooling/evals`: 125 passed, 2 skipped; black and ruff clean.
 
 ## PR / merge state
-Branch `feat/209-eval-mcp-reasons`; PR TBD.
+Branch `feat/209-eval-mcp-reasons`; PR #212.
 
 ## Lessons
 - Keeping "absent" distinct from "unknown" avoids noise when a new payload field only exists on newer captures.
