@@ -112,3 +112,4 @@ Monotonically numbered log of every post-bootstrap task. Each entry records the 
 - [0116 — MCP row cap alignment](0116-mcp-row-cap-alignment.md) — client result row cap now `MAX_ROWS` (64) instead of 20; cross-layer catalogue test and compose smoke over every catalogue prompt (#186 Slice B)
 - [0117 — MCP failure reasons](0117-mcp-failure-reasons.md) — closed `MCPToolError.reason` set carried as `tool_error` on `tool.failed`, step, `run.failed` (live and replayed) and durable run; replay also keeps `provider_error`; fixes unconfigured-client TypeError (#209)
 - [0118 — eval MCP failure reasons](0118-eval-mcp-failure-reasons.md) — `run-compare`/`run-review` histogram `tool_error.reason` from saved `run.failed` captures; `mcp_tool_error` captures without it are `unclassified` (#209)
+- [0119 — compose app healthcheck](0119-compose-app-healthcheck.md) — `app` healthcheck gets `start_period: 30s`, `timeout: 3s`, `retries: 30` so `compose-smoke` survives a loaded host
