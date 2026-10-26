@@ -21,7 +21,7 @@ The run ended `step.tool_call` failed with the generic "MCP tool execution faile
 - `make compose-smoke`: passes with all 20 catalogue prompts. Two earlier attempts failed only because the app container healthcheck (10 x 1s) timed out under heavy host load; the rerun passed.
 
 ## PR / merge state
-Branch `fix/186-mcp-catalogue-error`; PR number TBD.
+Branch `fix/186-mcp-catalogue-error`; PR #208.
 
 ## Lessons
 - Three layers each had a self-consistent test (catalogue vs validator, planner schema vs validator, client sanitizer vs its own cap) and none crossed layers, so a contract mismatch between them shipped.
