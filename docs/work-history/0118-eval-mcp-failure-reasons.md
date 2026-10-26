@@ -8,7 +8,8 @@
 
 ## Decisions
 - `_frame_field` now sits on a small `_frame_payload` helper so a nested field can be read without a second parser; its behaviour is unchanged.
-- `mcp_reason_histogram` counts `tool_error.reason` over captures whose `run.failed` frame has one. Captures without `tool_error` (older runs, non-MCP failures) are skipped rather than counted as `unknown`, so existing output only gains a `none` row.
+- `mcp_reason_histogram` counts only `run.failed` frames whose `failure_code` is `mcp_tool_error`, so a `tool_error` on any other failure code is never counted.
+- An `mcp_tool_error` frame with no usable `tool_error.reason` (older captures) is counted as `unclassified`, so `none` always means no MCP failures rather than missing reason data. Other failure codes and missing capture files are ignored.
 - One row each in `compare.md` ("MCP failure reasons (this run)") and `review.html` (`#mcp-failure-reasons`), next to the failure-code and declined rows.
 - Out of scope: capture-record schema, app code, web, byte-cap truncation.
 
@@ -20,4 +21,4 @@
 Branch `feat/209-eval-mcp-reasons`; PR #212.
 
 ## Lessons
-- Keeping "absent" distinct from "unknown" avoids noise when a new payload field only exists on newer captures.
+- A closed bucket for "failure without the new field" (`unclassified`) keeps old captures visible instead of reading as no failures.
