@@ -11,6 +11,7 @@ from evals.runs import (
     event_failure_code,
     failure_histogram,
     format_histogram,
+    mcp_reason_histogram,
 )
 
 
@@ -128,4 +129,66 @@ def test_compare_and_review_show_declined_histogram(tmp_path):
     )
     assert (
         "Declined outcomes: no_visible_output: 1" in (run / "review.html").read_text()
+    )
+
+
+def _mcp_failed(reason, wrapped=True, tool_error=True) -> str:
+    body = {"failure_code": "mcp_tool_error"}
+    if tool_error:
+        body["tool_error"] = {"reason": reason, "tool_name": "run_query"}
+    body = {"payload": body} if wrapped else body
+    return f"event: run.started\ndata: {{}}\n\nevent: run.failed\ndata: {json.dumps(body)}\n\n"
+
+
+def test_mcp_reason_histogram_counts_mcp_failures_only(tmp_path):
+    (tmp_path / "events").mkdir()
+    ev = tmp_path / "events"
+    (ev / "r1.txt").write_text(_mcp_failed("row_limit_exceeded"))
+    (ev / "r2.txt").write_text(_mcp_failed("transport_error", wrapped=False))
+    (ev / "r3.txt").write_text(_mcp_failed("row_limit_exceeded"))
+    (ev / "r4.txt").write_text(_mcp_failed(None, tool_error=False))  # older capture
+    (ev / "r5.txt").write_text(
+        _frame({"failure_code": "mcp_tool_error", "tool_error": "bad"})
+    )
+    (ev / "r6.txt").write_text(
+        _frame({"failure_code": "mcp_tool_error", "tool_error": {}})
+    )
+    # Non-MCP failure code never counts, even with a valid tool_error.reason.
+    (ev / "r7.txt").write_text(
+        _frame({"failure_code": "x", "tool_error": {"reason": "transport_error"}})
+    )
+    (ev / "r8.txt").write_text(_frame({"failure_code": "x"}))
+    rows = [{"terminal": "run.failed", "run_id": f"r{i}"} for i in range(1, 10)]
+    hist = mcp_reason_histogram(tmp_path, rows)  # r9: no events file, skipped
+    assert dict(hist) == {
+        "row_limit_exceeded": 2,
+        "transport_error": 1,
+        "unclassified": 3,
+    }
+    assert (
+        format_histogram(hist)
+        == "row_limit_exceeded: 2, transport_error: 1, unclassified: 3"
+    )
+    assert format_histogram(mcp_reason_histogram(tmp_path, rows[6:])) == "none"
+
+
+def test_compare_and_review_show_mcp_reasons(tmp_path):
+    run, base = setup_run(tmp_path)
+    (run / "events").mkdir()
+    (run / "events" / "r3.txt").write_text(_mcp_failed("row_limit_exceeded"))
+    assert (
+        main(["run-compare", "--root", str(tmp_path), "--baseline-results", str(base)])
+        == 0
+    )
+    assert (
+        "## MCP failure reasons (this run)\n\nrow_limit_exceeded: 1"
+        in (run / "compare.md").read_text()
+    )
+    assert (
+        main(["run-review", "--root", str(tmp_path), "--baseline-results", str(base)])
+        == 0
+    )
+    assert (
+        "MCP failure reasons: row_limit_exceeded: 1"
+        in (run / "review.html").read_text()
     )

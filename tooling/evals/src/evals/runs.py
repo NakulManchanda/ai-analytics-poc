@@ -129,10 +129,10 @@ def require_complete(run_dir: Path, allow_incomplete: bool) -> None:
         )
 
 
-def _frame_field(events_file: Path, event: str, field: str) -> str | None:
-    """``field`` of the first ``event`` frame in a saved SSE capture.
+def _frame_payload(events_file: Path, event: str) -> dict | None:
+    """Payload of the first ``event`` frame in a saved SSE capture.
 
-    ``None`` when there is no such frame; ``unknown`` when the frame has no usable field.
+    ``None`` when there is no such frame; ``{}`` when the frame has no usable payload.
     """
     try:
         lines = events_file.read_text().splitlines()
@@ -150,9 +150,20 @@ def _frame_field(events_file: Path, event: str, field: str) -> str | None:
                 except ValueError:
                     break
                 payload = obj.get("payload", obj) if isinstance(obj, dict) else {}
-                value = payload.get(field) if isinstance(payload, dict) else None
-                return value if isinstance(value, str) and value else "unknown"
+                return payload if isinstance(payload, dict) else {}
     return None
+
+
+def _frame_field(events_file: Path, event: str, field: str) -> str | None:
+    """``field`` of the first ``event`` frame in a saved SSE capture.
+
+    ``None`` when there is no such frame; ``unknown`` when the frame has no usable field.
+    """
+    payload = _frame_payload(events_file, event)
+    if payload is None:
+        return None
+    value = payload.get(field)
+    return value if isinstance(value, str) and value else "unknown"
 
 
 def event_failure_code(events_file: Path) -> str:
@@ -192,6 +203,33 @@ def declined_histogram(run_dir: Path, results: list[dict]) -> collections.Counte
         outcome = event_declined_outcome(run_dir / "events" / f"{run_id}.txt")
         if outcome is not None:
             hist[outcome] += 1
+    return hist
+
+
+def event_mcp_reason(events_file: Path) -> str | None:
+    """Reason of an ``mcp_tool_error`` ``run.failed`` frame in a saved capture.
+
+    ``None`` when there is no such frame (missing file, other failure code);
+    ``unclassified`` when the frame has no usable ``tool_error.reason`` (older captures).
+    """
+    payload = _frame_payload(events_file, "run.failed")
+    if payload is None or payload.get("failure_code") != "mcp_tool_error":
+        return None
+    tool_error = payload.get("tool_error")
+    reason = tool_error.get("reason") if isinstance(tool_error, dict) else None
+    return reason if isinstance(reason, str) and reason else "unclassified"
+
+
+def mcp_reason_histogram(run_dir: Path, results: list[dict]) -> collections.Counter:
+    """Count MCP failure reasons over results rows whose capture has an ``mcp_tool_error``."""
+    hist: collections.Counter = collections.Counter()
+    for r in results:
+        run_id = r.get("run_id")
+        if not run_id:
+            continue
+        reason = event_mcp_reason(run_dir / "events" / f"{run_id}.txt")
+        if reason is not None:
+            hist[reason] += 1
     return hist
 
 
