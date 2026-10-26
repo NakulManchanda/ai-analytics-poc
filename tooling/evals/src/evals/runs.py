@@ -207,14 +207,21 @@ def declined_histogram(run_dir: Path, results: list[dict]) -> collections.Counte
 
 
 def event_mcp_reason(events_file: Path) -> str | None:
-    """``tool_error.reason`` of the ``run.failed`` frame; ``None`` if absent (older captures)."""
-    tool_error = (_frame_payload(events_file, "run.failed") or {}).get("tool_error")
+    """Reason of an ``mcp_tool_error`` ``run.failed`` frame in a saved capture.
+
+    ``None`` when there is no such frame (missing file, other failure code);
+    ``unclassified`` when the frame has no usable ``tool_error.reason`` (older captures).
+    """
+    payload = _frame_payload(events_file, "run.failed")
+    if payload is None or payload.get("failure_code") != "mcp_tool_error":
+        return None
+    tool_error = payload.get("tool_error")
     reason = tool_error.get("reason") if isinstance(tool_error, dict) else None
-    return reason if isinstance(reason, str) and reason else None
+    return reason if isinstance(reason, str) and reason else "unclassified"
 
 
 def mcp_reason_histogram(run_dir: Path, results: list[dict]) -> collections.Counter:
-    """Count ``tool_error.reason`` over results rows whose ``run.failed`` frame carries one."""
+    """Count MCP failure reasons over results rows whose capture has an ``mcp_tool_error``."""
     hist: collections.Counter = collections.Counter()
     for r in results:
         run_id = r.get("run_id")

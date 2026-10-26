@@ -140,20 +140,36 @@ def _mcp_failed(reason, wrapped=True, tool_error=True) -> str:
     return f"event: run.started\ndata: {{}}\n\nevent: run.failed\ndata: {json.dumps(body)}\n\n"
 
 
-def test_mcp_reason_histogram_counts_only_tool_error_frames(tmp_path):
+def test_mcp_reason_histogram_counts_mcp_failures_only(tmp_path):
     (tmp_path / "events").mkdir()
     ev = tmp_path / "events"
     (ev / "r1.txt").write_text(_mcp_failed("row_limit_exceeded"))
     (ev / "r2.txt").write_text(_mcp_failed("transport_error", wrapped=False))
     (ev / "r3.txt").write_text(_mcp_failed("row_limit_exceeded"))
     (ev / "r4.txt").write_text(_mcp_failed(None, tool_error=False))  # older capture
-    (ev / "r5.txt").write_text(_frame({"failure_code": "x", "tool_error": "bad"}))
-    (ev / "r6.txt").write_text(_frame({"failure_code": "x", "tool_error": {}}))
-    rows = [{"terminal": "run.failed", "run_id": f"r{i}"} for i in range(1, 8)]
-    hist = mcp_reason_histogram(tmp_path, rows)
-    assert dict(hist) == {"row_limit_exceeded": 2, "transport_error": 1}
-    assert format_histogram(hist) == "row_limit_exceeded: 2, transport_error: 1"
-    assert format_histogram(mcp_reason_histogram(tmp_path, rows[3:])) == "none"
+    (ev / "r5.txt").write_text(
+        _frame({"failure_code": "mcp_tool_error", "tool_error": "bad"})
+    )
+    (ev / "r6.txt").write_text(
+        _frame({"failure_code": "mcp_tool_error", "tool_error": {}})
+    )
+    # Non-MCP failure code never counts, even with a valid tool_error.reason.
+    (ev / "r7.txt").write_text(
+        _frame({"failure_code": "x", "tool_error": {"reason": "transport_error"}})
+    )
+    (ev / "r8.txt").write_text(_frame({"failure_code": "x"}))
+    rows = [{"terminal": "run.failed", "run_id": f"r{i}"} for i in range(1, 10)]
+    hist = mcp_reason_histogram(tmp_path, rows)  # r9: no events file, skipped
+    assert dict(hist) == {
+        "row_limit_exceeded": 2,
+        "transport_error": 1,
+        "unclassified": 3,
+    }
+    assert (
+        format_histogram(hist)
+        == "row_limit_exceeded: 2, transport_error: 1, unclassified: 3"
+    )
+    assert format_histogram(mcp_reason_histogram(tmp_path, rows[6:])) == "none"
 
 
 def test_compare_and_review_show_mcp_reasons(tmp_path):
