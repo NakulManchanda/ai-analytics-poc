@@ -17,10 +17,10 @@ When an MCP tool call fails, the run says why from a closed, safe set of reasons
 
 ## Verification
 - Tests written first failed on the old code (the new test module could not import `MCP_FAILURE_REASONS`).
-- `uv run --project services/app pytest services/app/tests -q`, black and ruff, `make test` and `make compose-smoke`: see PR description.
+- `uv run --project services/app pytest services/app/tests -q`: 487 passed. black and ruff clean for `services/app`, `tests`, `services/gateway`. `make test` passes except `web-test` (no `node_modules` locally; `web/` untouched). `make compose-smoke` passed in its isolated project.
 
 ## PR / merge state
-Branch `feat/209-mcp-failure-reasons`; PR TBD.
+Branch `feat/209-mcp-failure-reasons`; PR #210.
 
 ## Lessons
 - A reason on the exception costs one keyword per raise site; an AST test keeps new raise sites from silently defaulting to `unspecified`.
