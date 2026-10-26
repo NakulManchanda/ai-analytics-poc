@@ -19,7 +19,7 @@ Decline runs must show `run.declined` (with outcome and reason) on the SSE strea
 - `make compose-smoke`: failed on the unfixed code at the post-growth decline case; passes with the fix.
 
 ## PR / merge state
-Branch `fix/186-sse-replay-declined`; PR TBD.
+Branch `fix/186-sse-replay-declined`; PR #205.
 
 ## Lessons
 - A smoke that never reads the event stream cannot catch replay bugs; the regression needs a stream longer than one read page.
