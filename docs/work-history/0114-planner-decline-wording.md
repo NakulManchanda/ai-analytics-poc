@@ -37,7 +37,7 @@ Target questions under F: the weather question and both delete phrasings decline
 - Not run: the live eval-all against Bedrock is pending.
 
 ## PR / merge state
-Draft PR open; not mergeable until the classifier interaction above is resolved.
+Draft PR #204 (`Refs #179`, `Refs #186`). The classifier interaction is resolved in this branch (response-text-only classification). Merge order: PR #203 first, then this branch rebases on it; the live `eval-all` is still pending.
 
 ## Lessons
 - Instruction text written in the imperative ("call no tool") can be echoed back to users on unrelated questions; third-person wording plus a positive anchor avoided it.
