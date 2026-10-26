@@ -206,21 +206,18 @@ def test_classify_non_tool_outcomes() -> None:
     assert (
         classify_non_tool_outcome(
             "I cannot determine that: driver info is not in the dataset.",
-            "Which driver earned the most money?",
         )
         == "unsupported"
     )
     assert (
         classify_non_tool_outcome(
             "The yellow taxi data does not contain weather records.",
-            "How did weather affect tipping?",
         )
         == "unsupported"
     )
     assert (
         classify_non_tool_outcome(
             "Forecasting is not supported: dataset only covers historical Jan 2024.",
-            "Predict trips for February 2024",
         )
         == "unsupported"
     )
@@ -228,7 +225,6 @@ def test_classify_non_tool_outcomes() -> None:
     assert (
         classify_non_tool_outcome(
             "Could you clarify which borough you are interested in?",
-            "What was the trip count?",
         )
         == "clarification_required"
     )
@@ -236,9 +232,30 @@ def test_classify_non_tool_outcomes() -> None:
     assert (
         classify_non_tool_outcome(
             "Here are the top zones.",
-            "What are the top pickup zones?",
         )
         == "no_tool"
+    )
+
+
+def test_classifier_ignores_prompt_like_text_and_blank_is_no_tool() -> None:
+    import inspect
+
+    from app.validation.proposal import classify_non_tool_outcome
+
+    assert classify_non_tool_outcome("") == "no_tool"
+    assert classify_non_tool_outcome("   ") == "no_tool"
+    # The prompt ("read-only", "cannot", "does not contain") is not a parameter, so
+    # it cannot influence the outcome.
+    assert list(inspect.signature(classify_non_tool_outcome).parameters) == ["text"]
+
+
+def test_classifier_response_text_phrases() -> None:
+    from app.validation.proposal import classify_non_tool_outcome
+
+    assert classify_non_tool_outcome("I cannot modify data.") == "unsupported"
+    assert (
+        classify_non_tool_outcome("Please clarify which borough you mean.")
+        == "clarification_required"
     )
 
 

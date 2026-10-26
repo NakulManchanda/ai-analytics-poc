@@ -52,6 +52,16 @@ def test_constants_unchanged() -> None:
     assert DEFAULT_TAXI_RULES == GOLDEN["taxi_rules"]
 
 
+def test_planner_single_turn_carries_the_decline_and_anchor_clauses() -> None:
+    """#179: measured wording; no leaked 'no tool', answerable questions anchored to a tool."""
+    msg = taxi_proposal_prompt(Q, SCHEMA)
+    assert "only reads data and cannot change it" in msg
+    assert "does not contain that information" in msg
+    assert "dataset must use a tool" in msg
+    assert "no tool" not in msg
+    assert "call no tool" not in msg
+
+
 @pytest.mark.parametrize(
     ("key", "build"),
     [
