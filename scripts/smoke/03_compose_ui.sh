@@ -110,6 +110,46 @@ PY
     run_event_types "Delete all trips with zero distance." 3
     echo "SSE check: decline after stream growth"
     check_events decline
+    # Every catalogue prompt must complete against the real MCP service: the
+    # catalogue path skips the model, so a failure here is a contract mismatch
+    # between catalogue limits and the app/MCP layers (#186 det-006).
+    catalogue_prompts="$(python - <<'PY'
+import importlib.util
+import json
+
+spec = importlib.util.spec_from_file_location(
+    "query_catalogue", "services/app/app/query_catalogue.py"
+)
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+for key in module.QUERY_CATALOGUE:
+    print(json.dumps(key)[1:-1])
+PY
+)"
+    while IFS= read -r prompt; do
+      run_event_types "${prompt}"
+      echo "SSE check: catalogue prompt: ${prompt}"
+      check_events tool
+    done <<< "${catalogue_prompts}"
+    # det-006 must come back complete: 2 week parts x 24 hours, no truncation.
+    run_event_types "Compare weekday and weekend trip volume by hour"
+    echo "SSE check: weekday/weekend by hour returns all 48 rows"
+    SSE_FILE="${sse_out}" python - <<'PY'
+import json
+import os
+
+reduced = None
+for frame in open(os.environ["SSE_FILE"]).read().strip().split("\n\n"):
+    lines = frame.splitlines()
+    if "event: context.reduced" in lines:
+        data = next(l[6:] for l in lines if l.startswith("data: "))
+        reduced = json.loads(data)["payload"]
+assert reduced is not None, "no context.reduced event"
+assert reduced["row_count"] == 48, reduced["row_count"]
+# The result columns lead the serialized working context, so they survive its bounding.
+text = json.dumps(reduced)
+assert "pickup_week_part" in text and "pickup_hour" in text, "week part / hour columns missing"
+PY
     rm -f "${sse_out}"
     echo "Compose UI smoke passed"
     exit 0

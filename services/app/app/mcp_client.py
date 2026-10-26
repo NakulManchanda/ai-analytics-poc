@@ -12,9 +12,14 @@ from httpx import HTTPError
 from mcp import McpError
 from opentelemetry import propagate, trace
 
+from app.validation.proposal import MAX_ROWS
+
 DEFAULT_MCP_URL = "http://mcp:8001/mcp"
 MAX_PROFILE_BYTES = 8_192
 MAX_QUERY_RESULT_BYTES = 8_192
+# Same ceiling the planner schema and validator advertise, so a result the app
+# asked for is never rejected after the tool already succeeded.
+MAX_QUERY_RESULT_ROWS = MAX_ROWS
 ALLOWED_ANALYSES = {
     "top_pickup_zones",
     "trip_volume_by_hour",
@@ -590,7 +595,7 @@ def sanitize_query_result(payload: Mapping[str, Any]) -> dict[str, object]:
             for column in columns
         )
         or not isinstance(rows, list)
-        or len(rows) > 20
+        or len(rows) > MAX_QUERY_RESULT_ROWS
         or isinstance(row_count, bool)
         or not isinstance(row_count, int)
         or row_count != len(rows)

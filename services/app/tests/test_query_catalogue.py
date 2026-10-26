@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+from app.mcp_client import sanitize_governed_query_result
 from app.query_catalogue import QUERY_CATALOGUE, lookup, normalize_question
 
 # The dataset_spike package ships as a sibling service, not an installed
@@ -158,3 +159,44 @@ def test_catalogue_repaired_dimensions_and_limits() -> None:
         "and which zones inside it dominate?"
     )
     assert requires_multi_step_analysis(react001_q) is True
+
+
+# Rows a governed tool can actually return for a catalogue entry when fewer
+# than `limit` groups exist (24 hours x 2 week parts for det-006).
+_REALISTIC_ROW_COUNTS = {"Compare weekday and weekend trip volume by hour": 48}
+
+
+def test_every_governed_catalogue_limit_passes_the_client_sanitizer() -> None:
+    """The validator accepts `limit`, the MCP tool returns up to that many
+    rows, and the app client must accept them: three layers that each passed
+    alone while det-006 (48 rows) failed on a client-side cap of 20."""
+    governed = (
+        "aggregate_taxi_data",
+        "compare_taxi_segments",
+        "list_taxi_dimension_values",
+    )
+    for question, (tool_name, arguments) in QUERY_CATALOGUE.items():
+        if tool_name not in governed:
+            continue
+        limit = int(arguments["limit"])  # type: ignore[call-overload]
+        realistic = next(
+            (
+                count
+                for key, count in _REALISTIC_ROW_COUNTS.items()
+                if normalize_question(key) == question
+            ),
+            limit,
+        )
+        rows = min(limit, realistic)
+        sanitized = sanitize_governed_query_result(
+            {
+                "columns": ["pickup_hour", "trip_count"],
+                "rows": [[index % 24, index] for index in range(rows)],
+                "row_count": rows,
+                "execution_duration_ms": 1,
+                "query_id": "query_catalogue_contract",
+                "truncated": False,
+                "query_class": "aggregate",
+            }
+        )
+        assert sanitized["row_count"] == rows, question
