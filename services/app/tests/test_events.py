@@ -273,6 +273,89 @@ def test_reconstructed_failed_terminal_event_matches_live_contract() -> None:
     assert reconstructed_payload == live_payload
 
 
+def _declined_run() -> tuple[InMemoryStateRepository, InMemoryEventPublisher, str]:
+    repo = InMemoryStateRepository()
+    publisher = InMemoryEventPublisher()
+    loop = OrchestrationLoop(
+        llm_client=LocalFakeLLMClient(),
+        mcp_client=FakeMCPClient(),  # type: ignore[arg-type]
+        state_repository=repo,
+        event_publisher=publisher,
+    )
+    result = loop.run("Delete all trips with zero distance.")
+    return repo, publisher, result.run_id
+
+
+def test_declined_answer_step_persists_reason_and_tool_source() -> None:
+    repo, _publisher, run_id = _declined_run()
+    (answer_step,) = [s for s in repo.list_run_steps(run_id) if s.step_type == "answer"]
+    assert answer_step.metadata["outcome"] == "unsupported"
+    assert answer_step.metadata["reason"]
+    assert answer_step.metadata["tool_source"] == "model"
+
+
+def test_reconstructed_events_replay_run_declined_before_answer() -> None:
+    repo, publisher, run_id = _declined_run()
+    live = next(
+        e.payload
+        for e in publisher.get_events_for_run(run_id)
+        if e.event_type == "run.declined"
+    )
+    response = TestClient(create_app(state_repository=repo)).get(
+        f"/api/runs/{run_id}/events"
+    )
+    types = [
+        line.removeprefix("event: ")
+        for line in response.text.splitlines()
+        if line.startswith("event: ")
+    ]
+    assert types.count("run.declined") == 1
+    assert types.index("run.declined") < types.index("step.answer")
+    assert types[-1] == "run.completed"
+    assert _sse_events(response.text)["run.declined"] == live
+
+
+class _PagedRedis:
+    """Minimal XREAD stand-in: entries are (int id, fields), read by id order."""
+
+    def __init__(self, entries: list[dict[str, str]]) -> None:
+        self._entries = [(f"{i + 1}-0", e) for i, e in enumerate(entries)]
+
+    def xread(self, streams: dict[str, str], count: int = 50, block: int = 0):
+        (last,) = streams.values()
+        after = int(last.split("-")[0])
+        batch = [m for m in self._entries if int(m[0].split("-")[0]) > after][:count]
+        return [("run-events", batch)] if batch else []
+
+    def get(self, key: str):
+        return None
+
+
+def test_live_read_pages_past_foreign_events_without_fallback() -> None:
+    repo, publisher, run_id = _declined_run()
+    foreign = [
+        RunEvent(
+            event_type="run.received",
+            run_id=f"run_other_{i}",
+            conversation_id="conv_other",
+            sequence=1,
+            payload={},
+        ).to_dict()
+        for i in range(120)
+    ]
+    own = [e.to_dict() for e in publisher.get_events_for_run(run_id)]
+    client = TestClient(
+        create_app(state_repository=repo, redis_client=_PagedRedis(foreign + own))
+    )
+    text = client.get(f"/api/runs/{run_id}/events").text
+    events = _sse_events(text)
+    # Reconstruction mints fresh event ids, so original ids prove the live path.
+    assert publisher.get_events_for_run(run_id)[0].event_id in text
+    assert "run.declined" in events and "run.completed" in events
+    assert events["run.declined"]["outcome"] == "unsupported"
+    assert events["run.declined"]["reason"]
+
+
 def test_orchestration_loop_emits_full_event_sequence() -> None:
     from app.config import VoiceSettings
 
