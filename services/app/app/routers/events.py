@@ -22,6 +22,12 @@ from app.events.publisher import (
 from app.state import InMemoryStateRepository, StateRepository
 
 logger = logging.getLogger(__name__)
+DECLINE_OUTCOMES = (
+    "unsupported",
+    "clarification_required",
+    "no_tool",
+    "no_visible_output",
+)
 HEARTBEAT_INTERVAL_SECONDS = 15.0
 POLL_INTERVAL_SECONDS = 0.5
 MAX_STREAM_WAIT_SECONDS = 60.0
@@ -123,6 +129,7 @@ def create_events_router(
                     break
 
                 events_found = False
+                batch_read = False
                 if client is not None:
                     try:
                         # Read new events from Redis Stream
@@ -130,6 +137,9 @@ def create_events_router(
                             {RUN_EVENTS_STREAM: last_stream_id}, count=50, block=500
                         )
                         if streams:
+                            # Any batch is progress: a run behind >50 foreign
+                            # entries must page forward, not be rebuilt early.
+                            batch_read = True
                             for _stream_name, messages in streams:
                                 for msg_id, raw_data in messages:
                                     last_stream_id = msg_id
@@ -154,7 +164,9 @@ def create_events_router(
                         client = None
 
                 # Fallback / Reconciliation from Durable State Repository
-                if not events_found and (client is None or not emitted_event_ids):
+                if not events_found and (
+                    client is None or (not emitted_event_ids and not batch_read)
+                ):
                     current_run = repo.get_run(run_id)
                     if current_run is not None and current_run.status in (
                         "completed",
@@ -195,6 +207,27 @@ def create_events_router(
                             yield init_evt.to_sse()
 
                         for step in steps:
+                            if (
+                                step.step_type == "answer"
+                                and step.metadata.get("outcome") in DECLINE_OUTCOMES
+                            ):
+                                # run.declined is live-only; rebuild it from the
+                                # durable answer step so replay matches the live run.
+                                seq += 1
+                                declined_evt = RunEvent(
+                                    event_type="run.declined",
+                                    run_id=run_id,
+                                    conversation_id=current_run.conversation_id,
+                                    sequence=seq,
+                                    payload={
+                                        "outcome": step.metadata["outcome"],
+                                        "reason": step.metadata.get("reason"),
+                                        "tool_source": step.metadata.get("tool_source"),
+                                    },
+                                )
+                                if declined_evt.event_id not in emitted_event_ids:
+                                    emitted_event_ids.add(declined_evt.event_id)
+                                    yield declined_evt.to_sse()
                             seq += 1
                             if step.step_type == "context_reduced":
                                 event_type = "context.reduced"
@@ -299,7 +332,7 @@ def create_events_router(
                     )
                     break
 
-                if not events_found:
+                if not events_found and not batch_read:
                     await asyncio.sleep(POLL_INTERVAL_SECONDS)
 
         return StreamingResponse(

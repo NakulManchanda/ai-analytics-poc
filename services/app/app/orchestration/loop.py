@@ -1434,7 +1434,12 @@ class OrchestrationLoop:
                             input_summary=f"question: {prompt[:80]}",
                             output_summary=f"answer: {decline_answer[:80]}",
                             duration_ms=0,
-                            metadata={"outcome": outcome, "tool_source": "model"},
+                            # reason/tool_source let a durable replay rebuild run.declined.
+                            metadata={
+                                "outcome": outcome,
+                                "reason": proposal.decline_reason,
+                                "tool_source": "model",
+                            },
                         )
                         self._repo.add_run_step(answer_step)
                         steps.append(answer_step)
