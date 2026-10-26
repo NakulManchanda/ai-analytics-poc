@@ -17,7 +17,7 @@ The `app` healthcheck in `docker-compose.yml` ran a Python one-liner with `inter
 - `docker compose config -q` parses for the base file and the base + aws + litellm + observability combination.
 
 ## PR / merge state
-Branch `fix/compose-app-healthcheck`; PR TBD.
+Branch `fix/compose-app-healthcheck`; PR #213.
 
 ## Lessons
 - A healthcheck with no `start_period` and a 1s timeout measures host load, not app health; budget the startup explicitly.
