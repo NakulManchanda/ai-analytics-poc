@@ -15,6 +15,7 @@ from evals.runs import (
     format_histogram,
     load_baseline,
     load_run_reports,
+    mcp_reason_histogram,
     merge_failed,
     read_jsonl,
 )
@@ -87,6 +88,8 @@ def render_review(run_dir: Path, baseline: Path | None = None) -> str:
         f"{_e(format_histogram(failure_histogram(run_dir, results)))}</p>"
         f'<p id="declined-outcomes">Declined outcomes: '
         f"{_e(format_histogram(declined_histogram(run_dir, results)))}</p>"
+        f'<p id="mcp-failure-reasons">MCP failure reasons: '
+        f"{_e(format_histogram(mcp_reason_histogram(run_dir, results)))}</p>"
         '<p><button data-m="all">all</button> <button data-m="bad">failed / not correct</button> '
         f'{reg_btn} <input id="q" placeholder="search"> <span id="shown"></span></p>'
         "<table><thead><tr><th>turn</th><th>question</th><th>outcome</th><th>tools (actual)</th>"

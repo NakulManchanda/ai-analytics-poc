@@ -15,6 +15,7 @@ from evals.runs import (
     format_histogram,
     load_baseline,
     load_run_reports,
+    mcp_reason_histogram,
     merge_failed,
     read_jsonl,
 )
@@ -103,6 +104,10 @@ def render_compare(
         "## Declined outcomes (this run)",
         "",
         format_histogram(declined_histogram(run_dir, results)),
+        "",
+        "## MCP failure reasons (this run)",
+        "",
+        format_histogram(mcp_reason_histogram(run_dir, results)),
     ]
     L += [
         "",
