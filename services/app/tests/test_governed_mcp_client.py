@@ -6,6 +6,7 @@ from app.mcp_client import (
     sanitize_describe_result,
     sanitize_governed_query_result,
 )
+from app.validation.proposal import MAX_ROWS
 
 
 def _valid_describe_payload() -> dict[str, object]:
@@ -42,6 +43,31 @@ def _valid_governed_query_payload() -> dict[str, object]:
         "dimensions": ["pickup_hour"],
         "measures": ["trip_count"],
     }
+
+
+def _governed_payload_with_rows(count: int) -> dict[str, object]:
+    payload = _valid_governed_query_payload()
+    payload["rows"] = [[index % 24, index] for index in range(count)]
+    payload["row_count"] = count
+    return payload
+
+
+class TestGovernedResultRowCap:
+    def test_accepts_exactly_max_rows(self) -> None:
+        sanitized = sanitize_governed_query_result(
+            _governed_payload_with_rows(MAX_ROWS)
+        )
+        assert sanitized["row_count"] == MAX_ROWS
+
+    def test_rejects_more_than_max_rows(self) -> None:
+        with pytest.raises(MCPToolError) as exc_info:
+            sanitize_governed_query_result(_governed_payload_with_rows(MAX_ROWS + 1))
+        assert exc_info.value.retryable is False
+
+    def test_client_cap_matches_the_validated_proposal_limit(self) -> None:
+        # The planner may request up to MAX_ROWS rows; a smaller client cap
+        # fails the call after the tool succeeded (#186 det-006).
+        assert mcp_client.MAX_QUERY_RESULT_ROWS == MAX_ROWS
 
 
 class TestSanitizeDescribeResult:
