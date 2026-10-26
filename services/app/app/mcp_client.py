@@ -28,11 +28,37 @@ ALLOWED_ANALYSES = {
 SCHEMA_RESOURCE_URI = "dataset://nyc-taxi/schema"
 
 
+# Closed, safe set of failure reasons: fixed strings only, never row data, SQL,
+# argument values or model text, so they can travel on events and durable runs.
+MCP_FAILURE_REASONS = frozenset(
+    {
+        "row_limit_exceeded",
+        "byte_limit_exceeded",
+        "invalid_result_shape",
+        "invalid_cell_value",
+        "tool_error_envelope",
+        "invalid_request",
+        "unknown_tool",
+        "transport_error",
+        "not_configured",
+        "unspecified",
+    }
+)
+
+
 class MCPToolError(Exception):
-    def __init__(self, retryable: bool, message: str | None = None) -> None:
+    def __init__(
+        self,
+        retryable: bool,
+        message: str | None = None,
+        reason: str = "unspecified",
+    ) -> None:
+        if reason not in MCP_FAILURE_REASONS:
+            raise ValueError("unknown MCP failure reason")
         super().__init__(message or "MCP tool execution failed")
         self.retryable = retryable
         self.message = message or "MCP tool execution failed"
+        self.reason = reason
 
 
 class DatasetProfileMCPClient(Protocol):
@@ -98,27 +124,37 @@ class FastMCPDatasetProfileClient:
         try:
             return asyncio.run(self._get_dataset_profile())
         except (ClientError, HTTPError, McpError, OSError, RuntimeError) as error:
-            raise MCPToolError(retryable=True, message=str(error)) from error
+            raise MCPToolError(
+                retryable=True, message=str(error), reason="transport_error"
+            ) from error
 
     def get_dataset_schema(self) -> dict[str, object]:
         try:
             return asyncio.run(self._get_dataset_schema())
         except (ClientError, HTTPError, McpError, OSError, RuntimeError) as error:
-            raise MCPToolError(retryable=True, message=str(error)) from error
+            raise MCPToolError(
+                retryable=True, message=str(error), reason="transport_error"
+            ) from error
 
     def query_taxi_data(self, *, analysis: str, limit: int) -> dict[str, object]:
         if analysis not in ALLOWED_ANALYSES:
             raise MCPToolError(
-                retryable=False, message=f"Disallowed analysis '{analysis}'"
+                retryable=False,
+                message=f"Disallowed analysis '{analysis}'",
+                reason="invalid_request",
             )
         if isinstance(limit, bool) or not 1 <= limit <= 20:
             raise MCPToolError(
-                retryable=False, message=f"Limit {limit} outside allowed range [1, 20]"
+                retryable=False,
+                message=f"Limit {limit} outside allowed range [1, 20]",
+                reason="invalid_request",
             )
         try:
             return asyncio.run(self._query_taxi_data(analysis=analysis, limit=limit))
         except (ClientError, HTTPError, McpError, OSError, RuntimeError) as error:
-            raise MCPToolError(retryable=True, message=str(error)) from error
+            raise MCPToolError(
+                retryable=True, message=str(error), reason="transport_error"
+            ) from error
 
     def average_trip_metrics(
         self, *, region_name: str | None = None
@@ -129,26 +165,34 @@ class FastMCPDatasetProfileClient:
             or len(region_name) > 128
         ):
             raise MCPToolError(
-                retryable=False, message=f"Invalid region_name '{region_name}'"
+                retryable=False,
+                message=f"Invalid region_name '{region_name}'",
+                reason="invalid_request",
             )
         try:
             return asyncio.run(self._average_trip_metrics(region_name=region_name))
         except (ClientError, HTTPError, McpError, OSError, RuntimeError) as error:
-            raise MCPToolError(retryable=True, message=str(error)) from error
+            raise MCPToolError(
+                retryable=True, message=str(error), reason="transport_error"
+            ) from error
 
     def describe_taxi_dataset(
         self, *, include_column_stats: bool = False
     ) -> dict[str, object]:
         if not isinstance(include_column_stats, bool):
             raise MCPToolError(
-                retryable=False, message="include_column_stats must be a boolean"
+                retryable=False,
+                message="include_column_stats must be a boolean",
+                reason="invalid_request",
             )
         try:
             return asyncio.run(
                 self._describe_taxi_dataset(include_column_stats=include_column_stats)
             )
         except (ClientError, HTTPError, McpError, OSError, RuntimeError) as error:
-            raise MCPToolError(retryable=True, message=str(error)) from error
+            raise MCPToolError(
+                retryable=True, message=str(error), reason="transport_error"
+            ) from error
 
     def list_taxi_dimension_values(
         self, *, dimension: str, search: str | None = None, limit: int = 20
@@ -160,7 +204,9 @@ class FastMCPDatasetProfileClient:
                 )
             )
         except (ClientError, HTTPError, McpError, OSError, RuntimeError) as error:
-            raise MCPToolError(retryable=True, message=str(error)) from error
+            raise MCPToolError(
+                retryable=True, message=str(error), reason="transport_error"
+            ) from error
 
     def aggregate_taxi_data(
         self,
@@ -182,7 +228,9 @@ class FastMCPDatasetProfileClient:
                 )
             )
         except (ClientError, HTTPError, McpError, OSError, RuntimeError) as error:
-            raise MCPToolError(retryable=True, message=str(error)) from error
+            raise MCPToolError(
+                retryable=True, message=str(error), reason="transport_error"
+            ) from error
 
     def compare_taxi_segments(
         self,
@@ -206,7 +254,9 @@ class FastMCPDatasetProfileClient:
                 )
             )
         except (ClientError, HTTPError, McpError, OSError, RuntimeError) as error:
-            raise MCPToolError(retryable=True, message=str(error)) from error
+            raise MCPToolError(
+                retryable=True, message=str(error), reason="transport_error"
+            ) from error
 
     async def _describe_taxi_dataset(
         self, *, include_column_stats: bool
@@ -217,7 +267,7 @@ class FastMCPDatasetProfileClient:
                 {"include_column_stats": include_column_stats},
             )
         if not isinstance(result.data, dict):
-            raise MCPToolError(retryable=False)
+            raise MCPToolError(retryable=False, reason="invalid_result_shape")
         _raise_for_error_envelope(result.data)
         return sanitize_describe_result(result.data)
 
@@ -230,7 +280,7 @@ class FastMCPDatasetProfileClient:
         async with self._client() as client:
             result = await client.call_tool("list_taxi_dimension_values", arguments)
         if not isinstance(result.data, dict):
-            raise MCPToolError(retryable=False)
+            raise MCPToolError(retryable=False, reason="invalid_result_shape")
         _raise_for_error_envelope(result.data)
         return sanitize_governed_query_result(result.data)
 
@@ -255,7 +305,7 @@ class FastMCPDatasetProfileClient:
         async with self._client() as client:
             result = await client.call_tool("aggregate_taxi_data", arguments)
         if not isinstance(result.data, dict):
-            raise MCPToolError(retryable=False)
+            raise MCPToolError(retryable=False, reason="invalid_result_shape")
         _raise_for_error_envelope(result.data)
         return sanitize_governed_query_result(result.data)
 
@@ -284,7 +334,7 @@ class FastMCPDatasetProfileClient:
         async with self._client() as client:
             result = await client.call_tool("compare_taxi_segments", arguments)
         if not isinstance(result.data, dict):
-            raise MCPToolError(retryable=False)
+            raise MCPToolError(retryable=False, reason="invalid_result_shape")
         _raise_for_error_envelope(result.data)
         return sanitize_governed_query_result(result.data)
 
@@ -292,20 +342,22 @@ class FastMCPDatasetProfileClient:
         async with self._client() as client:
             result = await client.call_tool("get_dataset_profile")
         if not isinstance(result.data, dict):
-            raise MCPToolError(retryable=False)
+            raise MCPToolError(retryable=False, reason="invalid_result_shape")
         return sanitize_dataset_profile(result.data)
 
     async def _get_dataset_schema(self) -> dict[str, object]:
         async with self._client() as client:
             resources = await client.read_resource(SCHEMA_RESOURCE_URI)
         if len(resources) != 1 or not isinstance(resources[0].text, str):
-            raise MCPToolError(retryable=False)
+            raise MCPToolError(retryable=False, reason="invalid_result_shape")
         try:
             payload = json.loads(resources[0].text)
         except (TypeError, ValueError) as error:
-            raise MCPToolError(retryable=False) from error
+            raise MCPToolError(
+                retryable=False, reason="invalid_result_shape"
+            ) from error
         if not isinstance(payload, Mapping):
-            raise MCPToolError(retryable=False)
+            raise MCPToolError(retryable=False, reason="invalid_result_shape")
         return sanitize_dataset_schema(payload)
 
     async def _query_taxi_data(self, *, analysis: str, limit: int) -> dict[str, object]:
@@ -314,7 +366,7 @@ class FastMCPDatasetProfileClient:
                 "query_taxi_data", {"analysis": analysis, "limit": limit}
             )
         if not isinstance(result.data, dict):
-            raise MCPToolError(retryable=False)
+            raise MCPToolError(retryable=False, reason="invalid_result_shape")
         return sanitize_query_result(result.data)
 
     async def _average_trip_metrics(
@@ -324,20 +376,21 @@ class FastMCPDatasetProfileClient:
         async with self._client() as client:
             result = await client.call_tool("average_trip_metrics", arguments)
         if not isinstance(result.data, dict):
-            raise MCPToolError(retryable=False)
+            raise MCPToolError(retryable=False, reason="invalid_result_shape")
         error = result.data.get("error")
         if isinstance(error, Mapping) and error.get("retryable") is False:
             err_msg = error.get("message")
             raise MCPToolError(
                 retryable=False,
                 message=str(err_msg) if err_msg else "Invalid region_name",
+                reason="tool_error_envelope",
             )
         return sanitize_query_result(result.data)
 
 
 def sanitize_dataset_schema(payload: Mapping[str, Any]) -> dict[str, object]:
     if set(payload) != {"columns", "dataset", "month"}:
-        raise MCPToolError(retryable=False)
+        raise MCPToolError(retryable=False, reason="invalid_result_shape")
     dataset = payload.get("dataset")
     month = payload.get("month")
     columns = payload.get("columns")
@@ -355,7 +408,7 @@ def sanitize_dataset_schema(payload: Mapping[str, Any]) -> dict[str, object]:
             for column in columns
         )
     ):
-        raise MCPToolError(retryable=False)
+        raise MCPToolError(retryable=False, reason="invalid_result_shape")
     return {"columns": columns, "dataset": dataset, "month": month}
 
 
@@ -366,6 +419,7 @@ def _raise_for_error_envelope(payload: Mapping[str, Any]) -> None:
         raise MCPToolError(
             retryable=False,
             message=str(message) if message else "Governed query validation failed",
+            reason="tool_error_envelope",
         )
 
 
@@ -395,7 +449,7 @@ def sanitize_governed_query_result(payload: Mapping[str, Any]) -> dict[str, obje
         | _GOVERNED_RESULT_LIST_EXTRAS
     )
     if not _GOVERNED_RESULT_BASE_FIELDS <= set(payload) or set(payload) - allowed_keys:
-        raise MCPToolError(retryable=False)
+        raise MCPToolError(retryable=False, reason="invalid_result_shape")
     base_payload = {key: payload[key] for key in _GOVERNED_RESULT_BASE_FIELDS}
     sanitized = sanitize_query_result(base_payload)
     for key in _GOVERNED_RESULT_STRING_EXTRAS:
@@ -403,7 +457,7 @@ def sanitize_governed_query_result(payload: Mapping[str, Any]) -> dict[str, obje
             continue
         value = payload[key]
         if not isinstance(value, str) or not value or len(value) > 512:
-            raise MCPToolError(retryable=False)
+            raise MCPToolError(retryable=False, reason="invalid_result_shape")
         sanitized[key] = value
     for key in _GOVERNED_RESULT_LIST_EXTRAS:
         if key not in payload:
@@ -417,14 +471,14 @@ def sanitize_governed_query_result(payload: Mapping[str, Any]) -> dict[str, obje
                 for value in values
             )
         ):
-            raise MCPToolError(retryable=False)
+            raise MCPToolError(retryable=False, reason="invalid_result_shape")
         sanitized[key] = values
     try:
         encoded = json.dumps(sanitized, separators=(",", ":"), allow_nan=False).encode()
     except (TypeError, ValueError) as error:
-        raise MCPToolError(retryable=False) from error
+        raise MCPToolError(retryable=False, reason="invalid_result_shape") from error
     if len(encoded) > MAX_QUERY_RESULT_BYTES:
-        raise MCPToolError(retryable=False)
+        raise MCPToolError(retryable=False, reason="byte_limit_exceeded")
     return sanitized
 
 
@@ -449,24 +503,24 @@ def sanitize_describe_result(payload: Mapping[str, Any]) -> dict[str, object]:
     if not required_fields <= set(payload) or (
         set(payload) - required_fields - optional_fields
     ):
-        raise MCPToolError(retryable=False)
+        raise MCPToolError(retryable=False, reason="invalid_result_shape")
 
     row_count = payload["row_count"]
     if isinstance(row_count, bool) or not isinstance(row_count, int) or row_count < 0:
-        raise MCPToolError(retryable=False)
+        raise MCPToolError(retryable=False, reason="invalid_result_shape")
 
     for key in ("min_pickup_datetime", "max_pickup_datetime"):
         value = payload[key]
         if value is not None and (not isinstance(value, str) or len(value) > 64):
-            raise MCPToolError(retryable=False)
+            raise MCPToolError(retryable=False, reason="invalid_result_shape")
 
     columns = payload["columns"]
     if not isinstance(columns, list) or len(columns) > 64:
-        raise MCPToolError(retryable=False)
+        raise MCPToolError(retryable=False, reason="invalid_result_shape")
     sanitized_columns: list[dict[str, str]] = []
     for column in columns:
         if not isinstance(column, Mapping) or set(column) != {"name", "type"}:
-            raise MCPToolError(retryable=False)
+            raise MCPToolError(retryable=False, reason="invalid_result_shape")
         name, column_type = column["name"], column["type"]
         if (
             not isinstance(name, str)
@@ -475,7 +529,7 @@ def sanitize_describe_result(payload: Mapping[str, Any]) -> dict[str, object]:
             or not isinstance(column_type, str)
             or len(column_type) > 64
         ):
-            raise MCPToolError(retryable=False)
+            raise MCPToolError(retryable=False, reason="invalid_result_shape")
         sanitized_columns.append({"name": name, "type": column_type})
 
     for key in ("supported_dimensions", "supported_measures"):
@@ -488,7 +542,7 @@ def sanitize_describe_result(payload: Mapping[str, Any]) -> dict[str, object]:
                 for value in values
             )
         ):
-            raise MCPToolError(retryable=False)
+            raise MCPToolError(retryable=False, reason="invalid_result_shape")
 
     code_dictionaries = payload["code_dictionaries"]
     if not isinstance(code_dictionaries, Mapping) or set(code_dictionaries) != {
@@ -496,11 +550,11 @@ def sanitize_describe_result(payload: Mapping[str, Any]) -> dict[str, object]:
         "rate_code",
         "vendor",
     }:
-        raise MCPToolError(retryable=False)
+        raise MCPToolError(retryable=False, reason="invalid_result_shape")
     sanitized_dictionaries: dict[str, dict[str, str]] = {}
     for dictionary_name, mapping in code_dictionaries.items():
         if not isinstance(mapping, Mapping) or len(mapping) > 16:
-            raise MCPToolError(retryable=False)
+            raise MCPToolError(retryable=False, reason="invalid_result_shape")
         sanitized_mapping: dict[str, str] = {}
         for code, label in mapping.items():
             if (
@@ -510,22 +564,22 @@ def sanitize_describe_result(payload: Mapping[str, Any]) -> dict[str, object]:
                 or not label
                 or len(label) > 64
             ):
-                raise MCPToolError(retryable=False)
+                raise MCPToolError(retryable=False, reason="invalid_result_shape")
             sanitized_mapping[code] = label
         sanitized_dictionaries[dictionary_name] = sanitized_mapping
 
     for key in ("tip_rate_semantics", "airport_trip_rule", "valid_records_rule"):
         value = payload[key]
         if not isinstance(value, str) or not value or len(value) > 512:
-            raise MCPToolError(retryable=False)
+            raise MCPToolError(retryable=False, reason="invalid_result_shape")
 
     truncated = payload["truncated"]
     if not isinstance(truncated, bool):
-        raise MCPToolError(retryable=False)
+        raise MCPToolError(retryable=False, reason="invalid_result_shape")
 
     query_id = payload["query_id"]
     if not isinstance(query_id, str) or not query_id or len(query_id) > 128:
-        raise MCPToolError(retryable=False)
+        raise MCPToolError(retryable=False, reason="invalid_result_shape")
 
     result: dict[str, object] = {
         "query_class": payload["query_class"],
@@ -547,7 +601,7 @@ def sanitize_describe_result(payload: Mapping[str, Any]) -> dict[str, object]:
             continue
         mapping = payload[optional_key]
         if not isinstance(mapping, Mapping) or len(mapping) > 8:
-            raise MCPToolError(retryable=False)
+            raise MCPToolError(retryable=False, reason="invalid_result_shape")
         sanitized_optional: dict[str, int] = {}
         for name, value in mapping.items():
             if (
@@ -557,16 +611,16 @@ def sanitize_describe_result(payload: Mapping[str, Any]) -> dict[str, object]:
                 or not isinstance(value, int)
                 or value < 0
             ):
-                raise MCPToolError(retryable=False)
+                raise MCPToolError(retryable=False, reason="invalid_result_shape")
             sanitized_optional[name] = value
         result[optional_key] = sanitized_optional
 
     try:
         encoded = json.dumps(result, separators=(",", ":"), allow_nan=False).encode()
     except (TypeError, ValueError) as error:
-        raise MCPToolError(retryable=False) from error
+        raise MCPToolError(retryable=False, reason="invalid_result_shape") from error
     if len(encoded) > MAX_PROFILE_BYTES:
-        raise MCPToolError(retryable=False)
+        raise MCPToolError(retryable=False, reason="byte_limit_exceeded")
     return result
 
 
@@ -580,13 +634,15 @@ def sanitize_query_result(payload: Mapping[str, Any]) -> dict[str, object]:
         "truncated",
     }
     if set(payload) != required_fields:
-        raise MCPToolError(retryable=False)
+        raise MCPToolError(retryable=False, reason="invalid_result_shape")
     columns = payload.get("columns")
     rows = payload.get("rows")
     row_count = payload.get("row_count")
     duration = payload.get("execution_duration_ms")
     query_id = payload.get("query_id")
     truncated = payload.get("truncated")
+    if isinstance(rows, list) and len(rows) > MAX_QUERY_RESULT_ROWS:
+        raise MCPToolError(retryable=False, reason="row_limit_exceeded")
     if (
         not isinstance(columns, list)
         or not 1 <= len(columns) <= 16
@@ -595,7 +651,6 @@ def sanitize_query_result(payload: Mapping[str, Any]) -> dict[str, object]:
             for column in columns
         )
         or not isinstance(rows, list)
-        or len(rows) > MAX_QUERY_RESULT_ROWS
         or isinstance(row_count, bool)
         or not isinstance(row_count, int)
         or row_count != len(rows)
@@ -607,23 +662,23 @@ def sanitize_query_result(payload: Mapping[str, Any]) -> dict[str, object]:
         or len(query_id) > 128
         or not isinstance(truncated, bool)
     ):
-        raise MCPToolError(retryable=False)
+        raise MCPToolError(retryable=False, reason="invalid_result_shape")
     sanitized_rows: list[list[object]] = []
     for row in rows:
         if not isinstance(row, list) or len(row) != len(columns):
-            raise MCPToolError(retryable=False)
+            raise MCPToolError(retryable=False, reason="invalid_result_shape")
         sanitized_row: list[object] = []
         for value in row:
             if value is None or (
                 isinstance(value, (str, int, float)) and not isinstance(value, bool)
             ):
                 if isinstance(value, str) and len(value) > 128:
-                    raise MCPToolError(retryable=False)
+                    raise MCPToolError(retryable=False, reason="invalid_cell_value")
                 if isinstance(value, float) and not math.isfinite(value):
-                    raise MCPToolError(retryable=False)
+                    raise MCPToolError(retryable=False, reason="invalid_cell_value")
                 sanitized_row.append(value)
                 continue
-            raise MCPToolError(retryable=False)
+            raise MCPToolError(retryable=False, reason="invalid_cell_value")
         sanitized_rows.append(sanitized_row)
     result: dict[str, object] = {
         "columns": columns,
@@ -636,9 +691,9 @@ def sanitize_query_result(payload: Mapping[str, Any]) -> dict[str, object]:
     try:
         encoded = json.dumps(result, separators=(",", ":"), allow_nan=False).encode()
     except (TypeError, ValueError) as error:
-        raise MCPToolError(retryable=False) from error
+        raise MCPToolError(retryable=False, reason="invalid_result_shape") from error
     if len(encoded) > MAX_QUERY_RESULT_BYTES:
-        raise MCPToolError(retryable=False)
+        raise MCPToolError(retryable=False, reason="byte_limit_exceeded")
     return result
 
 
@@ -655,7 +710,7 @@ def sanitize_dataset_profile(payload: Mapping[str, Any]) -> dict[str, object]:
     for field_name in required_nonnegative_ints:
         value = payload.get(field_name)
         if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-            raise MCPToolError(retryable=False)
+            raise MCPToolError(retryable=False, reason="invalid_result_shape")
         profile[field_name] = value
 
     schema_columns = payload.get("schema_columns")
@@ -667,16 +722,16 @@ def sanitize_dataset_profile(payload: Mapping[str, Any]) -> dict[str, object]:
             for column in schema_columns
         )
     ):
-        raise MCPToolError(retryable=False)
+        raise MCPToolError(retryable=False, reason="invalid_result_shape")
     profile["schema_columns"] = schema_columns
 
     daily_zone_rows = payload.get("daily_zone_rows")
     if not isinstance(daily_zone_rows, list) or len(daily_zone_rows) > 10:
-        raise MCPToolError(retryable=False)
+        raise MCPToolError(retryable=False, reason="invalid_result_shape")
     sanitized_rows: list[dict[str, object]] = []
     for row in daily_zone_rows:
         if not isinstance(row, Mapping):
-            raise MCPToolError(retryable=False)
+            raise MCPToolError(retryable=False, reason="invalid_result_shape")
         pickup_date = row.get("pickup_date")
         pickup_zone = row.get("pickup_zone")
         trip_count = row.get("trip_count")
@@ -692,7 +747,7 @@ def sanitize_dataset_profile(payload: Mapping[str, Any]) -> dict[str, object]:
             or isinstance(total_amount, bool)
             or not isinstance(total_amount, (int, float))
         ):
-            raise MCPToolError(retryable=False)
+            raise MCPToolError(retryable=False, reason="invalid_result_shape")
         sanitized_rows.append(
             {
                 "pickup_date": pickup_date,
@@ -705,19 +760,19 @@ def sanitize_dataset_profile(payload: Mapping[str, Any]) -> dict[str, object]:
 
     settings = payload.get("duckdb_settings")
     if not isinstance(settings, Mapping):
-        raise MCPToolError(retryable=False)
+        raise MCPToolError(retryable=False, reason="invalid_result_shape")
     sanitized_settings: dict[str, str] = {}
     for key in ("threads", "memory_limit"):
         value = settings.get(key)
         if not isinstance(value, str) or len(value) > 64:
-            raise MCPToolError(retryable=False)
+            raise MCPToolError(retryable=False, reason="invalid_result_shape")
         sanitized_settings[key] = value
     profile["duckdb_settings"] = sanitized_settings
 
     try:
         encoded = json.dumps(profile, separators=(",", ":"), allow_nan=False).encode()
     except (TypeError, ValueError) as error:
-        raise MCPToolError(retryable=False) from error
+        raise MCPToolError(retryable=False, reason="invalid_result_shape") from error
     if len(encoded) > MAX_PROFILE_BYTES:
-        raise MCPToolError(retryable=False)
+        raise MCPToolError(retryable=False, reason="byte_limit_exceeded")
     return profile

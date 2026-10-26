@@ -36,6 +36,7 @@ def terminal_run_payload(
     retryable: bool | None = None,
     error: str | None = None,
     provider_error: dict[str, Any] | None = None,
+    tool_error: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build the shared live/reconstructed public contract for terminal runs."""
     payload = {
@@ -57,6 +58,8 @@ def terminal_run_payload(
         payload["error"] = error
     if provider_error is not None:
         payload["provider_error"] = provider_error
+    if tool_error is not None:
+        payload["tool_error"] = tool_error
     return payload
 
 

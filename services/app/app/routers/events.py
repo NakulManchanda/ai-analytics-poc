@@ -282,6 +282,10 @@ def create_events_router(
                                 reason=current_run.metadata.get("reason"),
                                 retryable=current_run.metadata.get("retryable"),
                                 error=current_run.metadata.get("error"),
+                                provider_error=current_run.metadata.get(
+                                    "provider_error"
+                                ),
+                                tool_error=current_run.metadata.get("tool_error"),
                             ),
                         )
                         if term_evt.event_id not in emitted_event_ids:
