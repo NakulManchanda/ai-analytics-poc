@@ -119,11 +119,14 @@ PLANNER_OUTCOMES = frozenset(
 )
 
 
-def classify_non_tool_outcome(text: str, question: str = "") -> str:
+def classify_non_tool_outcome(text: str) -> str:
     """Classify a non-tool planner response into a typed outcome:
     'unsupported' | 'clarification_required' | 'no_tool'.
+
+    Classifies the model's response text only; never the prompt, which may itself
+    contain phrases such as "cannot" or "read-only".
     """
-    combined = f"{question} {text}".lower()
+    combined = text.lower()
     if any(
         phrase in combined
         for phrase in (

@@ -157,13 +157,23 @@ AGENT_GLOBAL = PromptBundle(
 
 PLANNER_SINGLE_TURN = PromptBundle(
     "planner-single-turn",
-    "1.0.0",
+    "1.1.0",
     {
         "message": PromptTemplate(
             "Choose exactly ONE governed analysis that answers the question. "
             "Do not make multiple tool calls. To compare all boroughs "
             "across NYC, call average_trip_metrics with region_name omitted. "
-            "Dataset schema: {{schema_json}}\nQuestion: {{question}}",
+            "Dataset schema: {{schema_json}}\nQuestion: {{question}}\n"
+            "These tools are read-only analytics over the NYC taxi dataset. "
+            "For a request to modify, delete, insert or update data, "
+            "answer in one plain sentence that this assistant only reads data "
+            "and cannot change it, and do not use a tool. For a question "
+            "about causes that depend on data outside the dataset (such as "
+            "weather, events, traffic or news), answer in one plain sentence "
+            "that the dataset does not contain that information, and do not "
+            "use a tool. A question about trip counts, fares, distances, "
+            "tips, zones, boroughs, payment types or times in the dataset "
+            "must use a tool.",
             PromptKind.SINGLE_TURN,
             frozenset({"question"}),
         )

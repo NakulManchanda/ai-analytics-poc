@@ -30,7 +30,7 @@ not this layer's.
 |---|---|---|
 | Catalogue / deterministic (`query_catalogue.lookup`) | No: planner step is skipped, no model-call record | none |
 | Planner, serve/vLLM (`ServeLLMClient.propose_taxi_query`) | Yes | `planner@1.0.0` |
-| Planner, LiteLLM proxy and direct Bedrock | Yes | `planner-single-turn@1.0.0` |
+| Planner, LiteLLM proxy and direct Bedrock | Yes | `planner-single-turn@1.1.0` |
 | Answer, serve/vLLM and LiteLLM (streaming or not) | Yes | `answer@1.0.0` (`answer-with-schema` when a schema is passed) |
 | Answer, direct Bedrock (streaming or not) | Yes | `answer-single-turn@1.0.0` |
 | Dataset profile answer, serve | Yes | `dataset-profile@1.0.0` |
@@ -89,3 +89,4 @@ the bad version already produced captures; versions are never reused). Captures 
 | Bundle | Version | Change | Eval run |
 |---|---|---|---|
 | all bundles | 1.0.0 | Extracted from inline strings; text unchanged (golden-tested) | n/a (no behaviour change) |
+| planner-single-turn | 1.1.0 | Appended read-only decline, outside-the-dataset decline and positive tool-use anchor (#179); live eval-all pending | pending |

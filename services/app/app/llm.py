@@ -965,7 +965,7 @@ class BedrockLLMClient:
             decline_reason = "".join(
                 block.get("text", "") for block in content if "text" in block
             ).strip()
-            outcome = classify_non_tool_outcome(decline_reason, prompt)
+            outcome = classify_non_tool_outcome(decline_reason)
         return ToolProposalResult(
             name=name if isinstance(name, str) else "",
             arguments=arguments,
@@ -1639,8 +1639,7 @@ class ServeLLMClient:
         tool_calls = message.get("tool_calls", [])
         if not tool_calls or not isinstance(tool_calls, list):
             content_text = (message.get("content", "") or "").strip()
-            user_msg = payload.get("messages", [{}])[-1].get("content", "")
-            outcome = classify_non_tool_outcome(content_text, str(user_msg))
+            outcome = classify_non_tool_outcome(content_text)
             reasoning = _reasoning_facts(message, usage)
             if outcome == "no_tool" and not content_text and reasoning["present"]:
                 # Blank content but the model reasoned. That is NOT necessarily a

@@ -77,7 +77,7 @@ def test_two_turn_session_attributes_each_call_to_its_own_rendered_prompt(
         "planner-single-turn",
         "answer",
     ]
-    assert {c["prompt_template_version"] for c in calls} == {"1.0.0"}
+    assert [c["prompt_template_version"] for c in calls] == ["1.0.0", "1.1.0", "1.0.0"]
     # No run-wide tag masquerades as a template version.
     assert all(
         c["prompt_template_version"] != c["prompt_config_version"] for c in calls
@@ -142,7 +142,10 @@ def test_otel_event_per_call_carries_prompt_attributes() -> None:
         "answer",
     ]
     assert all(len(e.attributes["ai.prompt.sha256"]) == 64 for e in events)
-    assert all(e.attributes["ai.prompt.template_version"] == "1.0.0" for e in events)
+    assert [e.attributes["ai.prompt.template_version"] for e in events] == [
+        "1.1.0",
+        "1.0.0",
+    ]
 
 
 def test_catalogue_path_has_no_planner_call_to_attribute(tmp_path: Path) -> None:

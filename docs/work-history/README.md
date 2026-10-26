@@ -107,3 +107,4 @@ Monotonically numbered log of every post-bootstrap task. Each entry records the 
 - [0111 — eval run folder](0111-eval-run-folder.md) — `metrics/evals/<run_id>/` layout, label guard, tracked driver, logged `eval-*` targets and `review.html` (#200)
 - [0112 — malformed ToolUse classification](0112-malformed-tool-use-classification.md) — typed `malformed_tool_use`, null-usage failed-call record, conservative budget charge, failure-code histograms (#186 Slice A)
 - [0113 — reasoning-only planner output](0113-no-visible-output-reasoning-only.md) — distinct `no_visible_output` outcome for blank content plus reasoning, `output_basis` and finish_reason handling; reasoning text never read (#186 Slice C)
+- [0114 — planner decline wording](0114-planner-decline-wording.md) — `planner-single-turn@1.1.0`: decline write and outside-the-dataset requests, anchor answerable questions to a tool call; live eval-all pending (#179)
