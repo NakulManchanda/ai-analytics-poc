@@ -27,7 +27,7 @@ make litellm-spend               # per-alias calls, failures, tokens, cost
 make litellm-errors              # failed calls with the provider error
 make litellm-env                 # generate LITELLM_MASTER_KEY into git-ignored .env (value never printed)
 make litellm-calls               # compact table of recent proxy calls (needs jq); SESSION=conv_... LIMIT=20
-make phoenix-ui                  # Phoenix trace UI: http://127.0.0.1:16006 (no login; project ai-analytics-poc)
+make phoenix-ui                  # Phoenix trace UI: http://127.0.0.1:16006 (no login; project default)
 make phoenix-up / phoenix-down   # start/restart or stop only Phoenix (traces kept)
 make phoenix-purge               # delete every stored Phoenix trace
 make litellm-smoke               # real run through the app; asserts the proxy logged its calls (spends a few tokens)
@@ -93,16 +93,21 @@ Proxy-native budgets and per-key limits are #170.
 ## Phoenix trace UI (#190)
 
 `docker-compose.phoenix.yml` is part of the default local path (`LITELLM_COMPOSE` in the Makefile). It runs Arize
-Phoenix next to the proxy and sets `PHOENIX_COLLECTOR_HTTP_ENDPOINT`/`PHOENIX_PROJECT_NAME` on the proxy, which makes
-LiteLLM attach its Phoenix logger beside the `otel` callback. `infra/litellm/config.yaml` is unchanged because the same
-file is the deployed proxy's config; the overlay is local only and never reaches Terraform. `PHOENIX_PORT` overrides the
-host port (default 16006, loopback only).
+Phoenix next to the proxy and sets `PHOENIX_COLLECTOR_HTTP_ENDPOINT` on the proxy, which makes LiteLLM attach its
+Phoenix logger beside the `otel` callback. `infra/litellm/config.yaml` is unchanged because the same file is the deployed
+proxy's config; the overlay is local only and never reaches Terraform. `PHOENIX_PORT` overrides the host port (default
+16006, loopback only). The overlay also turns on app and MCP tracing and exports it straight to Phoenix, so one trace is the
+whole run: `ai.run` -> LLM calls -> `mcp.request` -> `mcp.tool.execute` -> `duckdb.query`. The app sets `session.id` to the
+conversation id on `ai.run`, so Phoenix's Sessions tab groups a conversation's runs. Everything lands in the `default` project.
 
 Each model call is an LLM span with the full input messages, offered tools, the response (including proposed tool
 calls and arguments), tokens, cost and duration. **Prompt and response bodies are stored locally in the `phoenix_data`
-volume by default**, independent of `LITELLM_CAPTURE`; `make phoenix-purge` deletes them. Known gaps: the
-conversation id is not yet Phoenix's `session.id`, and app/MCP spans (tool execution and results) are not exported to it.
-Phoenix's own total cost can show $0 for Nova Micro; use the span's `llm.response.cost`.
+volume by default**, independent of `LITELLM_CAPTURE`; `make phoenix-purge` deletes them.
+
+Known gaps: MCP spans carry the tool name and (for aggregates) `ai.row_count`/`ai.truncated`, not the result rows;
+`LITELLM_OTEL=1` overrides the app/MCP endpoint to the Collector/Jaeger, so Phoenix then shows only the proxy's spans;
+the UI's status polling adds lone `mcp.request` traces with no session; Phoenix's own total cost can show $0 for Nova
+Micro (use the span's `llm.response.cost`).
 
 ## Prompt capture is opt-in
 

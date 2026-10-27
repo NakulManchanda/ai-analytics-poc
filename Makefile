@@ -322,8 +322,8 @@ phoenix-up: litellm-env ## Start (or restart) only the Phoenix trace UI and the 
 phoenix-down: litellm-env ## Stop only Phoenix (traces are kept in its volume; the proxy keeps working without it)
 	$(LITELLM_COMPOSE_ENV) docker compose $(LITELLM_COMPOSE) stop phoenix
 
-phoenix-ui: ## Print the local Phoenix UI URL (project ai-analytics-poc; no login)
-	@echo "Phoenix UI: $(PHOENIX_URL)  (project: ai-analytics-poc; stores full prompts/responses locally)"
+phoenix-ui: ## Print the local Phoenix UI URL (project: default; no login)
+	@echo "Phoenix UI: $(PHOENIX_URL)  (project: default; stores full prompts/responses locally)"
 
 phoenix-purge: litellm-env ## Delete ALL stored Phoenix traces (stops Phoenix and removes its volume)
 	$(LITELLM_COMPOSE_ENV) docker compose $(LITELLM_COMPOSE) rm -sf phoenix

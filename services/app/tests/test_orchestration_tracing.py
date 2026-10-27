@@ -80,6 +80,7 @@ def test_run_emits_one_safe_ai_run_span() -> None:
     assert span.attributes == {
         "ai.run_id": result.run_id,
         "ai.conversation_id": result.conversation_id,
+        "session.id": result.conversation_id,
         "ai.turn_type": "text",
         "ai.status": "completed",
         "gen_ai.request.model": DEFAULT_MODEL_ID,
@@ -160,6 +161,7 @@ def test_async_path_capture_trace_id_matches_ai_run_span(tmp_path) -> None:
     expected = format(spans[0].get_span_context().trace_id, "032x")
     assert spans[0].attributes["ai.run_id"] == submission.run_id
     assert spans[0].attributes["ai.conversation_id"] == submission.conversation_id
+    assert spans[0].attributes["session.id"] == submission.conversation_id
     assert spans[0].attributes["ai.status"] == "completed"
     records = _capture_records(tmp_path)
     assert records

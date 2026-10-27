@@ -776,6 +776,8 @@ class OrchestrationLoop:
             {
                 "ai.run_id": submission.run_id,
                 "ai.conversation_id": submission.conversation_id,
+                # OpenInference key: Phoenix groups a conversation's traces into one session.
+                "session.id": submission.conversation_id,
                 "ai.turn_type": "text",
                 "gen_ai.request.model": self._configured_model_id(),
                 **(

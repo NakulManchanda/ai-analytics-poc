@@ -3,7 +3,7 @@
 # Full prompts, responses and tool-call arguments are stored in the `phoenix_data` volume:
 # purge with `make phoenix-purge`. UI: http://127.0.0.1:${PHOENIX_PORT:-16006}
 # The shared infra/litellm/config.yaml is untouched (it is also the deployed proxy's config):
-# PHOENIX_* env makes LiteLLM attach its Phoenix logger next to the `otel` callback.
+# PHOENIX_COLLECTOR_HTTP_ENDPOINT makes LiteLLM attach its Phoenix logger next to the `otel` callback.
 services:
   phoenix:
     image: arizephoenix/phoenix:version-20.26.1
@@ -14,10 +14,23 @@ services:
     volumes:
       - phoenix_data:/mnt/data
 
+  # App and MCP export their own spans straight to Phoenix so a trace shows the whole run (ai.run ->
+  # LLM calls -> MCP tool); everything lands in Phoenix's `default` project.
+  # LITELLM_OTEL=1 (docker-compose.observability.yml) later overrides the endpoint to the Collector/Jaeger.
+  app:
+    environment: &phoenix-tracing
+      OTEL_TRACING_ENABLED: "true"
+      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: http://phoenix:6006/v1/traces
+    depends_on:
+      phoenix:
+        condition: service_started
+
+  mcp:
+    environment: *phoenix-tracing
+
   litellm:
     environment:
       PHOENIX_COLLECTOR_HTTP_ENDPOINT: http://phoenix:6006/v1/traces
-      PHOENIX_PROJECT_NAME: ai-analytics-poc
     depends_on:
       phoenix:
         condition: service_started
