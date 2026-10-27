@@ -143,16 +143,20 @@ export default function App() {
       setChatTurns(
         orderedMessages.map((message, index) => {
           const priorMessage = orderedMessages[index - 1];
+          const nextMessage = orderedMessages[index + 1];
+          // A failed/declined run persists no assistant message, so its user turn carries the Inspect link.
           const associatedRun = message.role === "assistant" && priorMessage?.role === "user"
             ? runsByMessageId.get(priorMessage.message_id)
-            : undefined;
+            : message.role === "user" && nextMessage?.role !== "assistant"
+              ? runsByMessageId.get(message.message_id)
+              : undefined;
           return {
             id: message.message_id,
             role: message.role,
             content: message.content,
             timestamp: new Date(message.created_at).toLocaleTimeString(),
             runId: associatedRun?.run_id,
-            tokens: associatedRun ? associatedRun.input_tokens + associatedRun.output_tokens : undefined,
+            tokens: associatedRun && message.role === "assistant" ? associatedRun.input_tokens + associatedRun.output_tokens : undefined,
           };
         }),
       );
@@ -434,9 +438,9 @@ export default function App() {
                       <time>{turn.timestamp}</time>
                     </div>
                     <p className="bubble-content">{turn.content}</p>
-                    {turn.tokens && (
+                    {(turn.tokens || turn.runId) && (
                       <div className="bubble-telemetry">
-                        <span>{turn.tokens} tokens</span>
+                        {turn.tokens && <span>{turn.tokens} tokens</span>}
                         {turn.latencyMs && <span> · {turn.latencyMs} ms</span>}
                         {turn.runId && (
                           <button
