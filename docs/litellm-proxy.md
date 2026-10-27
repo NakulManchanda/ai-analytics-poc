@@ -27,6 +27,9 @@ make litellm-spend               # per-alias calls, failures, tokens, cost
 make litellm-errors              # failed calls with the provider error
 make litellm-env                 # generate LITELLM_MASTER_KEY into git-ignored .env (value never printed)
 make litellm-calls               # compact table of recent proxy calls (needs jq); SESSION=conv_... LIMIT=20
+make phoenix-ui                  # Phoenix trace UI: http://127.0.0.1:16006 (no login; project ai-analytics-poc)
+make phoenix-up / phoenix-down   # start/restart or stop only Phoenix (traces kept)
+make phoenix-purge               # delete every stored Phoenix trace
 make litellm-smoke               # real run through the app; asserts the proxy logged its calls (spends a few tokens)
 make local-bedrock-direct-compose  # rollback: direct Bedrock, no proxy
 ```
@@ -87,9 +90,23 @@ or unavailable allowance maps to `bedrock_budget_exhausted` / `bedrock_budget_un
 called. `LITELLM_API_KEY` is required when `LLM_PROVIDER=litellm` (startup fails closed without it).
 Proxy-native budgets and per-key limits are #170.
 
+## Phoenix trace UI (#190)
+
+`docker-compose.phoenix.yml` is part of the default local path (`LITELLM_COMPOSE` in the Makefile). It runs Arize
+Phoenix next to the proxy and sets `PHOENIX_COLLECTOR_HTTP_ENDPOINT`/`PHOENIX_PROJECT_NAME` on the proxy, which makes
+LiteLLM attach its Phoenix logger beside the `otel` callback. `infra/litellm/config.yaml` is unchanged because the same
+file is the deployed proxy's config; the overlay is local only and never reaches Terraform. `PHOENIX_PORT` overrides the
+host port (default 16006, loopback only).
+
+Each model call is an LLM span with the full input messages, offered tools, the response (including proposed tool
+calls and arguments), tokens, cost and duration. **Prompt and response bodies are stored locally in the `phoenix_data`
+volume by default**, independent of `LITELLM_CAPTURE`; `make phoenix-purge` deletes them. Known gaps: the
+conversation id is not yet Phoenix's `session.id`, and app/MCP spans (tool execution and results) are not exported to it.
+Phoenix's own total cost can show $0 for Nova Micro; use the span's `llm.response.cost`.
+
 ## Prompt capture is opt-in
 
-Local logging is metadata-only by default. `LITELLM_CAPTURE=1 make local-aws-litellm-compose` stores prompts and
+Proxy spend-log logging is metadata-only by default (Phoenix traces above are separate and do hold bodies). `LITELLM_CAPTURE=1 make local-aws-litellm-compose` stores prompts and
 responses in Postgres and prints bodies (DEBUG) for evaluation capture; without it `make litellm-calls` shows `-`
 in the TOOL column and Logs has no request/response JSON. Deployed ECS never stores bodies.
 

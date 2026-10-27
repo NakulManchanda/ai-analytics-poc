@@ -1,0 +1,26 @@
+# Local Arize Phoenix trace UI (#190): the LiteLLM proxy exports OpenInference spans to it.
+# Part of the default local path (`make local-aws-litellm-compose`); local only, never deployed.
+# Full prompts, responses and tool-call arguments are stored in the `phoenix_data` volume:
+# purge with `make phoenix-purge`. UI: http://127.0.0.1:${PHOENIX_PORT:-16006}
+# The shared infra/litellm/config.yaml is untouched (it is also the deployed proxy's config):
+# PHOENIX_* env makes LiteLLM attach its Phoenix logger next to the `otel` callback.
+services:
+  phoenix:
+    image: arizephoenix/phoenix:version-20.26.1
+    ports:
+      - "127.0.0.1:${PHOENIX_PORT:-16006}:6006"
+    environment:
+      PHOENIX_WORKING_DIR: /mnt/data
+    volumes:
+      - phoenix_data:/mnt/data
+
+  litellm:
+    environment:
+      PHOENIX_COLLECTOR_HTTP_ENDPOINT: http://phoenix:6006/v1/traces
+      PHOENIX_PROJECT_NAME: ai-analytics-poc
+    depends_on:
+      phoenix:
+        condition: service_started
+
+volumes:
+  phoenix_data:

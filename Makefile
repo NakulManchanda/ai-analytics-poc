@@ -11,7 +11,7 @@ OBSERVABILITY_BURST_COUNT ?= 10
 OBSERVABILITY_LOG_TAIL ?= 200
 KV_BUNDLE_OUT = $(or $(OUT),work/kv-hop.yaml)
 
-.PHONY: help eval-stack-up eval-start eval-health eval-smoke eval-run eval-freeze eval-grade eval-compare eval-cost eval-review eval-open eval-all check-bootstrap dev app-serve-dev mcp-dev mcp-smoke dataset-test dataset-smoke smoke test bench-test evals-test evals-report gateway-test mcp-test infra-test web-test compose-smoke observability-up observability-down observability-smoke observability-dev-up observability-dev-info observability-dev-ask observability-dev-burst observability-dev-metrics observability-dev-logs observability-dev-down local-aws-litellm-compose local-aws-compose local-litellm-compose local-bedrock-direct-compose litellm-traffic litellm-env litellm-smoke litellm-calls litellm-spend litellm-errors litellm-ready litellm-ui litellm-traffic local-aws-refresh local-serve-compose local-serve-refresh local-bedrock-compose bedrock-smoke m5-bedrock-smoke m6-bedrock-smoke dashboard tf-dispatch tf-resume tf-park inference-validate inference-sync inference-config inference-secret inference-bootstrap inference-deploy inference-up inference-tunnel inference-connect inference-smoke inference-warmup inference-capacity inference-restart inference-gateway-restart inference-controls-on inference-controls-off inference-verify-workers inference-e1 inference-fresh-up inference-tmux-start inference-tmux-end inference-serve-smoke inference-run inference-pull-evidence inference-pull-range inference-kv-image inference-kv-render inference-kv-smoke evidence-analyze evidence-notebook evidence-notebook-open inference-teardown replay-fanout replay-multi-turn replay-compare-strategies replay-strategy-manual replay-strategy-crewai replay-e3-least-loaded replay-e3-prefix-then-load replay-e4-admission-on replay-e4-admission-off replay-e3-large-prefix-least-loaded replay-e3-large-prefix-prefix-then-load replay-e5 replay-arrival-rate trace-request
+.PHONY: help eval-stack-up eval-start eval-health eval-smoke eval-run eval-freeze eval-grade eval-compare eval-cost eval-review eval-open eval-all check-bootstrap dev app-serve-dev mcp-dev mcp-smoke dataset-test dataset-smoke smoke test bench-test evals-test evals-report gateway-test mcp-test infra-test web-test compose-smoke observability-up observability-down observability-smoke observability-dev-up observability-dev-info observability-dev-ask observability-dev-burst observability-dev-metrics observability-dev-logs observability-dev-down local-aws-litellm-compose local-aws-compose local-litellm-compose local-bedrock-direct-compose litellm-traffic litellm-env litellm-smoke litellm-calls litellm-spend litellm-errors litellm-ready litellm-ui litellm-traffic local-aws-refresh phoenix-up phoenix-down phoenix-ui phoenix-purge local-serve-compose local-serve-refresh local-bedrock-compose bedrock-smoke m5-bedrock-smoke m6-bedrock-smoke dashboard tf-dispatch tf-resume tf-park inference-validate inference-sync inference-config inference-secret inference-bootstrap inference-deploy inference-up inference-tunnel inference-connect inference-smoke inference-warmup inference-capacity inference-restart inference-gateway-restart inference-controls-on inference-controls-off inference-verify-workers inference-e1 inference-fresh-up inference-tmux-start inference-tmux-end inference-serve-smoke inference-run inference-pull-evidence inference-pull-range inference-kv-image inference-kv-render inference-kv-smoke evidence-analyze evidence-notebook evidence-notebook-open inference-teardown replay-fanout replay-multi-turn replay-compare-strategies replay-strategy-manual replay-strategy-crewai replay-e3-least-loaded replay-e3-prefix-then-load replay-e4-admission-on replay-e4-admission-off replay-e3-large-prefix-least-loaded replay-e3-large-prefix-prefix-then-load replay-e5 replay-arrival-rate trace-request
 
 
 help: ## Show available commands
@@ -276,7 +276,7 @@ observability-dev-down: ## Stop only the issue-owned local observability project
 		docker compose -p "$(OBSERVABILITY_PROJECT)" -f docker-compose.yml -f docker-compose.observability.yml down --remove-orphans
 
 # LITELLM_OTEL=1 adds the Collector/Jaeger overlay and points the proxy's otel callback at it (#189).
-LITELLM_COMPOSE = -f docker-compose.yml -f docker-compose.aws.yml -f docker-compose.litellm.yml $(if $(filter 1,$(LITELLM_OTEL)),-f docker-compose.observability.yml -f docker-compose.litellm-otel.yml)
+LITELLM_COMPOSE = -f docker-compose.yml -f docker-compose.aws.yml -f docker-compose.litellm.yml -f docker-compose.phoenix.yml $(if $(filter 1,$(LITELLM_OTEL)),-f docker-compose.observability.yml -f docker-compose.litellm-otel.yml)
 AWS_DIRECT_COMPOSE = -f docker-compose.yml -f docker-compose.aws.yml
 # The proxy master key lives in the git-ignored .env (see litellm-env); it is sourced, never printed.
 LITELLM_ENV = set -a; [ -f .env ] && . ./.env; set +a; : "$${LITELLM_MASTER_KEY:?run make litellm-env}";
@@ -292,7 +292,7 @@ local-litellm-compose: litellm-env ## Start local Compose with real AWS, model c
 	WEB_PORT=$(or $(WEB_PORT),3000) \
 	VOICE_ENABLED=$(or $(VOICE_ENABLED),false) \
 	docker compose $(LITELLM_COMPOSE) up --build -d
-	@$(MAKE) --no-print-directory litellm-ui
+	@$(MAKE) --no-print-directory litellm-ui phoenix-ui
 
 local-aws-litellm-compose: local-litellm-compose ## Start local Compose with real AWS (Bedrock via LiteLLM proxy + Transcribe); proxy is the default
 
@@ -312,6 +312,23 @@ local-aws-refresh: litellm-env ## Restart local Compose stack from scratch (down
 
 litellm-ui: ## Print the local LiteLLM Admin UI URL; login is admin / LITELLM_MASTER_KEY from .env
 	@echo "LiteLLM UI: $(LITELLM_URL)/ui  (user: admin, password: LITELLM_MASTER_KEY in .env)"
+
+PHOENIX_URL = http://127.0.0.1:$(or $(PHOENIX_PORT),16006)
+
+phoenix-up: litellm-env ## Start (or restart) only the Phoenix trace UI and the proxy that exports to it, without rebuilding the rest of the stack
+	$(LITELLM_COMPOSE_ENV) docker compose $(LITELLM_COMPOSE) up -d phoenix litellm
+	@$(MAKE) --no-print-directory phoenix-ui
+
+phoenix-down: litellm-env ## Stop only Phoenix (traces are kept in its volume; the proxy keeps working without it)
+	$(LITELLM_COMPOSE_ENV) docker compose $(LITELLM_COMPOSE) stop phoenix
+
+phoenix-ui: ## Print the local Phoenix UI URL (project ai-analytics-poc; no login)
+	@echo "Phoenix UI: $(PHOENIX_URL)  (project: ai-analytics-poc; stores full prompts/responses locally)"
+
+phoenix-purge: litellm-env ## Delete ALL stored Phoenix traces (stops Phoenix and removes its volume)
+	$(LITELLM_COMPOSE_ENV) docker compose $(LITELLM_COMPOSE) rm -sf phoenix
+	@docker volume ls -q -f label=com.docker.compose.volume=phoenix_data -f label=com.docker.compose.project=$$($(LITELLM_COMPOSE_ENV) docker compose $(LITELLM_COMPOSE) config --format json | python3 -c 'import json,sys;print(json.load(sys.stdin)["name"])') | xargs -r docker volume rm
+	@echo "Phoenix traces purged; run make phoenix-up to start it empty."
 
 litellm-ready: ## Check the local LiteLLM proxy readiness and liveness endpoints (no auth needed)
 	@curl -sf "$(LITELLM_URL)/health/readiness" && echo && curl -sf "$(LITELLM_URL)/health/liveliness" && echo
