@@ -26,7 +26,11 @@ services:
         condition: service_started
 
   mcp:
-    environment: *phoenix-tracing
+    environment:
+      <<: *phoenix-tracing
+      # Opt-in: put a bounded copy of tool result rows on the duckdb.query span (data, not metadata).
+      MCP_TRACE_RESULTS: "${MCP_TRACE_RESULTS:-0}"
+      MCP_TRACE_RESULT_MAX_BYTES: "${MCP_TRACE_RESULT_MAX_BYTES:-4096}"
 
   litellm:
     environment:

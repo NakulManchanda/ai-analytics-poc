@@ -23,7 +23,11 @@ from fastmcp import FastMCP
 from opentelemetry import trace
 from opentelemetry.trace import Status, StatusCode
 
-from mcp_server.telemetry import SCHEMA_RESOURCE_URI, MCPTracingMiddleware
+from mcp_server.telemetry import (
+    SCHEMA_RESOURCE_URI,
+    MCPTracingMiddleware,
+    record_result_preview,
+)
 
 DATASET_NAME = "nyc-yellow-taxi"
 DATASET_MONTH = "2024-01"
@@ -84,8 +88,11 @@ def _run_duckdb_query(
         try:
             if analysis is not None and limit is not None:
                 span.set_attributes({"ai.analysis": analysis, "ai.row_limit": limit})
-                return runner(analysis=analysis, limit=limit)
-            return runner(region_name=region_name)
+                result = runner(analysis=analysis, limit=limit)
+            else:
+                result = runner(region_name=region_name)
+            record_result_preview(span, result)
+            return result
         except Exception:
             span.set_status(Status(StatusCode.ERROR))
             raise
@@ -154,6 +161,7 @@ def _run_governed_analytics_tool(
         truncated = result.get("truncated")
         if isinstance(truncated, bool):
             span.set_attribute("ai.truncated", truncated)
+        record_result_preview(span, result)
         return result
 
 

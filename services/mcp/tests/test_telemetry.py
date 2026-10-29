@@ -315,7 +315,7 @@ def test_fastmcp_middleware_extracts_traceparent_and_makes_server_child_current(
     assert current_spans == [span.context]
 
 
-def test_fastmcp_middleware_creates_root_span_without_valid_traceparent():
+def test_fastmcp_middleware_skips_root_discovery_requests_without_valid_traceparent():
     provider, tracer, exporter = traced_runtime()
     try:
         response = asyncio.run(
@@ -324,11 +324,8 @@ def test_fastmcp_middleware_creates_root_span_without_valid_traceparent():
     finally:
         provider.shutdown()
 
-    spans = exporter.get_finished_spans()
-    assert response.is_success
-    assert len(spans) == 1
-    assert spans[0].context.is_valid
-    assert spans[0].parent is None
+    assert response.is_success  # initialize still answered
+    assert exporter.get_finished_spans() == ()
 
 
 def test_fastmcp_middleware_ignores_malformed_traceparent():
@@ -343,10 +340,60 @@ def test_fastmcp_middleware_ignores_malformed_traceparent():
     finally:
         provider.shutdown()
 
+    # malformed context counts as no caller trace, so the discovery request is not traced
     assert response.is_success
+    assert exporter.get_finished_spans() == ()
+
+
+@pytest.mark.parametrize(
+    "method", ["initialize", "tools/list", "resources/list", "ping"]
+)
+def test_middleware_does_not_trace_rootless_discovery_but_still_runs_it(method):
+    from types import SimpleNamespace
+
+    from mcp_server import telemetry
+
+    async def downstream(_context):
+        return "downstream response"
+
+    provider, tracer, exporter = traced_runtime()
+    middleware = telemetry.MCPTracingMiddleware(tracer)
+    try:
+        response = asyncio.run(
+            middleware.on_request(
+                context=SimpleNamespace(method=method), call_next=downstream
+            )
+        )
+    finally:
+        provider.shutdown()
+
+    assert response == "downstream response"
+    assert exporter.get_finished_spans() == ()
+
+
+@pytest.mark.parametrize("method", ["tools/call", "resources/read"])
+def test_middleware_still_traces_rootless_work_requests(method):
+    from types import SimpleNamespace
+
+    from mcp_server import telemetry
+
+    async def downstream(_context):
+        return "downstream response"
+
+    provider, tracer, exporter = traced_runtime()
+    middleware = telemetry.MCPTracingMiddleware(tracer)
+    try:
+        asyncio.run(
+            middleware.on_request(
+                context=SimpleNamespace(method=method), call_next=downstream
+            )
+        )
+    finally:
+        provider.shutdown()
+
     spans = exporter.get_finished_spans()
     assert len(spans) == 1
-    assert spans[0].context.is_valid
+    assert spans[0].attributes["rpc.method"] == method
     assert spans[0].parent is None
 
 
