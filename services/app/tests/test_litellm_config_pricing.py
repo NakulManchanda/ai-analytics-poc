@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from app.model_policy import RunBudgetExceededError, RunBudgets
 from app.model_policy.pricing import (
     ALIAS_MODELS,
     MODEL_RATES,
@@ -49,11 +50,23 @@ def test_every_proxy_model_is_in_the_terraform_iam_allowlist() -> None:
         assert variables.count(ARN.format(model)) == 2  # default + validation
 
 
-def test_unmapped_alias_is_priced_at_the_highest_known_rate() -> None:
-    table = default_pricing(("custom-alias", "amazon.nova-micro-v1:0"))
-    assert table.rates["custom-alias"] == max(MODEL_RATES.values())
-    # the direct Bedrock path uses the model id as its alias
+def test_unmapped_alias_and_unknown_model_are_unpriced_not_guessed() -> None:
+    table = default_pricing(
+        ("custom-alias", "amazon.nova-lite-v1:0", "amazon.nova-micro-v1:0")
+    )
+    assert table.estimate("custom-alias", 1_000_000, 0) is None
+    assert table.estimate("amazon.nova-lite-v1:0", 1_000_000, 0) is None
+    assert "custom-alias" not in table.rates
+    # the direct Bedrock path uses a priced model id as its alias
     assert (
         table.rates["amazon.nova-micro-v1:0"] == MODEL_RATES["amazon.nova-micro-v1:0"]
     )
-    assert table.estimate("custom-alias", 1_000_000, 0) == pytest.approx(0.80)
+
+
+def test_unpriced_call_is_denied_by_a_usd_cap_and_allowed_by_a_token_cap() -> None:
+    estimate = default_pricing(("custom-alias",)).estimate("custom-alias", 1000, 100)
+    assert estimate is None
+    with pytest.raises(RunBudgetExceededError):
+        RunBudgets(max_usd=1.0).reserve("run_usd", 1100, estimate)
+    # no USD cap configured: the token cap alone applies, as before
+    assert RunBudgets(max_tokens=10_000).reserve("run_tok", 1100, estimate)

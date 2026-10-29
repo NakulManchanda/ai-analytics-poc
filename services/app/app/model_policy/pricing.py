@@ -22,14 +22,13 @@ ALIAS_MODELS: Mapping[str, str] = MappingProxyType(
         "taxi-answer": "amazon.nova-micro-v1:0",
     }
 )
-# An alias that is neither mapped nor a model id (e.g. from a custom MODEL_POLICY_FILE) is priced at
-# the most expensive known rate, so run budgets over-estimate instead of under-estimating.
-_UNMAPPED_RATE = max(MODEL_RATES.values())
 
 
-def _rate(alias: str) -> tuple[float, float]:
-    # The direct Bedrock path uses the model id itself as the alias.
-    return MODEL_RATES.get(ALIAS_MODELS.get(alias, alias), _UNMAPPED_RATE)
+def _rate(alias: str) -> tuple[float, float] | None:
+    """Rate for a mapped alias, or for an alias that is itself a priced model id (the direct
+    Bedrock path). Anything else is unpriced: no guess, so a configured USD cap fails closed.
+    """
+    return MODEL_RATES.get(ALIAS_MODELS.get(alias, alias))
 
 
 @dataclass(frozen=True)
@@ -51,5 +50,6 @@ class PricingTable:
 
 def default_pricing(aliases: tuple[str, ...]) -> PricingTable:
     return PricingTable(
-        PRICING_VERSION, MappingProxyType({a: _rate(a) for a in aliases})
+        PRICING_VERSION,
+        MappingProxyType({a: rate for a in aliases if (rate := _rate(a)) is not None}),
     )
