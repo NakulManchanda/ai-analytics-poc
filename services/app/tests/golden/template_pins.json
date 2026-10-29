@@ -32,8 +32,8 @@
     "fingerprint": "36770c532788cb10f9d482d4e98c3e6f88fba59c6c06276444abca87371dee53"
   },
   "planner-single-turn": {
-    "version": "1.1.0",
-    "fingerprint": "ee8f257c721df7ffc1cdb589358e946175b1caac66759a286ea44ab835d50619"
+    "version": "1.2.0",
+    "fingerprint": "693dd3818281840fd284ba8d3042e75f78de6658f793e5e5cf960b1b8277a254"
   },
   "taxi-base": {
     "version": "1.0.0",
