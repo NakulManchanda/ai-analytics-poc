@@ -241,6 +241,23 @@ make eval-all LABEL=<name> EVAL_CONFIRM=1 [EVAL_BASELINE=...]
 
 **Failure codes (#186).** `run.failed` carries a `failure_code`; `run-compare` and `run-review` show a per-run histogram of them (read from the run's events), so a change in failure mix is visible without grepping events. Codes seen on the golden set: `no_tool_call` (planner replied without a tool call), `multiple_tool_calls`, `mcp_tool_error`, `litellm_proxy_http_<status>` for unclassified proxy errors, and `malformed_tool_use`: a planner call that Bedrock rejected with "Model produced invalid sequence as part of ToolUse" (LiteLLM relays it as HTTP 424). `malformed_tool_use` is not retried and has no fallback alias. Its `run.failed` payload and run metadata carry `provider_error` = `{category, provider_status, provider_call_id, attempts}` (never the provider body or the prompt), and the failed attempt is an `LLMCall` with null usage and cost: the run budget is charged the existing conservative bound (or fails closed when the alias is unpriced) while the reported run tokens and cost stay unchanged. The span event `ai.llm_call` gains `ai.llm.error_category` and `ai.llm.provider_status`, and the run span `ai.error.category`.
 
+## Planner model comparison: Nova Micro vs Nova Pro (#207)
+
+Not yet run: each full golden run is paid Bedrock traffic and needs your `EVAL_CONFIRM=1`. Run both with the same prompt version (`planner-single-turn@1.2.0`) and the same dataset so the model is the only change:
+
+```bash
+# Pro (the default mapping in infra/litellm/config.yaml)
+make eval-stack-up
+make eval-all LABEL=207-pro EVAL_CONFIRM=1
+
+# Micro: use an untracked copy of the proxy config with taxi-planner -> bedrock/amazon.nova-micro-v1:0,
+# mounted over /app/config.yaml, then restart the stack and run the same label pattern
+make eval-all LABEL=207-micro EVAL_CONFIRM=1
+make eval-compare EVAL_RUN=<pro run> EVAL_BASELINE=<micro run>/regrade_results.jsonl
+```
+
+Read from `compare.md` / `review.html`: tool and argument correctness (matches, `failure_code` histogram incl. `multiple_tool_calls` and `tool_validation_error`), completion success (answered vs failed vs declined), latency, and cost. Cost per successful query is the run's `report/` cost divided by its answered turns (calculate it by hand; the tooling does not print it). Record the result and any case that could not run in `docs/work-history/0120-nova-pro-planner.md`.
+
 ## Known gaps
 
 - A first live provisional baseline exists only as local, uncommitted evidence; the committed session report is local-scripted. Its legacy grader score is not a trusted quality metric.

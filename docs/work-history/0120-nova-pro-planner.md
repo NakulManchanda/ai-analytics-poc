@@ -10,11 +10,14 @@ All aliases targeted Nova Micro. `planner-single-turn@1.2.0` made Micro answer i
 - `taxi-planner` -> `bedrock/amazon.nova-pro-v1:0`; `taxi-answer` and `taxi-classifier` stay Nova Micro (user chose "everywhere" after seeing the cost: about 20x per question, roughly $0.0036 vs $0.0002; planner call about twice as slow).
 - Terraform `bedrock_model_arns` now defaults to, and validation requires exactly, the Nova Micro and Nova Pro foundation-model ARNs. The same variable feeds the ai-app task role and the LiteLLM task role, so both get Pro permission.
 - `default_pricing` prices `taxi-planner` at Nova Pro rates ($0.80 / $3.20 per 1M tokens, same as LiteLLM's cost map) and every other alias at Micro; `PRICING_VERSION` bumped to `2026-10-bedrock-nova-v2`.
+- Review follow-up: `ALIAS_MODELS`/`MODEL_RATES` replace the hardcoded planner alias; `tests/test_litellm_config_pricing.py` fails when `infra/litellm/config.yaml`, the price table or the Terraform ARN allowlist drift (checked by temporarily remapping the planner to Micro: 2 failures). An alias that is neither mapped nor a model id is priced at the highest known rate (over-estimate, never under). `pyyaml` added as a dev dependency for the test.
 - Not done: `terraform apply`, proxy redeploy, live eval-all on Pro. Existing eval baselines were measured on Micro and are not comparable.
 
 ## Verification
 - `uv run pytest -q` in `services/app`: 489 passed; `pytest tests/infra`: 21 passed; ruff and black clean.
 - `terraform fmt -check` and `terraform validate` (no backend): success.
+- Deployed proxy: the user reported on 2026-10-29 that Nova Pro invocation through the deployed LiteLLM proxy was validated; **no evidence (run id, spend-log cost, streaming result, logs) is attached yet**, so this PR does not claim it. Checklist in `docs/litellm-proxy.md`.
+- Controlled Micro-vs-Pro golden eval: **not run** (paid Bedrock, needs EVAL_CONFIRM); procedure in `docs/evals.md`.
 - Manual (earlier, untracked override): Nova Pro planner returned one grouped call on the weekday-vs-weekend query.
 
 ## PR / merge state

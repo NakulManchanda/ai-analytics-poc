@@ -5,11 +5,31 @@ from dataclasses import dataclass
 from types import MappingProxyType
 
 PRICING_VERSION = "2026-10-bedrock-nova-v2"
-# USD per million (input, output) tokens; Nova Micro on-demand, same rates as bedrock_budget.
-_NOVA_MICRO = (0.035, 0.140)
-# Nova Pro on-demand (the taxi-planner alias, infra/litellm/config.yaml).
-_NOVA_PRO = (0.80, 3.20)
-_PRO_ALIASES = frozenset({"taxi-planner"})
+# USD per million (input, output) tokens, Bedrock on-demand (matches LiteLLM's model cost map).
+MODEL_RATES: Mapping[str, tuple[float, float]] = MappingProxyType(
+    {
+        "amazon.nova-micro-v1:0": (0.035, 0.140),
+        "amazon.nova-pro-v1:0": (0.80, 3.20),
+    }
+)
+# Which Bedrock model each proxy alias targets. Must equal `model_list` in
+# infra/litellm/config.yaml (the deployed proxy's config too): tests/test_litellm_config_pricing.py
+# fails when the two drift, so remapping an alias cannot silently misprice it.
+ALIAS_MODELS: Mapping[str, str] = MappingProxyType(
+    {
+        "taxi-classifier": "amazon.nova-micro-v1:0",
+        "taxi-planner": "amazon.nova-pro-v1:0",
+        "taxi-answer": "amazon.nova-micro-v1:0",
+    }
+)
+# An alias that is neither mapped nor a model id (e.g. from a custom MODEL_POLICY_FILE) is priced at
+# the most expensive known rate, so run budgets over-estimate instead of under-estimating.
+_UNMAPPED_RATE = max(MODEL_RATES.values())
+
+
+def _rate(alias: str) -> tuple[float, float]:
+    # The direct Bedrock path uses the model id itself as the alias.
+    return MODEL_RATES.get(ALIAS_MODELS.get(alias, alias), _UNMAPPED_RATE)
 
 
 @dataclass(frozen=True)
@@ -31,8 +51,5 @@ class PricingTable:
 
 def default_pricing(aliases: tuple[str, ...]) -> PricingTable:
     return PricingTable(
-        PRICING_VERSION,
-        MappingProxyType(
-            {a: _NOVA_PRO if a in _PRO_ALIASES else _NOVA_MICRO for a in aliases}
-        ),
+        PRICING_VERSION, MappingProxyType({a: _rate(a) for a in aliases})
     )
