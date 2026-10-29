@@ -7,7 +7,7 @@ Two follow-ups from the retrospective review of #214: let a human see the rows a
 MCP spans carried only the tool name, `ai.row_count` and `ai.truncated`; every discovery request without a caller trace became its own trace (6 stray traces for 2 real runs).
 
 ## Decisions
-- `MCP_TRACE_RESULTS=1` (default off, passed through `docker-compose.phoenix.yml`) attaches `ai.result.preview` / `preview_rows` / `preview_truncated` to `duckdb.query`, capped by `MCP_TRACE_RESULT_MAX_BYTES` (4096 default, 256..65536) by dropping trailing whole rows. The tool result is never trimmed; the helper never raises.
+- `MCP_TRACE_RESULTS=1` (default off, passed through `docker-compose.phoenix.yml`) attaches `ai.result.preview` / `preview_rows` / `preview_truncated` to `duckdb.query`, capped by `MCP_TRACE_RESULT_MAX_BYTES` (4096 default, 256..65536) by keeping leading whole rows, built incrementally (one serialization per row) so the UTF-8 byte cap always holds; if even the column header exceeds the cap the preview is omitted and `ai.result.preview_omitted=true` is set (review fix). The tool result is never trimmed; the helper never raises.
 - `MCPTracingMiddleware` does not create a span for `initialize`, `tools/list`, `resources/list`, `resources/templates/list`, `prompts/list` or `ping` when there is no valid caller trace. With a traceparent they are traced as before; `tools/call` and `resources/read` are always traced.
 - Out of scope: the other review items (redacted mode, exporter-failure smoke, OTEL routing doc), annotation workflow (#190), the app-side status endpoint.
 

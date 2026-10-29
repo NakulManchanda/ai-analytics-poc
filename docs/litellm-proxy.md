@@ -107,7 +107,8 @@ volume by default**, independent of `LITELLM_CAPTURE`; `make phoenix-purge` dele
 Tool result rows are not on the MCP spans by default (they carry the tool name and, for aggregates, `ai.row_count` and
 `ai.truncated`). `MCP_TRACE_RESULTS=1 make local-aws-litellm-compose` adds a bounded preview to the `duckdb.query` span:
 `ai.result.preview` (JSON `{columns, rows}`), `ai.result.preview_rows` and `ai.result.preview_truncated`, capped at
-`MCP_TRACE_RESULT_MAX_BYTES` (default 4096, clamped to 256..65536) by dropping trailing whole rows. It is off by default
+`MCP_TRACE_RESULT_MAX_BYTES` (default 4096, clamped to 256..65536) by keeping only leading whole rows (the serialized preview never exceeds the byte cap; if even the column header cannot fit, no
+preview is exported and `ai.result.preview_omitted` is set). It is off by default
 because rows are data; the tool's own result is never trimmed. Human verdicts stay with the review workflow in #190.
 
 MCP discovery requests (`initialize`, `tools/list`, `resources/list`, `ping`) that arrive without a caller trace, such as the UI's

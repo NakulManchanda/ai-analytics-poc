@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import functools
 import json
 import logging
 import os
@@ -200,23 +201,34 @@ def record_result_preview(span: trace.Span, result: object) -> None:
         except ValueError:
             limit = _RESULT_PREVIEW_DEFAULT_BYTES
         limit = max(_RESULT_PREVIEW_MIN_BYTES, min(limit, _RESULT_PREVIEW_MAX_BYTES))
-        columns = result.get("columns")
-        shown = list(rows)
-
-        def render() -> str:
-            return json.dumps(
-                {"columns": columns, "rows": shown}, separators=(",", ":"), default=str
+        dump = functools.partial(json.dumps, separators=(",", ":"), default=str)
+        head = '{"columns":' + dump(result.get("columns")) + ',"rows":['
+        used = len(head.encode("utf-8")) + 2  # closing "]}"
+        if used > limit:
+            # Even a zero-row preview would exceed the cap: export no data, only the fact.
+            span.set_attributes(
+                {
+                    "ai.result.preview_omitted": True,
+                    "ai.result.preview_rows": 0,
+                    "ai.result.preview_truncated": len(rows) > 0,
+                }
             )
-
-        text = render()
-        while shown and len(text.encode("utf-8")) > limit:
-            shown.pop()
-            text = render()
+            return
+        kept: list[str] = []
+        for (
+            row
+        ) in rows:  # one serialization per row; stop at the first that does not fit
+            encoded = dump(row)
+            cost = len(encoded.encode("utf-8")) + (1 if kept else 0)
+            if used + cost > limit:
+                break
+            kept.append(encoded)
+            used += cost
         span.set_attributes(
             {
-                "ai.result.preview": text,
-                "ai.result.preview_rows": len(shown),
-                "ai.result.preview_truncated": len(shown) < len(rows),
+                "ai.result.preview": head + ",".join(kept) + "]}",
+                "ai.result.preview_rows": len(kept),
+                "ai.result.preview_truncated": len(kept) < len(rows),
             }
         )
     except Exception:
