@@ -10,7 +10,7 @@ durable state. Deployed (ECS) proxy is stateless. Local Compose adds Postgres so
 
 | Alias | Used for | Target |
 | --- | --- | --- |
-| `taxi-planner` | tool proposal calls | Bedrock Nova Micro |
+| `taxi-planner` | tool proposal calls | Bedrock Nova Pro |
 | `taxi-answer` | answers (streaming and not), `ask` | Bedrock Nova Micro |
 | `taxi-classifier` | reserved for later slices | Bedrock Nova Micro |
 

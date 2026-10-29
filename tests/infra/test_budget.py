@@ -252,12 +252,14 @@ def test_bedrock_iam_allowlist_is_pinned_to_ai_app_only():
 
     variables = variables_file.read_text(encoding="utf-8")
     iam = iam_file.read_text(encoding="utf-8")
-    allowed_model_arn = (
-        "arn:aws:bedrock:us-east-1::foundation-model/amazon.nova-micro-v1:0"
+    allowed_model_arns = (
+        "arn:aws:bedrock:us-east-1::foundation-model/amazon.nova-micro-v1:0",
+        "arn:aws:bedrock:us-east-1::foundation-model/amazon.nova-pro-v1:0",
     )
 
     assert 'variable "bedrock_model_arns"' in variables
-    assert variables.count(allowed_model_arn) == 2
+    for allowed_model_arn in allowed_model_arns:
+        assert variables.count(allowed_model_arn) == 2
     assert "bedrock:InvokeModel" in iam
     assert "bedrock:InvokeModelWithResponseStream" in iam
     assert "resources = statement.value" in iam

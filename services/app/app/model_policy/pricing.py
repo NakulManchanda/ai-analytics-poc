@@ -4,9 +4,12 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
 
-PRICING_VERSION = "2026-10-bedrock-nova-micro-v1"
+PRICING_VERSION = "2026-10-bedrock-nova-v2"
 # USD per million (input, output) tokens; Nova Micro on-demand, same rates as bedrock_budget.
 _NOVA_MICRO = (0.035, 0.140)
+# Nova Pro on-demand (the taxi-planner alias, infra/litellm/config.yaml).
+_NOVA_PRO = (0.80, 3.20)
+_PRO_ALIASES = frozenset({"taxi-planner"})
 
 
 @dataclass(frozen=True)
@@ -28,5 +31,8 @@ class PricingTable:
 
 def default_pricing(aliases: tuple[str, ...]) -> PricingTable:
     return PricingTable(
-        PRICING_VERSION, MappingProxyType({a: _NOVA_MICRO for a in aliases})
+        PRICING_VERSION,
+        MappingProxyType(
+            {a: _NOVA_PRO if a in _PRO_ALIASES else _NOVA_MICRO for a in aliases}
+        ),
     )

@@ -1,5 +1,6 @@
 # LiteLLM Proxy config (issue #168). Agent policy selects aliases; the proxy owns the provider mapping.
-# Bedrock only: every alias targets the IAM-allowlisted Nova Micro model. No public-provider entries.
+# Bedrock only: the planner targets Nova Pro, answer/classifier Nova Micro; both are IAM-allowlisted
+# (infra/terraform/variables.tf). No public-provider entries.
 # Credentials come from the AWS SDK chain (mounted ~/.aws profile locally, task/instance role on AWS).
 model_list:
   - model_name: taxi-classifier
@@ -8,7 +9,7 @@ model_list:
       aws_region_name: us-east-1
   - model_name: taxi-planner
     litellm_params:
-      model: bedrock/amazon.nova-micro-v1:0
+      model: bedrock/amazon.nova-pro-v1:0
       aws_region_name: us-east-1
   - model_name: taxi-answer
     litellm_params:

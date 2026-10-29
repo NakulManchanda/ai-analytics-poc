@@ -275,3 +275,10 @@ def test_known_tokens_unknown_cost_still_exhausts_usd_cap() -> None:
         granted += 1
     assert granted == 2
     assert budgets.summary("r")["incomplete"] is True
+
+
+def test_planner_alias_is_priced_at_nova_pro_rates_and_others_at_micro() -> None:
+    table = default_pricing(("taxi-planner", "taxi-answer"))
+    assert table.estimate("taxi-planner", 1_000_000, 1_000_000) == pytest.approx(4.0)
+    assert table.estimate("taxi-answer", 1_000_000, 1_000_000) == pytest.approx(0.175)
+    assert table.estimate("unknown", 1, 1) is None
