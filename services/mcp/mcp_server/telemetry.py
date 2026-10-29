@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import os
 from dataclasses import dataclass
@@ -23,6 +24,24 @@ _SAFE_PROTOCOL_METHODS = {
     "tools/list",
     "resources/list",
 }
+
+
+# Discovery/keep-alive requests (UI status polling and client handshakes). With no caller trace they
+# would each become a one-span trace in the backend, so they are not traced unless they join one.
+_DISCOVERY_METHODS = frozenset(
+    {
+        "initialize",
+        "tools/list",
+        "resources/list",
+        "resources/templates/list",
+        "prompts/list",
+        "ping",
+    }
+)
+
+_RESULT_PREVIEW_DEFAULT_BYTES = 4096
+_RESULT_PREVIEW_MIN_BYTES = 256
+_RESULT_PREVIEW_MAX_BYTES = 65536
 
 
 def _environment_flag(name: str, default: bool = False) -> bool:
@@ -112,6 +131,12 @@ class MCPTracingMiddleware(Middleware):
 
     async def on_request(self, context, call_next):
         parent = propagate.extract(get_http_headers())
+        method = getattr(context, "method", None)
+        if (
+            method in _DISCOVERY_METHODS
+            and not trace.get_current_span(parent).get_span_context().is_valid
+        ):
+            return await call_next(context)
         with self._tracer.start_as_current_span(
             "mcp.request",
             context=parent,
@@ -119,7 +144,6 @@ class MCPTracingMiddleware(Middleware):
             record_exception=False,
             set_status_on_exception=False,
         ) as span:
-            method = getattr(context, "method", None)
             method = method if method in _SAFE_PROTOCOL_METHODS else "unknown"
             span.set_attributes({"rpc.system": "mcp", "rpc.method": method})
             try:
@@ -153,3 +177,47 @@ class MCPTracingMiddleware(Middleware):
             except Exception:
                 span.set_status(Status(StatusCode.ERROR))
                 raise
+
+
+def record_result_preview(span: trace.Span, result: object) -> None:
+    """Opt-in (MCP_TRACE_RESULTS=1): attach a bounded copy of a tool's result rows to its span.
+
+    Off by default because rows are data, not metadata. The preview is capped at
+    MCP_TRACE_RESULT_MAX_BYTES (default 4096, clamped to 256..65536) by dropping trailing whole
+    rows; `ai.result.preview_rows` and `ai.result.preview_truncated` say what was kept.
+    Never raises.
+    """
+    if not _environment_flag("MCP_TRACE_RESULTS"):
+        return
+    try:
+        rows = result.get("rows") if isinstance(result, dict) else None
+        if not isinstance(rows, list):
+            return
+        try:
+            limit = int(
+                os.getenv("MCP_TRACE_RESULT_MAX_BYTES", _RESULT_PREVIEW_DEFAULT_BYTES)
+            )
+        except ValueError:
+            limit = _RESULT_PREVIEW_DEFAULT_BYTES
+        limit = max(_RESULT_PREVIEW_MIN_BYTES, min(limit, _RESULT_PREVIEW_MAX_BYTES))
+        columns = result.get("columns")
+        shown = list(rows)
+
+        def render() -> str:
+            return json.dumps(
+                {"columns": columns, "rows": shown}, separators=(",", ":"), default=str
+            )
+
+        text = render()
+        while shown and len(text.encode("utf-8")) > limit:
+            shown.pop()
+            text = render()
+        span.set_attributes(
+            {
+                "ai.result.preview": text,
+                "ai.result.preview_rows": len(shown),
+                "ai.result.preview_truncated": len(shown) < len(rows),
+            }
+        )
+    except Exception:
+        LOGGER.warning("Could not record tool result preview", exc_info=True)

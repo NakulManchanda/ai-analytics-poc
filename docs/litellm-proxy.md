@@ -104,10 +104,17 @@ Each model call is an LLM span with the full input messages, offered tools, the 
 calls and arguments), tokens, cost and duration. **Prompt and response bodies are stored locally in the `phoenix_data`
 volume by default**, independent of `LITELLM_CAPTURE`; `make phoenix-purge` deletes them.
 
-Known gaps: MCP spans carry the tool name and (for aggregates) `ai.row_count`/`ai.truncated`, not the result rows;
-`LITELLM_OTEL=1` overrides the app/MCP endpoint to the Collector/Jaeger, so Phoenix then shows only the proxy's spans;
-the UI's status polling adds lone `mcp.request` traces with no session; Phoenix's own total cost can show $0 for Nova
-Micro (use the span's `llm.response.cost`).
+Tool result rows are not on the MCP spans by default (they carry the tool name and, for aggregates, `ai.row_count` and
+`ai.truncated`). `MCP_TRACE_RESULTS=1 make local-aws-litellm-compose` adds a bounded preview to the `duckdb.query` span:
+`ai.result.preview` (JSON `{columns, rows}`), `ai.result.preview_rows` and `ai.result.preview_truncated`, capped at
+`MCP_TRACE_RESULT_MAX_BYTES` (default 4096, clamped to 256..65536) by dropping trailing whole rows. It is off by default
+because rows are data; the tool's own result is never trimmed. Human verdicts stay with the review workflow in #190.
+
+MCP discovery requests (`initialize`, `tools/list`, `resources/list`, `ping`) that arrive without a caller trace, such as the UI's
+status polling, are no longer traced, so they stop appearing as one-span traces. Tool calls and resource reads are always traced.
+
+Known gaps: `LITELLM_OTEL=1` overrides the app/MCP endpoint to the Collector/Jaeger, so Phoenix then shows only the proxy's
+spans; Phoenix's own total cost can show $0 for Nova models (use the span's `llm.response.cost`).
 
 ## Deploying the Nova Pro planner (#207)
 

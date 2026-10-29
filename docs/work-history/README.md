@@ -115,3 +115,4 @@ Monotonically numbered log of every post-bootstrap task. Each entry records the 
 - [0119 — Phoenix default trace UI](0119-phoenix-default.md) — `docker-compose.phoenix.yml` joins the default local LiteLLM path; Phoenix logger attaches via `PHOENIX_*` env, shared proxy config untouched; `phoenix-up/down/ui/purge` targets (#190)
 - [0120 — Nova Pro planner](0120-nova-pro-planner.md) — `taxi-planner` alias on Nova Pro (answer/classifier stay Micro); Terraform ARN allowlist, per-alias pricing and docs updated; no apply or deploy (#207)
 - [0121 — compose app healthcheck](0121-compose-app-healthcheck.md) — `app` healthcheck gets `start_period: 30s`, `timeout: 3s`, `retries: 30` so `compose-smoke` survives a loaded host
+- [0122 — Phoenix trace hygiene](0122-phoenix-trace-hygiene.md) — opt-in bounded tool-result preview on `duckdb.query` (`MCP_TRACE_RESULTS=1`); rootless MCP discovery requests are no longer traced (#216)
