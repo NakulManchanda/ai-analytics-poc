@@ -15,9 +15,11 @@ The `app` healthcheck in `docker-compose.yml` ran a Python one-liner with `inter
 - Red: unchanged main, `make compose-smoke` twice under load: both failed with "container ...-app-1 is unhealthy".
 - Green: with the change, `make compose-smoke` passed (22 "SSE check" lines, "Compose UI smoke passed"); no `ai-analytics-m5-smoke-*` containers left.
 - `docker compose config -q` parses for the base file and the base + aws + litellm + observability combination.
+- After merging current main (2026-10-30): `docker compose config -q` rc 0; `make compose-smoke` passed again (22 "SSE check" lines, "Compose UI smoke passed", no smoke containers left).
+- Bounded window, measured with the same parameters on a throwaway container: a passing check is reported healthy after 1 s; a check that never passes is marked unhealthy after 63 s (30 s `start_period` + 30 one-second retries), so a broken app still fails promptly rather than hanging.
 
 ## PR / merge state
-Branch `fix/compose-app-healthcheck`; PR #213.
+Branch `fix/compose-app-healthcheck`; PR #213. Renumbered from 0119 to 0121 after #214 (0119) and #215 (0120) merged first.
 
 ## Lessons
 - A healthcheck with no `start_period` and a 1s timeout measures host load, not app health; budget the startup explicitly.
