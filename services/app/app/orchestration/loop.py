@@ -349,7 +349,9 @@ class OrchestrationError(ValueError):
         details: dict[str, Any] | None = None,
         tool_error: dict[str, Any] | None = None,
     ):
-        super().__init__(message)
+        # An empty message would leave the ai.run span status (and its trace banner) blank, so
+        # fall back to the closed failure code; self.message stays what the caller supplied.
+        super().__init__(message or code)
         # Safe structured facts for run.failed (e.g. provider_error); never raw bodies.
         self.details = details
         # Closed MCP failure reason plus tool name for run.failed; never row data.

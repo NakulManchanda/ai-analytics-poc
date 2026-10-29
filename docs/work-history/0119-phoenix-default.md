@@ -12,6 +12,7 @@ Proxy spans went only to the Collector/Jaeger when `LITELLM_OTEL=1`; full bodies
 - Image pinned to `arizephoenix/phoenix:version-20.26.1`; loopback-only port; named volume `phoenix_data`.
 - Targets: `phoenix-up`, `phoenix-down`, `phoenix-ui`, `phoenix-purge`.
 - The app and MCP export their spans to Phoenix directly (overlay env); the app adds the OpenInference `session.id` (= conversation id) to the `ai.run` span, one line in `loop.py` with the test updated. LiteLLM itself only fills `session.id` from its end-user id, which we do not repurpose.
+- `OrchestrationError` now falls back to its closed failure code when the message is empty, so a failed run's `ai.run` span status reads `OrchestrationError: multiple_tool_calls` instead of a blank banner; `ai.error.category` stays the filterable attribute. `self.message` (user-facing) is unchanged.
 - `OTEL_RESOURCE_ATTRIBUTES`/`PHOENIX_PROJECT_NAME` did not route spans to a named project, so everything is in `default` and the extra env was dropped.
 - Out of scope (follow-ups): tool result rows on MCP spans, per-conversation JSON export helper, status-poll noise traces.
 

@@ -4,6 +4,7 @@ import pytest
 from app.config import DEFAULT_MODEL_ID, VoiceSettings
 from app.llm import LLMProviderError, LocalFakeLLMClient, ToolProposalResult
 from app.orchestration import OrchestrationLoop
+from app.orchestration.loop import OrchestrationError
 from app.state import InMemoryStateRepository
 from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
@@ -261,3 +262,10 @@ def test_span_has_no_eval_run_id_attribute_by_default(tmp_path) -> None:
     loop.run("Which pickup zones have the most trips?")
     (span,) = exporter.get_finished_spans()
     assert "ai.eval_run_id" not in span.attributes
+
+
+def test_empty_orchestration_error_message_falls_back_to_failure_code() -> None:
+    err = OrchestrationError("multiple_tool_calls", False, "call_1", "")
+    assert str(err) == "multiple_tool_calls"
+    assert err.message == ""
+    assert str(OrchestrationError("x", False, "call_1", "boom")) == "boom"
