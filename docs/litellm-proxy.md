@@ -10,7 +10,7 @@ durable state. Deployed (ECS) proxy is stateless. Local Compose adds Postgres so
 
 | Alias | Used for | Target |
 | --- | --- | --- |
-| `taxi-planner` | tool proposal calls | Bedrock Nova Micro |
+| `taxi-planner` | tool proposal calls | Bedrock Nova Pro |
 | `taxi-answer` | answers (streaming and not), `ask` | Bedrock Nova Micro |
 | `taxi-classifier` | reserved for later slices | Bedrock Nova Micro |
 
@@ -108,6 +108,17 @@ Known gaps: MCP spans carry the tool name and (for aggregates) `ai.row_count`/`a
 `LITELLM_OTEL=1` overrides the app/MCP endpoint to the Collector/Jaeger, so Phoenix then shows only the proxy's spans;
 the UI's status polling adds lone `mcp.request` traces with no session; Phoenix's own total cost can show $0 for Nova
 Micro (use the span's `llm.response.cost`).
+
+## Deploying the Nova Pro planner (#207)
+
+`infra/litellm/config.yaml` maps `taxi-planner` to Nova Pro and the other aliases to Nova Micro; the Terraform `bedrock_model_arns` allowlist (ai-app and LiteLLM task roles) must contain both ARNs before the proxy is redeployed, or planner calls fail with 403. Order: `terraform plan` (expect only the added Nova Pro ARN in the two IAM policies), apply with explicit approval, redeploy the proxy, then verify on the deployed stack and record the evidence in the work-history entry:
+
+- one real turn answered end to end; the planner span names `taxi-planner` and the model is Nova Pro (proxy logs or `GET /spend/logs`);
+- `x-litellm-response-cost` / spend-log cost for the planner call, and token usage, consistent with the price table in `app/model_policy/pricing.py`;
+- the streamed answer (Nova Micro) still streams (`answer.delta` events) and its usage is recorded;
+- no `litellm_proxy_http_403` in the proxy logs.
+
+`tests/test_litellm_config_pricing.py` keeps the proxy mapping, the price table and the IAM allowlist in step; changing an alias mapping requires updating `ALIAS_MODELS` in the same PR.
 
 ## Prompt capture is opt-in
 

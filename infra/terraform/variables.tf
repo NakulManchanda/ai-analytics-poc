@@ -67,15 +67,19 @@ variable "private_subnet_cidrs" {
 }
 
 variable "bedrock_model_arns" {
-  description = "Bedrock foundation-model ARNs that the ai-app task may invoke. Defaults to the Milestone 4 model only."
+  description = "Bedrock foundation-model ARNs that the ai-app task and the LiteLLM proxy may invoke: Nova Micro (answer, classifier) and Nova Pro (planner)."
   type        = list(string)
   default = [
     "arn:aws:bedrock:us-east-1::foundation-model/amazon.nova-micro-v1:0",
+    "arn:aws:bedrock:us-east-1::foundation-model/amazon.nova-pro-v1:0",
   ]
 
   validation {
-    condition     = length(var.bedrock_model_arns) == 1 && var.bedrock_model_arns[0] == "arn:aws:bedrock:us-east-1::foundation-model/amazon.nova-micro-v1:0"
-    error_message = "Milestone 4 permits only the us-east-1 amazon.nova-micro-v1:0 foundation-model ARN."
+    condition = toset(var.bedrock_model_arns) == toset([
+      "arn:aws:bedrock:us-east-1::foundation-model/amazon.nova-micro-v1:0",
+      "arn:aws:bedrock:us-east-1::foundation-model/amazon.nova-pro-v1:0",
+    ])
+    error_message = "Only the us-east-1 amazon.nova-micro-v1:0 and amazon.nova-pro-v1:0 foundation-model ARNs are permitted."
   }
 }
 

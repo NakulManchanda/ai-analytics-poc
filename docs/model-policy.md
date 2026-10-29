@@ -4,8 +4,8 @@ Issue #170, epic #167. Code: `services/app/app/model_policy/`, wired into `LiteL
 
 ## Roles and aliases
 
-The app picks a role (`classifier`, `planner`, `answer`); policy maps it to a proxy alias. Today every alias targets
-the same Bedrock Nova Micro model. Mapping is static config; there is no LLM-based routing.
+The app picks a role (`classifier`, `planner`, `answer`); policy maps it to a proxy alias. Today `taxi-planner` targets Bedrock Nova Pro
+(it follows the one-call tool rules far better than Micro; about 20x the cost per question) and the other aliases Nova Micro. Mapping is static config; there is no LLM-based routing.
 
 Swap models without code: write a JSON policy and set `MODEL_POLICY_FILE=/path/policy.json`.
 
@@ -47,7 +47,7 @@ Each `LLMResult` carries `role`, `model_alias`, `pricing_version`, `cost_usd`, `
 (`model_policy/pricing.py`), else `unknown` with `cost_usd=None`. When the provider returns no usage, `usage_known=False`
 and consumers must store token counts as null (the int fields are placeholders). `RunBudgets.summary(run_id)` sums known
 usage only and sets `incomplete=true` when any call lacked usage or cost; a call with unknown usage keeps its worst-case
-reservation counted against the budget. Bump `PRICING_VERSION` whenever rates change.
+reservation counted against the budget. Rates are per alias (planner: Nova Pro $0.80/$3.20 per 1M tokens, others Nova Micro $0.035/$0.14). Bump `PRICING_VERSION` whenever rates change.
 
 ## Alert thresholds and monthly caps (starting points)
 
