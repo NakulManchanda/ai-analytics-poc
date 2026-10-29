@@ -157,11 +157,16 @@ AGENT_GLOBAL = PromptBundle(
 
 PLANNER_SINGLE_TURN = PromptBundle(
     "planner-single-turn",
-    "1.1.0",
+    "1.2.0",
     {
         "message": PromptTemplate(
             "Choose exactly ONE governed analysis that answers the question. "
-            "Do not make multiple tool calls. To compare all boroughs "
+            "Do not make multiple tool calls. Put every metric the question "
+            "asks for in that one call's measures list. To compare groups "
+            "(for example weekday and weekend, or two boroughs), still make "
+            "one call: group by that field with aggregate_taxi_data, or call "
+            "compare_taxi_segments once; never one call per group. To compare "
+            "all boroughs "
             "across NYC, call average_trip_metrics with region_name omitted. "
             "Dataset schema: {{schema_json}}\nQuestion: {{question}}\n"
             "These tools are read-only analytics over the NYC taxi dataset. "
