@@ -386,6 +386,39 @@ describe("App", () => {
     expect(screen.getByText("Unavailable (non-streaming)")).toBeVisible();
   });
 
+  it("offers Inspect Run on the user turn of a run that persisted no answer", async () => {
+    window.localStorage.setItem("ai-analytics-conversation-id", "conv_failed_1");
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((input: string) => {
+      if (input === "/api/status") {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ app: { status: "ok", service: "ai-app" }, mcp: { status: "ok", tools: 1, resources: 1 } }),
+        });
+      }
+      if (input === "/api/conversations/conv_failed_1") {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            conversation_id: "conv_failed_1",
+            messages: [
+              { message_id: "msg_f1", sequence: 1, role: "user", content: "A question that failed", created_at: "2026-08-25T00:00:00Z" },
+            ],
+            runs: [
+              { run_id: "run_failed_1", message_id: "msg_f1", status: "failed", started_at: "2026-08-25T00:00:00Z", completed_at: null, input_tokens: 0, output_tokens: 0, estimated_cost_usd: 0, steps: [] },
+            ],
+          }),
+        });
+      }
+      return Promise.resolve({ ok: true, json: async () => ({}) });
+    }));
+
+    render(<App />);
+
+    expect(await screen.findByText("A question that failed")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Inspect Run" })).toBeVisible();
+    expect(screen.queryByText(/tokens/)).toBeNull();
+  });
+
   it("does not let a stale mount hydration overwrite a submitted run", async () => {
     window.localStorage.setItem("ai-analytics-conversation-id", "conv_old");
     let resolveOldSnapshot: ((value: unknown) => void) | undefined;

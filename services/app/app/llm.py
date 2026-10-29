@@ -437,7 +437,10 @@ TAXI_PROPOSAL_TOOL_SPECS: list[dict[str, Any]] = [
         "name": "aggregate_taxi_data",
         "description": (
             "Run flexible governed aggregations over allowlisted dimensions "
-            "and measures with optional filters."
+            "and measures with optional filters. One call returns several "
+            "measures and several groups: set dimensions to the field to "
+            "compare (for example pickup_week_part for weekday vs weekend) "
+            "instead of making one call per group."
         ),
         "inputSchema": {
             "type": "object",
@@ -532,7 +535,8 @@ TAXI_PROPOSAL_TOOL_SPECS: list[dict[str, Any]] = [
     {
         "name": "compare_taxi_segments",
         "description": (
-            "Compare a baseline and a comparison population. comparison_mode "
+            "Compare a baseline and a comparison population in ONE call (for "
+            "example Manhattan vs Queens). comparison_mode "
             "'by_dimension' (default) aligns them per segment of a shared "
             "segment_dimension and needs the filters to differ on something other "
             "than that dimension; 'whole_segment' compares the two filtered "

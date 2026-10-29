@@ -4,6 +4,7 @@ import pytest
 from app.config import DEFAULT_MODEL_ID, VoiceSettings
 from app.llm import LLMProviderError, LocalFakeLLMClient, ToolProposalResult
 from app.orchestration import OrchestrationLoop
+from app.orchestration.loop import OrchestrationError
 from app.state import InMemoryStateRepository
 from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
@@ -80,6 +81,7 @@ def test_run_emits_one_safe_ai_run_span() -> None:
     assert span.attributes == {
         "ai.run_id": result.run_id,
         "ai.conversation_id": result.conversation_id,
+        "session.id": result.conversation_id,
         "ai.turn_type": "text",
         "ai.status": "completed",
         "gen_ai.request.model": DEFAULT_MODEL_ID,
@@ -160,6 +162,7 @@ def test_async_path_capture_trace_id_matches_ai_run_span(tmp_path) -> None:
     expected = format(spans[0].get_span_context().trace_id, "032x")
     assert spans[0].attributes["ai.run_id"] == submission.run_id
     assert spans[0].attributes["ai.conversation_id"] == submission.conversation_id
+    assert spans[0].attributes["session.id"] == submission.conversation_id
     assert spans[0].attributes["ai.status"] == "completed"
     records = _capture_records(tmp_path)
     assert records
@@ -259,3 +262,10 @@ def test_span_has_no_eval_run_id_attribute_by_default(tmp_path) -> None:
     loop.run("Which pickup zones have the most trips?")
     (span,) = exporter.get_finished_spans()
     assert "ai.eval_run_id" not in span.attributes
+
+
+def test_empty_orchestration_error_message_falls_back_to_failure_code() -> None:
+    err = OrchestrationError("multiple_tool_calls", False, "call_1", "")
+    assert str(err) == "multiple_tool_calls"
+    assert err.message == ""
+    assert str(OrchestrationError("x", False, "call_1", "boom")) == "boom"

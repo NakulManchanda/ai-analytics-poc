@@ -1,4 +1,4 @@
-# 0119 — Compose app healthcheck startup budget
+# 0121 — Compose app healthcheck startup budget
 
 ## Goal
 `make compose-smoke` stops failing with "container app-1 is unhealthy" on a loaded machine.
