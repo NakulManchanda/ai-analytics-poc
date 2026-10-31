@@ -121,7 +121,11 @@ def test_run_records_exception_and_preserves_original_failure() -> None:
 def _make_loop(tracer, tmp_path=None, llm=None):
     from app.capture.recorder import CaptureRecorder, CaptureSettings
 
-    capture = CaptureRecorder(CaptureSettings(directory=tmp_path)) if tmp_path is not None else None
+    capture = (
+        CaptureRecorder(CaptureSettings(directory=tmp_path))
+        if tmp_path is not None
+        else None
+    )
     return OrchestrationLoop(
         llm_client=llm or LocalFakeLLMClient(),
         mcp_client=FakeMCPClient(),  # type: ignore[arg-type]
@@ -235,7 +239,9 @@ def test_eval_run_id_is_a_span_attribute_and_in_capture_alongside_trace_id(
     tracer, exporter = _tracer_and_exporter()
     loop = _make_loop(tracer, tmp_path)
 
-    submission = loop.prepare_run("Which pickup zones have the most trips?", eval_run_id="batch-1")
+    submission = loop.prepare_run(
+        "Which pickup zones have the most trips?", eval_run_id="batch-1"
+    )
     thread = threading.Thread(target=loop.execute, args=(submission,))
     thread.start()
     thread.join()
@@ -245,7 +251,9 @@ def test_eval_run_id_is_a_span_attribute_and_in_capture_alongside_trace_id(
     records = _capture_records(tmp_path)
     assert records
     assert {r["eval_run_id"] for r in records} == {"batch-1"}
-    assert {r["trace_id"] for r in records} == {format(span.get_span_context().trace_id, "032x")}
+    assert {r["trace_id"] for r in records} == {
+        format(span.get_span_context().trace_id, "032x")
+    }
 
 
 def test_span_has_no_eval_run_id_attribute_by_default(tmp_path) -> None:
@@ -270,7 +278,9 @@ def test_run_io_is_opt_in_and_bounded(monkeypatch) -> None:
     result = _make_loop(tracer).run(prompt)
     attributes = exporter.get_finished_spans()[0].attributes
     assert attributes["input.value"].startswith("How many trips x")
-    assert len(attributes["input.value"]) == 200 and attributes["input.value"].endswith("…")
+    assert len(attributes["input.value"]) == 200 and attributes["input.value"].endswith(
+        "…"
+    )
     assert attributes["output.value"] == " ".join(result.answer.split())[:200] or (
         attributes["output.value"].endswith("…")
     )

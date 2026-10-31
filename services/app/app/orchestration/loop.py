@@ -105,7 +105,9 @@ EXTENDED_GOVERNED_TOOL_NAMES = frozenset(
 class RunCancelledError(Exception):
     """Raised when a run execution is aborted due to a cancellation request."""
 
-    def __init__(self, partial_text: str = "", reason: str = "cancelled_by_user") -> None:
+    def __init__(
+        self, partial_text: str = "", reason: str = "cancelled_by_user"
+    ) -> None:
         super().__init__(reason)
         self.partial_text = partial_text
         self.reason = reason
@@ -284,7 +286,11 @@ class _TracedCalls(list[LLMCall]):
                 "ai.prompt.template_id": call.prompt_template_id or "",
                 "ai.prompt.template_version": call.prompt_template_version or "",
                 "ai.prompt.sha256": call.prompt_sha256 or "",
-                **({"ai.llm.error_category": call.error_code} if call.error_code else {}),
+                **(
+                    {"ai.llm.error_category": call.error_code}
+                    if call.error_code
+                    else {}
+                ),
                 **(
                     {"ai.llm.provider_status": call.provider_status}
                     if call.provider_status is not None
@@ -402,7 +408,11 @@ def _parse_list_taxi_dimension_values(arguments: object) -> dict[str, object] | 
         return None
     if search is not None and not isinstance(search, str):
         return None
-    if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= MAX_ROWS:
+    if (
+        isinstance(limit, bool)
+        or not isinstance(limit, int)
+        or not 1 <= limit <= MAX_ROWS
+    ):
         return None
     return {"dimension": dimension, "search": search, "limit": limit}
 
@@ -429,7 +439,11 @@ def _parse_aggregate_taxi_data(arguments: object) -> dict[str, object] | None:
         return None
     if order_by is not None and not isinstance(order_by, Mapping):
         return None
-    if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= MAX_ROWS:
+    if (
+        isinstance(limit, bool)
+        or not isinstance(limit, int)
+        or not 1 <= limit <= MAX_ROWS
+    ):
         return None
     return {
         "dimensions": dimensions,
@@ -466,9 +480,15 @@ def _parse_compare_taxi_segments(arguments: object) -> dict[str, object] | None:
         return None
     if not _is_str_list(measures) or not measures:
         return None
-    if not isinstance(baseline_filters, Mapping) or not isinstance(comparison_filters, Mapping):
+    if not isinstance(baseline_filters, Mapping) or not isinstance(
+        comparison_filters, Mapping
+    ):
         return None
-    if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= MAX_ROWS:
+    if (
+        isinstance(limit, bool)
+        or not isinstance(limit, int)
+        or not 1 <= limit <= MAX_ROWS
+    ):
         return None
     parsed: dict[str, object] = {
         "measures": measures,
@@ -511,7 +531,9 @@ def parse_query_proposal(
             return None
         region_name = arguments.get("region_name")
         if region_name is not None and (
-            not isinstance(region_name, str) or not region_name.strip() or len(region_name) > 128
+            not isinstance(region_name, str)
+            or not region_name.strip()
+            or len(region_name) > 128
         ):
             return None
         return proposal.name, ({"region_name": region_name} if region_name else {})
@@ -730,7 +752,9 @@ class OrchestrationLoop:
                 # Activates per-run budgets and tenant entitlements (#170) for every
                 # model call in this run; copied into worker threads by
                 # _run_with_cancellation.
-                with call_context(DEFAULT_TENANT, submission.run_id, submission.eval_run_id):
+                with call_context(
+                    DEFAULT_TENANT, submission.run_id, submission.eval_run_id
+                ):
                     result = self._execute_loop(
                         prompt=submission.prompt,
                         conv_id=submission.conversation_id,
@@ -754,7 +778,9 @@ class OrchestrationLoop:
                         submission.prompt,
                         answer,
                         provider_client=(
-                            type(self._llm_client).__name__ if self._llm_client else None
+                            type(self._llm_client).__name__
+                            if self._llm_client
+                            else None
                         ),
                     )
 
@@ -777,7 +803,11 @@ class OrchestrationLoop:
                 "session.id": submission.conversation_id,
                 "ai.turn_type": "text",
                 "gen_ai.request.model": self._configured_model_id(),
-                **({"ai.eval_run_id": submission.eval_run_id} if submission.eval_run_id else {}),
+                **(
+                    {"ai.eval_run_id": submission.eval_run_id}
+                    if submission.eval_run_id
+                    else {}
+                ),
             },
         )
         if _trace_run_io_enabled():
@@ -816,7 +846,9 @@ class OrchestrationLoop:
         set Redis flag, and emit run.cancel_requested."""
         run = self._repo.get_run(run_id)
         if run is None:
-            raise OrchestrationError("run_not_found", False, "", f"Run {run_id} not found")
+            raise OrchestrationError(
+                "run_not_found", False, "", f"Run {run_id} not found"
+            )
         if run.status in ("completed", "failed", "budget_exceeded", "cancelled"):
             raise OrchestrationError(
                 "run_already_terminal",
@@ -831,7 +863,9 @@ class OrchestrationLoop:
                 client = self._publisher._get_client()
                 client.set(f"run:cancel:{run_id}", "1", ex=300)
             except Exception as error:
-                logger.warning("Failed to set Redis cancel flag for %s: %s", run_id, error)
+                logger.warning(
+                    "Failed to set Redis cancel flag for %s: %s", run_id, error
+                )
 
         # Update durable run status to cancel_requested
         updated_run = Run(
@@ -873,7 +907,9 @@ class OrchestrationLoop:
                 if client.get(f"run:cancel:{run_id}") == "1":
                     return True
             except Exception as error:
-                logger.warning("Failed to check Redis cancel flag for %s: %s", run_id, error)
+                logger.warning(
+                    "Failed to check Redis cancel flag for %s: %s", run_id, error
+                )
         run = self._repo.get_run(run_id)
         return run is not None and run.status in ("cancel_requested", "cancelled")
 
@@ -893,7 +929,9 @@ class OrchestrationLoop:
         """
         executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
         try:
-            with llm_call_scope(llm_call_id) if llm_call_id else contextlib.nullcontext():
+            with (
+                llm_call_scope(llm_call_id) if llm_call_id else contextlib.nullcontext()
+            ):
                 context = contextvars.copy_context()
             future = executor.submit(context.run, func, *args, **kwargs)
             while not future.done():
@@ -923,7 +961,9 @@ class OrchestrationLoop:
 
         # Re-fetch the in-progress run record for started_at reference
         run = self._repo.get_run(run_id)
-        assert run is not None, f"Run {run_id} not found; prepare_run must be called first"
+        assert (
+            run is not None
+        ), f"Run {run_id} not found; prepare_run must be called first"
 
         eval_run_id: str | None = run.metadata.get("eval_run_id")
         eval_meta: dict[str, Any] = {"eval_run_id": eval_run_id} if eval_run_id else {}
@@ -1066,7 +1106,9 @@ class OrchestrationLoop:
             # Serve mode runs on an owned, self-hosted vLLM gateway: it has no
             # per-token billing.
             if is_self_hosted:
-                return CallCost(0.0, COST_SOURCE_SELF_HOSTED, 0.0, BUDGET_BASIS_SELF_HOSTED)
+                return CallCost(
+                    0.0, COST_SOURCE_SELF_HOSTED, 0.0, BUDGET_BASIS_SELF_HOSTED
+                )
             # The LLM client already priced the call (billed header or per-alias policy
             # pricing); never re-price it with a single model's rate.
             result_cost = getattr(result, "cost_usd", None)
@@ -1098,17 +1140,22 @@ class OrchestrationLoop:
             )
             priced = priced_key(result, model_id)
             if priced is None:
-                return CallCost(0.0, COST_SOURCE_UNPRICED, None, BUDGET_BASIS_UNRESOLVABLE)
+                return CallCost(
+                    0.0, COST_SOURCE_UNPRICED, None, BUDGET_BASIS_UNRESOLVABLE
+                )
             table, key = priced
             estimate = table.estimate(key, input_tokens, output_tokens) or 0.0
             if not incomplete:
-                return CallCost(estimate, COST_SOURCE_FALLBACK, estimate, BUDGET_BASIS_REPORTED)
+                return CallCost(
+                    estimate, COST_SOURCE_FALLBACK, estimate, BUDGET_BASIS_REPORTED
+                )
             # Largest call the run could have made: the run's input-token budget plus the
             # call's configured (or the run's) output ceiling.
             bound = table.estimate(
                 key,
                 active_budgets.max_input_tokens,
-                getattr(result, "configured_max_tokens", None) or active_budgets.max_output_tokens,
+                getattr(result, "configured_max_tokens", None)
+                or active_budgets.max_output_tokens,
             )
             return CallCost(
                 estimate,
@@ -1191,7 +1238,9 @@ class OrchestrationLoop:
                 mcp = self._get_mcp_client()
                 forwards_conversation = isinstance(llm, ServeLLMClient)
                 # The LiteLLM proxy fronts billed Bedrock, so it is not self-hosted.
-                is_self_hosted = forwards_conversation and not isinstance(llm, LiteLLMClient)
+                is_self_hosted = forwards_conversation and not isinstance(
+                    llm, LiteLLMClient
+                )
                 configured_model_id = llm.model_id
             except LLMConfigurationError as err:
                 raise OrchestrationError(
@@ -1214,7 +1263,9 @@ class OrchestrationLoop:
                 check_cancellation()
                 emit("context.loading", {"resource": "dataset://nyc-taxi/schema"})
                 try:
-                    raw_schema = self._run_with_cancellation(mcp.get_dataset_schema, run_id=run_id)
+                    raw_schema = self._run_with_cancellation(
+                        mcp.get_dataset_schema, run_id=run_id
+                    )
                     schema = sanitize_dataset_schema(raw_schema)
                 except MCPToolError as err:
                     raise OrchestrationError(
@@ -1233,7 +1284,9 @@ class OrchestrationLoop:
                 active_rejected_outcome = None
 
                 catalogue_entry = (
-                    None if requires_multi_step_analysis(prompt) else catalogue_lookup(prompt)
+                    None
+                    if requires_multi_step_analysis(prompt)
+                    else catalogue_lookup(prompt)
                 )
                 if catalogue_entry is not None:
                     active_tool_source = "catalogue"
@@ -1317,7 +1370,9 @@ class OrchestrationLoop:
                     call_latency_ms = int((self._monotonic() - call_start) * 1000)
                     proposal_latency_ms = call_latency_ms
 
-                    cost = call_cost(proposal.input_tokens, proposal.output_tokens, proposal)
+                    cost = call_cost(
+                        proposal.input_tokens, proposal.output_tokens, proposal
+                    )
                     record_call(proposal.input_tokens, proposal.output_tokens, cost)
                     llm_calls.append(
                         LLMCall(
@@ -1328,8 +1383,12 @@ class OrchestrationLoop:
                             latency_ms=proposal.latency_ms,
                             finish_reason=proposal.finish_reason,
                             configured_max_tokens=proposal.configured_max_tokens,
-                            reasoning_tokens=getattr(proposal, "reasoning_tokens", None),
-                            reasoning_present=getattr(proposal, "reasoning_present", None),
+                            reasoning_tokens=getattr(
+                                proposal, "reasoning_tokens", None
+                            ),
+                            reasoning_present=getattr(
+                                proposal, "reasoning_present", None
+                            ),
                             reasoning_chars=getattr(proposal, "reasoning_chars", None),
                             output_basis=getattr(proposal, "output_basis", None),
                             planner_outcome=proposal.outcome,
@@ -1527,7 +1586,9 @@ class OrchestrationLoop:
                         schema=schema,
                         governed_calls_executed=len(executed_tool_signatures),
                     )
-                    query_request = parse_query_proposal(proposal) if validation.ok else None
+                    query_request = (
+                        parse_query_proposal(proposal) if validation.ok else None
+                    )
                     validation_retries = 0
                     while query_request is None:
                         arg_summary = summarize_arguments(
@@ -1602,8 +1663,12 @@ class OrchestrationLoop:
                                 str(err),
                                 details=_provider_error_details(err),
                             ) from err
-                        proposal_latency_ms += int((self._monotonic() - call_start) * 1000)
-                        cost = call_cost(proposal.input_tokens, proposal.output_tokens, proposal)
+                        proposal_latency_ms += int(
+                            (self._monotonic() - call_start) * 1000
+                        )
+                        cost = call_cost(
+                            proposal.input_tokens, proposal.output_tokens, proposal
+                        )
                         record_call(proposal.input_tokens, proposal.output_tokens, cost)
                         llm_calls.append(
                             LLMCall(
@@ -1653,7 +1718,9 @@ class OrchestrationLoop:
                             schema=schema,
                             governed_calls_executed=len(executed_tool_signatures),
                         )
-                        query_request = parse_query_proposal(proposal) if validation.ok else None
+                        query_request = (
+                            parse_query_proposal(proposal) if validation.ok else None
+                        )
 
                     tool_name, tool_arguments = query_request
 
@@ -1834,7 +1901,9 @@ class OrchestrationLoop:
                         status="completed",
                         query_id=query_id_val,
                         output_summary="instruction-like text in tool observation",
-                        metadata={"findings": [f.to_dict() for f in injection_findings]},
+                        metadata={
+                            "findings": [f.to_dict() for f in injection_findings]
+                        },
                     )
                     self._repo.add_run_step(scan_step)
                     steps.append(scan_step)
@@ -1851,7 +1920,9 @@ class OrchestrationLoop:
                         conversation_id=conv_id,
                         sequence=next_seq,
                         role="tool",
-                        content=json.dumps(query_result, separators=(",", ":"), sort_keys=True),
+                        content=json.dumps(
+                            query_result, separators=(",", ":"), sort_keys=True
+                        ),
                         metadata={"tool_name": tool_name, "query_id": query_id_val},
                     )
                 )
@@ -1994,7 +2065,9 @@ class OrchestrationLoop:
                         call_latency_ms = int((self._monotonic() - call_start) * 1000)
 
                         # 5. Calculate cost
-                        c_cost = call_cost(call_res.input_tokens, call_res.output_tokens, call_res)
+                        c_cost = call_cost(
+                            call_res.input_tokens, call_res.output_tokens, call_res
+                        )
 
                         # 6. Append LLMCall first so completed physical call telemetry
                         # is never discarded
@@ -2004,7 +2077,9 @@ class OrchestrationLoop:
                             input_tokens=call_res.input_tokens,
                             output_tokens=call_res.output_tokens,
                             latency_ms=(
-                                call_res.latency_ms if call_res.latency_ms else call_latency_ms
+                                call_res.latency_ms
+                                if call_res.latency_ms
+                                else call_latency_ms
                             ),
                             finish_reason=call_res.finish_reason,
                             configured_max_tokens=call_res.configured_max_tokens,
@@ -2056,10 +2131,14 @@ class OrchestrationLoop:
                         step_seq += 1
 
                         # 9. Record cost and tracker (checks post-call limits)
-                        record_call(call_res.input_tokens, call_res.output_tokens, c_cost)
+                        record_call(
+                            call_res.input_tokens, call_res.output_tokens, c_cost
+                        )
 
                         # 10. Post-call cancellation check
-                        check_cancellation(call_res.text if role.lower() == "writer" else "")
+                        check_cancellation(
+                            call_res.text if role.lower() == "writer" else ""
+                        )
                         return call_res
 
                     try:
@@ -2077,12 +2156,16 @@ class OrchestrationLoop:
                     ):
                         raise
                     except RuntimeError as err:
-                        last_call_id = llm_calls[-1].llm_call_id if llm_calls else answer_call_id
+                        last_call_id = (
+                            llm_calls[-1].llm_call_id if llm_calls else answer_call_id
+                        )
                         raise OrchestrationError(
                             "strategy_execution_error", False, last_call_id, str(err)
                         ) from err
                     except Exception as err:
-                        last_call_id = llm_calls[-1].llm_call_id if llm_calls else answer_call_id
+                        last_call_id = (
+                            llm_calls[-1].llm_call_id if llm_calls else answer_call_id
+                        )
                         raise OrchestrationError(
                             "strategy_execution_error", False, last_call_id, str(err)
                         ) from err
@@ -2091,7 +2174,9 @@ class OrchestrationLoop:
                     final_answer_latency_ms = ans_latency_ms
                     final_answer_text = apply_grounding(crew_answer.text)
 
-                    last_call_id = llm_calls[-1].llm_call_id if llm_calls else answer_call_id
+                    last_call_id = (
+                        llm_calls[-1].llm_call_id if llm_calls else answer_call_id
+                    )
                     emit(
                         "answer.completed",
                         {"answer": final_answer_text},
@@ -2108,7 +2193,9 @@ class OrchestrationLoop:
                                 output_format="mp3",
                             )
                             if audio_bytes:
-                                audio_base64 = base64.b64encode(audio_bytes).decode("utf-8")
+                                audio_base64 = base64.b64encode(audio_bytes).decode(
+                                    "utf-8"
+                                )
                                 emit(
                                     "answer.audio",
                                     answer_audio_payload(
@@ -2158,7 +2245,9 @@ class OrchestrationLoop:
 
                     tracker.ensure_cost_determinate()
                     try:
-                        stream_answer = getattr(llm, "stream_answer_with_query_result", None)
+                        stream_answer = getattr(
+                            llm, "stream_answer_with_query_result", None
+                        )
                         answer_kwargs: dict[str, Any] = conversation_kwargs()
                         with llm_call_scope(answer_call_id):
                             if callable(stream_answer):
@@ -2202,7 +2291,9 @@ class OrchestrationLoop:
                                 output_format="mp3",
                             )
                             if audio_bytes:
-                                audio_base64 = base64.b64encode(audio_bytes).decode("utf-8")
+                                audio_base64 = base64.b64encode(audio_bytes).decode(
+                                    "utf-8"
+                                )
                                 emit(
                                     "answer.audio",
                                     answer_audio_payload(

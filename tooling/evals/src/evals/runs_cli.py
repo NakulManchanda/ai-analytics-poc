@@ -27,7 +27,9 @@ DATASET = Path("tooling/evals/datasets/golden/v1/cases.jsonl")
 
 
 def phoenix_args(p) -> None:
-    p.add_argument("--phoenix-url", help="add a trace link per run (e.g. http://127.0.0.1:16006)")
+    p.add_argument(
+        "--phoenix-url", help="add a trace link per run (e.g. http://127.0.0.1:16006)"
+    )
     p.add_argument("--phoenix-project-id", default=DEFAULT_PHOENIX_PROJECT_ID)
 
 
