@@ -121,11 +121,7 @@ def test_run_records_exception_and_preserves_original_failure() -> None:
 def _make_loop(tracer, tmp_path=None, llm=None):
     from app.capture.recorder import CaptureRecorder, CaptureSettings
 
-    capture = (
-        CaptureRecorder(CaptureSettings(directory=tmp_path))
-        if tmp_path is not None
-        else None
-    )
+    capture = CaptureRecorder(CaptureSettings(directory=tmp_path)) if tmp_path is not None else None
     return OrchestrationLoop(
         llm_client=llm or LocalFakeLLMClient(),
         mcp_client=FakeMCPClient(),  # type: ignore[arg-type]
@@ -239,9 +235,7 @@ def test_eval_run_id_is_a_span_attribute_and_in_capture_alongside_trace_id(
     tracer, exporter = _tracer_and_exporter()
     loop = _make_loop(tracer, tmp_path)
 
-    submission = loop.prepare_run(
-        "Which pickup zones have the most trips?", eval_run_id="batch-1"
-    )
+    submission = loop.prepare_run("Which pickup zones have the most trips?", eval_run_id="batch-1")
     thread = threading.Thread(target=loop.execute, args=(submission,))
     thread.start()
     thread.join()
@@ -251,9 +245,7 @@ def test_eval_run_id_is_a_span_attribute_and_in_capture_alongside_trace_id(
     records = _capture_records(tmp_path)
     assert records
     assert {r["eval_run_id"] for r in records} == {"batch-1"}
-    assert {r["trace_id"] for r in records} == {
-        format(span.get_span_context().trace_id, "032x")
-    }
+    assert {r["trace_id"] for r in records} == {format(span.get_span_context().trace_id, "032x")}
 
 
 def test_span_has_no_eval_run_id_attribute_by_default(tmp_path) -> None:
@@ -269,3 +261,40 @@ def test_empty_orchestration_error_message_falls_back_to_failure_code() -> None:
     assert str(err) == "multiple_tool_calls"
     assert err.message == ""
     assert str(OrchestrationError("x", False, "call_1", "boom")) == "boom"
+
+
+def test_run_io_is_opt_in_and_bounded(monkeypatch) -> None:
+    prompt = "How many trips " + "x" * 400
+    tracer, exporter = _tracer_and_exporter()
+    monkeypatch.setenv("AI_TRACE_RUN_IO", "1")
+    result = _make_loop(tracer).run(prompt)
+    attributes = exporter.get_finished_spans()[0].attributes
+    assert attributes["input.value"].startswith("How many trips x")
+    assert len(attributes["input.value"]) == 200 and attributes["input.value"].endswith("…")
+    assert attributes["output.value"] == " ".join(result.answer.split())[:200] or (
+        attributes["output.value"].endswith("…")
+    )
+
+
+def test_run_io_absent_by_default(monkeypatch) -> None:
+    tracer, exporter = _tracer_and_exporter()
+    monkeypatch.delenv("AI_TRACE_RUN_IO", raising=False)
+    _make_loop(tracer).run("a private question")
+    attributes = exporter.get_finished_spans()[0].attributes
+    assert "input.value" not in attributes and "output.value" not in attributes
+
+
+def test_run_io_records_failure_code(monkeypatch) -> None:
+    class FailingLLMClient(LocalFakeLLMClient):
+        def propose_taxi_query(
+            self, prompt: str, schema: Mapping[str, object]
+        ) -> ToolProposalResult:
+            raise LLMProviderError(retryable=True)
+
+    tracer, exporter = _tracer_and_exporter()
+    monkeypatch.setenv("AI_TRACE_RUN_IO", "1")
+    with pytest.raises(ValueError):
+        _make_loop(tracer, llm=FailingLLMClient()).run("fail safely")
+    attributes = exporter.get_finished_spans()[0].attributes
+    assert attributes["input.value"] == "fail safely"
+    assert attributes["output.value"].startswith("failed: ")

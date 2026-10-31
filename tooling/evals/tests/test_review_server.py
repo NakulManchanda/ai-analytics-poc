@@ -105,3 +105,27 @@ def test_notes_only_rereview_and_history_visible(srv):
     assert 'value="second"' in html and 'data-cur="second"' in html
     assert "history (2)" in html and "first" in html and "alice" in html
     assert "reviewed_at" not in html and "Z</span>" in html
+
+
+def test_run_column_and_phoenix_link(run):
+    from urllib.parse import parse_qs, urlsplit
+
+    from evals.run_review import phoenix_run_url
+
+    plain = render_review(run)
+    assert (
+        "<th>run</th>" in plain and 'class="rid"' in plain and ">trace</a>" not in plain
+    )
+    linked = render_review(run, phoenix_url="http://127.0.0.1:16006/")
+    assert (
+        linked.count(">trace</a>") == 2
+    )  # one per turn; both fixture turns have a run id
+    url = phoenix_run_url("http://127.0.0.1:16006/", "UHJvamVjdDox", "run_abc")
+    parts = urlsplit(url)
+    assert parts.path == "/projects/UHJvamVjdDox/spans"
+    assert parse_qs(parts.query)["spanFilterCondition"] == [
+        'attributes["ai"]["run_id"] == "run_abc"'
+    ]
+    assert 'run_id == "x"' not in phoenix_run_url(
+        "http://h", "p", 'x"; drop'
+    )  # quoted safely

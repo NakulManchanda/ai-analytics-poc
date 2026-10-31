@@ -111,6 +111,8 @@ Tool result rows are not on the MCP spans by default (they carry the tool name a
 preview is exported and `ai.result.preview_omitted` is set). It is off by default
 because rows are data; the tool's own result is never trimmed. Human verdicts stay with the review workflow in #190.
 
+The `ai.run` span carries a bounded (200 characters) question as `input.value` and the answer, or `failed: <code>`, as `output.value` when `AI_TRACE_RUN_IO=1`, so Phoenix's Input/Output columns are filled. The app default is off (spans stay metadata-only for any backend); `docker-compose.phoenix.yml` turns it on for the local Phoenix path (`AI_TRACE_RUN_IO=0` to disable). Find one run with the spans filter `attributes["ai"]["run_id"] == "run_..."`.
+
 MCP discovery requests (`initialize`, `tools/list`, `resources/list`, `ping`) that arrive without a caller trace, such as the UI's
 status polling, are no longer traced, so they stop appearing as one-span traces. Tool calls and resource reads are always traced.
 

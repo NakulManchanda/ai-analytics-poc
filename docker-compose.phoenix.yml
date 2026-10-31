@@ -4,6 +4,10 @@
 # purge with `make phoenix-purge`. UI: http://127.0.0.1:${PHOENIX_PORT:-16006}
 # The shared infra/litellm/config.yaml is untouched (it is also the deployed proxy's config):
 # PHOENIX_COLLECTOR_HTTP_ENDPOINT makes LiteLLM attach its Phoenix logger next to the `otel` callback.
+x-phoenix-tracing: &phoenix-tracing
+  OTEL_TRACING_ENABLED: "true"
+  OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: http://phoenix:6006/v1/traces
+
 services:
   phoenix:
     image: arizephoenix/phoenix:version-20.26.1
@@ -18,9 +22,11 @@ services:
   # LLM calls -> MCP tool); everything lands in Phoenix's `default` project.
   # LITELLM_OTEL=1 (docker-compose.observability.yml) later overrides the endpoint to the Collector/Jaeger.
   app:
-    environment: &phoenix-tracing
-      OTEL_TRACING_ENABLED: "true"
-      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: http://phoenix:6006/v1/traces
+    environment:
+      <<: *phoenix-tracing
+      # Bounded question/answer on the ai.run span so the Phoenix grid shows Input/Output
+      # (off in the app by default; AI_TRACE_RUN_IO=0 turns it off here too).
+      AI_TRACE_RUN_IO: "${AI_TRACE_RUN_IO:-1}"
     depends_on:
       phoenix:
         condition: service_started

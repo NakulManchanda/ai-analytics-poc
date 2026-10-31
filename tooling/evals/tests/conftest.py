@@ -16,6 +16,7 @@ def run(tmp_path):
             "turn_index": i,
             "question": f"q{i}",
             "terminal": "run.completed",
+            "run_id": f"run_{i}",
         }
         for i in (0, 1)
     ]

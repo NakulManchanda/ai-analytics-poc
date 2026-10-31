@@ -7,14 +7,19 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from evals.reviews import append_reviews, new_record
-from evals.run_review import render_review
+from evals.run_review import DEFAULT_PHOENIX_PROJECT_ID, render_review
 from evals.runs import RunError
 
 MAX_BODY = 64 * 1024
 
 
 def make_server(
-    run_dir: Path, reviewer: str, baseline: Path | None = None, port: int = 0
+    run_dir: Path,
+    reviewer: str,
+    baseline: Path | None = None,
+    port: int = 0,
+    phoenix_url: str | None = None,
+    phoenix_project_id: str = DEFAULT_PHOENIX_PROJECT_ID,
 ) -> ThreadingHTTPServer:
     class Handler(BaseHTTPRequestHandler):
         def _send(self, code: int, body: bytes, ctype: str) -> None:
@@ -43,7 +48,13 @@ def make_server(
             if self.path != "/" or not self._local():
                 return self._json(404, {"error": "not found"})
             try:
-                page = render_review(run_dir, baseline, interactive=True)
+                page = render_review(
+                    run_dir,
+                    baseline,
+                    interactive=True,
+                    phoenix_url=phoenix_url,
+                    phoenix_project_id=phoenix_project_id,
+                )
             except RunError as err:
                 return self._json(500, {"error": str(err)})
             self._send(200, page.encode(), "text/html; charset=utf-8")

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import html
+import json
 from pathlib import Path
+from urllib.parse import quote
 
 from evals.reviews import (
     HUMAN_DIMS,
@@ -33,7 +35,7 @@ table{border-collapse:collapse;width:100%}td,th{border:1px solid #ccc;padding:4p
 .correct{background:#cfc}.incorrect,.failed,.regressed{background:#fbb}.needs_review{background:#fe9}
 .improved{background:#bdf}.unchanged{background:#eee}.lateral{background:#fdb}.missing_evidence{background:#ddd;font-style:italic}.fail{background:#fee}pre{white-space:pre-wrap;margin:0}
 .rv select{font-size:12px}.rv input{width:10em}.meta{color:#666;font-size:11px}.rv details{font-size:11px}.dis{background:#fe9;font-size:12px}
-.note{color:#900;font-size:12px}.hide{display:none}
+.rid{font-size:11px;word-break:break-all}.note{color:#900;font-size:12px}.hide{display:none}
 button.on{background:#222;color:#fff}#shown{font-weight:600;margin-left:.5rem}"""
 
 JS = """const rows=[...document.querySelectorAll('tbody tr')];let mode='all';
@@ -103,10 +105,42 @@ def _review_cell(k: tuple, human: dict, dis: dict, history: dict) -> str:
     )
 
 
+# Phoenix's default project (global id of "Project:1"); override for another project.
+DEFAULT_PHOENIX_PROJECT_ID = "UHJvamVjdDox"
+
+
+def phoenix_run_url(base: str, project_id: str, run_id: str) -> str:
+    """Phoenix spans view filtered to one ``ai.run`` span (attributes are nested: ai -> run_id)."""
+    cond = f'attributes["ai"]["run_id"] == {json.dumps(run_id)}'
+    return (
+        f"{base.rstrip('/')}/projects/{quote(project_id, safe='')}/spans"
+        f"?timeRangeKey=7d&spanFilterCondition={quote(cond, safe='')}"
+    )
+
+
+def _run_cell(run_id: object, phoenix_url: str | None, project_id: str) -> str:
+    if not run_id:
+        return "<td></td>"
+    link = (
+        f' <a href="{_e(phoenix_run_url(phoenix_url, project_id, str(run_id)))}" '
+        'target="_blank" rel="noopener">trace</a>'
+        if phoenix_url
+        else ""
+    )
+    return f'<td><code class="rid">{_e(run_id)}</code>{link}</td>'
+
+
 def render_review(
-    run_dir: Path, baseline: Path | None = None, interactive: bool = False
+    run_dir: Path,
+    baseline: Path | None = None,
+    interactive: bool = False,
+    phoenix_url: str | None = None,
+    phoenix_project_id: str = DEFAULT_PHOENIX_PROJECT_ID,
 ) -> str:
-    """Static report; ``interactive`` adds the human-verdict column (needs the review server)."""
+    """Static report; ``interactive`` adds the human-verdict column (needs the review server).
+
+    A ``run`` column always shows the run id; ``phoenix_url`` adds a link to that run's trace.
+    """
     reviews = load_reviews(run_dir) if interactive else None
     dis_by_turn: dict[tuple, dict] = {}
     graded, _ = load_run_reports(run_dir)
@@ -148,7 +182,9 @@ def render_review(
         body.append(
             f'<tr data-bad="{int(bad)}" data-dirs="{_e(dirset)}"'
             f"{' class=fail' if r['terminal'] != TERMINAL_OK else ''}>"
-            f"<td>{_e(k[0])}#{k[1]}</td><td>{_e(r.get('question', ''))}</td>"
+            f"<td>{_e(k[0])}#{k[1]}</td>"
+            f"{_run_cell(r.get('run_id'), phoenix_url, phoenix_project_id)}"
+            f"<td>{_e(r.get('question', ''))}</td>"
             f"<td>{badges} {dbadges}</td>"
             f"<td><pre>{_e(g['actual'])}</pre>expected: {_e(g['expected'])}</td>"
             f"<td>{_e(g['reasons'])}</td><td><pre>{_e(g['answer_text'])}</pre></td>"
@@ -184,7 +220,7 @@ def render_review(
         f"{_e(format_histogram(mcp_reason_histogram(run_dir, results)))}</p>"
         '<p><button data-m="all">all</button> <button data-m="bad">failed / not correct</button> '
         f'{reg_btn} <input id="q" placeholder="search"> <span id="shown"></span></p>'
-        "<table><thead><tr><th>turn</th><th>question</th><th>outcome</th><th>tools (actual)</th>"
+        "<table><thead><tr><th>turn</th><th>run</th><th>question</th><th>outcome</th><th>tools (actual)</th>"
         "<th>reasons</th><th>answer</th><th>terminal</th>"
         + ("<th>human review</th>" if interactive else "")
         + "</tr></thead><tbody>"
