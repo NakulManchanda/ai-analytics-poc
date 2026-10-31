@@ -11,6 +11,7 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
+from evals.reviews import HUMAN_DIMS, VERDICTS
 from evals.runs import (
     DEFAULT_ROOT,
     LABEL_RE,
@@ -54,6 +55,20 @@ def add_parsers(sub) -> None:
     p = common(sub.add_parser("run-compare", help="compare with a frozen baseline"))
     p.add_argument("--baseline-results", type=Path, required=True)
     p.add_argument("--focus", help="comma list of case ids; trailing * = prefix")
+    p = common(sub.add_parser("run-review-add", help="append one human verdict (#190)"))
+    p.add_argument("--case", required=True)
+    p.add_argument("--turn", type=int, required=True)
+    p.add_argument("--dimension", required=True, choices=HUMAN_DIMS)
+    p.add_argument("--verdict", required=True, choices=VERDICTS)
+    p.add_argument("--reviewer", required=True)
+    p.add_argument("--failure-layer")
+    p.add_argument("--failure-category")
+    p.add_argument("--notes", default="")
+    common(
+        sub.add_parser(
+            "run-review-export", help="resolve reviews.jsonl -> reviews.resolved.json"
+        )
+    )
     p = common(sub.add_parser("run-review", help="write static review.html"))
     p.add_argument("--baseline-results", type=Path)
 
@@ -238,6 +253,33 @@ def run_review_cmd(a) -> int:
     return 0
 
 
+def run_review_add(a) -> int:
+    from evals.reviews import append_review, new_record
+
+    _, run_dir = _checked(a)
+    rec = new_record(
+        run_dir, a.case, a.turn, a.dimension, a.verdict, a.reviewer,
+        failure_layer=a.failure_layer, failure_category=a.failure_category, notes=a.notes,
+    )  # fmt: skip
+    append_review(run_dir, rec)
+    print(rec["review_id"])
+    return 0
+
+
+def run_review_export(a) -> int:
+    from evals.reviews import materialize
+
+    _, run_dir = _checked(a)
+    doc = materialize(run_dir)
+    print(
+        f"{len(doc['verdicts'])} verdicts, {len(doc['disagreements'])} grader disagreements, "
+        f"{len(doc['coverage']['untouched'])} untouched, {len(doc['coverage']['partial'])} partial, "
+        f"{doc['coverage']['complete']} complete turns; {len(doc['malformed'])} malformed, "
+        f"{len(doc['stale'])} stale, {len(doc['duplicates'])} duplicate, {len(doc['orphaned'])} orphaned -> {run_dir / 'reviews.resolved.json'}"
+    )
+    return 0
+
+
 HANDLERS = {
     "run-start": run_start,
     "run-live": run_live_cmd,
@@ -245,6 +287,8 @@ HANDLERS = {
     "run-grade": run_grade,
     "run-compare": run_compare_cmd,
     "run-review": run_review_cmd,
+    "run-review-add": run_review_add,
+    "run-review-export": run_review_export,
 }
 
 
