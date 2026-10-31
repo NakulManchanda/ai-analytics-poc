@@ -7,7 +7,7 @@ Let a reviewer record verdicts per turn without editing JSONL, on top of the dat
 `reviews.jsonl` could be written only through `evals run-review-add`; `review.html` was static and read-only.
 
 ## Decisions
-- UI choice: extend `run_review.render_review` with an `interactive` flag (extra "human review" column, unreviewed and disagreement filters) rather than add Streamlit. A static file cannot write, so a small stdlib helper (`review_server.py`, `evals run-review-serve`, `make eval-review-serve`) serves the page and appends verdicts through the existing `append_review`. No new dependency or service.
+- UI choice: extend `run_review.render_review` with an `interactive` flag (extra "human review" column, incomplete-review and disagreement filters) rather than add Streamlit. A static file cannot write, so a small stdlib helper (`review_server.py`, `evals run-review-serve`, `make eval-review-serve`) serves the page and appends verdicts through the existing `append_review`. No new dependency or service.
 - The helper binds `127.0.0.1`, accepts only `Host` / `Origin` of itself (blocks cross-site posts and DNS rebinding), caps the body at 64 KiB, validates a whole batch before writing any of it, and takes the reviewer name from the command line.
 - The static `review.html` output is unchanged (tested).
 - Out of scope: Phoenix deep links and span mirroring, the baseline review itself.

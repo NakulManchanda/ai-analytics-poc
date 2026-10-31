@@ -49,7 +49,7 @@ def test_page_has_form_and_disagreement_filters(srv):
     run, s = srv
     code, html = call(s)
     assert code == 200 and 'class="rv"' in html and "human review" in html
-    assert 'data-m="unreviewed"' in html and "unreviewed" in html
+    assert 'data-m="incomplete"' in html and "incomplete" in html
     assert "human review" not in render_review(run)  # static report unchanged
 
 

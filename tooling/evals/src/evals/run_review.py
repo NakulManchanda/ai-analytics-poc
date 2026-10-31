@@ -5,7 +5,13 @@ from __future__ import annotations
 import html
 from pathlib import Path
 
-from evals.reviews import HUMAN_DIMS, VERDICTS, disagreements, load_reviews
+from evals.reviews import (
+    HUMAN_DIMS,
+    VERDICTS,
+    disagreements,
+    load_reviews,
+    required_dims,
+)
 from evals.run_compare import changes
 from evals.runs import (
     DIMS,
@@ -110,8 +116,8 @@ def render_review(
         )
         tokens = {v for _, v in dirs}
         if interactive:
-            if not human:
-                tokens.add("unreviewed")
+            if not set(required_dims(k[1])) <= set(human):
+                tokens.add("incomplete")
             if k in dis_by_turn:
                 tokens.add("disagree")
         dirset = " ".join(sorted(tokens))
@@ -137,7 +143,7 @@ def render_review(
         else ""
     )
     if interactive:
-        reg_btn += ' <button data-m="unreviewed">unreviewed</button> <button data-m="disagree">grader/human disagree</button>'
+        reg_btn += ' <button data-m="incomplete">incomplete review</button> <button data-m="disagree">grader/human disagree</button>'
     return (
         f'<!doctype html><html lang="en"><head><meta charset="utf-8">'
         f"<title>{_e(run_dir.name)}</title><style>{CSS}</style></head><body>"
