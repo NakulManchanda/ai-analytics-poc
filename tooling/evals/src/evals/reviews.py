@@ -254,7 +254,11 @@ def reviews_digest(run_dir: Path) -> str:
 
 
 def coverage(turns: set[tuple[str, int]], reviews: Reviews) -> dict:
-    """Which turns are untouched, partially reviewed (missing dimensions) or complete."""
+    """Annotation coverage (untouched / partial / complete) and adjudication state.
+
+    ``complete`` means every required dimension has a verdict; ``adjudicated`` additionally needs
+    that no verdict on the turn is a human ``needs_review`` (those stay unresolved).
+    """
     done: dict[tuple[str, int], set[str]] = {}
     for c, t, d in reviews.resolved:
         done.setdefault((c, t), set()).add(d)
@@ -263,11 +267,19 @@ def coverage(turns: set[tuple[str, int]], reviews: Reviews) -> dict:
         for c, t in sorted(done)
         if (c, t) in turns and set(required_dims(t)) - done[(c, t)]
     ]
+    unresolved = {
+        (c, t)
+        for (c, t, _), r in reviews.resolved.items()
+        if r["verdict"] == "needs_review"
+    }
+    complete = {k for k in done if k in turns and set(required_dims(k[1])) <= done[k]}
     return {
         "required": "tool+answer; resolution also on follow-up turns (turn_index > 0)",
         "untouched": sorted(f"{c}#{t}" for c, t in turns - set(done)),
         "partial": partial,
-        "complete": len(done) - len(partial),
+        "complete": len(complete),
+        "needs_review": sorted(f"{c}#{t}" for c, t in unresolved),
+        "adjudicated": len(complete - unresolved),
     }
 
 

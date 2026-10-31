@@ -49,7 +49,7 @@ def test_report_separates_human_from_grader_and_lists_disagreements(run):
         run, turn=1, dim="tool", verdict="correct"
     )  # follow-up turn: answer + resolution missing
     text = "\n".join(summary_lines(run))
-    assert "complete 1, partial 1, untouched 0" in text
+    assert "annotated 1 (partial 1, untouched 0); adjudicated 1" in text
     assert "| tool | 1 | 1 | 0 | 0 |" in text
     assert "- tool: 0 agree, 1 differ" in text and "- answer: 1 agree, 0 differ" in text
     assert "| c1#0 | tool | correct | incorrect | planner | wrong \\| tool |" in text
@@ -96,3 +96,42 @@ def test_cli_writes_the_report_file(run, capsys):
     )
     assert (run / "review-report.md").read_text().startswith("# Human review report: ")
     assert "Human review (separate" in capsys.readouterr().out
+
+
+def test_optional_resolution_on_turn_zero_never_makes_unreviewed_negative(run):
+    add(run, dim="resolution")  # turn 0: not a required dimension
+    text = "\n".join(summary_lines(run))
+    row = next(x for x in text.splitlines() if x.startswith("| resolution |"))
+    assert (
+        row == "| resolution | 1 | 0 | 0 | 1 (+1 optional) |"
+    )  # 1 follow-up turn still open
+    assert "-" not in row.split("|")[-2]
+
+
+def test_human_needs_review_stays_pending_until_resolved(run):
+    add(run, dim="tool", verdict="correct")
+    add(run, dim="answer", verdict="needs_review", notes="unsure")
+    text = "\n".join(summary_lines(run))
+    assert "annotated 1 (partial 0, untouched 1); adjudicated 0" in text
+    assert "unresolved needs_review 1" in text
+    report = render_review_report(run)
+    assert "## Unresolved human needs_review (1 turns)" in report and "- c1#0" in report
+    add(
+        run, dim="answer", verdict="correct", notes="checked reference"
+    )  # later verdict wins
+    after = "\n".join(summary_lines(run))
+    assert "adjudicated 1" in after and "unresolved needs_review 0" in after
+
+
+def test_report_header_has_digests_and_timestamp(run):
+    from datetime import UTC, datetime
+
+    from evals.reviews import reviews_digest, snapshot_digest
+
+    add(run)
+    first = render_review_report(run, now=datetime(2026, 10, 31, 6, 0, tzinfo=UTC))
+    assert "generated 2026-10-31T06:00:00Z" in first
+    assert snapshot_digest(run)[:12] in first and reviews_digest(run)[:12] in first
+    add(run, dim="answer")
+    second = render_review_report(run, now=datetime(2026, 10, 31, 6, 5, tzinfo=UTC))
+    assert reviews_digest(run)[:12] in second and reviews_digest(run)[:12] not in first

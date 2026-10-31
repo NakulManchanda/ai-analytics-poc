@@ -6,6 +6,7 @@ Grader outcomes and human verdicts are reported side by side and never merged.
 from __future__ import annotations
 
 import collections
+from datetime import UTC, datetime
 from pathlib import Path
 
 from evals.reviews import (
@@ -16,6 +17,7 @@ from evals.reviews import (
     disagreements,
     load_reviews,
     required_dims,
+    reviews_digest,
     snapshot_digest,
 )
 from evals.runs import (
@@ -45,8 +47,10 @@ def summary_lines(run_dir: Path) -> list[str]:
     cov = coverage(turns, reviews)
     L = ["## Human review (separate from grader outcomes)", ""]
     L.append(
-        f"turns: {len(turns)}; complete {cov['complete']}, partial {len(cov['partial'])}, "
-        f"untouched {len(cov['untouched'])} (required: {cov['required']})"
+        f"turns: {len(turns)}; annotated {cov['complete']} (partial {len(cov['partial'])}, "
+        f"untouched {len(cov['untouched'])}); adjudicated {cov['adjudicated']} "
+        f"(annotated with no human needs_review); unresolved needs_review "
+        f"{len(cov['needs_review'])} (required: {cov['required']})"
     )
     L.append(
         f"records not applied: malformed {len(reviews.malformed)}, stale {len(reviews.stale)}, "
@@ -61,11 +65,16 @@ def summary_lines(run_dir: Path) -> list[str]:
         counts = collections.Counter(
             r["verdict"] for (c, t, d), r in reviews.resolved.items() if d == dim
         )
-        applicable = sum(1 for _, t in turns if dim in required_dims(t))
+        applicable = {k for k in turns if dim in required_dims(k[1])}
+        reviewed = sum(
+            1 for (c, t, d) in reviews.resolved if d == dim and (c, t) in applicable
+        )
+        extra = sum(counts.values()) - reviewed
         L.append(
             f"| {dim} | "
             + " | ".join(str(counts.get(v, 0)) for v in VERDICTS)
-            + f" | {applicable - sum(counts.values())} |"
+            + f" | {len(applicable) - reviewed}"
+            + (f" (+{extra} optional) |" if extra else " |")
         )
     both = collections.Counter()
     for (c, t, d), rec in reviews.resolved.items():
@@ -125,12 +134,28 @@ def queue(run_dir: Path) -> list[tuple[str, str]]:
     return [(f"{k[0]}#{k[1]}", why) for _, k, why in out]
 
 
-def render_review_report(run_dir: Path) -> str:
+def render_review_report(run_dir: Path, now: datetime | None = None) -> str:
     L = [f"# Human review report: {run_dir.name}", ""]
-    L.append(f"snapshot sha256: {snapshot_digest(run_dir)[:12]}")
+    stamp = (
+        (now or datetime.now(UTC)).isoformat(timespec="seconds").replace("+00:00", "Z")
+    )
+    L.append(
+        f"generated {stamp} from snapshot {snapshot_digest(run_dir)[:12]} and "
+        f"reviews {reviews_digest(run_dir)[:12]}; this file does not update itself: re-run "
+        "`make eval-review-report` after new verdicts and compare the reviews digest."
+    )
     L.append("")
     body = summary_lines(run_dir)
     L += body or ["No reviews recorded yet (`make eval-review-serve`)."]
+    nr = coverage(
+        {
+            (r["case_id"], r["turn_index"])
+            for r in read_jsonl(run_dir / "results.jsonl")
+        },
+        load_reviews(run_dir),
+    )["needs_review"]
+    L += ["", f"## Unresolved human needs_review ({len(nr)} turns)", ""]
+    L += [f"- {t}" for t in nr] or ["- none"]
     todo = queue(run_dir)
     L += ["", f"## Still to review ({len(todo)} turns, most informative first)", ""]
     for turn, why in todo[:QUEUE_LIMIT]:

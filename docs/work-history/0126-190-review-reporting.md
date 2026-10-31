@@ -11,11 +11,12 @@ Finish the reporting side of #190: show human verdicts next to grader outcomes (
 - `run-compare` appends the same human section when `reviews.jsonl` exists; the grader tables are untouched, so grader and human outcomes stay separate.
 - `reviews.coverage()` extracted from `materialize` so the export and the report share one definition of complete/partial/untouched.
 - Baseline adjudication is documented in `docs/evals.md` (graded JSON prerequisite, review, report, export, and that golden/grader fixes go through a PR). The verdicts themselves are human work and are not part of this PR.
+- Review fixes (PR #220): the unreviewed count only counts applicable turns (an optional `resolution` on turn 0 shows as `+N optional`, never negative); `coverage()` now separates annotated (`complete`) from `adjudicated` (annotated with no human `needs_review`) and lists unresolved `needs_review` turns, shown in their own report section; the report's first line records generation time and the snapshot and reviews digests and says to re-run it after new verdicts.
 - `make next-5-commands` now ends with the report step and lists the no-Docker baseline adjudication commands.
 - Out of scope: failure layer/category inputs on the review page (records already carry them), cross-run human-vs-human comparison, Phoenix annotations.
 
 ## Verification
-- `make evals-test`: 164 passed, 2 skipped (`tests/test_review_report.py`: no-reviews report and compare, disagreement table with escaped notes, partial coverage, compare section once, queue order, CLI file).
+- `make evals-test`: 167 passed, 2 skipped (`tests/test_review_report.py`: optional resolution on turn 0, needs_review stays pending until resolved, header digests/timestamp, no-reviews report and compare, disagreement table with escaped notes, partial coverage, compare section once, queue order, CLI file).
 - Ran `run-review-report` on a scratch copy of the real baseline with three saved verdicts: coverage 1 complete / 1 partial / 41 untouched, one disagreement listed, and 7 not-completed runs first in the queue.
 - black and ruff clean.
 
