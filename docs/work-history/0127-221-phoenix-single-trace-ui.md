@@ -20,12 +20,13 @@ The default local path (`make local-aws-litellm-compose`, `make eval-stack-up`) 
 - `uv run --project services/app pytest tests/scripts/test_observability_compose.py`: 8 passed (service lists, Collector exports, Jaeger overlay, split Phoenix files, overlay order in the Makefile, run-I/O flag per destination, `docker compose config` for the Phoenix and Jaeger combinations).
 - `docker compose config` for the default observability stack, the Jaeger overlay and the LiteLLM path (`LITELLM_OTEL=1`) all validate.
 - `./scripts/smoke/16_observability.sh` (isolated project, ephemeral ports): passed; the trace reached Phoenix through the Collector.
-- `./scripts/smoke/16_observability_jaeger.sh`: see PR description for the result.
-- Not verified: Grafana's Jaeger datasource in a browser and `LITELLM_OTEL=1 make local-aws-litellm-compose` end to end (needs AWS).
+- `./scripts/smoke/16_observability_jaeger.sh` (isolated project, ephemeral ports): passed on the second run. The first run failed at `docker compose up`: the overlay mounted a single `jaeger.yml` into Grafana's datasources directory, which is already a read-only bind mount, so Docker refused ("read-only file system"). The overlay now replaces the whole datasources mount (same target path) with a directory holding the core datasources plus Jaeger, and a test checks the core entries stay identical.
+- Not verified: Grafana's Jaeger datasource in a browser (the container starts with the mount; the datasource list was not opened) and `LITELLM_OTEL=1 make local-aws-litellm-compose` end to end (needs AWS).
 
 ## PR / merge state
 Branch `feat/221-phoenix-single-trace-ui`; draft PR.
 
 ## Lessons
+- A single-file bind mount cannot go inside a directory that is already mounted read-only; override the directory mount instead. Only running the smoke found this; static `docker compose config` accepted it.
 - An overlay that touches a service defined in another overlay (`litellm`) is only valid with that overlay; keep each overlay self-contained.
 - Phoenix's REST API (`/v1/projects/<project>/spans`, filters `name`, `trace_id`) is enough for a smoke check; attributes come back flat (`ai.run_id`).

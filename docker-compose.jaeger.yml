@@ -18,8 +18,10 @@ services:
       - jaeger
 
   grafana:
+    # Replaces the core datasources mount (same target path): a single file cannot be mounted inside the
+    # read-only core directory. The directory holds the core datasources plus Jaeger.
     volumes:
-      - ./infra/observability/jaeger/jaeger-datasource.yml:/etc/grafana/provisioning/datasources/jaeger.yml:ro
+      - ./infra/observability/jaeger/grafana-datasources:/etc/grafana/provisioning/datasources:ro
 
   app:
     environment:

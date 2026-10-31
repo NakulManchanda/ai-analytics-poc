@@ -149,8 +149,18 @@ def test_phoenix_is_the_default_trace_backend_and_jaeger_is_optional() -> None:
         "otlphttp/phoenix",
         "otlp_grpc/jaeger",
     ]
-    datasource = _load("infra/observability/jaeger/jaeger-datasource.yml")
-    assert [d["name"] for d in datasource["datasources"]] == ["Jaeger"]
+    core_ds = _load(
+        "infra/observability/core/grafana/provisioning/datasources/datasources.yml"
+    )["datasources"]
+    jaeger_ds = _load("infra/observability/jaeger/grafana-datasources/datasources.yml")[
+        "datasources"
+    ]
+    assert jaeger_ds[: len(core_ds)] == core_ds  # core datasources unchanged
+    assert [d["name"] for d in jaeger_ds[len(core_ds) :]] == ["Jaeger"]
+    grafana_mounts = jaeger["grafana"]["volumes"]
+    assert grafana_mounts == [
+        "./infra/observability/jaeger/grafana-datasources:/etc/grafana/provisioning/datasources:ro"
+    ]
 
 
 def test_phoenix_overlay_works_without_litellm_and_litellm_logger_is_separate() -> None:
