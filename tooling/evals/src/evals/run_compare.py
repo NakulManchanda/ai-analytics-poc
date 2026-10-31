@@ -5,6 +5,7 @@ from __future__ import annotations
 import collections
 from pathlib import Path
 
+from evals.review_report import summary_lines
 from evals.runs import (
     DIMS,
     DIRECTIONS,
@@ -109,6 +110,9 @@ def render_compare(
         "",
         format_histogram(mcp_reason_histogram(run_dir, results)),
     ]
+    human = summary_lines(run_dir)
+    if human:
+        L += [""] + human
     L += [
         "",
         "## Focus cases",

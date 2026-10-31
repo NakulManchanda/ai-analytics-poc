@@ -11,7 +11,7 @@ OBSERVABILITY_BURST_COUNT ?= 10
 OBSERVABILITY_LOG_TAIL ?= 200
 KV_BUNDLE_OUT = $(or $(OUT),work/kv-hop.yaml)
 
-.PHONY: help eval-stack-up eval-start eval-health eval-smoke eval-run eval-freeze eval-grade eval-compare eval-cost eval-review eval-review-serve next-5-commands eval-open eval-all check-bootstrap dev app-serve-dev mcp-dev mcp-smoke dataset-test dataset-smoke smoke test bench-test evals-test evals-report gateway-test mcp-test infra-test web-test compose-smoke observability-up observability-down observability-smoke observability-dev-up observability-dev-info observability-dev-ask observability-dev-burst observability-dev-metrics observability-dev-logs observability-dev-down local-aws-litellm-compose local-aws-compose local-litellm-compose local-bedrock-direct-compose litellm-traffic litellm-env litellm-smoke litellm-calls litellm-spend litellm-errors litellm-ready litellm-ui litellm-traffic local-aws-refresh phoenix-up phoenix-down phoenix-ui phoenix-purge local-serve-compose local-serve-refresh local-bedrock-compose bedrock-smoke m5-bedrock-smoke m6-bedrock-smoke dashboard tf-dispatch tf-resume tf-park inference-validate inference-sync inference-config inference-secret inference-bootstrap inference-deploy inference-up inference-tunnel inference-connect inference-smoke inference-warmup inference-capacity inference-restart inference-gateway-restart inference-controls-on inference-controls-off inference-verify-workers inference-e1 inference-fresh-up inference-tmux-start inference-tmux-end inference-serve-smoke inference-run inference-pull-evidence inference-pull-range inference-kv-image inference-kv-render inference-kv-smoke evidence-analyze evidence-notebook evidence-notebook-open inference-teardown replay-fanout replay-multi-turn replay-compare-strategies replay-strategy-manual replay-strategy-crewai replay-e3-least-loaded replay-e3-prefix-then-load replay-e4-admission-on replay-e4-admission-off replay-e3-large-prefix-least-loaded replay-e3-large-prefix-prefix-then-load replay-e5 replay-arrival-rate trace-request
+.PHONY: help eval-stack-up eval-start eval-health eval-smoke eval-run eval-freeze eval-grade eval-compare eval-cost eval-review eval-review-serve eval-review-report next-5-commands eval-open eval-all check-bootstrap dev app-serve-dev mcp-dev mcp-smoke dataset-test dataset-smoke smoke test bench-test evals-test evals-report gateway-test mcp-test infra-test web-test compose-smoke observability-up observability-down observability-smoke observability-dev-up observability-dev-info observability-dev-ask observability-dev-burst observability-dev-metrics observability-dev-logs observability-dev-down local-aws-litellm-compose local-aws-compose local-litellm-compose local-bedrock-direct-compose litellm-traffic litellm-env litellm-smoke litellm-calls litellm-spend litellm-errors litellm-ready litellm-ui litellm-traffic local-aws-refresh phoenix-up phoenix-down phoenix-ui phoenix-purge local-serve-compose local-serve-refresh local-bedrock-compose bedrock-smoke m5-bedrock-smoke m6-bedrock-smoke dashboard tf-dispatch tf-resume tf-park inference-validate inference-sync inference-config inference-secret inference-bootstrap inference-deploy inference-up inference-tunnel inference-connect inference-smoke inference-warmup inference-capacity inference-restart inference-gateway-restart inference-controls-on inference-controls-off inference-verify-workers inference-e1 inference-fresh-up inference-tmux-start inference-tmux-end inference-serve-smoke inference-run inference-pull-evidence inference-pull-range inference-kv-image inference-kv-render inference-kv-smoke evidence-analyze evidence-notebook evidence-notebook-open inference-teardown replay-fanout replay-multi-turn replay-compare-strategies replay-strategy-manual replay-strategy-crewai replay-e3-least-loaded replay-e3-prefix-then-load replay-e4-admission-on replay-e4-admission-off replay-e3-large-prefix-least-loaded replay-e3-large-prefix-prefix-then-load replay-e5 replay-arrival-rate trace-request
 
 
 help: ## Show available commands
@@ -454,8 +454,11 @@ eval-review-serve: ## Local review page that records human verdicts (REVIEWER=<n
 	@[ -n "$(REVIEWER)" ] || { echo "set REVIEWER=<your name>"; exit 2; }
 	$(EVAL) run-review-serve $(EVAL_RUN_ARG) --allow-incomplete --reviewer "$(REVIEWER)" $(if $(REVIEW_PORT),--port $(REVIEW_PORT)) $(if $(EVAL_BASELINE),--baseline-results $(EVAL_BASELINE)) --phoenix-url $(PHOENIX_URL)
 
+eval-review-report: ## Human-review report: coverage, grader vs human disagreements, what is still to review (EVAL_RUN optional)
+	@$(EVAL) run-review-report $(EVAL_RUN_ARG) --allow-incomplete
+
 # Prints the commands for the live Nova Pro planner run + human review (#190). Pure echo; you run the live steps.
-next-5-commands: ## Print the 10 commands (with startup options) for a new live Nova Pro planner run and its human review
+next-5-commands: ## Print the commands (with startup options) for a new live Nova Pro planner run and its human review
 	@echo "Startup: Docker running; AWS credentials valid for the profile (aws sts get-caller-identity --profile <profile>); Bedrock access to Nova Pro in us-east-1."
 	@echo "Cost: eval-smoke and eval-run call real Bedrock and need EVAL_CONFIRM=1. Planner is Nova Pro (taxi-planner); answer model is Nova Micro (infra/litellm/config.yaml)."
 	@echo "Options: LABEL=<name> (required, never reused) | AWS_PROFILE=<profile> (default 'default') | WEB_PORT=<port> (default 3000) | LITELLM_PORT (default 14000) | LITELLM_OTEL=1 (adds Jaeger) | EVAL_RUN=<run_id> (default metrics/evals/.current) | REVIEWER=<name> | EVAL_BASELINE=<results.jsonl> | REVIEW_PORT (default 8765)"
@@ -479,8 +482,14 @@ next-5-commands: ## Print the 10 commands (with startup options) for a new live 
 	@echo "   make eval-compare EVAL_BASELINE=metrics/evals/baselines/golden-2026-10-20.jsonl"
 	@echo "9. Human review page (open the printed URL; verdicts save to reviews.jsonl):"
 	@echo "   make eval-review-serve REVIEWER=<your name> EVAL_BASELINE=metrics/evals/baselines/golden-2026-10-20.jsonl"
-	@echo "10. Spend check, export reviews, and stop the stack when done:"
-	@echo "   make eval-cost && $(EVAL) run-review-export --root $(EVAL_ROOT) --allow-incomplete && docker compose -p ai_app_poc down"
+	@echo "10. Review report (coverage, grader vs human, what is still to review), then export:"
+	@echo "   make eval-review-report && $(EVAL) run-review-export --root $(EVAL_ROOT) --allow-incomplete"
+	@echo "11. Spend check and stop the stack when done:"
+	@echo "   make eval-cost && docker compose -p ai_app_poc down"
+	@echo ""
+	@echo "Baseline adjudication (no Docker): the same review page and report on the frozen 2026-10-20 run:"
+	@echo "   make eval-review-serve REVIEWER=<name> EVAL_RUN=2026-10-20-post-planner-repair-20261021T052401Z EVAL_BASELINE=metrics/evals/baselines/golden-2026-10-20.jsonl"
+	@echo "   make eval-review-report EVAL_RUN=2026-10-20-post-planner-repair-20261021T052401Z"
 	@echo ""
 	@echo "Shortcut for steps 2-8 once the stack is up: make eval-all LABEL=nova-pro-planner EVAL_CONFIRM=1 EVAL_BASELINE=metrics/evals/baselines/golden-2026-10-20.jsonl"
 

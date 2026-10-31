@@ -253,13 +253,8 @@ def reviews_digest(run_dir: Path) -> str:
     return hashlib.sha256(path.read_bytes() if path.is_file() else b"").hexdigest()
 
 
-def materialize(run_dir: Path) -> dict:
-    """Write ``reviews.resolved.json`` (the import/reporting artifact) and return it."""
-    reviews = load_reviews(run_dir)
-    graded, _ = load_run_reports(run_dir)
-    turns = {
-        (r["case_id"], r["turn_index"]) for r in read_jsonl(run_dir / "results.jsonl")
-    }
+def coverage(turns: set[tuple[str, int]], reviews: Reviews) -> dict:
+    """Which turns are untouched, partially reviewed (missing dimensions) or complete."""
     done: dict[tuple[str, int], set[str]] = {}
     for c, t, d in reviews.resolved:
         done.setdefault((c, t), set()).add(d)
@@ -268,7 +263,21 @@ def materialize(run_dir: Path) -> dict:
         for c, t in sorted(done)
         if (c, t) in turns and set(required_dims(t)) - done[(c, t)]
     ]
-    untouched = sorted(f"{c}#{t}" for c, t in turns - set(done))
+    return {
+        "required": "tool+answer; resolution also on follow-up turns (turn_index > 0)",
+        "untouched": sorted(f"{c}#{t}" for c, t in turns - set(done)),
+        "partial": partial,
+        "complete": len(done) - len(partial),
+    }
+
+
+def materialize(run_dir: Path) -> dict:
+    """Write ``reviews.resolved.json`` (the import/reporting artifact) and return it."""
+    reviews = load_reviews(run_dir)
+    graded, _ = load_run_reports(run_dir)
+    turns = {
+        (r["case_id"], r["turn_index"]) for r in read_jsonl(run_dir / "results.jsonl")
+    }
     doc = {
         "schema_version": SCHEMA_VERSION,
         "eval_run_id": run_dir.name,
@@ -278,12 +287,7 @@ def materialize(run_dir: Path) -> dict:
             for (c, t, d), rec in sorted(reviews.resolved.items())
         ],
         "disagreements": disagreements(reviews, graded),
-        "coverage": {
-            "required": "tool+answer; resolution also on follow-up turns (turn_index > 0)",
-            "untouched": untouched,
-            "partial": partial,
-            "complete": len(done) - len(partial),
-        },
+        "coverage": coverage(turns, reviews),
         "malformed": [{"line": n, "reason": r} for n, r in reviews.malformed],
         "stale": reviews.stale,
         "duplicates": reviews.duplicates,

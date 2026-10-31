@@ -77,6 +77,12 @@ def add_parsers(sub) -> None:
             "run-review-export", help="resolve reviews.jsonl -> reviews.resolved.json"
         )
     )
+    common(
+        sub.add_parser(
+            "run-review-report",
+            help="write <run>/review-report.md (coverage, grader vs human)",
+        )
+    )
     p = common(
         sub.add_parser("run-review-serve", help="local review page that saves verdicts")
     )
@@ -311,6 +317,16 @@ def run_review_serve(a) -> int:
     return 0
 
 
+def run_review_report(a) -> int:
+    from evals.review_report import render_review_report
+
+    _, run_dir = _checked(a)
+    text = render_review_report(run_dir)
+    (run_dir / "review-report.md").write_text(text)
+    print(text)
+    return 0
+
+
 def run_review_export(a) -> int:
     from evals.reviews import materialize
 
@@ -334,6 +350,7 @@ HANDLERS = {
     "run-review": run_review_cmd,
     "run-review-add": run_review_add,
     "run-review-export": run_review_export,
+    "run-review-report": run_review_report,
     "run-review-serve": run_review_serve,
 }
 
