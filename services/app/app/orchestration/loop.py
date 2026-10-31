@@ -556,6 +556,25 @@ def parse_query_proposal(
     return proposal.name, {"analysis": analysis, "limit": limit}
 
 
+RUN_IO_MAX_CHARS = 200
+
+
+def _trace_run_io_enabled() -> bool:
+    """Opt-in (AI_TRACE_RUN_IO=1): put a bounded question/answer on the ai.run span.
+
+    Off by default so spans stay metadata-only for any OTEL backend; the local Phoenix
+    compose overlay turns it on so the Phoenix grid shows what each run asked and answered.
+    """
+    return os.getenv("AI_TRACE_RUN_IO", "0").strip().lower() in ("1", "true", "yes")
+
+
+def _clip(text: str) -> str:
+    flat = " ".join(text.split())
+    if len(flat) <= RUN_IO_MAX_CHARS:
+        return flat
+    return flat[: RUN_IO_MAX_CHARS - 1] + "\u2026"
+
+
 def _safe_set_attribute(span: Any, key: str, value: Any) -> None:
     if span is None:
         return
@@ -748,6 +767,8 @@ class OrchestrationLoop:
                     )
                 answer = result.answer
                 _safe_set_attribute(span, "ai.status", result.status)
+                if _trace_run_io_enabled() and result.answer:
+                    _safe_set_attribute(span, "output.value", _clip(result.answer))
                 return result
             finally:
                 if self._capture is not None:
@@ -789,9 +810,14 @@ class OrchestrationLoop:
                 ),
             },
         )
+        if _trace_run_io_enabled():
+            _safe_set_attribute(span, "input.value", _clip(submission.prompt))
         try:
             yield span
         except BaseException as error:
+            if _trace_run_io_enabled():
+                code = getattr(error, "code", None) or type(error).__name__
+                _safe_set_attribute(span, "output.value", f"failed: {code}")
             try:
                 suppressed = manager.__exit__(type(error), error, error.__traceback__)
             except Exception:
@@ -1709,8 +1735,7 @@ class OrchestrationLoop:
                         "tool_validation_error",
                         False,
                         llm_call_id or proposal_call_id,
-                        "Invalid tool proposal "
-                        f"({','.join(v.code for v in pre_exec.violations)})",
+                        f"Invalid tool proposal ({','.join(v.code for v in pre_exec.violations)})",
                     )
 
                 emit(

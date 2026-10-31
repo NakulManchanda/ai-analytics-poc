@@ -12,6 +12,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from evals.reviews import HUMAN_DIMS, VERDICTS
+from evals.run_review import DEFAULT_PHOENIX_PROJECT_ID
 from evals.runs import (
     DEFAULT_ROOT,
     LABEL_RE,
@@ -23,6 +24,13 @@ from evals.runs import (
 )
 
 DATASET = Path("tooling/evals/datasets/golden/v1/cases.jsonl")
+
+
+def phoenix_args(p) -> None:
+    p.add_argument(
+        "--phoenix-url", help="add a trace link per run (e.g. http://127.0.0.1:16006)"
+    )
+    p.add_argument("--phoenix-project-id", default=DEFAULT_PHOENIX_PROJECT_ID)
 
 
 def add_parsers(sub) -> None:
@@ -75,8 +83,10 @@ def add_parsers(sub) -> None:
     p.add_argument("--reviewer", required=True)
     p.add_argument("--port", type=int, default=8765)
     p.add_argument("--baseline-results", type=Path)
+    phoenix_args(p)
     p = common(sub.add_parser("run-review", help="write static review.html"))
     p.add_argument("--baseline-results", type=Path)
+    phoenix_args(p)
 
 
 def _git_head() -> str | None:
@@ -254,7 +264,14 @@ def run_review_cmd(a) -> int:
 
     _, run_dir = _checked(a)
     out = run_dir / "review.html"
-    out.write_text(render_review(run_dir, a.baseline_results))
+    out.write_text(
+        render_review(
+            run_dir,
+            a.baseline_results,
+            phoenix_url=a.phoenix_url,
+            phoenix_project_id=a.phoenix_project_id,
+        )
+    )
     print(out)
     return 0
 
@@ -276,7 +293,14 @@ def run_review_serve(a) -> int:
     from evals.review_server import make_server
 
     _, run_dir = _checked(a)
-    server = make_server(run_dir, a.reviewer, a.baseline_results, a.port)
+    server = make_server(
+        run_dir,
+        a.reviewer,
+        a.baseline_results,
+        a.port,
+        a.phoenix_url,
+        a.phoenix_project_id,
+    )
     print(
         f"review {run_dir.name} at http://127.0.0.1:{server.server_port}/  (ctrl-c to stop)"
     )

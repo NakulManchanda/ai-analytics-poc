@@ -448,11 +448,11 @@ eval-cost: ## LiteLLM spend and recent calls (stack lifetime, not only this run;
 	@$(EVAL_LOG) eval-cost -- sh -c '$(MAKE) --no-print-directory litellm-spend && $(MAKE) --no-print-directory litellm-calls LIMIT=60'
 
 eval-review: ## Build <run>/review.html
-	@$(EVAL_LOG) eval-review -- $(EVAL) run-review $(EVAL_RUN_ARG) $(if $(EVAL_BASELINE),--baseline-results $(EVAL_BASELINE))
+	@$(EVAL_LOG) eval-review -- $(EVAL) run-review $(EVAL_RUN_ARG) $(if $(EVAL_BASELINE),--baseline-results $(EVAL_BASELINE)) --phoenix-url $(PHOENIX_URL)
 
 eval-review-serve: ## Local review page that records human verdicts (REVIEWER=<name> required; REVIEW_PORT optional; localhost only)
 	@[ -n "$(REVIEWER)" ] || { echo "set REVIEWER=<your name>"; exit 2; }
-	$(EVAL) run-review-serve $(EVAL_RUN_ARG) --allow-incomplete --reviewer "$(REVIEWER)" $(if $(REVIEW_PORT),--port $(REVIEW_PORT)) $(if $(EVAL_BASELINE),--baseline-results $(EVAL_BASELINE))
+	$(EVAL) run-review-serve $(EVAL_RUN_ARG) --allow-incomplete --reviewer "$(REVIEWER)" $(if $(REVIEW_PORT),--port $(REVIEW_PORT)) $(if $(EVAL_BASELINE),--baseline-results $(EVAL_BASELINE)) --phoenix-url $(PHOENIX_URL)
 
 # Prints the commands for the live Nova Pro planner run + human review (#190). Pure echo; you run the live steps.
 next-5-commands: ## Print the 10 commands (with startup options) for a new live Nova Pro planner run and its human review

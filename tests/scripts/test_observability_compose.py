@@ -127,3 +127,27 @@ def test_docker_compose_config_validates_successfully() -> None:
         text=True,
     )
     assert result.returncode == 0, f"docker compose config failed: {result.stderr}"
+
+
+def test_run_io_flag_is_off_wherever_app_spans_leave_phoenix() -> None:
+    """AI_TRACE_RUN_IO puts question/answer text on ai.run spans whatever the exporter is."""
+    phoenix = yaml.safe_load((ROOT / "docker-compose.phoenix.yml").read_text())
+    observability = yaml.safe_load(
+        (ROOT / "docker-compose.observability.yml").read_text()
+    )
+    assert (
+        "phoenix:6006"
+        in phoenix["services"]["app"]["environment"][
+            "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"
+        ]
+    )
+    assert phoenix["services"]["app"]["environment"]["AI_TRACE_RUN_IO"].endswith(":-1}")
+    app_env = observability["services"]["app"]["environment"]
+    assert "otel-collector" in app_env["OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"]
+    assert app_env["AI_TRACE_RUN_IO"] == "0"
+    # The Makefile layers observability after phoenix, so its "0" wins when both are present.
+    makefile = (ROOT / "Makefile").read_text()
+    line = next(x for x in makefile.splitlines() if x.startswith("LITELLM_COMPOSE ="))
+    assert line.index("docker-compose.phoenix.yml") < line.index(
+        "docker-compose.observability.yml"
+    )

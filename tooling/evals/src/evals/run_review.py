@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import html
+import json
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from urllib.parse import quote
 
 from evals.reviews import (
     HUMAN_DIMS,
@@ -33,7 +36,7 @@ table{border-collapse:collapse;width:100%}td,th{border:1px solid #ccc;padding:4p
 .correct{background:#cfc}.incorrect,.failed,.regressed{background:#fbb}.needs_review{background:#fe9}
 .improved{background:#bdf}.unchanged{background:#eee}.lateral{background:#fdb}.missing_evidence{background:#ddd;font-style:italic}.fail{background:#fee}pre{white-space:pre-wrap;margin:0}
 .rv select{font-size:12px}.rv input{width:10em}.meta{color:#666;font-size:11px}.rv details{font-size:11px}.dis{background:#fe9;font-size:12px}
-.note{color:#900;font-size:12px}.hide{display:none}
+.rid{font-size:11px;word-break:break-all}.note{color:#900;font-size:12px}.hide{display:none}
 button.on{background:#222;color:#fff}#shown{font-weight:600;margin-left:.5rem}"""
 
 JS = """const rows=[...document.querySelectorAll('tbody tr')];let mode='all';
@@ -103,11 +106,88 @@ def _review_cell(k: tuple, human: dict, dis: dict, history: dict) -> str:
     )
 
 
-def render_review(
-    run_dir: Path, baseline: Path | None = None, interactive: bool = False
+# Phoenix's default project (global id of "Project:1"); override for another project.
+DEFAULT_PHOENIX_PROJECT_ID = "UHJvamVjdDox"
+
+
+PHOENIX_WINDOW_PAD = timedelta(minutes=15)
+
+
+def phoenix_window(run_dir: Path) -> tuple[str, str] | None:
+    """(start, end) ISO times bracketing the run, from ``run_started_at`` in the frozen captures."""
+    snap = run_dir / "captures.snapshot.jsonl"
+    if not snap.is_file():
+        return None
+    stamps = []
+    for line in snap.read_text().splitlines():
+        try:
+            value = json.loads(line).get("run_started_at")
+            stamps.append(datetime.fromisoformat(value))
+        except (ValueError, TypeError, AttributeError):
+            continue
+    stamps = [t for t in stamps if t.tzinfo]
+    if not stamps:
+        return None
+
+    def iso(t: datetime) -> str:
+        return t.astimezone(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+    return iso(min(stamps) - PHOENIX_WINDOW_PAD), iso(max(stamps) + PHOENIX_WINDOW_PAD)
+
+
+def phoenix_run_url(
+    base: str,
+    project_id: str,
+    run_id: str,
+    window: tuple[str, str] | None = None,
 ) -> str:
-    """Static report; ``interactive`` adds the human-verdict column (needs the review server)."""
+    """Phoenix spans view filtered to one ``ai.run`` span (attributes are nested: ai -> run_id).
+
+    ``window`` pins Phoenix's time range (``timeRangeStart``/``timeRangeEnd``) to when the run
+    happened, so old runs are found; without evidence it falls back to the last 30 days.
+    """
+    cond = f'attributes["ai"]["run_id"] == {json.dumps(run_id)}'
+    time = (
+        f"timeRangeStart={quote(window[0], safe='')}&timeRangeEnd={quote(window[1], safe='')}"
+        if window
+        else "timeRangeKey=30d"
+    )
+    return (
+        f"{base.rstrip('/')}/projects/{quote(project_id, safe='')}/spans"
+        f"?{time}&spanFilterCondition={quote(cond, safe='')}"
+    )
+
+
+def _run_cell(
+    run_id: object,
+    phoenix_url: str | None,
+    project_id: str,
+    window: tuple[str, str] | None = None,
+) -> str:
+    if not run_id:
+        return "<td></td>"
+    link = (
+        f' <a href="{_e(phoenix_run_url(phoenix_url, project_id, str(run_id), window))}" '
+        'target="_blank" rel="noopener">trace</a>'
+        if phoenix_url
+        else ""
+    )
+    return f'<td><code class="rid">{_e(run_id)}</code>{link}</td>'
+
+
+def render_review(
+    run_dir: Path,
+    baseline: Path | None = None,
+    interactive: bool = False,
+    phoenix_url: str | None = None,
+    phoenix_project_id: str = DEFAULT_PHOENIX_PROJECT_ID,
+) -> str:
+    """Static report; ``interactive`` adds the human-verdict column (needs the review server).
+
+    A ``run`` column always shows the run id; ``phoenix_url`` adds a link to that run's trace.
+    """
     reviews = load_reviews(run_dir) if interactive else None
+    window = phoenix_window(run_dir) if phoenix_url else None
     dis_by_turn: dict[tuple, dict] = {}
     graded, _ = load_run_reports(run_dir)
     results = read_jsonl(run_dir / "results.jsonl")
@@ -148,7 +228,9 @@ def render_review(
         body.append(
             f'<tr data-bad="{int(bad)}" data-dirs="{_e(dirset)}"'
             f"{' class=fail' if r['terminal'] != TERMINAL_OK else ''}>"
-            f"<td>{_e(k[0])}#{k[1]}</td><td>{_e(r.get('question', ''))}</td>"
+            f"<td>{_e(k[0])}#{k[1]}</td>"
+            f"{_run_cell(r.get('run_id'), phoenix_url, phoenix_project_id, window)}"
+            f"<td>{_e(r.get('question', ''))}</td>"
             f"<td>{badges} {dbadges}</td>"
             f"<td><pre>{_e(g['actual'])}</pre>expected: {_e(g['expected'])}</td>"
             f"<td>{_e(g['reasons'])}</td><td><pre>{_e(g['answer_text'])}</pre></td>"
@@ -184,7 +266,7 @@ def render_review(
         f"{_e(format_histogram(mcp_reason_histogram(run_dir, results)))}</p>"
         '<p><button data-m="all">all</button> <button data-m="bad">failed / not correct</button> '
         f'{reg_btn} <input id="q" placeholder="search"> <span id="shown"></span></p>'
-        "<table><thead><tr><th>turn</th><th>question</th><th>outcome</th><th>tools (actual)</th>"
+        "<table><thead><tr><th>turn</th><th>run</th><th>question</th><th>outcome</th><th>tools (actual)</th>"
         "<th>reasons</th><th>answer</th><th>terminal</th>"
         + ("<th>human review</th>" if interactive else "")
         + "</tr></thead><tbody>"
