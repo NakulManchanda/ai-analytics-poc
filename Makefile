@@ -454,29 +454,35 @@ eval-review-serve: ## Local review page that records human verdicts (REVIEWER=<n
 	@[ -n "$(REVIEWER)" ] || { echo "set REVIEWER=<your name>"; exit 2; }
 	$(EVAL) run-review-serve $(EVAL_RUN_ARG) --allow-incomplete --reviewer "$(REVIEWER)" $(if $(REVIEW_PORT),--port $(REVIEW_PORT)) $(if $(EVAL_BASELINE),--baseline-results $(EVAL_BASELINE))
 
-# Prints the commands to try the human-review workflow (#190) on the frozen 2026-10-20 baseline.
-NEXT_RUN := 2026-10-20-post-planner-repair-20261021T052401Z
-next-5-commands: ## Print 5-10 commands (with startup options) to try the human-review workflow on the frozen 2026-10-20 baseline
-	@echo "Startup: no Docker or Bedrock needed; run from the repo root (or the worktree) with uv installed."
-	@echo "Prerequisite: the run needs graded report/*.json. If the page shows every turn as missing/not_graded, regenerate them (keeps .md untouched): cp -R $(EVAL_ROOT)/$(NEXT_RUN)/report $(EVAL_ROOT)/$(NEXT_RUN)/report.pre-json-backup && $(EVAL) run-grade --root $(EVAL_ROOT) --run $(NEXT_RUN) --allow-incomplete"
-	@echo "Options: REVIEWER=<name> (required) | EVAL_RUN=<run_id> (default metrics/evals/.current) | EVAL_BASELINE=<results.jsonl> (adds regression filters) | REVIEW_PORT=<port> (default 8765, localhost only)"
+# Prints the commands for the live Nova Pro planner run + human review (#190). Pure echo; you run the live steps.
+next-5-commands: ## Print the 10 commands (with startup options) for a new live Nova Pro planner run and its human review
+	@echo "Startup: Docker running; AWS credentials valid for the profile (aws sts get-caller-identity --profile <profile>); Bedrock access to Nova Pro in us-east-1."
+	@echo "Cost: eval-smoke and eval-run call real Bedrock and need EVAL_CONFIRM=1. Planner is Nova Pro (taxi-planner); answer model is Nova Micro (infra/litellm/config.yaml)."
+	@echo "Options: LABEL=<name> (required, never reused) | AWS_PROFILE=<profile> (default 'default') | WEB_PORT=<port> (default 3000) | LITELLM_PORT (default 14000) | LITELLM_OTEL=1 (adds Jaeger) | EVAL_RUN=<run_id> (default metrics/evals/.current) | REVIEWER=<name> | EVAL_BASELINE=<results.jsonl> | REVIEW_PORT (default 8765)"
+	@echo "Phoenix (trace UI) starts with the stack; open it with: make phoenix-ui"
 	@echo ""
-	@echo "1. Offline tests for the review tooling:"
-	@echo "   make evals-test"
-	@echo "2. Review page (open the printed URL, set verdicts and notes, save; ctrl-c to stop):"
-	@echo "   make eval-review-serve REVIEWER=<your name> EVAL_RUN=$(NEXT_RUN) EVAL_BASELINE=metrics/evals/baselines/golden-2026-10-20.jsonl"
-	@echo "3. Same page on another port if 8765 is taken:"
-	@echo "   make eval-review-serve REVIEWER=<your name> EVAL_RUN=$(NEXT_RUN) REVIEW_PORT=8800"
-	@echo "4. Record one verdict from the CLI instead:"
-	@echo "   $(EVAL) run-review-add --root $(EVAL_ROOT) --run $(NEXT_RUN) --allow-incomplete --case det-001 --turn 0 --dimension tool --verdict correct --reviewer <your name>"
-	@echo "5. Resolve reviews and write the export:"
-	@echo "   $(EVAL) run-review-export --root $(EVAL_ROOT) --run $(NEXT_RUN) --allow-incomplete"
-	@echo "6. Inspect coverage and grader/human disagreements:"
-	@echo "   python3 -c \"import json;d=json.load(open('$(EVAL_ROOT)/$(NEXT_RUN)/reviews.resolved.json'));print(d['coverage']['complete'],'complete;',len(d['coverage']['partial']),'partial;',len(d['coverage']['untouched']),'untouched');print(d['disagreements'])\""
-	@echo "7. Raw append-only verdict log (one JSON record per line):"
-	@echo "   tail -n 5 $(EVAL_ROOT)/$(NEXT_RUN)/reviews.jsonl"
-	@echo "8. Static read-only report (unchanged by the review work):"
-	@echo "   make eval-review EVAL_RUN=$(NEXT_RUN) && make eval-open EVAL_RUN=$(NEXT_RUN)"
+	@echo "1. Start the stack with eval capture (builds images; wait for healthy):"
+	@echo "   make eval-stack-up AWS_PROFILE=<profile> WEB_PORT=3000"
+	@echo "2. Create the run folder (label must be new):"
+	@echo "   make eval-start LABEL=nova-pro-planner"
+	@echo "3. Check web app and LiteLLM proxy (no spend):"
+	@echo "   make eval-health"
+	@echo "4. One real golden case (det-001); proves Nova Pro access before the full run:"
+	@echo "   make eval-smoke EVAL_CONFIRM=1"
+	@echo "5. Confirm the planner call used Nova Pro (look for taxi-planner / amazon.nova-pro-v1:0):"
+	@echo "   make litellm-calls LIMIT=5"
+	@echo "6. Full golden run (37 cases / 43 turns, real Bedrock spend):"
+	@echo "   make eval-run EVAL_CONFIRM=1"
+	@echo "7. Freeze the evidence, then grade it:"
+	@echo "   make eval-freeze && make eval-grade"
+	@echo "8. Compare with the Nova Micro baseline (2026-10-20):"
+	@echo "   make eval-compare EVAL_BASELINE=metrics/evals/baselines/golden-2026-10-20.jsonl"
+	@echo "9. Human review page (open the printed URL; verdicts save to reviews.jsonl):"
+	@echo "   make eval-review-serve REVIEWER=<your name> EVAL_BASELINE=metrics/evals/baselines/golden-2026-10-20.jsonl"
+	@echo "10. Spend check, export reviews, and stop the stack when done:"
+	@echo "   make eval-cost && $(EVAL) run-review-export --root $(EVAL_ROOT) --allow-incomplete && docker compose -p ai_app_poc down"
+	@echo ""
+	@echo "Shortcut for steps 2-8 once the stack is up: make eval-all LABEL=nova-pro-planner EVAL_CONFIRM=1 EVAL_BASELINE=metrics/evals/baselines/golden-2026-10-20.jsonl"
 
 eval-open: ## Open <run>/review.html in the browser
 	@r="$(or $(EVAL_RUN),$$(cat $(EVAL_ROOT)/.current 2>/dev/null))"; [ -f "$(EVAL_ROOT)/$$r/review.html" ] || { echo "no review.html for run '$$r' (make eval-review)"; exit 2; }; open "$(EVAL_ROOT)/$$r/review.html"
