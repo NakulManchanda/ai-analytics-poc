@@ -456,17 +456,26 @@ eval-review-serve: ## Local review page that records human verdicts (REVIEWER=<n
 
 # Prints the commands to try the human-review workflow (#190) on the frozen 2026-10-20 baseline.
 NEXT_RUN := 2026-10-20-post-planner-repair-20261021T052401Z
-next-5-commands: ## Print 5 commands to try the human-review workflow on the frozen 2026-10-20 baseline
-	@echo "1. Review page (open the printed URL, set verdicts, save):"
-	@echo "   make eval-review-serve REVIEWER=<your name> EVAL_RUN=$(NEXT_RUN) EVAL_BASELINE=metrics/evals/baselines/golden-2026-10-20.jsonl"
-	@echo "2. Record one verdict from the CLI instead:"
-	@echo "   $(EVAL) run-review-add --root $(EVAL_ROOT) --run $(NEXT_RUN) --allow-incomplete --case det-001 --turn 0 --dimension tool --verdict correct --reviewer <your name>"
-	@echo "3. Resolve reviews and write the export:"
-	@echo "   $(EVAL) run-review-export --root $(EVAL_ROOT) --run $(NEXT_RUN) --allow-incomplete"
-	@echo "4. Inspect coverage and grader/human disagreements:"
-	@echo "   python3 -c \"import json;d=json.load(open('$(EVAL_ROOT)/$(NEXT_RUN)/reviews.resolved.json'));print(d['coverage']['complete'],'complete;',len(d['coverage']['partial']),'partial;',len(d['coverage']['untouched']),'untouched');print(d['disagreements'])\""
-	@echo "5. Offline tests for the review tooling:"
+next-5-commands: ## Print 5-10 commands (with startup options) to try the human-review workflow on the frozen 2026-10-20 baseline
+	@echo "Startup: no Docker or Bedrock needed; run from the repo root (or the worktree) with uv installed."
+	@echo "Options: REVIEWER=<name> (required) | EVAL_RUN=<run_id> (default metrics/evals/.current) | EVAL_BASELINE=<results.jsonl> (adds regression filters) | REVIEW_PORT=<port> (default 8765, localhost only)"
+	@echo ""
+	@echo "1. Offline tests for the review tooling:"
 	@echo "   make evals-test"
+	@echo "2. Review page (open the printed URL, set verdicts and notes, save; ctrl-c to stop):"
+	@echo "   make eval-review-serve REVIEWER=<your name> EVAL_RUN=$(NEXT_RUN) EVAL_BASELINE=metrics/evals/baselines/golden-2026-10-20.jsonl"
+	@echo "3. Same page on another port if 8765 is taken:"
+	@echo "   make eval-review-serve REVIEWER=<your name> EVAL_RUN=$(NEXT_RUN) REVIEW_PORT=8800"
+	@echo "4. Record one verdict from the CLI instead:"
+	@echo "   $(EVAL) run-review-add --root $(EVAL_ROOT) --run $(NEXT_RUN) --allow-incomplete --case det-001 --turn 0 --dimension tool --verdict correct --reviewer <your name>"
+	@echo "5. Resolve reviews and write the export:"
+	@echo "   $(EVAL) run-review-export --root $(EVAL_ROOT) --run $(NEXT_RUN) --allow-incomplete"
+	@echo "6. Inspect coverage and grader/human disagreements:"
+	@echo "   python3 -c \"import json;d=json.load(open('$(EVAL_ROOT)/$(NEXT_RUN)/reviews.resolved.json'));print(d['coverage']['complete'],'complete;',len(d['coverage']['partial']),'partial;',len(d['coverage']['untouched']),'untouched');print(d['disagreements'])\""
+	@echo "7. Raw append-only verdict log (one JSON record per line):"
+	@echo "   tail -n 5 $(EVAL_ROOT)/$(NEXT_RUN)/reviews.jsonl"
+	@echo "8. Static read-only report (unchanged by the review work):"
+	@echo "   make eval-review EVAL_RUN=$(NEXT_RUN) && make eval-open EVAL_RUN=$(NEXT_RUN)"
 
 eval-open: ## Open <run>/review.html in the browser
 	@r="$(or $(EVAL_RUN),$$(cat $(EVAL_ROOT)/.current 2>/dev/null))"; [ -f "$(EVAL_ROOT)/$$r/review.html" ] || { echo "no review.html for run '$$r' (make eval-review)"; exit 2; }; open "$(EVAL_ROOT)/$$r/review.html"
