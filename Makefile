@@ -458,6 +458,7 @@ eval-review-serve: ## Local review page that records human verdicts (REVIEWER=<n
 NEXT_RUN := 2026-10-20-post-planner-repair-20261021T052401Z
 next-5-commands: ## Print 5-10 commands (with startup options) to try the human-review workflow on the frozen 2026-10-20 baseline
 	@echo "Startup: no Docker or Bedrock needed; run from the repo root (or the worktree) with uv installed."
+	@echo "Prerequisite: the run needs graded report/*.json. If the page shows every turn as missing/not_graded, regenerate them (keeps .md untouched): cp -R $(EVAL_ROOT)/$(NEXT_RUN)/report $(EVAL_ROOT)/$(NEXT_RUN)/report.pre-json-backup && $(EVAL) run-grade --root $(EVAL_ROOT) --run $(NEXT_RUN) --allow-incomplete"
 	@echo "Options: REVIEWER=<name> (required) | EVAL_RUN=<run_id> (default metrics/evals/.current) | EVAL_BASELINE=<results.jsonl> (adds regression filters) | REVIEW_PORT=<port> (default 8765, localhost only)"
 	@echo ""
 	@echo "1. Offline tests for the review tooling:"
