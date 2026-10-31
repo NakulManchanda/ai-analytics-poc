@@ -59,7 +59,8 @@ and `.github/copilot-instructions.md`) must stay thin and refer here rather than
 - Prefer existing Make targets for repeatable developer, test, CI, smoke, and deployment workflows.
   When a useful non-trivial command would otherwise be reconstructed across tasks, add a small
   documented Make target. Keep one-off inspections direct and do not wrap or regenerate complicated
-  commands without a recurring need.
+  commands without a recurring need. Common run, eval, review, trace, test, and PR commands are collected in
+  `.claude/skills/dev-commands/SKILL.md`; `make help` lists every target.
 
 ## GitHub agent work queue
 
