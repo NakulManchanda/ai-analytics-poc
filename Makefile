@@ -11,7 +11,7 @@ OBSERVABILITY_BURST_COUNT ?= 10
 OBSERVABILITY_LOG_TAIL ?= 200
 KV_BUNDLE_OUT = $(or $(OUT),work/kv-hop.yaml)
 
-.PHONY: help eval-stack-up eval-start eval-health eval-smoke eval-run eval-freeze eval-grade eval-compare eval-cost eval-review eval-review-serve eval-open eval-all check-bootstrap dev app-serve-dev mcp-dev mcp-smoke dataset-test dataset-smoke smoke test bench-test evals-test evals-report gateway-test mcp-test infra-test web-test compose-smoke observability-up observability-down observability-smoke observability-dev-up observability-dev-info observability-dev-ask observability-dev-burst observability-dev-metrics observability-dev-logs observability-dev-down local-aws-litellm-compose local-aws-compose local-litellm-compose local-bedrock-direct-compose litellm-traffic litellm-env litellm-smoke litellm-calls litellm-spend litellm-errors litellm-ready litellm-ui litellm-traffic local-aws-refresh phoenix-up phoenix-down phoenix-ui phoenix-purge local-serve-compose local-serve-refresh local-bedrock-compose bedrock-smoke m5-bedrock-smoke m6-bedrock-smoke dashboard tf-dispatch tf-resume tf-park inference-validate inference-sync inference-config inference-secret inference-bootstrap inference-deploy inference-up inference-tunnel inference-connect inference-smoke inference-warmup inference-capacity inference-restart inference-gateway-restart inference-controls-on inference-controls-off inference-verify-workers inference-e1 inference-fresh-up inference-tmux-start inference-tmux-end inference-serve-smoke inference-run inference-pull-evidence inference-pull-range inference-kv-image inference-kv-render inference-kv-smoke evidence-analyze evidence-notebook evidence-notebook-open inference-teardown replay-fanout replay-multi-turn replay-compare-strategies replay-strategy-manual replay-strategy-crewai replay-e3-least-loaded replay-e3-prefix-then-load replay-e4-admission-on replay-e4-admission-off replay-e3-large-prefix-least-loaded replay-e3-large-prefix-prefix-then-load replay-e5 replay-arrival-rate trace-request
+.PHONY: help eval-stack-up eval-start eval-health eval-smoke eval-run eval-freeze eval-grade eval-compare eval-cost eval-review eval-review-serve next-5-commands eval-open eval-all check-bootstrap dev app-serve-dev mcp-dev mcp-smoke dataset-test dataset-smoke smoke test bench-test evals-test evals-report gateway-test mcp-test infra-test web-test compose-smoke observability-up observability-down observability-smoke observability-dev-up observability-dev-info observability-dev-ask observability-dev-burst observability-dev-metrics observability-dev-logs observability-dev-down local-aws-litellm-compose local-aws-compose local-litellm-compose local-bedrock-direct-compose litellm-traffic litellm-env litellm-smoke litellm-calls litellm-spend litellm-errors litellm-ready litellm-ui litellm-traffic local-aws-refresh phoenix-up phoenix-down phoenix-ui phoenix-purge local-serve-compose local-serve-refresh local-bedrock-compose bedrock-smoke m5-bedrock-smoke m6-bedrock-smoke dashboard tf-dispatch tf-resume tf-park inference-validate inference-sync inference-config inference-secret inference-bootstrap inference-deploy inference-up inference-tunnel inference-connect inference-smoke inference-warmup inference-capacity inference-restart inference-gateway-restart inference-controls-on inference-controls-off inference-verify-workers inference-e1 inference-fresh-up inference-tmux-start inference-tmux-end inference-serve-smoke inference-run inference-pull-evidence inference-pull-range inference-kv-image inference-kv-render inference-kv-smoke evidence-analyze evidence-notebook evidence-notebook-open inference-teardown replay-fanout replay-multi-turn replay-compare-strategies replay-strategy-manual replay-strategy-crewai replay-e3-least-loaded replay-e3-prefix-then-load replay-e4-admission-on replay-e4-admission-off replay-e3-large-prefix-least-loaded replay-e3-large-prefix-prefix-then-load replay-e5 replay-arrival-rate trace-request
 
 
 help: ## Show available commands
@@ -452,7 +452,21 @@ eval-review: ## Build <run>/review.html
 
 eval-review-serve: ## Local review page that records human verdicts (REVIEWER=<name> required; REVIEW_PORT optional; localhost only)
 	@[ -n "$(REVIEWER)" ] || { echo "set REVIEWER=<your name>"; exit 2; }
-	$(EVAL) run-review-serve $(EVAL_RUN_ARG) --reviewer "$(REVIEWER)" $(if $(REVIEW_PORT),--port $(REVIEW_PORT)) $(if $(EVAL_BASELINE),--baseline-results $(EVAL_BASELINE))
+	$(EVAL) run-review-serve $(EVAL_RUN_ARG) --allow-incomplete --reviewer "$(REVIEWER)" $(if $(REVIEW_PORT),--port $(REVIEW_PORT)) $(if $(EVAL_BASELINE),--baseline-results $(EVAL_BASELINE))
+
+# Prints the commands to try the human-review workflow (#190) on the frozen 2026-10-20 baseline.
+NEXT_RUN := 2026-10-20-post-planner-repair-20261021T052401Z
+next-5-commands: ## Print 5 commands to try the human-review workflow on the frozen 2026-10-20 baseline
+	@echo "1. Review page (open the printed URL, set verdicts, save):"
+	@echo "   make eval-review-serve REVIEWER=<your name> EVAL_RUN=$(NEXT_RUN) EVAL_BASELINE=metrics/evals/baselines/golden-2026-10-20.jsonl"
+	@echo "2. Record one verdict from the CLI instead:"
+	@echo "   $(EVAL) run-review-add --root $(EVAL_ROOT) --run $(NEXT_RUN) --allow-incomplete --case det-001 --turn 0 --dimension tool --verdict correct --reviewer <your name>"
+	@echo "3. Resolve reviews and write the export:"
+	@echo "   $(EVAL) run-review-export --root $(EVAL_ROOT) --run $(NEXT_RUN) --allow-incomplete"
+	@echo "4. Inspect coverage and grader/human disagreements:"
+	@echo "   python3 -c \"import json;d=json.load(open('$(EVAL_ROOT)/$(NEXT_RUN)/reviews.resolved.json'));print(d['coverage']['complete'],'complete;',len(d['coverage']['partial']),'partial;',len(d['coverage']['untouched']),'untouched');print(d['disagreements'])\""
+	@echo "5. Offline tests for the review tooling:"
+	@echo "   make evals-test"
 
 eval-open: ## Open <run>/review.html in the browser
 	@r="$(or $(EVAL_RUN),$$(cat $(EVAL_ROOT)/.current 2>/dev/null))"; [ -f "$(EVAL_ROOT)/$$r/review.html" ] || { echo "no review.html for run '$$r' (make eval-review)"; exit 2; }; open "$(EVAL_ROOT)/$$r/review.html"
