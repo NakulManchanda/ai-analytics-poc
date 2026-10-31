@@ -1,0 +1,15 @@
+# Extra Collector config merged over core/otel-collector.yaml by docker-compose.jaeger.yml (#221):
+# keep sending traces to Phoenix and also to Jaeger. Lists are replaced when configs merge, so the
+# traces pipeline is restated in full.
+exporters:
+  otlp_grpc/jaeger:
+    endpoint: jaeger:4317
+    tls:
+      insecure: true
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [otlphttp/phoenix, otlp_grpc/jaeger]

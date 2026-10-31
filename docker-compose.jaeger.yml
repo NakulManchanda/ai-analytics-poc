@@ -1,0 +1,28 @@
+# Optional Jaeger trace UI (#221). Phoenix is the default and primary trace UI; layer this overlay on
+# top of docker-compose.observability.yml (`JAEGER=1 make observability-up`, or
+# `LITELLM_OTEL=1 JAEGER=1 make local-aws-litellm-compose`) for generic distributed-system debugging.
+# The Collector then sends traces to Phoenix and Jaeger, and Grafana gains a Jaeger datasource.
+services:
+  jaeger:
+    image: cr.jaegertracing.io/jaegertracing/jaeger:2.21.0
+    ports:
+      - "127.0.0.1:${JAEGER_UI_PORT:-16686}:16686"
+
+  otel-collector:
+    command:
+      - "--config=/etc/otelcol/config.yaml"
+      - "--config=/etc/otelcol/jaeger.yaml"
+    volumes:
+      - ./infra/observability/jaeger/otel-collector-jaeger.yaml:/etc/otelcol/jaeger.yaml:ro
+    depends_on:
+      - jaeger
+
+  grafana:
+    volumes:
+      - ./infra/observability/jaeger/jaeger-datasource.yml:/etc/grafana/provisioning/datasources/jaeger.yml:ro
+
+  app:
+    environment:
+      # Spans now also leave for Jaeger (not only the local Phoenix): keep question/answer text off them
+      # even though docker-compose.phoenix.yml enables it for Phoenix alone.
+      AI_TRACE_RUN_IO: "0"

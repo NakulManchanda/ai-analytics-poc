@@ -20,7 +20,7 @@ cd <active-worktree>
 
 # Fake-provider stack when real AWS is unnecessary:
 WEB_PORT=<task-owned-port> \
-JAEGER_UI_PORT=<task-owned-port> \
+PHOENIX_PORT=<task-owned-port> \
 make observability-up
 
 # Or the opt-in real-AWS overlay when the test requires it:
