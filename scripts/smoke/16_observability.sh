@@ -10,8 +10,9 @@ cd "${ROOT_DIR}"
 export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-ai-analytics-otel-smoke-$$}"
 export WEB_PORT="${WEB_PORT:-0}"
 export PHOENIX_PORT="${PHOENIX_PORT:-0}"
-# The default contract is metadata-only spans; the Phoenix overlay would otherwise turn on run input/output.
-export AI_TRACE_RUN_IO=0
+# Default Phoenix path: the Phoenix overlay turns AI_TRACE_RUN_IO on, so ai.run carries a bounded
+# input.value / output.value. (The Jaeger overlay smoke covers the opposite: text absent.)
+unset AI_TRACE_RUN_IO
 
 compose=(
   docker compose
@@ -19,6 +20,12 @@ compose=(
   -f docker-compose.phoenix.yml
   -f docker-compose.observability.yml
 )
+
+resolved_run_io="$("${compose[@]}" config | awk '/AI_TRACE_RUN_IO:/ {gsub(/"/, "", $2); print $2; exit}')"
+if [[ "${resolved_run_io}" != "1" ]]; then
+  echo "Resolved Compose config has AI_TRACE_RUN_IO=${resolved_run_io:-<unset>}; expected 1 on the Phoenix-only path" >&2
+  exit 1
+fi
 
 cleanup() {
   local exit_code=$?
@@ -112,7 +119,18 @@ python3 - <<'PY'
 import json
 import os
 
-raw = os.environ["SPANS_JSON"]
+spans = json.loads(os.environ["SPANS_JSON"])["data"]
+ai_run_ids = [s for s in spans if s["name"] == "ai.run"]
+assert len(ai_run_ids) == 1
+run_io = {
+    key: ai_run_ids[0]["attributes"].get(key) for key in ("input.value", "output.value")
+}
+# Everything except the opt-in run input/output must stay free of private text.
+for span in spans:
+    for key in ("input.value", "output.value"):
+        if span is ai_run_ids[0]:
+            span["attributes"].pop(key, None)
+raw = json.dumps(spans)
 for sentinel in (
     os.environ["SMOKE_PROMPT"],
     os.environ["FAKE_DATASET_ROW_SENTINEL"],
@@ -121,7 +139,9 @@ for sentinel in (
 ):
     assert sentinel not in raw, f"private text reached the trace: {sentinel!r}"
 
-spans = json.loads(raw)["data"]
+# Phoenix-only default: ai.run carries the bounded question and answer.
+assert run_io["input.value"] == os.environ["SMOKE_PROMPT"], run_io
+assert run_io["output.value"] and len(run_io["output.value"]) <= 200, run_io
 by_name = lambda name: [s for s in spans if s["name"] == name]
 
 def only(items):
@@ -135,7 +155,6 @@ assert attrs["ai.conversation_id"] == os.environ["CONVERSATION_ID"]
 assert attrs["session.id"] == os.environ["CONVERSATION_ID"]
 assert attrs["ai.status"] == "completed" and attrs["ai.turn_type"] == "text"
 assert attrs["gen_ai.request.model"]
-assert "input.value" not in attrs and "output.value" not in attrs
 
 tool_span = only(by_name("mcp.tool.execute"))
 duckdb_span = only(by_name("duckdb.query"))

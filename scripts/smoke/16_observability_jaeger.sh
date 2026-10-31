@@ -19,6 +19,12 @@ compose=(
   -f docker-compose.jaeger.yml
 )
 
+resolved_run_io="$("${compose[@]}" config | awk '/AI_TRACE_RUN_IO:/ {gsub(/"/, "", $2); print $2; exit}')"
+if [[ "${resolved_run_io}" != "0" ]]; then
+  echo "Resolved Compose config has AI_TRACE_RUN_IO=${resolved_run_io:-<unset>}; expected 0 with the Jaeger overlay" >&2
+  exit 1
+fi
+
 cleanup() {
   local exit_code=$?
   if [[ ${exit_code} -ne 0 ]]; then
@@ -228,6 +234,9 @@ assert ai_run["attributes"]["ai.conversation_id"] == os.environ["CONVERSATION_ID
 assert ai_run["attributes"]["ai.status"] == "completed"
 assert ai_run["attributes"]["ai.turn_type"] == "text"
 assert ai_run["attributes"]["gen_ai.request.model"]
+# Spans also leave for Jaeger here, so the run input/output text must be absent.
+assert "input.value" not in ai_run["attributes"]
+assert "output.value" not in ai_run["attributes"]
 
 required_names = {
     "ai.run",

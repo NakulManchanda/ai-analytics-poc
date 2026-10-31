@@ -202,3 +202,18 @@ def test_makefile_layers_overlays_in_order_and_jaeger_is_opt_in() -> None:
     )
     assert "$(if $(filter 1,$(JAEGER)),-f docker-compose.jaeger.yml)" in obs
     assert "observability-jaeger-smoke" in (ROOT / "Makefile").read_text()
+
+
+def test_resolved_run_io_flag_per_trace_destination() -> None:
+    """The merged Compose config (not just the YAML pieces) decides the flag's value."""
+    base = [
+        "docker-compose.yml",
+        "docker-compose.phoenix.yml",
+        "docker-compose.observability.yml",
+    ]
+    for extra, expected in (([], "1"), (["docker-compose.jaeger.yml"], "0")):
+        result = _compose_config(*base, *extra)
+        assert result.returncode == 0, result.stderr
+        env = yaml.safe_load(result.stdout)["services"]["app"]["environment"]
+        assert env["AI_TRACE_RUN_IO"] == expected, extra
+        assert "otel-collector" in env["OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"]
