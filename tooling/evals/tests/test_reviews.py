@@ -17,6 +17,11 @@ from evals.reviews import (
 )
 from evals.runs import RunError
 
+
+def rid(n):
+    return f"{n:032x}"
+
+
 T0 = datetime(2026, 10, 30, 12, 0, tzinfo=UTC)
 
 
@@ -85,15 +90,17 @@ def test_malformed_lines_reported_not_fatal(run):
     bad = [
         "{not json",
         "[1]",
-        json.dumps(dict(ok, review_id="a", verdict="maybe")),
-        json.dumps(dict(ok, review_id="b", dimension="execution")),
-        json.dumps(dict(ok, review_id="c", reviewed_at="yesterday")),
-        json.dumps(dict(ok, review_id="d", reviewed_at="2026-10-30T12:00:00")),  # naive
-        json.dumps(dict(ok, review_id="e", turn_index="0")),
+        json.dumps(dict(ok, review_id=rid(10), verdict="maybe")),
+        json.dumps(dict(ok, review_id=rid(11), dimension="execution")),
+        json.dumps(dict(ok, review_id=rid(12), reviewed_at="yesterday")),
         json.dumps(
-            {k: v for k, v in ok.items() if k != "reviewer"} | {"review_id": "f"}
+            dict(ok, review_id=rid(13), reviewed_at="2026-10-30T12:00:00")
+        ),  # naive
+        json.dumps(dict(ok, review_id=rid(14), turn_index="0")),
+        json.dumps(
+            {k: v for k, v in ok.items() if k != "reviewer"} | {"review_id": rid(15)}
         ),
-        json.dumps(dict(ok, review_id="g", schema_version=2)),
+        json.dumps(dict(ok, review_id=rid(16), schema_version=2)),
     ]
     with (run / "reviews.jsonl").open("a") as f:
         f.write("\n".join(bad) + "\n\n")
@@ -104,12 +111,14 @@ def test_malformed_lines_reported_not_fatal(run):
 
 def test_mismatched_evidence_is_stale_never_applied(run):
     rec = add(run)
-    other = dict(rec, review_id="x", snapshot_sha256="0" * 64, dimension="answer")
-    copied = dict(rec, review_id="y", eval_run_id="other-run", dimension="resolution")
+    other = dict(rec, review_id=rid(1), snapshot_sha256="0" * 64, dimension="answer")
+    copied = dict(
+        rec, review_id=rid(2), eval_run_id="other-run", dimension="resolution"
+    )
     with (run / "reviews.jsonl").open("a") as f:
         f.write(json.dumps(other) + "\n" + json.dumps(copied) + "\n")
     r = load_reviews(run)
-    assert r.stale == ["x", "y"] and list(r.resolved) == [("c1", 0, "tool")]
+    assert r.stale == [rid(1), rid(2)] and list(r.resolved) == [("c1", 0, "tool")]
 
 
 def test_tampered_snapshot_blocks_everything(run):
@@ -159,7 +168,7 @@ def test_export_round_trip_via_cli(run, capsys):
         == (run / "captures.snapshot.sha256").read_text().split()[0]
     )
     assert [d["dimension"] for d in doc["disagreements"]] == ["tool"]
-    assert doc["unreviewed_turns"] == []
+    assert doc["coverage"]["untouched"] == [] and doc["coverage"]["complete"] == 0
     assert load_human_verdicts(run) == {
         ("c1", 0): {"tool": "incorrect"},
         ("c1", 1): {"answer": "correct"},
@@ -186,3 +195,80 @@ def test_add_cli_appends_without_touching_evidence(run, capsys):
     assert set(after) - set(before) == {"reviews.jsonl"}
     assert all(after[k] == v for k, v in before.items())
     assert len(load_reviews(run).resolved) == 1
+
+
+def lines(run, **overrides):
+    """Append a hand-built record (bypasses append_review, like a bad merge or manual edit)."""
+    base = new_record(run, "c1", 0, "tool", "correct", "me", now=T0)
+    with (run / "reviews.jsonl").open("a") as f:
+        f.write(json.dumps(dict(base, **overrides)) + "\n")
+    return base
+
+
+def test_append_rejects_cross_run_and_digest_mismatch(run):
+    rec = new_record(run, "c1", 0, "tool", "correct", "me")
+    with pytest.raises(RunError, match="not 'r-"):
+        append_review(run, dict(rec, eval_run_id="other-run"))
+    with pytest.raises(RunError, match="different snapshot digest"):
+        append_review(run, dict(rec, snapshot_sha256="0" * 64))
+    assert not (run / "reviews.jsonl").exists()
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        {"reviewer": "  "},
+        {"reviewer": "x" * 300},
+        {"reviewer": "a\nb"},
+        {"review_id": "ABC"},
+        {"review_id": "g" * 32},
+        {"snapshot_sha256": "abc"},
+        {"snapshot_sha256": "G" * 64},
+        {"case_id": ""},
+        {"turn_index": -1},
+    ],
+)
+def test_invalid_identity_fields_rejected(run, bad):
+    rec = dict(new_record(run, "c1", 0, "tool", "correct", "me"), **bad)
+    with pytest.raises(RunError, match="invalid review"):
+        append_review(run, rec)
+    lines(run, **bad)
+    r = load_reviews(run)
+    assert len(r.malformed) == 1 and not r.resolved
+
+
+def test_orphaned_turn_reported_and_skipped(run):
+    ok = add(run)
+    lines(run, review_id=rid(3), case_id="nope")
+    r = load_reviews(run)
+    assert r.orphaned == [rid(3)]
+    assert list(r.resolved) == [("c1", 0, "tool")] and ok
+
+
+def test_export_invalidated_by_later_verdict(run):
+    add(run)
+    assert materialize(run)["verdicts"]
+    assert load_human_verdicts(run) == {("c1", 0): {"tool": "correct"}}
+    add(run, "incorrect", minutes=3)  # snapshot digest unchanged
+    with pytest.raises(RunError, match="older than reviews.jsonl"):
+        load_human_verdicts(run)
+    materialize(run)
+    assert load_human_verdicts(run) == {("c1", 0): {"tool": "incorrect"}}
+
+
+def test_coverage_untouched_partial_complete(run):
+    add(run, dim="tool", turn=0)  # turn 0 needs tool+answer -> partial
+    add(run, dim="tool", turn=1)  # follow-up needs tool+answer+resolution
+    add(run, dim="answer", turn=1)
+    cov = materialize(run)["coverage"]
+    assert cov["partial"] == [
+        {"turn": "c1#0", "missing": ["answer"]},
+        {"turn": "c1#1", "missing": ["resolution"]},
+    ]
+    assert cov["untouched"] == [] and cov["complete"] == 0
+    add(run, dim="answer", turn=0)
+    add(run, dim="resolution", turn=1)
+    cov = materialize(run)["coverage"]
+    assert cov["partial"] == [] and cov["complete"] == 2
+    (run / "reviews.jsonl").unlink()
+    assert materialize(run)["coverage"]["untouched"] == ["c1#0", "c1#1"]

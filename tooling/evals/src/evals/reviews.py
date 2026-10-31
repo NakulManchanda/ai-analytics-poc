@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -29,6 +30,24 @@ REVIEWS_FILE = "reviews.jsonl"
 RESOLVED_FILE = "reviews.resolved.json"
 _REQUIRED = ("review_id", "eval_run_id", "case_id", "turn_index", "snapshot_sha256")
 _REQUIRED += ("dimension", "verdict", "reviewer", "reviewed_at")
+_ID_RE = re.compile(r"^[0-9a-f]{32}$")
+_SHA_RE = re.compile(r"^[0-9a-f]{64}$")
+_TEXT_MAX = 256
+
+
+def required_dims(turn_index: int) -> tuple[str, ...]:
+    """Dimensions a complete review covers: resolution only applies to follow-up turns."""
+    return ("tool", "answer") if turn_index == 0 else HUMAN_DIMS
+
+
+def _text(value: object) -> bool:
+    """Non-blank, bounded, single-line string."""
+    return (
+        isinstance(value, str)
+        and bool(value.strip())
+        and len(value) <= _TEXT_MAX
+        and value.isprintable()
+    )
 
 
 def snapshot_digest(run_dir: Path) -> str:
@@ -64,8 +83,21 @@ def validate(rec: object) -> str | None:
     for k in _REQUIRED:
         if k not in rec or rec[k] in (None, ""):
             return f"missing {k}"
-    if not isinstance(rec["turn_index"], int) or isinstance(rec["turn_index"], bool):
-        return "turn_index must be an integer"
+    if not isinstance(rec["review_id"], str) or not _ID_RE.match(rec["review_id"]):
+        return "review_id must be 32 lowercase hex characters"
+    if not isinstance(rec["snapshot_sha256"], str) or not _SHA_RE.match(
+        rec["snapshot_sha256"]
+    ):
+        return "snapshot_sha256 must be 64 lowercase hex characters"
+    for k in ("eval_run_id", "case_id", "reviewer"):
+        if not _text(rec[k]):
+            return f"{k} must be a non-blank single-line string up to {_TEXT_MAX} chars"
+    if (
+        not isinstance(rec["turn_index"], int)
+        or isinstance(rec["turn_index"], bool)
+        or rec["turn_index"] < 0
+    ):
+        return "turn_index must be a non-negative integer"
     if rec["dimension"] not in HUMAN_DIMS:
         return f"dimension must be one of {', '.join(HUMAN_DIMS)}"
     if rec["verdict"] not in VERDICTS:
@@ -110,6 +142,12 @@ def append_review(run_dir: Path, rec: dict) -> None:
     err = validate(rec)
     if err:
         raise RunError(f"invalid review: {err}")
+    if rec["eval_run_id"] != run_dir.name:
+        raise RunError(
+            f"review is for run {rec['eval_run_id']!r}, not {run_dir.name!r}"
+        )
+    if rec["snapshot_sha256"] != snapshot_digest(run_dir):
+        raise RunError("review is bound to a different snapshot digest")
     known = {
         (r["case_id"], r["turn_index"]) for r in read_jsonl(run_dir / "results.jsonl")
     }
@@ -131,6 +169,7 @@ class Reviews:
     duplicates: list[str] = field(
         default_factory=list
     )  # repeated review_ids (first wins)
+    orphaned: list[str] = field(default_factory=list)  # review_ids for unknown turns
 
 
 def load_reviews(run_dir: Path) -> Reviews:
@@ -145,6 +184,9 @@ def load_reviews(run_dir: Path) -> Reviews:
     if not path.is_file():
         return out
     digest = snapshot_digest(run_dir)
+    turns = {
+        (r["case_id"], r["turn_index"]) for r in read_jsonl(run_dir / "results.jsonl")
+    }
     seen: set[str] = set()
     groups: dict[tuple[str, int, str], list[tuple[datetime, int, dict]]] = {}
     for n, line in enumerate(path.read_text().splitlines(), 1):
@@ -163,6 +205,9 @@ def load_reviews(run_dir: Path) -> Reviews:
         elif rec["snapshot_sha256"] != digest or rec["eval_run_id"] != run_dir.name:
             seen.add(rec["review_id"])
             out.stale.append(rec["review_id"])
+        elif (rec["case_id"], rec["turn_index"]) not in turns:
+            seen.add(rec["review_id"])
+            out.orphaned.append(rec["review_id"])
         else:
             seen.add(rec["review_id"])
             key = (rec["case_id"], rec["turn_index"], rec["dimension"])
@@ -190,6 +235,12 @@ def disagreements(reviews: Reviews, graded: dict[tuple[str, int], dict]) -> list
     return out
 
 
+def reviews_digest(run_dir: Path) -> str:
+    """Digest of ``reviews.jsonl`` bytes (of the empty string when there are no reviews)."""
+    path = run_dir / REVIEWS_FILE
+    return hashlib.sha256(path.read_bytes() if path.is_file() else b"").hexdigest()
+
+
 def materialize(run_dir: Path) -> dict:
     """Write ``reviews.resolved.json`` (the import/reporting artifact) and return it."""
     reviews = load_reviews(run_dir)
@@ -197,7 +248,15 @@ def materialize(run_dir: Path) -> dict:
     turns = {
         (r["case_id"], r["turn_index"]) for r in read_jsonl(run_dir / "results.jsonl")
     }
-    reviewed = {(c, t) for c, t, _ in reviews.resolved}
+    done: dict[tuple[str, int], set[str]] = {}
+    for c, t, d in reviews.resolved:
+        done.setdefault((c, t), set()).add(d)
+    partial = [
+        {"turn": f"{c}#{t}", "missing": sorted(set(required_dims(t)) - done[(c, t)])}
+        for c, t in sorted(done)
+        if (c, t) in turns and set(required_dims(t)) - done[(c, t)]
+    ]
+    untouched = sorted(f"{c}#{t}" for c, t in turns - set(done))
     doc = {
         "schema_version": SCHEMA_VERSION,
         "eval_run_id": run_dir.name,
@@ -207,10 +266,17 @@ def materialize(run_dir: Path) -> dict:
             for (c, t, d), rec in sorted(reviews.resolved.items())
         ],
         "disagreements": disagreements(reviews, graded),
-        "unreviewed_turns": sorted(f"{c}#{t}" for c, t in turns - reviewed),
+        "coverage": {
+            "required": "tool+answer; resolution also on follow-up turns (turn_index > 0)",
+            "untouched": untouched,
+            "partial": partial,
+            "complete": len(done) - len(partial),
+        },
         "malformed": [{"line": n, "reason": r} for n, r in reviews.malformed],
         "stale": reviews.stale,
         "duplicates": reviews.duplicates,
+        "orphaned": reviews.orphaned,
+        "reviews_sha256": reviews_digest(run_dir),
     }
     write_json_atomic(run_dir / RESOLVED_FILE, doc)
     return doc
@@ -224,6 +290,8 @@ def load_human_verdicts(run_dir: Path) -> dict[tuple[str, int], dict[str, str]]:
     doc = json.loads(path.read_text())
     if doc.get("snapshot_sha256") != snapshot_digest(run_dir):
         raise RunError(f"{path.name} is bound to different evidence; re-run export")
+    if doc.get("reviews_sha256") != reviews_digest(run_dir):
+        raise RunError(f"{path.name} is older than {REVIEWS_FILE}; re-run export")
     out: dict[tuple[str, int], dict[str, str]] = {}
     for v in doc["verdicts"]:
         out.setdefault((v["case_id"], v["turn_index"]), {})[v["dimension"]] = v[

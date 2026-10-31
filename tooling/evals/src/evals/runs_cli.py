@@ -273,8 +273,9 @@ def run_review_export(a) -> int:
     doc = materialize(run_dir)
     print(
         f"{len(doc['verdicts'])} verdicts, {len(doc['disagreements'])} grader disagreements, "
-        f"{len(doc['unreviewed_turns'])} unreviewed turns, {len(doc['malformed'])} malformed, "
-        f"{len(doc['stale'])} stale, {len(doc['duplicates'])} duplicate -> {run_dir / 'reviews.resolved.json'}"
+        f"{len(doc['coverage']['untouched'])} untouched, {len(doc['coverage']['partial'])} partial, "
+        f"{doc['coverage']['complete']} complete turns; {len(doc['malformed'])} malformed, "
+        f"{len(doc['stale'])} stale, {len(doc['duplicates'])} duplicate, {len(doc['orphaned'])} orphaned -> {run_dir / 'reviews.resolved.json'}"
     )
     return 0
 
