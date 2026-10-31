@@ -69,6 +69,12 @@ def add_parsers(sub) -> None:
             "run-review-export", help="resolve reviews.jsonl -> reviews.resolved.json"
         )
     )
+    p = common(
+        sub.add_parser("run-review-serve", help="local review page that saves verdicts")
+    )
+    p.add_argument("--reviewer", required=True)
+    p.add_argument("--port", type=int, default=8765)
+    p.add_argument("--baseline-results", type=Path)
     p = common(sub.add_parser("run-review", help="write static review.html"))
     p.add_argument("--baseline-results", type=Path)
 
@@ -266,6 +272,21 @@ def run_review_add(a) -> int:
     return 0
 
 
+def run_review_serve(a) -> int:
+    from evals.review_server import make_server
+
+    _, run_dir = _checked(a)
+    server = make_server(run_dir, a.reviewer, a.baseline_results, a.port)
+    print(
+        f"review {run_dir.name} at http://127.0.0.1:{server.server_port}/  (ctrl-c to stop)"
+    )
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    return 0
+
+
 def run_review_export(a) -> int:
     from evals.reviews import materialize
 
@@ -289,6 +310,7 @@ HANDLERS = {
     "run-review": run_review_cmd,
     "run-review-add": run_review_add,
     "run-review-export": run_review_export,
+    "run-review-serve": run_review_serve,
 }
 
 

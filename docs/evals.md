@@ -267,3 +267,13 @@ Read from `compare.md` / `review.html`: tool and argument correctness (matches, 
 
 Fixtures are synthetic, so no real model quality or cost decision is supported yet. The `app_runs` direct vs LiteLLM rerun, quality-qualified goodput joined with the benchmark SLO
 goodput (here: pass rate only), failure clustering and judge calibration are follow-ups.
+
+## Human review of a frozen run (#190)
+
+Verdicts are stored beside the frozen evidence in `<run>/reviews.jsonl` (append-only, schema v1, bound to the run id and `captures.snapshot.sha256`); the evidence, golden cases and grader reports are never edited. A modified snapshot blocks reading and writing reviews.
+
+1. `make eval-review-serve REVIEWER=<name> [EVAL_RUN=<run_id>] [EVAL_BASELINE=<results.jsonl>] [REVIEW_PORT=8765]` serves the review page on `127.0.0.1` only. Each turn has a tool / answer / resolution verdict (`correct`, `incorrect`, `needs_review`) plus notes; save writes to `reviews.jsonl`. The page filters by unreviewed and by grader/human disagreement; grader outcomes stay in their own column.
+2. Re-reviewing a turn appends a new record; the latest `reviewed_at` wins and the earlier ones stay in the file as superseded. Duplicate ids, malformed lines and records bound to other evidence are reported, never applied.
+3. `evals run-review-export` writes `<run>/reviews.resolved.json` (verdicts, disagreements, unreviewed turns, malformed/stale/duplicate counts); `evals.reviews.load_human_verdicts` imports it. `evals run-review-add` records one verdict from the command line.
+
+The static `review.html` from `make eval-review` is unchanged. Phoenix deep links are not part of this page yet.
