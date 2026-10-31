@@ -82,3 +82,26 @@ def test_rejects_foreign_host_and_origin(srv):
         == 404
     )
     assert not (run / "reviews.jsonl").exists()
+
+
+def test_batch_with_unknown_second_turn_writes_nothing(srv):
+    run, s = srv
+    code, _ = call(s, "/api/review", {"items": [item(), item(case_id="zz")]})
+    assert code == 400 and not (run / "reviews.jsonl").exists()
+    call(s, "/api/review", {"items": [item(verdict="correct")]})
+    before = (run / "reviews.jsonl").read_bytes()
+    code, _ = call(s, "/api/review", {"items": [item(), item(turn_index=99)]})
+    assert code == 400 and (run / "reviews.jsonl").read_bytes() == before
+
+
+def test_notes_only_rereview_and_history_visible(srv):
+    run, s = srv
+    call(s, "/api/review", {"items": [item(verdict="incorrect", notes="first")]})
+    # same verdict, new notes (what the page submits when only the notes changed)
+    call(s, "/api/review", {"items": [item(verdict="incorrect", notes="second")]})
+    rec = load_reviews(run).resolved[("c1", 0, "tool")]
+    assert rec["notes"] == "second" and len(rec["superseded"]) == 1
+    _, html = call(s)
+    assert 'value="second"' in html and 'data-cur="second"' in html
+    assert "history (2)" in html and "first" in html and "alice" in html
+    assert "reviewed_at" not in html and "Z</span>" in html

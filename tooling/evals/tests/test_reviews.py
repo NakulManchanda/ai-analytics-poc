@@ -9,6 +9,7 @@ import pytest
 from evals.cli import main
 from evals.reviews import (
     append_review,
+    append_reviews,
     disagreements,
     load_human_verdicts,
     load_reviews,
@@ -254,3 +255,13 @@ def test_coverage_untouched_partial_complete(run):
     assert cov["partial"] == [] and cov["complete"] == 2
     (run / "reviews.jsonl").unlink()
     assert materialize(run)["coverage"]["untouched"] == ["c1#0", "c1#1"]
+
+
+def test_append_reviews_is_all_or_none(run):
+    good = new_record(run, "c1", 0, "tool", "correct", "me")
+    bad = new_record(run, "zz", 0, "tool", "correct", "me")
+    with pytest.raises(RunError, match="not a turn"):
+        append_reviews(run, [good, bad])
+    assert not (run / "reviews.jsonl").exists()
+    append_reviews(run, [good, new_record(run, "c1", 1, "answer", "correct", "me")])
+    assert len((run / "reviews.jsonl").read_text().splitlines()) == 2

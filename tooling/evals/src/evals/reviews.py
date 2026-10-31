@@ -137,26 +137,34 @@ def new_record(
     }
 
 
-def append_review(run_dir: Path, rec: dict) -> None:
-    """Validate and append one record; the turn must exist in this run's ``results.jsonl``."""
-    err = validate(rec)
-    if err:
-        raise RunError(f"invalid review: {err}")
-    if rec["eval_run_id"] != run_dir.name:
-        raise RunError(
-            f"review is for run {rec['eval_run_id']!r}, not {run_dir.name!r}"
-        )
-    if rec["snapshot_sha256"] != snapshot_digest(run_dir):
-        raise RunError("review is bound to a different snapshot digest")
+def append_reviews(run_dir: Path, recs: list[dict]) -> None:
+    """Validate every record against the run, then append them in one write (all or none)."""
     known = {
         (r["case_id"], r["turn_index"]) for r in read_jsonl(run_dir / "results.jsonl")
     }
-    if (rec["case_id"], rec["turn_index"]) not in known:
-        raise RunError(
-            f"{rec['case_id']}#{rec['turn_index']} is not a turn of {run_dir.name}"
-        )
-    with (run_dir / REVIEWS_FILE).open("a") as f:
-        f.write(json.dumps(rec, sort_keys=True) + "\n")
+    digest = snapshot_digest(run_dir)
+    for rec in recs:
+        err = validate(rec)
+        if err:
+            raise RunError(f"invalid review: {err}")
+        if rec["eval_run_id"] != run_dir.name:
+            raise RunError(
+                f"review is for run {rec['eval_run_id']!r}, not {run_dir.name!r}"
+            )
+        if rec["snapshot_sha256"] != digest:
+            raise RunError("review is bound to a different snapshot digest")
+        if (rec["case_id"], rec["turn_index"]) not in known:
+            raise RunError(
+                f"{rec['case_id']}#{rec['turn_index']} is not a turn of {run_dir.name}"
+            )
+    if recs:
+        with (run_dir / REVIEWS_FILE).open("a") as f:
+            f.write("".join(json.dumps(r, sort_keys=True) + "\n" for r in recs))
+
+
+def append_review(run_dir: Path, rec: dict) -> None:
+    """Validate and append one record; the turn must exist in this run's ``results.jsonl``."""
+    append_reviews(run_dir, [rec])
 
 
 @dataclass
@@ -170,6 +178,9 @@ class Reviews:
         default_factory=list
     )  # repeated review_ids (first wins)
     orphaned: list[str] = field(default_factory=list)  # review_ids for unknown turns
+    history: dict[tuple[str, int, str], list[dict]] = field(
+        default_factory=dict
+    )  # every applied record per key, oldest first
 
 
 def load_reviews(run_dir: Path) -> Reviews:
@@ -214,6 +225,7 @@ def load_reviews(run_dir: Path) -> Reviews:
             groups.setdefault(key, []).append((_parse_ts(rec["reviewed_at"]), n, rec))
     for key, items in groups.items():
         items.sort(key=lambda t: (t[0], t[1]))
+        out.history[key] = [r for *_, r in items]
         out.resolved[key] = dict(
             items[-1][2], superseded=[r["review_id"] for *_, r in items[:-1]]
         )

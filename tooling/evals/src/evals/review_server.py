@@ -6,7 +6,7 @@ import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from evals.reviews import append_review, new_record, validate
+from evals.reviews import append_reviews, new_record
 from evals.run_review import render_review
 from evals.runs import RunError
 
@@ -70,11 +70,9 @@ def make_server(
                     )
                     for i in items
                 ]
-                for r in recs:  # reject the whole batch before writing any of it
-                    if err := validate(r):
-                        raise RunError(err)
-                for r in recs:
-                    append_review(run_dir, r)
+                append_reviews(
+                    run_dir, recs
+                )  # validates the whole batch, then writes once
             except (RunError, KeyError, TypeError, ValueError) as err:
                 return self._json(400, {"error": f"{type(err).__name__}: {err}"})
             self._json(200, {"saved": len(recs)})
