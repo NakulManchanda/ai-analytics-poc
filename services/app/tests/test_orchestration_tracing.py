@@ -281,9 +281,10 @@ def test_run_io_is_opt_in_and_bounded(monkeypatch) -> None:
     assert len(attributes["input.value"]) == 200 and attributes["input.value"].endswith(
         "…"
     )
-    assert attributes["output.value"] == " ".join(result.answer.split())[:200] or (
-        attributes["output.value"].endswith("…")
-    )
+    flat_answer = " ".join(result.answer.split())
+    expected = flat_answer if len(flat_answer) <= 200 else flat_answer[:199] + "…"
+    assert len(attributes["output.value"]) <= 200
+    assert attributes["output.value"] == expected
 
 
 def test_run_io_absent_by_default(monkeypatch) -> None:

@@ -129,3 +129,29 @@ def test_run_column_and_phoenix_link(run):
     assert 'run_id == "x"' not in phoenix_run_url(
         "http://h", "p", 'x"; drop'
     )  # quoted safely
+
+
+def test_phoenix_window_comes_from_run_evidence(run):
+    from urllib.parse import parse_qs, urlsplit
+
+    from evals.run_review import phoenix_run_url, phoenix_window
+
+    assert phoenix_window(run) is None  # fixture snapshot has no run_started_at
+    assert "timeRangeKey=30d" in phoenix_run_url("http://h", "p", "run_x")
+
+    snap = run / "captures.snapshot.jsonl"
+    snap.write_text(
+        '{"run_started_at": "2026-10-20T05:24:01.592355+00:00"}\n'
+        '{"run_started_at": "2026-10-20T05:28:05+00:00"}\n'
+        "not json\n"
+        '{"run_started_at": "yesterday"}\n'
+        '{"run_started_at": "2026-10-20T05:26:00"}\n'  # naive: ignored
+        '{"other": 1}\n'
+    )
+    window = phoenix_window(run)
+    assert window == ("2026-10-20T05:09:01Z", "2026-10-20T05:43:05Z")
+    query = parse_qs(urlsplit(phoenix_run_url("http://h", "p", "run_x", window)).query)
+    assert query["timeRangeStart"] == [window[0]] and query["timeRangeEnd"] == [
+        window[1]
+    ]
+    assert "timeRangeKey" not in query

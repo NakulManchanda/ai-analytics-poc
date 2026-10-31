@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import html
 import json
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from urllib.parse import quote
 
@@ -109,20 +110,64 @@ def _review_cell(k: tuple, human: dict, dis: dict, history: dict) -> str:
 DEFAULT_PHOENIX_PROJECT_ID = "UHJvamVjdDox"
 
 
-def phoenix_run_url(base: str, project_id: str, run_id: str) -> str:
-    """Phoenix spans view filtered to one ``ai.run`` span (attributes are nested: ai -> run_id)."""
+PHOENIX_WINDOW_PAD = timedelta(minutes=15)
+
+
+def phoenix_window(run_dir: Path) -> tuple[str, str] | None:
+    """(start, end) ISO times bracketing the run, from ``run_started_at`` in the frozen captures."""
+    snap = run_dir / "captures.snapshot.jsonl"
+    if not snap.is_file():
+        return None
+    stamps = []
+    for line in snap.read_text().splitlines():
+        try:
+            value = json.loads(line).get("run_started_at")
+            stamps.append(datetime.fromisoformat(value))
+        except (ValueError, TypeError, AttributeError):
+            continue
+    stamps = [t for t in stamps if t.tzinfo]
+    if not stamps:
+        return None
+
+    def iso(t: datetime) -> str:
+        return t.astimezone(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+    return iso(min(stamps) - PHOENIX_WINDOW_PAD), iso(max(stamps) + PHOENIX_WINDOW_PAD)
+
+
+def phoenix_run_url(
+    base: str,
+    project_id: str,
+    run_id: str,
+    window: tuple[str, str] | None = None,
+) -> str:
+    """Phoenix spans view filtered to one ``ai.run`` span (attributes are nested: ai -> run_id).
+
+    ``window`` pins Phoenix's time range (``timeRangeStart``/``timeRangeEnd``) to when the run
+    happened, so old runs are found; without evidence it falls back to the last 30 days.
+    """
     cond = f'attributes["ai"]["run_id"] == {json.dumps(run_id)}'
+    time = (
+        f"timeRangeStart={quote(window[0], safe='')}&timeRangeEnd={quote(window[1], safe='')}"
+        if window
+        else "timeRangeKey=30d"
+    )
     return (
         f"{base.rstrip('/')}/projects/{quote(project_id, safe='')}/spans"
-        f"?timeRangeKey=7d&spanFilterCondition={quote(cond, safe='')}"
+        f"?{time}&spanFilterCondition={quote(cond, safe='')}"
     )
 
 
-def _run_cell(run_id: object, phoenix_url: str | None, project_id: str) -> str:
+def _run_cell(
+    run_id: object,
+    phoenix_url: str | None,
+    project_id: str,
+    window: tuple[str, str] | None = None,
+) -> str:
     if not run_id:
         return "<td></td>"
     link = (
-        f' <a href="{_e(phoenix_run_url(phoenix_url, project_id, str(run_id)))}" '
+        f' <a href="{_e(phoenix_run_url(phoenix_url, project_id, str(run_id), window))}" '
         'target="_blank" rel="noopener">trace</a>'
         if phoenix_url
         else ""
@@ -142,6 +187,7 @@ def render_review(
     A ``run`` column always shows the run id; ``phoenix_url`` adds a link to that run's trace.
     """
     reviews = load_reviews(run_dir) if interactive else None
+    window = phoenix_window(run_dir) if phoenix_url else None
     dis_by_turn: dict[tuple, dict] = {}
     graded, _ = load_run_reports(run_dir)
     results = read_jsonl(run_dir / "results.jsonl")
@@ -183,7 +229,7 @@ def render_review(
             f'<tr data-bad="{int(bad)}" data-dirs="{_e(dirset)}"'
             f"{' class=fail' if r['terminal'] != TERMINAL_OK else ''}>"
             f"<td>{_e(k[0])}#{k[1]}</td>"
-            f"{_run_cell(r.get('run_id'), phoenix_url, phoenix_project_id)}"
+            f"{_run_cell(r.get('run_id'), phoenix_url, phoenix_project_id, window)}"
             f"<td>{_e(r.get('question', ''))}</td>"
             f"<td>{badges} {dbadges}</td>"
             f"<td><pre>{_e(g['actual'])}</pre>expected: {_e(g['expected'])}</td>"

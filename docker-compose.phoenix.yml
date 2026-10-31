@@ -24,8 +24,10 @@ services:
   app:
     environment:
       <<: *phoenix-tracing
-      # Bounded question/answer on the ai.run span so the Phoenix grid shows Input/Output
-      # (off in the app by default; AI_TRACE_RUN_IO=0 turns it off here too).
+      # Bounded question/answer on the ai.run span so the Phoenix grid shows Input/Output.
+      # The flag is exporter-independent (the app puts the text on the span, wherever spans go):
+      # off in the app by default, and forced off by docker-compose.observability.yml, which sends
+      # app spans to the Collector/Jaeger instead. AI_TRACE_RUN_IO=0 turns it off here too.
       AI_TRACE_RUN_IO: "${AI_TRACE_RUN_IO:-1}"
     depends_on:
       phoenix:
