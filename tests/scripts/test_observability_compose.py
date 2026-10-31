@@ -17,7 +17,6 @@ def test_observability_compose_overlay_declares_all_services() -> None:
         "app",
         "mcp",
         "otel-collector",
-        "jaeger",
         "prometheus",
         "blackbox-exporter",
         "loki",
@@ -46,7 +45,8 @@ def test_observability_configuration_files_are_valid() -> None:
         for target in group["targets"]
     ]
     assert "http://app:8080/health" in http_targets
-    assert "http://jaeger:16686/" in http_targets
+    assert "http://phoenix:6006/healthz" in http_targets
+    assert "http://jaeger:16686/" not in http_targets  # Jaeger is optional (#221)
 
     assert "blackbox-tcp" in scrape_jobs
     tcp_targets = [
@@ -82,7 +82,7 @@ def test_observability_configuration_files_are_valid() -> None:
     ds_names = [d["name"] for d in ds_data.get("datasources", [])]
     assert "Prometheus" in ds_names
     assert "Loki" in ds_names
-    assert "Jaeger" in ds_names
+    assert "Jaeger" not in ds_names  # provisioned only by the Jaeger overlay (#221)
 
     # Grafana dashboard JSON
     dash_json = ROOT / "infra/observability/core/grafana/dashboards/local-stack.json"
@@ -111,43 +111,94 @@ def test_makefile_observability_targets_include_grafana_and_prometheus() -> None
     assert "Prometheus: http://127.0.0.1:19090" in info_output
 
 
+def _compose_config(*files: str) -> subprocess.CompletedProcess:
+    args = ["docker", "compose"]
+    for name in files:
+        args += ["-f", name]
+    return subprocess.run([*args, "config"], cwd=ROOT, capture_output=True, text=True)
+
+
 def test_docker_compose_config_validates_successfully() -> None:
-    result = subprocess.run(
-        [
-            "docker",
-            "compose",
-            "-f",
-            "docker-compose.yml",
-            "-f",
-            "docker-compose.observability.yml",
-            "config",
-        ],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-    )
-    assert result.returncode == 0, f"docker compose config failed: {result.stderr}"
+    base = ["docker-compose.yml", "docker-compose.phoenix.yml"]
+    for extra in (
+        ["docker-compose.observability.yml"],
+        ["docker-compose.observability.yml", "docker-compose.jaeger.yml"],
+    ):
+        result = _compose_config(*base, *extra)
+        assert result.returncode == 0, f"{extra}: {result.stderr}"
 
 
-def test_run_io_flag_is_off_wherever_app_spans_leave_phoenix() -> None:
+def _load(name: str) -> dict:
+    return yaml.safe_load((ROOT / name).read_text())
+
+
+def test_phoenix_is_the_default_trace_backend_and_jaeger_is_optional() -> None:
+    observability = _load("docker-compose.observability.yml")["services"]
+    assert "jaeger" not in observability
+    assert "phoenix" in observability["otel-collector"]["depends_on"]
+    assert "jaeger" not in observability["grafana"].get("depends_on", [])
+    core = _load("infra/observability/core/otel-collector.yaml")
+    assert core["service"]["pipelines"]["traces"]["exporters"] == ["otlphttp/phoenix"]
+    assert core["exporters"]["otlphttp/phoenix"]["endpoint"] == "http://phoenix:6006"
+
+    jaeger = _load("docker-compose.jaeger.yml")["services"]
+    assert "jaeger" in jaeger
+    assert "--config=/etc/otelcol/jaeger.yaml" in jaeger["otel-collector"]["command"]
+    extra = _load("infra/observability/jaeger/otel-collector-jaeger.yaml")
+    assert extra["service"]["pipelines"]["traces"]["exporters"] == [
+        "otlphttp/phoenix",
+        "otlp_grpc/jaeger",
+    ]
+    core_ds = _load(
+        "infra/observability/core/grafana/provisioning/datasources/datasources.yml"
+    )["datasources"]
+    jaeger_ds = _load("infra/observability/jaeger/grafana-datasources/datasources.yml")[
+        "datasources"
+    ]
+    assert jaeger_ds[: len(core_ds)] == core_ds  # core datasources unchanged
+    assert [d["name"] for d in jaeger_ds[len(core_ds) :]] == ["Jaeger"]
+    grafana_mounts = jaeger["grafana"]["volumes"]
+    assert grafana_mounts == [
+        "./infra/observability/jaeger/grafana-datasources:/etc/grafana/provisioning/datasources:ro"
+    ]
+
+
+def test_phoenix_overlay_works_without_litellm_and_litellm_logger_is_separate() -> None:
+    assert "litellm" not in _load("docker-compose.phoenix.yml")["services"]
+    litellm = _load("docker-compose.phoenix-litellm.yml")["services"]["litellm"]
+    assert "phoenix" in litellm["environment"]["PHOENIX_COLLECTOR_HTTP_ENDPOINT"]
+
+
+def test_run_io_text_only_goes_where_phoenix_is_the_only_destination() -> None:
     """AI_TRACE_RUN_IO puts question/answer text on ai.run spans whatever the exporter is."""
-    phoenix = yaml.safe_load((ROOT / "docker-compose.phoenix.yml").read_text())
-    observability = yaml.safe_load(
-        (ROOT / "docker-compose.observability.yml").read_text()
-    )
-    assert (
-        "phoenix:6006"
-        in phoenix["services"]["app"]["environment"][
-            "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"
-        ]
-    )
-    assert phoenix["services"]["app"]["environment"]["AI_TRACE_RUN_IO"].endswith(":-1}")
-    app_env = observability["services"]["app"]["environment"]
-    assert "otel-collector" in app_env["OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"]
-    assert app_env["AI_TRACE_RUN_IO"] == "0"
-    # The Makefile layers observability after phoenix, so its "0" wins when both are present.
-    makefile = (ROOT / "Makefile").read_text()
-    line = next(x for x in makefile.splitlines() if x.startswith("LITELLM_COMPOSE ="))
-    assert line.index("docker-compose.phoenix.yml") < line.index(
+    phoenix_env = _load("docker-compose.phoenix.yml")["services"]["app"]["environment"]
+    assert phoenix_env["AI_TRACE_RUN_IO"].endswith(":-1}")
+    # Default observability stack: app -> Collector -> Phoenix only, so the flag stays on.
+    obs_env = _load("docker-compose.observability.yml")["services"]["app"][
+        "environment"
+    ]
+    assert "otel-collector" in obs_env["OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"]
+    assert "AI_TRACE_RUN_IO" not in obs_env
+    # Once spans also go to Jaeger, the text is forced off.
+    jaeger_env = _load("docker-compose.jaeger.yml")["services"]["app"]["environment"]
+    assert jaeger_env["AI_TRACE_RUN_IO"] == "0"
+
+
+def test_makefile_layers_overlays_in_order_and_jaeger_is_opt_in() -> None:
+    lines = (ROOT / "Makefile").read_text().splitlines()
+    litellm = next(x for x in lines if x.startswith("LITELLM_COMPOSE ="))
+    order = [
+        "docker-compose.litellm.yml",
+        "docker-compose.phoenix.yml",
+        "docker-compose.phoenix-litellm.yml",
+        "docker-compose.observability.yml",
+        "docker-compose.litellm-otel.yml",
+        "docker-compose.jaeger.yml",
+    ]
+    assert [litellm.index(f) for f in order] == sorted(litellm.index(f) for f in order)
+    obs = next(x for x in lines if x.startswith("OBS_COMPOSE ="))
+    assert obs.index("docker-compose.phoenix.yml") < obs.index(
         "docker-compose.observability.yml"
     )
+    assert "$(if $(filter 1,$(JAEGER)),-f docker-compose.jaeger.yml)" in obs
+    assert "observability-jaeger-smoke" in (ROOT / "Makefile").read_text()

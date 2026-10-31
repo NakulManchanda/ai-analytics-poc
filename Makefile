@@ -5,13 +5,17 @@ MCP_HOST_PORT := $(or $(MCP_PORT),$(PORT),8001)
 OBSERVABILITY_PROJECT ?= ai-analytics-128
 OBSERVABILITY_WEB_PORT ?= 13000
 OBSERVABILITY_JAEGER_PORT ?= 16686
+OBSERVABILITY_PHOENIX_PORT ?= 16106
 OBSERVABILITY_GRAFANA_PORT ?= 13001
 OBSERVABILITY_PROMETHEUS_PORT ?= 19090
 OBSERVABILITY_BURST_COUNT ?= 10
 OBSERVABILITY_LOG_TAIL ?= 200
 KV_BUNDLE_OUT = $(or $(OUT),work/kv-hop.yaml)
+# Observability stack = base + Phoenix (the trace backend, #221) + Collector/Prometheus/Grafana/Loki;
+# JAEGER=1 adds the optional Jaeger overlay.
+OBS_COMPOSE = -f docker-compose.yml -f docker-compose.phoenix.yml -f docker-compose.observability.yml $(if $(filter 1,$(JAEGER)),-f docker-compose.jaeger.yml)
 
-.PHONY: help eval-stack-up eval-start eval-health eval-smoke eval-run eval-freeze eval-grade eval-compare eval-cost eval-review eval-review-serve eval-review-report next-5-commands eval-open eval-all check-bootstrap dev app-serve-dev mcp-dev mcp-smoke dataset-test dataset-smoke smoke test bench-test evals-test evals-report gateway-test mcp-test infra-test web-test compose-smoke observability-up observability-down observability-smoke observability-dev-up observability-dev-info observability-dev-ask observability-dev-burst observability-dev-metrics observability-dev-logs observability-dev-down local-aws-litellm-compose local-aws-compose local-litellm-compose local-bedrock-direct-compose litellm-traffic litellm-env litellm-smoke litellm-calls litellm-spend litellm-errors litellm-ready litellm-ui litellm-traffic local-aws-refresh phoenix-up phoenix-down phoenix-ui phoenix-purge local-serve-compose local-serve-refresh local-bedrock-compose bedrock-smoke m5-bedrock-smoke m6-bedrock-smoke dashboard tf-dispatch tf-resume tf-park inference-validate inference-sync inference-config inference-secret inference-bootstrap inference-deploy inference-up inference-tunnel inference-connect inference-smoke inference-warmup inference-capacity inference-restart inference-gateway-restart inference-controls-on inference-controls-off inference-verify-workers inference-e1 inference-fresh-up inference-tmux-start inference-tmux-end inference-serve-smoke inference-run inference-pull-evidence inference-pull-range inference-kv-image inference-kv-render inference-kv-smoke evidence-analyze evidence-notebook evidence-notebook-open inference-teardown replay-fanout replay-multi-turn replay-compare-strategies replay-strategy-manual replay-strategy-crewai replay-e3-least-loaded replay-e3-prefix-then-load replay-e4-admission-on replay-e4-admission-off replay-e3-large-prefix-least-loaded replay-e3-large-prefix-prefix-then-load replay-e5 replay-arrival-rate trace-request
+.PHONY: help eval-stack-up eval-start eval-health eval-smoke eval-run eval-freeze eval-grade eval-compare eval-cost eval-review eval-review-serve eval-review-report next-5-commands eval-open eval-all check-bootstrap dev app-serve-dev mcp-dev mcp-smoke dataset-test dataset-smoke smoke test bench-test evals-test evals-report gateway-test mcp-test infra-test web-test compose-smoke observability-up observability-down observability-smoke observability-jaeger-smoke observability-dev-up observability-dev-info observability-dev-ask observability-dev-burst observability-dev-metrics observability-dev-logs observability-dev-down local-aws-litellm-compose local-aws-compose local-litellm-compose local-bedrock-direct-compose litellm-traffic litellm-env litellm-smoke litellm-calls litellm-spend litellm-errors litellm-ready litellm-ui litellm-traffic local-aws-refresh phoenix-up phoenix-down phoenix-ui phoenix-purge local-serve-compose local-serve-refresh local-bedrock-compose bedrock-smoke m5-bedrock-smoke m6-bedrock-smoke dashboard tf-dispatch tf-resume tf-park inference-validate inference-sync inference-config inference-secret inference-bootstrap inference-deploy inference-up inference-tunnel inference-connect inference-smoke inference-warmup inference-capacity inference-restart inference-gateway-restart inference-controls-on inference-controls-off inference-verify-workers inference-e1 inference-fresh-up inference-tmux-start inference-tmux-end inference-serve-smoke inference-run inference-pull-evidence inference-pull-range inference-kv-image inference-kv-render inference-kv-smoke evidence-analyze evidence-notebook evidence-notebook-open inference-teardown replay-fanout replay-multi-turn replay-compare-strategies replay-strategy-manual replay-strategy-crewai replay-e3-least-loaded replay-e3-prefix-then-load replay-e4-admission-on replay-e4-admission-off replay-e3-large-prefix-least-loaded replay-e3-large-prefix-prefix-then-load replay-e5 replay-arrival-rate trace-request
 
 
 help: ## Show available commands
@@ -220,32 +224,36 @@ web-test: ## Run React tests and production build
 compose-smoke: ## Run the browser to FastAPI to FastMCP Compose smoke
 	WEB_PORT=$(or $(WEB_PORT),$(PORT)) ./scripts/smoke/03_compose_ui.sh
 
-observability-up: ## Start local Compose with OTEL Collector, Jaeger, Grafana, and Prometheus
-	WEB_PORT=$(or $(WEB_PORT),3000) JAEGER_UI_PORT=$(or $(JAEGER_UI_PORT),16686) \
+observability-up: ## Start local Compose with Phoenix (traces), OTEL Collector, Grafana, Prometheus and Loki (JAEGER=1 adds Jaeger)
+	WEB_PORT=$(or $(WEB_PORT),3000) JAEGER_UI_PORT=$(or $(JAEGER_UI_PORT),16686) PHOENIX_PORT=$(or $(PHOENIX_PORT),16006) \
 	GRAFANA_PORT=$(or $(GRAFANA_PORT),13001) PROMETHEUS_PORT=$(or $(PROMETHEUS_PORT),19090) \
-		docker compose -f docker-compose.yml -f docker-compose.observability.yml up --build -d
+		docker compose $(OBS_COMPOSE) up --build -d
 
 observability-down: ## Stop the local observability Compose stack
-	docker compose -f docker-compose.yml -f docker-compose.observability.yml down
+	docker compose $(OBS_COMPOSE) down --remove-orphans
 
-observability-smoke: ## Verify an application ai.run trace reaches Jaeger
+observability-smoke: ## Verify an application ai.run trace reaches Phoenix through the Collector
 	./scripts/smoke/16_observability.sh
 
-observability-dev-up: ## Start the issue-owned local app, Collector, Jaeger, Grafana, and Prometheus stack
-	WEB_PORT="$(OBSERVABILITY_WEB_PORT)" JAEGER_UI_PORT="$(OBSERVABILITY_JAEGER_PORT)" \
+observability-jaeger-smoke: ## Verify an application ai.run trace reaches Jaeger (optional Jaeger overlay)
+	./scripts/smoke/16_observability_jaeger.sh
+
+observability-dev-up: ## Start the issue-owned local app, Phoenix, Collector, Grafana, and Prometheus stack (JAEGER=1 adds Jaeger)
+	WEB_PORT="$(OBSERVABILITY_WEB_PORT)" JAEGER_UI_PORT="$(OBSERVABILITY_JAEGER_PORT)" PHOENIX_PORT="$(OBSERVABILITY_PHOENIX_PORT)" \
 	GRAFANA_PORT="$(OBSERVABILITY_GRAFANA_PORT)" PROMETHEUS_PORT="$(OBSERVABILITY_PROMETHEUS_PORT)" \
-		docker compose -p "$(OBSERVABILITY_PROJECT)" -f docker-compose.yml -f docker-compose.observability.yml up --build -d
+		docker compose -p "$(OBSERVABILITY_PROJECT)" $(OBS_COMPOSE) up --build -d
 
 observability-dev-info: ## Print issue-owned observability URLs, expected spans, and Compose status
 	@set -eu; \
 	printf '%s\n' "Web:        http://127.0.0.1:$(OBSERVABILITY_WEB_PORT)"; \
-	printf '%s\n' "Jaeger:     http://127.0.0.1:$(OBSERVABILITY_JAEGER_PORT)"; \
+	printf '%s\n' "Phoenix:    http://127.0.0.1:$(OBSERVABILITY_PHOENIX_PORT)"; \
+	$(if $(filter 1,$(JAEGER)),printf '%s\n' "Jaeger:     http://127.0.0.1:$(OBSERVABILITY_JAEGER_PORT)";) \
 	printf '%s\n' "Grafana:    http://127.0.0.1:$(OBSERVABILITY_GRAFANA_PORT)"; \
 	printf '%s\n' "Prometheus: http://127.0.0.1:$(OBSERVABILITY_PROMETHEUS_PORT)"; \
 	printf '%s\n' "Metrics:    metrics/runs.jsonl"; \
 	printf '%s\n' "Expected spans: ai.run -> mcp.request -> mcp.tool.execute -> duckdb.query"; \
 	printf '%s\n' "Compose project: $(OBSERVABILITY_PROJECT)"; \
-	docker compose -p "$(OBSERVABILITY_PROJECT)" -f docker-compose.yml -f docker-compose.observability.yml ps
+	docker compose -p "$(OBSERVABILITY_PROJECT)" $(OBS_COMPOSE) ps
 
 observability-dev-ask: ## Send a safe representative request to the issue-owned local stack
 	curl --fail --show-error --silent \
@@ -267,16 +275,16 @@ observability-dev-metrics: ## Print recent local JSONL metrics; app stdout emits
 	echo "Application stdout emits CloudWatch EMF; run 'make dashboard' to compare local JSONL runs."
 
 observability-dev-logs: ## Print recent app, MCP, and Collector logs; append -f to the shown command to follow
-	@docker compose -p "$(OBSERVABILITY_PROJECT)" -f docker-compose.yml -f docker-compose.observability.yml logs --tail "$(OBSERVABILITY_LOG_TAIL)" app mcp otel-collector; \
-	echo "Follow live logs with: docker compose -p '$(OBSERVABILITY_PROJECT)' -f docker-compose.yml -f docker-compose.observability.yml logs -f app mcp otel-collector"
+	@docker compose -p "$(OBSERVABILITY_PROJECT)" $(OBS_COMPOSE) logs --tail "$(OBSERVABILITY_LOG_TAIL)" app mcp otel-collector; \
+	echo "Follow live logs with: docker compose -p '$(OBSERVABILITY_PROJECT)' $(OBS_COMPOSE) logs -f app mcp otel-collector"
 
 observability-dev-down: ## Stop only the issue-owned local observability project and remove its orphans
-	WEB_PORT="$(OBSERVABILITY_WEB_PORT)" JAEGER_UI_PORT="$(OBSERVABILITY_JAEGER_PORT)" \
+	WEB_PORT="$(OBSERVABILITY_WEB_PORT)" JAEGER_UI_PORT="$(OBSERVABILITY_JAEGER_PORT)" PHOENIX_PORT="$(OBSERVABILITY_PHOENIX_PORT)" \
 	GRAFANA_PORT="$(OBSERVABILITY_GRAFANA_PORT)" PROMETHEUS_PORT="$(OBSERVABILITY_PROMETHEUS_PORT)" \
-		docker compose -p "$(OBSERVABILITY_PROJECT)" -f docker-compose.yml -f docker-compose.observability.yml down --remove-orphans
+		docker compose -p "$(OBSERVABILITY_PROJECT)" $(OBS_COMPOSE) down --remove-orphans
 
-# LITELLM_OTEL=1 adds the Collector/Jaeger overlay and points the proxy's otel callback at it (#189).
-LITELLM_COMPOSE = -f docker-compose.yml -f docker-compose.aws.yml -f docker-compose.litellm.yml -f docker-compose.phoenix.yml $(if $(filter 1,$(LITELLM_OTEL)),-f docker-compose.observability.yml -f docker-compose.litellm-otel.yml)
+# LITELLM_OTEL=1 adds the Collector overlay (traces still land in Phoenix) and points the proxy's otel callback at it (#189); JAEGER=1 also adds Jaeger.
+LITELLM_COMPOSE = -f docker-compose.yml -f docker-compose.aws.yml -f docker-compose.litellm.yml -f docker-compose.phoenix.yml -f docker-compose.phoenix-litellm.yml $(if $(filter 1,$(LITELLM_OTEL)),-f docker-compose.observability.yml -f docker-compose.litellm-otel.yml$(if $(filter 1,$(JAEGER)), -f docker-compose.jaeger.yml))
 AWS_DIRECT_COMPOSE = -f docker-compose.yml -f docker-compose.aws.yml
 # The proxy master key lives in the git-ignored .env (see litellm-env); it is sourced, never printed.
 LITELLM_ENV = set -a; [ -f .env ] && . ./.env; set +a; : "$${LITELLM_MASTER_KEY:?run make litellm-env}";
@@ -413,7 +421,7 @@ EVAL_LOG = EVAL_ROOT=$(EVAL_ROOT) EVAL_RUN=$(EVAL_RUN) scripts/eval-log.sh
 EVAL_COMPOSE = $(LITELLM_COMPOSE) -f docker-compose.eval-capture.yml
 EVAL_GUARD = @[ "$(EVAL_CONFIRM)" = "1" ] || { echo "Real Bedrock calls: re-run with EVAL_CONFIRM=1"; exit 2; }
 
-eval-stack-up: litellm-env ## Rebuild/start the local LiteLLM stack with live eval capture (metrics/evals/_capture); LITELLM_OTEL=1 adds Jaeger
+eval-stack-up: litellm-env ## Rebuild/start the local LiteLLM stack with live eval capture (metrics/evals/_capture); LITELLM_OTEL=1 adds the Collector, Prometheus and Grafana (JAEGER=1 adds Jaeger)
 	@mkdir -p $(EVAL_ROOT)/_capture
 	$(LITELLM_COMPOSE_ENV) EVAL_CAPTURE_DIR=$(CURDIR)/$(EVAL_ROOT)/_capture \
 	LITELLM_STORE_PROMPTS=false LITELLM_LOG=INFO WEB_PORT=$(or $(WEB_PORT),3000) VOICE_ENABLED=$(or $(VOICE_ENABLED),false) \
@@ -461,7 +469,7 @@ eval-review-report: ## Human-review report: coverage, grader vs human disagreeme
 next-5-commands: ## Print the commands (with startup options) to pull main, clear this repo's images, restart, and try the latest features
 	@echo "Startup: Docker running; AWS credentials valid for the profile (aws sts get-caller-identity --profile <profile>); Bedrock access for step 8."
 	@echo "Scope: only the compose project ai_app_poc and this repo's images (including stale ones from merged worktrees). Other projects' containers (for example jobai-*) are not touched. Named volumes are kept (Phoenix traces, LiteLLM DB); wipe traces with: make phoenix-purge"
-	@echo "Options: AWS_PROFILE=<profile> (default 'default') | WEB_PORT (3000) | LITELLM_PORT (14000) | PHOENIX_PORT (16006) | LITELLM_OTEL=1 (adds Jaeger; run-I/O span text is forced off on that path)"
+	@echo "Options: AWS_PROFILE=<profile> (default 'default') | WEB_PORT (3000) | LITELLM_PORT (14000) | PHOENIX_PORT (16006) | LITELLM_OTEL=1 (routes traces through the Collector; JAEGER=1 adds Jaeger and forces run-I/O span text off)"
 	@echo ""
 	@echo "1. Latest main:"
 	@echo "   git checkout main && git pull --rebase origin main && git log --oneline -1"

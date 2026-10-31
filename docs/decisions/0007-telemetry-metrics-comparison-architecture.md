@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted. Amended 2026-09-19 to define the OpenTelemetry (OTEL) tracing architecture and make this ADR the single source of truth for Issue #111.
+Accepted. Amended 2026-09-19 to define the OpenTelemetry (OTEL) tracing architecture and make this ADR the single source of truth for Issue #111. Amended 2026-10-31 (#221): Arize Phoenix is the primary local trace backend; Jaeger is an optional overlay. OTEL stays the instrumentation contract and the Collector stays backend-neutral; AWS X-Ray remains the operational backend.
 
 ## Context
 
@@ -68,7 +68,7 @@ flowchart LR
     Run --> Metrics[EMF / JSONL metrics]
 
     Events --> Timeline[Timeline Inspector<br/>What logically happened?]
-    Traces --> Ops[Jaeger / AWS X-Ray<br/>How did it execute?]
+    Traces --> Ops[Phoenix locally, AWS X-Ray operationally<br/>How did it execute?]
     Traces --> AI[Langfuse<br/>What happened in model/tool steps?]
     Metrics --> Fleet[CloudWatch / Streamlit<br/>How do runs behave over time?]
 
@@ -86,7 +86,7 @@ OpenTelemetry is the instrumentation and propagation standard. It is additive to
 | Signal | Primary question | Initial destination |
 | --- | --- | --- |
 | Redis/SSE semantic events | What logically happened during this run? | Timeline Inspector |
-| OTEL distributed traces | How did this request execute across components? | Jaeger locally; AWS X-Ray operationally |
+| OTEL distributed traces | How did this request execute across components? | Phoenix locally (Jaeger optional); AWS X-Ray operationally |
 | AI-relevant OTEL spans | What happened in model, tool, and agent steps? | Langfuse |
 | Aggregate run metrics | How does the population of runs behave over time? | CloudWatch EMF; local JSONL + Streamlit/DuckDB |
 | Application logs | What diagnostic event did a process report? | Structured `stdout`; CloudWatch Logs in AWS |
@@ -213,7 +213,7 @@ flowchart TB
     end
 ```
 
-For local development, one shared Collector service is added to Docker Compose. Jaeger provides a lightweight local trace UI. `docker-compose.aws.yml` continues to supply real AWS credentials and configuration for Bedrock, DynamoDB, Transcribe, and Polly; OTEL is independent of whether those dependencies are local or remote.
+For local development, one shared Collector service is added to Docker Compose. Phoenix is the local trace UI (sessions, LLM and tool-call inspection, run review); the Collector forwards to it, and `docker-compose.jaeger.yml` optionally adds Jaeger for generic distributed-system debugging. `docker-compose.aws.yml` continues to supply real AWS credentials and configuration for Bedrock, DynamoDB, Transcribe, and Polly; OTEL is independent of whether those dependencies are local or remote.
 
 For AWS, use AWS Distro for OpenTelemetry (ADOT) in ECS/Fargate as either a sidecar or a shared Collector service. Choose between those deployment forms when the ECS topology is implemented. Kubernetes manifests are a non-goal because this project deploys to ECS/Fargate.
 
