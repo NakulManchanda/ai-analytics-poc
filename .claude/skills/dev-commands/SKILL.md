@@ -20,6 +20,7 @@ The root `Makefile` is the operator interface; `make help` lists every target. P
 
 ## Run an eval (golden cases, real Bedrock; `EVAL_CONFIRM=1` on the paid steps)
 `make eval-stack-up` → `make eval-start LABEL=<new-name>` → `make eval-health` → `make eval-smoke EVAL_CONFIRM=1` → `make eval-run EVAL_CONFIRM=1` → `make eval-freeze && make eval-grade` → `make eval-compare EVAL_BASELINE=metrics/evals/baselines/golden-2026-10-20.jsonl` → `make eval-cost`. Shortcut: `make eval-all LABEL=<name> EVAL_CONFIRM=1`. `EVAL_RUN=<run_id>` selects a run other than `metrics/evals/.current`. Runs live in `metrics/evals/<run_id>/` (gitignored). Details: `docs/evals.md`.
+- **CrewAI strategy** (default is `manual`): the app reads `AGENT_STRATEGY` at boot, so set it on the stack step, then use a new label: `AGENT_STRATEGY=crewai make eval-stack-up` → `make eval-all LABEL=<name>-crewai EVAL_CONFIRM=1 EVAL_BASELINE=metrics/evals/baselines/golden-2026-10-20.jsonl`. Switch back with `AGENT_STRATEGY=manual make eval-stack-up` (or unset it) before the next manual run.
 
 ## Review a run (no Docker or Bedrock)
 - `make eval-review-serve REVIEWER=<name> [EVAL_RUN=<run_id>] [EVAL_BASELINE=<results.jsonl>] [REVIEW_PORT=8765]` — local page; verdicts append to `<run>/reviews.jsonl`.
