@@ -20,14 +20,16 @@ services:
 
   # App and MCP export their own spans straight to Phoenix so a trace shows the whole run (ai.run ->
   # LLM calls -> MCP tool); everything lands in Phoenix's `default` project.
-  # LITELLM_OTEL=1 (docker-compose.observability.yml) later overrides the endpoint to the Collector/Jaeger.
+  # LITELLM_OTEL=1 / the observability stack (docker-compose.observability.yml) later point the endpoint at the
+  # Collector, which forwards to this Phoenix (#221). The LiteLLM proxy's Phoenix logger is in
+  # docker-compose.phoenix-litellm.yml so this file also works without the LiteLLM overlay.
   app:
     environment:
       <<: *phoenix-tracing
       # Bounded question/answer on the ai.run span so the Phoenix grid shows Input/Output.
       # The flag is exporter-independent (the app puts the text on the span, wherever spans go):
-      # off in the app by default, and forced off by docker-compose.observability.yml, which sends
-      # app spans to the Collector/Jaeger instead. AI_TRACE_RUN_IO=0 turns it off here too.
+      # off in the app by default, and forced off by docker-compose.jaeger.yml, which also sends app spans
+      # to Jaeger. AI_TRACE_RUN_IO=0 turns it off here too.
       AI_TRACE_RUN_IO: "${AI_TRACE_RUN_IO:-1}"
     depends_on:
       phoenix:
@@ -39,13 +41,6 @@ services:
       # Opt-in: put a bounded copy of tool result rows on the duckdb.query span (data, not metadata).
       MCP_TRACE_RESULTS: "${MCP_TRACE_RESULTS:-0}"
       MCP_TRACE_RESULT_MAX_BYTES: "${MCP_TRACE_RESULT_MAX_BYTES:-4096}"
-
-  litellm:
-    environment:
-      PHOENIX_COLLECTOR_HTTP_ENDPOINT: http://phoenix:6006/v1/traces
-    depends_on:
-      phoenix:
-        condition: service_started
 
 volumes:
   phoenix_data:

@@ -2,7 +2,7 @@
 
 | Layer | Tool | What to emit |
 | --- | --- | --- |
-| **Tracing**<br>Every run | OpenTelemetry<br>OTEL Collector<br>Jaeger<br>Langfuse | Spans for `ai.run`, `llm.plan`, `mcp.tool`, and `duckdb.query`<br>Duration, tokens, model, `run_id`, `trace_id`, and status |
+| **Tracing**<br>Every run | OpenTelemetry<br>OTEL Collector<br>Phoenix (Jaeger optional)<br>Langfuse | Spans for `ai.run`, `llm.plan`, `mcp.tool`, and `duckdb.query`<br>Duration, tokens, model, `run_id`, `trace_id`, and status |
 | **Metrics**<br>Operations | CloudWatch EMF<br>JSONL + Streamlit | p50/p95/p99 latency<br>TTFT, input/output tokens, cost per run, and success/error rate |
 | **Events**<br>Product timeline | Redis + SSE<br>Timeline Inspector | Run received/completed<br>Tool started/completed, answer deltas, and cancellation |
 | **Quality**<br>Evaluation signals | Langfuse evaluations | Sampled faithfulness, answer relevance, tool correctness, and hallucination flag |

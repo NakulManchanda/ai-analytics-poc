@@ -144,7 +144,7 @@ There is no single baseline ID unless the driver sends one: pass the label as `e
 | `run_id` | driver, capture, events, LiteLLM `spend_logs_metadata.run_id` | one per turn |
 | `call_id` | capture `call_id` = event `llm_call_id` = LiteLLM `spend_logs_metadata.call_id` | one logical model call |
 | `(call_id, attempt)` | LiteLLM `spend_logs_metadata` | one physical proxy request; a policy fallback gives one capture record several rows, and a failed attempt may emit none. Join capture -> spend as 1:N and sum `spend` per row. |
-| `trace_id` | capture `trace_id`, Jaeger | one per run (`ai.run`); joins app, MCP and LiteLLM spans when the stack runs with `LITELLM_OTEL=1` |
+| `trace_id` | capture `trace_id`, Phoenix | one per run (`ai.run`); joins app, MCP and LiteLLM spans when the stack runs with `LITELLM_OTEL=1` |
 | `case_id`, `turn_index` | driver, matches file | not in capture or LiteLLM |
 | LiteLLM `request_id` | LiteLLM | proxy-generated; unrelated to `call_id` |
 
@@ -154,7 +154,7 @@ There is no single baseline ID unless the driver sends one: pass the label as `e
 2. Capture: select JSONL records with `eval_run_id == <id>`; `record_type == "model_call"` rows carry `call_id` and `trace_id`.
 3. Events: every run event has `eval_run_id`; `llm.completed` carries `llm_call_id`.
 4. LiteLLM: `GET /spend/logs` (no date params, master key) and keep rows whose `request_tags` contains `eval_run_id:<id>`; read `metadata.spend_logs_metadata.{run_id, call_id, attempt}`.
-5. Jaeger: `GET http://127.0.0.1:16686/api/traces/<capture trace_id>`; the trace holds `ai-analytics-app`, `analytics-mcp` and `litellm-proxy` spans.
+5. Phoenix: `GET http://127.0.0.1:16006/v1/projects/default/spans?trace_id=<capture trace_id>`; the trace holds `ai-analytics-app`, `analytics-mcp` and `litellm-proxy` spans.
 
 Expected invariants: every capture `call_id` has at least one spend row, every tagged spend row maps to a capture `call_id`, and `(call_id, attempt)` is unique among the rows actually emitted.
 
@@ -223,7 +223,7 @@ metrics/evals/
 ```
 
 ```bash
-make eval-stack-up                         # once: stack with live capture (LITELLM_OTEL=1 adds Jaeger)
+make eval-stack-up                         # once: stack with live capture (LITELLM_OTEL=1 routes traces through the Collector; JAEGER=1 adds Jaeger)
 make eval-start LABEL=<name>               # new run, fails if the label was used before
 make eval-health
 make eval-smoke EVAL_CONFIRM=1             # one real case (det-001), a few tokens

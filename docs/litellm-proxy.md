@@ -71,7 +71,7 @@ The app sends these headers so a proxy spend-log row can be mapped to an app run
 - The client injects W3C `traceparent` so proxy spans join the app trace; the proxy `otel` callback exports
   via `OTEL_*` env vars. Locally, `LITELLM_OTEL=1 make local-aws-litellm-compose` adds
   `docker-compose.observability.yml` and `docker-compose.litellm-otel.yml` (`OTEL_EXPORTER=otlp_http`,
-  `OTEL_ENDPOINT=http://otel-collector:4318`, service `litellm-proxy`); Jaeger is at `http://127.0.0.1:16686`.
+  `OTEL_ENDPOINT=http://otel-collector:4318`, service `litellm-proxy`); the Collector forwards to Phoenix, so app, MCP and proxy spans share one trace there (`JAEGER=1` also adds Jaeger at `http://127.0.0.1:16686`).
   Without that overlay the callback uses its console exporter.
 - The selected alias is the `model` in the request and the response's `model` field.
 
@@ -92,7 +92,7 @@ Proxy-native budgets and per-key limits are #170.
 
 ## Phoenix trace UI (#190)
 
-`docker-compose.phoenix.yml` is part of the default local path (`LITELLM_COMPOSE` in the Makefile). It runs Arize
+`docker-compose.phoenix.yml` is part of the default local path (`LITELLM_COMPOSE` in the Makefile; the proxy's Phoenix logger is in `docker-compose.phoenix-litellm.yml`, split out so the observability stack can layer Phoenix without LiteLLM). It runs Arize
 Phoenix next to the proxy and sets `PHOENIX_COLLECTOR_HTTP_ENDPOINT` on the proxy, which makes LiteLLM attach its
 Phoenix logger beside the `otel` callback. `infra/litellm/config.yaml` is unchanged because the same file is the deployed
 proxy's config; the overlay is local only and never reaches Terraform. `PHOENIX_PORT` overrides the host port (default
@@ -111,13 +111,12 @@ Tool result rows are not on the MCP spans by default (they carry the tool name a
 preview is exported and `ai.result.preview_omitted` is set). It is off by default
 because rows are data; the tool's own result is never trimmed. Human verdicts stay with the review workflow in #190.
 
-The `ai.run` span carries a bounded (200 characters) question as `input.value` and the answer, or `failed: <code>`, as `output.value` when `AI_TRACE_RUN_IO=1`, so Phoenix's Input/Output columns are filled. The app default is off (spans stay metadata-only for any backend); `docker-compose.phoenix.yml` turns it on for the local Phoenix path (`AI_TRACE_RUN_IO=0` to disable). The flag is exporter-independent (the text goes on the span wherever spans are sent), so `docker-compose.observability.yml`, which sends app spans to the Collector/Jaeger (`LITELLM_OTEL=1`), forces it to `0` even when layered over the Phoenix overlay; a test checks both. Find one run with the spans filter `attributes["ai"]["run_id"] == "run_..."`.
+The `ai.run` span carries a bounded (200 characters) question as `input.value` and the answer, or `failed: <code>`, as `output.value` when `AI_TRACE_RUN_IO=1`, so Phoenix's Input/Output columns are filled. The app default is off (spans stay metadata-only for any backend); `docker-compose.phoenix.yml` turns it on for the local Phoenix path (`AI_TRACE_RUN_IO=0` to disable). The flag is exporter-independent (the text goes on the span wherever spans are sent). With the Collector path (`LITELLM_OTEL=1`, the observability stack) spans still end up only in Phoenix, so it stays on; `docker-compose.jaeger.yml` (`JAEGER=1`) also sends spans to Jaeger and forces it to `0`; a test checks both. Find one run with the spans filter `attributes["ai"]["run_id"] == "run_..."`.
 
 MCP discovery requests (`initialize`, `tools/list`, `resources/list`, `ping`) that arrive without a caller trace, such as the UI's
 status polling, are no longer traced, so they stop appearing as one-span traces. Tool calls and resource reads are always traced.
 
-Known gaps: `LITELLM_OTEL=1` overrides the app/MCP endpoint to the Collector/Jaeger, so Phoenix then shows only the proxy's
-spans; Phoenix's own total cost can show $0 for Nova models (use the span's `llm.response.cost`).
+Known gaps: Phoenix's own total cost can show $0 for Nova models (use the span's `llm.response.cost`).
 
 ## Deploying the Nova Pro planner (#207)
 

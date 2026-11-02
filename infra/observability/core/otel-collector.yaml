@@ -14,14 +14,14 @@ processors:
   batch: {}
 
 exporters:
-  otlp_grpc/jaeger:
-    endpoint: jaeger:4317
-    tls:
-      insecure: true
+  # Phoenix takes OTLP/HTTP on its UI port (the path /v1/traces is appended).
+  otlphttp/phoenix:
+    endpoint: http://phoenix:6006
+    compression: none
 
 service:
   pipelines:
     traces:
       receivers: [otlp]
       processors: [memory_limiter, batch]
-      exporters: [otlp_grpc/jaeger]
+      exporters: [otlphttp/phoenix]

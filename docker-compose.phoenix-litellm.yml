@@ -1,0 +1,12 @@
+# LiteLLM proxy -> Phoenix (#190). Layer after docker-compose.litellm.yml and docker-compose.phoenix.yml
+# (`LITELLM_COMPOSE` in the Makefile does). Split out of docker-compose.phoenix.yml so that file can be used
+# on its own by the observability stack, which has no LiteLLM service.
+# The shared infra/litellm/config.yaml is untouched: PHOENIX_COLLECTOR_HTTP_ENDPOINT makes LiteLLM attach its
+# Phoenix logger next to the `otel` callback.
+services:
+  litellm:
+    environment:
+      PHOENIX_COLLECTOR_HTTP_ENDPOINT: http://phoenix:6006/v1/traces
+    depends_on:
+      phoenix:
+        condition: service_started

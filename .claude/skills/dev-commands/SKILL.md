@@ -8,7 +8,7 @@ description: Use when the user asks how to run the app, run an eval, run the rev
 The root `Makefile` is the operator interface; `make help` lists every target. Prefer a target over a hand-built command. Live Bedrock calls cost money: the user runs them (give the commands, inspect files afterwards). Never stop another task's Compose project; only stop one you started or the user names.
 
 ## Run the app (real AWS, Bedrock via LiteLLM proxy, Phoenix traces)
-- `make local-aws-litellm-compose` — start the stack (needs Docker and AWS credentials; `AWS_PROFILE=<profile>`, `WEB_PORT=3000`, `LITELLM_PORT=14000`, `LITELLM_CAPTURE=1` stores prompts/responses, `LITELLM_OTEL=1` adds Jaeger).
+- `make local-aws-litellm-compose` — start the stack (needs Docker and AWS credentials; `AWS_PROFILE=<profile>`, `WEB_PORT=3000`, `LITELLM_PORT=14000`, `LITELLM_CAPTURE=1` stores prompts/responses, `LITELLM_OTEL=1` routes traces through the Collector (+Prometheus/Grafana), `JAEGER=1` adds Jaeger).
 - `make local-aws-refresh` — down, then rebuild and start from scratch.
 - `docker compose -p <project> down` — stop a stack (project defaults to the checkout directory name; list with `docker ps`). Volumes are kept.
 - `make dev` / `make mcp-dev` — run the app (port 8080) or MCP service (8001) without Docker.

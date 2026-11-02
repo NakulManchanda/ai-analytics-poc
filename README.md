@@ -174,7 +174,7 @@ Folders are organised by ownership: deployable services, offline tooling, infras
 | `infra/terraform/` | AWS infrastructure | |
 | `infra/litellm/` | LiteLLM Proxy config (model aliases to Bedrock) | Opt-in service selected with `LLM_PROVIDER=litellm`; see [docs/litellm-proxy.md](docs/litellm-proxy.md) |
 | `infra/inference/` | GPU cluster deploy: K8s, HAMi, vLLM workers, KV transfer, scripts, experiment runners and manifests | Experiment runners (`experiments/`) run against the remote host |
-| `infra/observability/core/` | Local Compose stack: OTEL Collector, Jaeger, Prometheus, Loki, Grafana | Mounted by `docker-compose.observability.yml` |
+| `infra/observability/core/` | Local Compose stack: OTEL Collector, Prometheus, Loki, Grafana (traces go to Phoenix; optional Jaeger in `infra/observability/jaeger/`) | Mounted by `docker-compose.observability.yml` and `docker-compose.jaeger.yml` |
 | `infra/observability/inference/` | Inference-cluster Prometheus, Grafana, DCGM, alerts, dashboards | Deployed by `infra/inference/scripts/` |
 | `config/scenarios/` | Replay workload fixtures | Single source for `tooling/benchmarks` |
 | `tests/` | Cross-service, infra and experiments tests | Service-local tests stay with their service |
@@ -265,8 +265,8 @@ cannot coordinate that allowance between processes.
 
 ### Local OpenTelemetry traces
 
-Start the fake-model stack with an OpenTelemetry Collector and the Jaeger trace
-UI:
+Start the fake-model stack with an OpenTelemetry Collector, Phoenix (the trace
+UI), Prometheus, Loki and Grafana:
 
 ```bash
 make observability-up
@@ -275,18 +275,20 @@ curl -X POST http://localhost:3000/api/ask \
   -d '{"prompt":"Which pickup zones have the most trips?"}'
 ```
 
-Open [http://localhost:16686](http://localhost:16686), select
-`ai-analytics-app`, and search for the `ai.run` operation. Stop this exact stack
-with:
+Open [http://localhost:16006](http://localhost:16006) (Phoenix, project `default`)
+and look at the `ai.run` spans; to find one run, filter spans with
+`attributes["ai"]["run_id"] == "run_..."`. Stop this exact stack with:
 
 ```bash
 make observability-down
 ```
 
-Jaeger is an adjacent development container with transient in-memory trace
-storage. The Collector is the backend-neutral OTLP ingestion and routing layer.
-Run `make observability-smoke` for an isolated end-to-end check on dynamic host
-ports.
+The Collector is the backend-neutral OTLP ingestion and routing layer; it forwards
+traces to Phoenix. Jaeger is optional: `JAEGER=1 make observability-up` adds it
+(Jaeger UI on `http://localhost:16686`, a Grafana Jaeger datasource, and the
+run input/output span text forced off because spans also leave for Jaeger).
+Run `make observability-smoke` (Phoenix) or `make observability-jaeger-smoke`
+for an isolated end-to-end check on dynamic host ports.
 
 For a repeatable manual session that does not share the default Compose project
 or web port, use the issue-scoped targets:
@@ -302,16 +304,17 @@ make observability-dev-down
 ```
 
 They default to Compose project `ai-analytics-128`, web port `13000`,
-Jaeger port `16686`, Grafana port `13001`, and Prometheus port `19090`;
-each is overridable with the corresponding `OBSERVABILITY_PROJECT`,
-`OBSERVABILITY_WEB_PORT`, `OBSERVABILITY_JAEGER_PORT`, `OBSERVABILITY_GRAFANA_PORT`,
+Phoenix port `16106`, Grafana port `13001`, and Prometheus port `19090` (Jaeger
+port `16686` with `JAEGER=1`); each is overridable with the corresponding
+`OBSERVABILITY_PROJECT`, `OBSERVABILITY_WEB_PORT`, `OBSERVABILITY_PHOENIX_PORT`,
+`OBSERVABILITY_JAEGER_PORT`, `OBSERVABILITY_GRAFANA_PORT`,
 or `OBSERVABILITY_PROMETHEUS_PORT` Make variable. `make observability-dev-burst` sends
 a burst of randomized questions to populate dashboards, traces, and metrics.
 The `down` target removes only that project and its orphans.
 
 Grafana provides the operational dashboard at `http://127.0.0.1:13001` (service
-health, probe latencies, container logs via Loki), while Jaeger remains the
-distributed trace explorer at `http://127.0.0.1:16686`. Existing CloudWatch EMF and local
+health, probe latencies, container logs via Loki), while Phoenix is the trace
+explorer at `http://127.0.0.1:16006` (or the `OBSERVABILITY_PHOENIX_PORT` for the issue-scoped targets). Existing CloudWatch EMF and local
 JSONL metrics remain the aggregate latency, token, and cost path. The fake-model trace
 workflow needs no AWS login; the separate AWS Compose override continues to use the
 configured local AWS profile.
