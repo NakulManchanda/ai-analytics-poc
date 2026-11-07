@@ -62,8 +62,15 @@ class Settings:
     run_max_usd: float | None = None
 
     def __post_init__(self) -> None:
-        if self.agent_strategy not in ("manual", "crewai"):
-            raise LLMConfigurationError("AGENT_STRATEGY must be manual or crewai")
+        if self.agent_strategy not in ("manual", "crewai", "deep_agents"):
+            raise LLMConfigurationError(
+                "AGENT_STRATEGY must be manual or crewai (or deep_agents)"
+            )
+        if self.agent_strategy == "deep_agents" and self.llm_provider != "litellm":
+            raise LLMConfigurationError(
+                "AGENT_STRATEGY=deep_agents requires LLM_PROVIDER=litellm "
+                "(the Deep Agent routes its model calls through the LiteLLM proxy)"
+            )
 
     @classmethod
     def from_environment(cls) -> "Settings":
