@@ -1974,6 +1974,19 @@ class LiteLLMClient(ServeLLMClient):
         """The model-policy price table (alias -> rate), for cost estimation by callers."""
         return self._runtime.pricing
 
+    @property
+    def openai_base_url(self) -> str:
+        """The proxy's OpenAI-compatible base URL (``<proxy>/v1``), for SDK clients."""
+        return self._gateway_url.removesuffix("/chat/completions")
+
+    @property
+    def api_key(self) -> str | None:
+        return self._api_key
+
+    @property
+    def planner_alias(self) -> str:
+        return self._planner_alias
+
     @staticmethod
     def _role(payload: Mapping[str, Any]) -> str:
         return "planner" if payload.get("tools") else "answer"

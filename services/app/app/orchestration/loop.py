@@ -4,6 +4,7 @@ import base64
 import concurrent.futures
 import contextlib
 import contextvars
+import functools
 import json
 import logging
 import os
@@ -747,6 +748,11 @@ class OrchestrationLoop:
         capture.v1 ``trace_id`` matches the exported trace.
         """
         answer: str | None = None
+        run_strategy = self._execute_loop
+        if self._agent_strategy == "deep_agents":
+            from app.orchestration.deep_agents_run import execute_deep_agent_run
+
+            run_strategy = functools.partial(execute_deep_agent_run, self)
         with self._run_span(submission) as span:
             try:
                 # Activates per-run budgets and tenant entitlements (#170) for every
@@ -755,7 +761,7 @@ class OrchestrationLoop:
                 with call_context(
                     DEFAULT_TENANT, submission.run_id, submission.eval_run_id
                 ):
-                    result = self._execute_loop(
+                    result = run_strategy(
                         prompt=submission.prompt,
                         conv_id=submission.conversation_id,
                         user_msg_id=submission.message_id,

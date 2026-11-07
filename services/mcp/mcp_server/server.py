@@ -23,6 +23,16 @@ from fastmcp import FastMCP
 from opentelemetry import trace
 from opentelemetry.trace import Status, StatusCode
 
+from mcp_server.schemas import (
+    DimensionSchema,
+    DimensionsSchema,
+    FiltersSchema,
+    MeasuresSchema,
+    OptionalComparisonModeSchema,
+    OptionalDimensionSchema,
+    OptionalFiltersSchema,
+    OptionalOrderBySchema,
+)
 from mcp_server.telemetry import (
     SCHEMA_RESOURCE_URI,
     MCPTracingMiddleware,
@@ -393,7 +403,7 @@ def build_mcp(
 
     @server.tool()
     def list_taxi_dimension_values(
-        dimension: str, search: str | None = None, limit: int = 20
+        dimension: DimensionSchema, search: str | None = None, limit: int = 20
     ) -> dict[str, object]:
         """List bounded, counted values for one allowlisted analytical dimension."""
         if dimension_values_runner is run_pinned_list_taxi_dimension_values:
@@ -413,10 +423,10 @@ def build_mcp(
 
     @server.tool()
     def aggregate_taxi_data(
-        dimensions: list[str],
-        measures: list[str],
-        filters: dict[str, object] | None = None,
-        order_by: dict[str, object] | None = None,
+        dimensions: DimensionsSchema,
+        measures: MeasuresSchema,
+        filters: OptionalFiltersSchema = None,
+        order_by: OptionalOrderBySchema = None,
         limit: int = 20,
     ) -> dict[str, object]:
         """Aggregate the governed taxi surface over allowlisted dimensions/measures."""
@@ -443,11 +453,11 @@ def build_mcp(
 
     @server.tool()
     def compare_taxi_segments(
-        measures: list[str],
-        baseline_filters: dict[str, object],
-        comparison_filters: dict[str, object],
-        segment_dimension: str | None = None,
-        comparison_mode: str | None = None,
+        measures: MeasuresSchema,
+        baseline_filters: FiltersSchema,
+        comparison_filters: FiltersSchema,
+        segment_dimension: OptionalDimensionSchema = None,
+        comparison_mode: OptionalComparisonModeSchema = None,
         limit: int = 20,
     ) -> dict[str, object]:
         """Compare baseline vs comparison populations.
