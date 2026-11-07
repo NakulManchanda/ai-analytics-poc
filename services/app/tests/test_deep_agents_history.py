@@ -323,7 +323,10 @@ def test_correlation_clean_run_is_ok(monkeypatch: pytest.MonkeyPatch) -> None:
     assert run.metadata["correlation_ok"] is True
     assert run.metadata["correlation"]["header_failures"] == 0
     assert run.metadata["correlation"]["cost_header_missing"] == 0
-    assert run.metadata["billing_complete"] is True
+    # Header health is clean, but this fixture's calls are priced from the policy
+    # table (no provider-billed cost), so billing is not complete.
+    assert run.metadata["billing_complete"] is False
+    assert run.metadata["correlation"]["estimated_calls"] >= 1
     assert run.metadata["history"]["turns_available"] == 0
 
 
@@ -529,10 +532,10 @@ def test_snapshot_counts_and_completeness() -> None:
     from app.orchestration.deep_agents_run import _Correlation
 
     corr = _Correlation("r", "c", None)
-    snap = corr.snapshot(billed_calls=2, estimated_calls=1)
+    snap = corr.snapshot(billed_calls=2)
     assert snap["correlation_ok"] is True and snap["billing_complete"] is True
     assert snap["correlation"]["billed_calls"] == 2
-    assert snap["correlation"]["estimated_calls"] == 1
+    assert snap["correlation"]["estimated_calls"] == 0
     corr.cost_header_missing = 1
     snap = corr.snapshot()
     assert snap["correlation_ok"] is True and snap["billing_complete"] is False
@@ -558,3 +561,37 @@ def test_cost_header_present_billing_complete_and_billed_count(
     assert meta["correlation_ok"] is True and meta["billing_complete"] is True
     assert meta["correlation"]["billed_calls"] >= 1
     assert meta["correlation"]["estimated_calls"] == 0
+
+
+def test_estimated_call_makes_billing_incomplete_even_with_clean_headers() -> None:
+    from app.orchestration.deep_agents_run import _Correlation
+
+    corr = _Correlation("r", "c", None)
+    # No header failure and no missing billed-cost header, but one recorded call was
+    # priced from the policy table: not a provider-billed cost.
+    snap = corr.snapshot(billed_calls=2, estimated_calls=1)
+    assert snap["correlation_ok"] is True
+    assert snap["billing_complete"] is False
+    assert snap["correlation"]["billing_complete"] is False
+    assert snap["correlation"]["estimated_calls"] == 1
+    assert snap["correlation"]["cost_header_missing"] == 0
+
+
+def test_header_failure_makes_billing_incomplete() -> None:
+    from app.orchestration.deep_agents_run import _Correlation
+
+    corr = _Correlation("r", "c", None)
+    corr.header_failures = 1
+    snap = corr.snapshot(billed_calls=1)
+    assert snap["correlation_ok"] is False
+    assert snap["billing_complete"] is False
+
+
+def test_zero_call_run_is_vacuously_billing_complete() -> None:
+    from app.orchestration.deep_agents_run import _Correlation
+
+    snap = _Correlation("r", "c", None).snapshot()
+    assert snap["correlation_ok"] is True
+    assert snap["billing_complete"] is True
+    assert snap["correlation"]["billed_calls"] == 0
+    assert snap["correlation"]["estimated_calls"] == 0

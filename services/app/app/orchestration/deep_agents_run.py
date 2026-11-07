@@ -421,13 +421,24 @@ class _Correlation:
         """Correlation health for run metadata.
 
         ``correlation_ok`` is header integrity only: failures make the run's proxy-side
-        attribution unreliable. ``billing_complete`` is separate: every priced LLM call had
-        the proxy's ``x-litellm-response-cost`` header. Callers needing measured cost
+        attribution unreliable. ``billing_complete`` is separate and stricter: header
+        health is clean, no billed-cost header was missing or unparseable, and no recorded
+        LLM call was priced from the policy-table estimate (``estimated_calls == 0``), i.e.
+        every recorded call carries a provider-billed cost. Callers needing measured cost
         (#228 cost comparisons) must NOT treat a run with ``billing_complete == False`` as a
-        trustworthy cost measurement; ``estimated_calls`` were priced from the policy table.
+        trustworthy cost measurement.
+
+        A run with zero recorded LLM calls (failed or cancelled before the first model
+        call) is vacuously complete: there is nothing to bill. A request that was still in
+        flight when a run was abandoned is not recorded at all; that gap is tracked
+        separately (billed-cost reconciliation after cancellation, #226).
         """
         with self._lock:
-            billing_complete = self.cost_header_missing == 0
+            billing_complete = (
+                self.header_failures == 0
+                and self.cost_header_missing == 0
+                and estimated_calls == 0
+            )
             return {
                 "correlation": {
                     "header_failures": self.header_failures,
