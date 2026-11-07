@@ -20,7 +20,7 @@ import json
 import logging
 import threading
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
@@ -93,24 +93,82 @@ class _Aborted(BaseException):
     """Raised inside the abandoned worker once the run already reached a terminal state."""
 
 
+# LangChain run id of the model call this thread is about to issue; set by the recorder's
+# on_chat_model_start (synchronous, same thread/context as the request that follows).
+_current_lc_run_id: contextvars.ContextVar[UUID | None] = contextvars.ContextVar(
+    "deep_agents_lc_run_id", default=None
+)
+
+
 class _Correlation:
     """httpx hooks giving every proxy request the same correlation the manual LiteLLM
-    client sends (run/call/eval ids, session, trace context) and capturing the proxy's
-    billed cost. Model calls in a run are sequential, so one mutable holder is enough.
+    client sends (run/call/eval ids, session, trace context), capturing the proxy's billed
+    cost per request, and refusing/bounding requests once the run is over.
+
+    Association is per request: the recorder registers ``lc_run_id -> call_id`` and sets a
+    ContextVar; the request hook reads it and stamps ``request.extensions['lc_run_id']``;
+    the response hook files the billed cost under that id. A request with no run id in
+    context carries no call_id and no cost is attributed to it.
     """
 
-    def __init__(self, run_id: str, conversation_id: str, eval_run_id: str | None):
+    def __init__(
+        self,
+        run_id: str,
+        conversation_id: str,
+        eval_run_id: str | None,
+        *,
+        abort: threading.Event | None = None,
+        remaining_seconds: Callable[[], float | None] | None = None,
+    ):
         self.run_id = run_id
         self.conversation_id = conversation_id
         self.eval_run_id = eval_run_id
-        self.current_call_id: str | None = None
-        self.last_cost: float | None = None
+        self.abort = abort or threading.Event()
+        self._remaining = remaining_seconds
+        self._lock = threading.Lock()
+        self._call_ids: dict[UUID, str] = {}
+        self._costs: dict[UUID, float] = {}
+
+    def register(self, lc_run_id: UUID, call_id: str) -> None:
+        with self._lock:
+            self._call_ids[lc_run_id] = call_id
+        _current_lc_run_id.set(lc_run_id)
+
+    def release(self, lc_run_id: UUID) -> float | None:
+        """Forget a finished call and return its billed cost, if the proxy reported one."""
+        _current_lc_run_id.set(None)
+        with self._lock:
+            self._call_ids.pop(lc_run_id, None)
+            return self._costs.pop(lc_run_id, None)
+
+    def check_abort(self) -> None:
+        if self.abort.is_set():
+            raise _Aborted()
 
     def on_request(self, request: httpx.Request) -> None:
+        self.check_abort()  # never send once the run is over
+        if self._remaining is not None:
+            remaining = self._remaining()
+            if remaining is not None:
+                if remaining <= 0:
+                    raise _Aborted()
+                current = request.extensions.get("timeout") or {}
+                request.extensions["timeout"] = {
+                    key: (
+                        remaining
+                        if current.get(key) is None
+                        else min(current[key], remaining)
+                    )
+                    for key in ("connect", "read", "write", "pool")
+                }
         try:
+            lc_run_id = _current_lc_run_id.get()
+            with self._lock:
+                call_id = self._call_ids.get(lc_run_id) if lc_run_id else None
             meta: dict[str, Any] = {"run_id": self.run_id}
-            if self.current_call_id is not None:
-                meta["call_id"] = self.current_call_id
+            if call_id is not None:
+                meta["call_id"] = call_id
+                request.extensions["lc_run_id"] = lc_run_id
             meta["attempt"] = 1
             if self.eval_run_id:
                 meta["eval_run_id"] = self.eval_run_id
@@ -130,10 +188,15 @@ class _Correlation:
             logger.warning("deep_agents_correlation_headers_failed", exc_info=True)
 
     def on_response(self, response: httpx.Response) -> None:
+        lc_run_id = response.request.extensions.get("lc_run_id")
+        if lc_run_id is None:
+            return
         try:
-            self.last_cost = float(response.headers.get("x-litellm-response-cost", ""))
+            cost = float(response.headers.get("x-litellm-response-cost", ""))
         except (TypeError, ValueError):
-            self.last_cost = None
+            return
+        with self._lock:
+            self._costs[lc_run_id] = cost
 
 
 class _Emitter:
@@ -221,7 +284,7 @@ class _RunRecorder(BaseCallbackHandler):  # type: ignore[misc,valid-type]
         self.prompt = prompt
         self.next_seq = next_seq
         self.lock = threading.RLock()
-        self.aborted = False
+        self.abort = correlation.abort
         self.steps: list[RunStep] = []
         self.llm_calls: list[LLMCall] = _TracedCalls()
         self.step_seq = 1
@@ -235,11 +298,12 @@ class _RunRecorder(BaseCallbackHandler):  # type: ignore[misc,valid-type]
         self.last_failed_call_id: str | None = None
         self._calls: dict[UUID, tuple[str, float]] = {}
         self._tools: dict[UUID, dict[str, Any]] = {}
+        self.tools_succeeded = 0
+        self.tools_failed = 0
 
     # -- helpers -------------------------------------------------------------------
     def _guard(self) -> None:
-        if self.aborted:
-            raise _Aborted()
+        self.correlation.check_abort()
         if self.loop.is_cancelled(self.run_id):
             raise RunCancelledError()
         self.tracker.check_deadline()
@@ -350,8 +414,7 @@ class _RunRecorder(BaseCallbackHandler):  # type: ignore[misc,valid-type]
             self.llm._reserve_budget()
             call_id = self.loop._llm_call_id_factory()
             self._calls[run_id] = (call_id, self.loop._monotonic())
-            self.correlation.current_call_id = call_id
-            self.correlation.last_cost = None
+            self.correlation.register(run_id, call_id)
             self.emit(
                 "llm.started",
                 {"llm_call_id": call_id, "phase": "agent_step"},
@@ -371,7 +434,7 @@ class _RunRecorder(BaseCallbackHandler):  # type: ignore[misc,valid-type]
             meta = getattr(message, "response_metadata", None) or {}
             alias = self.llm.planner_alias
             model_id = meta.get("model_name") or alias
-            billed = self.correlation.last_cost
+            billed = self.correlation.release(run_id)
             result = SimpleNamespace(
                 model_alias=alias,
                 model_id=model_id,
@@ -436,7 +499,8 @@ class _RunRecorder(BaseCallbackHandler):  # type: ignore[misc,valid-type]
     def on_llm_error(self, error, *, run_id, **kwargs):  # type: ignore[no-untyped-def]
         with self.lock:
             entry = self._calls.pop(run_id, None)
-            if entry is None or self.aborted:
+            self.correlation.release(run_id)
+            if entry is None or self.abort.is_set():
                 return
             call_id, started = entry
             self.last_failed_call_id = call_id
@@ -526,6 +590,7 @@ class _RunRecorder(BaseCallbackHandler):  # type: ignore[misc,valid-type]
             self.last_query_id = query_id
             result_bytes = len(text.encode("utf-8"))
             self.tracker.record_tool_call(result_bytes=result_bytes)
+            self.tools_succeeded += 1
             row_count = query_result.get("row_count", 0)
             tool_call_id = info["tool_call_id"]
             self.emit(
@@ -577,7 +642,7 @@ class _RunRecorder(BaseCallbackHandler):  # type: ignore[misc,valid-type]
     def on_tool_error(self, error, *, run_id, **kwargs):  # type: ignore[no-untyped-def]
         with self.lock:
             info = self._tools.pop(run_id, None)
-            if info is None or self.aborted:
+            if info is None or self.abort.is_set():
                 return
             duration_ms = int((self.loop._monotonic() - info["started"]) * 1000)
             self._tool_failed(
@@ -591,6 +656,7 @@ class _RunRecorder(BaseCallbackHandler):  # type: ignore[misc,valid-type]
         self, info: dict[str, Any], result: dict[str, Any], text: str, duration_ms: int
     ) -> None:
         """The model received the error object and may react; the run continues."""
+        self.tools_failed += 1
         reason = str(result.get("reason") or result.get("error"))
         message = str(result.get("message") or result.get("error") or text)[:200]
         tool_call_id = info["tool_call_id"]
@@ -674,7 +740,15 @@ def execute_deep_agent_run(
     eval_run_id: str | None = run.metadata.get("eval_run_id")
     eval_meta: dict[str, Any] = {"eval_run_id": eval_run_id} if eval_run_id else {}
     emit = _Emitter(loop, run_id, conv_id, eval_run_id, initial_evt_sequence)
-    correlation = _Correlation(run_id, conv_id, eval_run_id)
+    abort = threading.Event()
+    correlation = _Correlation(
+        run_id,
+        conv_id,
+        eval_run_id,
+        abort=abort,
+        remaining_seconds=lambda: active_budgets.timeout_seconds
+        - tracker.elapsed_seconds,
+    )
     recorder: _RunRecorder | None = None
     configured_model_id = ""
     pending_llm_call_id = ""
@@ -705,11 +779,21 @@ def execute_deep_agent_run(
     def current_cost_source() -> str:
         return calls()[-1].cost_source if calls() else COST_SOURCE_FALLBACK
 
+    def evidence() -> dict[str, Any]:
+        ok = recorder.tools_succeeded if recorder else 0
+        return {
+            "tool_calls_succeeded": ok,
+            "tool_calls_failed": recorder.tools_failed if recorder else 0,
+            "evidence_backed": ok > 0,
+        }
+
     def run_metadata(extra: dict[str, Any], tel: dict[str, Any]) -> dict[str, Any]:
         return {
             **extra,
             "telemetry": tel,
             "strategy": STRATEGY_NAME,
+            "grounding": "not_applied",
+            "evidence": evidence(),
             **eval_meta,
             "cost_source": current_cost_source(),
             "llm_calls": [call.to_metadata() for call in calls()],
@@ -793,6 +877,7 @@ def execute_deep_agent_run(
         )
 
     executor: concurrent.futures.ThreadPoolExecutor | None = None
+    http_client: httpx.Client | None = None
     try:
         if loop.is_cancelled(run_id):
             raise RunCancelledError()
@@ -830,7 +915,7 @@ def execute_deep_agent_run(
             prompt=prompt,
             next_seq=next_seq,
         )
-        http_client = httpx.Client(
+        client = http_client = httpx.Client(
             timeout=active_budgets.timeout_seconds,
             event_hooks={
                 "request": [correlation.on_request],
@@ -845,8 +930,9 @@ def execute_deep_agent_run(
                 base_url=llm.openai_base_url,
                 api_key=llm.api_key or "unused",
                 model=llm.planner_alias,
-                http_client=http_client,
+                http_client=client,
                 timeout=active_budgets.timeout_seconds,
+                before_tool_call=correlation.check_abort,
             )
             return agent.invoke(
                 {"messages": [{"role": "user", "content": prompt}]},
@@ -861,6 +947,10 @@ def execute_deep_agent_run(
 
         executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
         future = executor.submit(contextvars.copy_context().run, work)
+        # Close the client only once the worker is done (never mid-request); an abandoned
+        # worker's in-flight request ends via the bounded per-request timeout.
+        future.add_done_callback(lambda _f, c=client: c.close())
+        http_client = None  # ownership handed to the callback
         while not future.done():
             if loop.is_cancelled(run_id):
                 raise RunCancelledError()
@@ -908,7 +998,7 @@ def execute_deep_agent_run(
         )
 
     except RunCancelledError as err:
-        _abort(recorder)
+        abort.set()
         logger.info("Run %s cancelled by user during execution", run_id)
         latency = int((loop._monotonic() - start_mono) * 1000)
         tel = telemetry(latency)
@@ -922,7 +1012,7 @@ def execute_deep_agent_run(
         )
         return result_for("cancelled", err.partial_text, tel, latency, "cancelled")
     except BudgetExceededError as err:
-        _abort(recorder)
+        abort.set()
         logger.warning("Agent loop budget exceeded: %s", err.reason)
         latency = int((loop._monotonic() - start_mono) * 1000)
         tel = telemetry(latency)
@@ -936,7 +1026,7 @@ def execute_deep_agent_run(
         )
         return result_for("budget_exceeded", "", tel, latency, "budget_exceeded")
     except OrchestrationError as err:
-        _abort(recorder)
+        abort.set()
         otel_trace.get_current_span().set_attribute("ai.error.category", err.code)
         latency = int((loop._monotonic() - start_mono) * 1000)
         tel = telemetry(latency)
@@ -961,15 +1051,11 @@ def execute_deep_agent_run(
         )
         raise
     finally:
+        abort.set()
+        if http_client is not None:  # worker was never submitted
+            http_client.close()
         if executor is not None:
             executor.shutdown(wait=False, cancel_futures=True)
-
-
-def _abort(recorder: _RunRecorder | None) -> None:
-    """Stop an abandoned worker from recording anything after the terminal state."""
-    if recorder is not None:
-        with recorder.lock:
-            recorder.aborted = True
 
 
 def _map_exception(err: Exception, recorder: _RunRecorder) -> Exception:

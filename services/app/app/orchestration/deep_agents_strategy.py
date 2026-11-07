@@ -56,13 +56,19 @@ _PARSERS: dict[str, Callable[[object], dict[str, object] | None]] = {
 
 
 def _run_tool(
-    client: DatasetProfileMCPClient, name: str, arguments: Mapping[str, Any]
+    client: DatasetProfileMCPClient,
+    name: str,
+    arguments: Mapping[str, Any],
+    before_call: Callable[[], None] | None = None,
 ) -> str:
     """Validate, call the MCP tool, and return a JSON string. Never raises for tool
-    failures: the model gets a bounded error object it can react to."""
+    failures: the model gets a bounded error object it can react to. ``before_call`` is a
+    cooperative abort check that runs immediately before the MCP client is used."""
     parsed = _PARSERS[name](dict(arguments))
     if parsed is None:
         return json.dumps({"error": "invalid_arguments", "tool_name": name})
+    if before_call is not None:
+        before_call()  # raises when the run already reached a terminal state
     try:
         result = getattr(client, name)(**parsed)
     except MCPToolError as err:
@@ -134,6 +140,7 @@ def _is_unknown_tool_error(err: MCPToolError) -> bool:
 def build_mcp_tools(
     client: DatasetProfileMCPClient,
     list_tools: Callable[[], ToolDefinitions] | None = None,
+    before_call: Callable[[], None] | None = None,
 ) -> list[BaseTool]:
     """Build the four governed tools from the MCP-published schemas. The allowlist stays
     hand-written policy; calls still go through ``client`` so trace headers and the
@@ -150,7 +157,7 @@ def build_mcp_tools(
         definition = published[name]
 
         def call(**kwargs: Any) -> str:
-            return _run_tool(client, name, kwargs)
+            return _run_tool(client, name, kwargs, before_call)
 
         return StructuredTool(
             name=name,
@@ -214,6 +221,7 @@ def build_deep_agent(
     http_client: Any | None = None,
     timeout: float | None = None,
     list_tools: Callable[[], ToolDefinitions] | None = None,
+    before_tool_call: Callable[[], None] | None = None,
 ) -> Any:
     """Return a compiled Deep Agent. ``chat_model`` is a test seam; production passes
     the LiteLLM proxy coordinates instead."""
@@ -235,7 +243,7 @@ def build_deep_agent(
     )
     return create_deep_agent(
         model=llm,
-        tools=build_mcp_tools(client, list_tools),
+        tools=build_mcp_tools(client, list_tools, before_tool_call),
         system_prompt=build_system_prompt(),
         middleware=[TodoListMiddleware(), build_allowlist_middleware()],
         subagents=[],

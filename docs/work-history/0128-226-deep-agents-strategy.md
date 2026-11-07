@@ -15,6 +15,13 @@ Add `AGENT_STRATEGY=deep_agents`: the Deep Agents library chooses tools, calls t
 - MCP schemas made specific with pydantic models published through `WithJsonSchema` (filters, order_by, dimension/measure/comparison_mode enums). Runtime validation and error envelopes are unchanged (`dataset_spike` validators remain the source of truth).
 - Dependencies `deepagents==0.7.32`, `langchain-openai`; imported lazily so the default path never loads them.
 
+## Review fixes (PR #237, P1)
+- Cancellation: one abort signal is set on every terminal path and checked before each model request, each MCP tool call and each outgoing HTTP request, so an abandoned worker cannot start new work. Each request's timeout is capped at the remaining run deadline. A request already in flight is bounded, not interrupted: it can finish (and be billed by the proxy) after the run is terminal.
+- HTTP client: closed by a done-callback when the worker finishes (never while a request is in flight), and if submission fails.
+- Billed cost: per-request correlation (LangChain run id carried in a context variable, stamped on the request) replaces the shared current-call/last-cost slots; a request without context gets no call id and no cost. An opt-in live test (`DEEP_AGENTS_LIVE_LITELLM_URL`) compares call id, tokens and cost with the proxy spend logs; it has not been run and its assumption about the spend-log field layout is unverified.
+- Run metadata now carries `grounding: "not_applied"` and `evidence` (`tool_calls_succeeded`, `tool_calls_failed`, `evidence_backed`) so evaluation can separate run completion from evidence-backed answers.
+- Deferred, required before any cost-per-correct-answer comparison: grounding parity, model-policy/entitlement parity, Phoenix/OTEL parity; also conversation restore and streaming.
+
 ## Verification
 - `services/app`: `uv run pytest` 523 passed; `services/mcp`: 57 passed; `black --check` and `ruff check` clean for both projects.
 - Stress: 15 runs of the new run/strategy tests, no hang or failure. One earlier full-suite run under load had 1 failure and one loop run stalled; neither reproduced and the cause was not identified.
