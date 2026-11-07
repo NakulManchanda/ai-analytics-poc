@@ -83,7 +83,10 @@ def test_run_emits_one_safe_ai_run_span() -> None:
         "ai.conversation_id": result.conversation_id,
         "session.id": result.conversation_id,
         "ai.turn_type": "text",
+        "agent.strategy": "manual",
+        "agent.framework": "bespoke",
         "ai.status": "completed",
+        "agent.step_count": len(result.steps),
         "gen_ai.request.model": DEFAULT_MODEL_ID,
     }
     serialized_attributes = repr(span.attributes)

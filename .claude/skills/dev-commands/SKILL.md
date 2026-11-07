@@ -28,6 +28,12 @@ Start the stack with the strategy: `AGENT_STRATEGY=deep_agents make eval-stack-u
 2. `curl -s -X POST $W/api/ask -H 'content-type: application/json' --data '{"prompt":"Compare that with the second highest zone","conversation_id":"<id from step 1>"}'`.
 Pass if the second answer keeps the first turn's zones and metric (golden `multi-001#1`) and `make litellm-calls` shows the second request carrying the history. An unresolvable reference should produce a clarifying question, not a guessed query. Run metadata carries `correlation_ok`; `false` means correlation headers failed and the run should be excluded from evals.
 
+## Phoenix parity smoke (live; the user runs it; real Bedrock)
+Same golden question through both strategies, then compare in Phoenix (`make phoenix-ui`):
+1. `make eval-stack-up` (manual) → `curl -s -X POST http://127.0.0.1:${WEB_PORT:-3000}/api/ask -H 'content-type: application/json' --data '{"prompt":"Which pickup zones have the most trips?"}'` → note `run_id`.
+2. `AGENT_STRATEGY=deep_agents make eval-stack-up` → the same curl → note `run_id`.
+3. In Phoenix, filter spans `name == "ai.run"`; attributes are nested: `attributes["agent"]["strategy"] == "deep_agents"` (or `"manual"`); `attributes["ai"]["run_id"] == "<run_id>"`. Check: `agent.framework`, `agent.step_count`, the `ai.llm_call` events (one per model call, matching `make litellm-calls` rows for the run), and the MCP (`mcp.*`, `duckdb.query`) and LiteLLM spans under the same trace id. Deep Agents runs may also show `ai.plan.updated` and `ai.context.compacted` events. Run metadata `trace.context_valid` must be `true`; a `false` or `propagation_failures > 0` run is excluded from evals.
+
 ## Review a run (no Docker or Bedrock)
 - `make eval-review-serve REVIEWER=<name> [EVAL_RUN=<run_id>] [EVAL_BASELINE=<results.jsonl>] [REVIEW_PORT=8765]` — local page; verdicts append to `<run>/reviews.jsonl`.
 - `uv run --project tooling/evals evals run-review-export --root metrics/evals --run <run_id> --allow-incomplete` — resolve to `reviews.resolved.json` (coverage, disagreements).
