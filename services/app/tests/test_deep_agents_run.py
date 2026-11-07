@@ -218,7 +218,13 @@ def test_happy_path(monkeypatch: pytest.MonkeyPatch) -> None:
     run = repo.get_run(submission.run_id)
     assert run.status == "completed"
     assert run.metadata["strategy"] == "deep_agents"
-    assert run.metadata["grounding"] == "not_applied"
+    assert run.metadata["grounding"] == "applied"
+    assert run.metadata["grounding_report"] == {
+        "ok": True,
+        "ungrounded_numbers": 0,
+        "unknown_query_ids": 0,
+        "evidence_count": 1,
+    }
     assert run.metadata["evidence"] == {
         "tool_calls_succeeded": 1,
         "tool_calls_failed": 0,
@@ -251,7 +257,7 @@ def test_tool_error_is_returned_to_model_and_run_completes(
     failed = [s for s in result.steps if s.step_type == "tool_call"]
     assert failed[0].status == "failed"
     run = repo.get_run(result.run_id)
-    assert run.metadata["grounding"] == "not_applied"
+    assert run.metadata["grounding"] == "applied"
     assert run.metadata["evidence"] == {
         "tool_calls_succeeded": 0,
         "tool_calls_failed": 1,

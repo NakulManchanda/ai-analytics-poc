@@ -82,3 +82,26 @@ def test_unsupported_causal_claims_are_flagged_but_hedges_pass() -> None:
 def test_empty_or_missing_evidence_means_any_big_number_is_ungrounded() -> None:
     report = check_answer_grounding("There were 5,000 trips.", None)
     assert not report.ok
+
+
+def test_multi_number_supported_by_any_evidence() -> None:
+    from app.validation import check_answer_grounding_multi
+
+    other = {"query_id": "q2", "rows": [["x", 777], ["y", 888]], "row_count": 2}
+    answer = "JFK had 15,000 trips and x had 777 (query id q2)."
+    assert check_answer_grounding_multi(answer, [EVIDENCE, other]).ok
+    assert not check_answer_grounding_multi(
+        "There were 98,765 trips.", [EVIDENCE, other]
+    ).ok
+    unknown = check_answer_grounding_multi("See query id nope-1.", [EVIDENCE, other])
+    assert unknown.unknown_query_ids == ["nope-1"]
+
+
+def test_multi_empty_matches_none_evidence() -> None:
+    from app.validation import check_answer_grounding_multi
+
+    for text in ("There were 98,765 trips.", "Which month?", "Query id abc-1 said so."):
+        assert (
+            check_answer_grounding_multi(text, []).to_metadata()
+            == check_answer_grounding(text, None).to_metadata()
+        )
