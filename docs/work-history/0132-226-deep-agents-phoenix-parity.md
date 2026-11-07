@@ -19,6 +19,12 @@ The manual path emits one `ai.run` span (attributes `ai.run_id`, `ai.conversatio
 ## Known limits
 No per-tool spans on any strategy (not invented). Compaction event depends on a private deepagents state key. `write_todos` still produces no run events or steps, only the span event. Reconciling model-call counts with LiteLLM spend rows and billed costs is a live check (below).
 
+## Limits carried from the model-policy slice (#240) that affect reading traces and costs
+- Billing: trust billed cost only when `billing_complete` is true. A run cancelled or abandoned mid-request can have late provider spend that is not in its trace or run record until it is reconciled against LiteLLM spend logs (open on #226; required before cost per correct answer in #228).
+- Fallbacks: the manual path can make several physical proxy requests under one `llm_call_id` (policy fallbacks); Deep Agents always makes exactly one. Model-call and latency spans are therefore not like for like on runs where manual fell back. Report or disable fallback outcomes before reliability comparisons.
+- Reservation estimates are character-based approximations (messages plus tool schemas on Deep Agents) and `commit` does not cap actual usage, so run budgets are not hard caps on either path.
+- The per-call `max_tokens` cap is sent through `extra_body`; enforcement through the real LiteLLM/Bedrock route has not been verified.
+
 ## PR / merge state
 Branch `feat/226-phoenix-parity`, stacked on `feat/226-model-policy` (PR #240); PR references #226.
 
