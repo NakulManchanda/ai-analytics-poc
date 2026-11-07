@@ -22,6 +22,12 @@ The root `Makefile` is the operator interface; `make help` lists every target. P
 `make eval-stack-up` → `make eval-start LABEL=<new-name>` → `make eval-health` → `make eval-smoke EVAL_CONFIRM=1` → `make eval-run EVAL_CONFIRM=1` → `make eval-freeze && make eval-grade` → `make eval-compare EVAL_BASELINE=metrics/evals/baselines/golden-2026-10-20.jsonl` → `make eval-cost`. Shortcut: `make eval-all LABEL=<name> EVAL_CONFIRM=1`. `EVAL_RUN=<run_id>` selects a run other than `metrics/evals/.current`. Runs live in `metrics/evals/<run_id>/` (gitignored). Details: `docs/evals.md`.
 - **CrewAI strategy** (default is `manual`): the app reads `AGENT_STRATEGY` at boot, so set it on the stack step, then use a new label: `AGENT_STRATEGY=crewai make eval-stack-up` → `make eval-all LABEL=<name>-crewai EVAL_CONFIRM=1 EVAL_BASELINE=metrics/evals/baselines/golden-2026-10-20.jsonl`. Switch back with `AGENT_STRATEGY=manual make eval-stack-up` (or unset it) before the next manual run.
 
+## Deep Agents two-turn smoke (live; the user runs it; real Bedrock)
+Start the stack with the strategy: `AGENT_STRATEGY=deep_agents make eval-stack-up` (needs `LLM_PROVIDER=litellm`, which the eval stack uses). Then, with `W=http://127.0.0.1:${WEB_PORT:-3000}`:
+1. `curl -s -X POST $W/api/ask -H 'content-type: application/json' --data '{"prompt":"Which pickup zones have the most trips?"}'` and note `conversation_id`.
+2. `curl -s -X POST $W/api/ask -H 'content-type: application/json' --data '{"prompt":"Compare that with the second highest zone","conversation_id":"<id from step 1>"}'`.
+Pass if the second answer keeps the first turn's zones and metric (golden `multi-001#1`) and `make litellm-calls` shows the second request carrying the history. An unresolvable reference should produce a clarifying question, not a guessed query. Run metadata carries `correlation_ok`; `false` means correlation headers failed and the run should be excluded from evals.
+
 ## Review a run (no Docker or Bedrock)
 - `make eval-review-serve REVIEWER=<name> [EVAL_RUN=<run_id>] [EVAL_BASELINE=<results.jsonl>] [REVIEW_PORT=8765]` — local page; verdicts append to `<run>/reviews.jsonl`.
 - `uv run --project tooling/evals evals run-review-export --root metrics/evals --run <run_id> --allow-incomplete` — resolve to `reviews.resolved.json` (coverage, disagreements).

@@ -89,6 +89,87 @@ _NO_ANSWER_TEXT = (
 )
 
 
+# Prior conversation context given to the Deep Agent on a follow-up turn (#226).
+HISTORY_MAX_TURNS = 4
+HISTORY_TOOL_RESULT_MAX_CHARS = 2000
+_TRUNCATED_MARKER = "[truncated]"
+_NO_ANSWER_HISTORY_NOTE = "(No answer was recorded for this turn.)"
+
+
+def _fold_tool_message(message: Message, max_chars: int) -> str:
+    tool = message.metadata.get("tool_name") or "tool"
+    arguments = message.metadata.get("arguments")
+    detail = ""
+    if isinstance(arguments, Mapping):
+        detail = (
+            " (arguments: "
+            + json.dumps(dict(arguments), sort_keys=True, default=str)
+            + ")"
+        )
+    content = message.content
+    if len(content) > max_chars:
+        content = content[:max_chars] + " " + _TRUNCATED_MARKER
+    return f"Governed result from {tool}{detail}: {content}"
+
+
+def build_history_messages(
+    repo: Any,
+    conversation_id: str,
+    current_message_id: str,
+    *,
+    max_turns: int = HISTORY_MAX_TURNS,
+    max_tool_chars: int = HISTORY_TOOL_RESULT_MAX_CHARS,
+) -> list[dict[str, str]]:
+    """Prior turns of one conversation as plain, strictly alternating user/assistant
+    messages (no tool-role messages: provider tool-call pairing rules reject stored tool
+    messages replayed without call ids). Each stored tool observation is folded as text into
+    the assistant message that follows it, with its arguments and a bounded result. The
+    current turn's user message (and anything after it) is excluded. Returns a list that is
+    empty or starts with a user message and ends with an assistant message."""
+    stored = repo.list_messages(conversation_id)
+    cutoff = next(
+        (m.sequence for m in stored if m.message_id == current_message_id), None
+    )
+    merged: list[list[str]] = []  # [role, text]
+
+    def push(role: str, text: str) -> None:
+        if merged and merged[-1][0] == role:
+            merged[-1][1] += "\n\n" + text
+        else:
+            merged.append([role, text])
+
+    pending: list[str] = []
+    for message in stored:
+        if message.conversation_id != conversation_id:
+            continue
+        if message.message_id == current_message_id or (
+            cutoff is not None and message.sequence >= cutoff
+        ):
+            continue
+        if message.role == "tool":
+            pending.append(_fold_tool_message(message, max_tool_chars))
+        elif message.role == "assistant":
+            push("assistant", "\n".join([*pending, message.content]))
+            pending = []
+        elif message.role == "user":
+            # Consecutive user messages (a failed earlier turn) are merged by push().
+            if pending:  # earlier run ended before answering
+                push("assistant", "\n".join([*pending, _NO_ANSWER_HISTORY_NOTE]))
+                pending = []
+            push("user", message.content)
+    if pending:
+        push("assistant", "\n".join([*pending, _NO_ANSWER_HISTORY_NOTE]))
+    while merged and merged[0][0] != "user":
+        merged.pop(0)
+    if merged and merged[-1][0] == "user":
+        merged.append(["assistant", _NO_ANSWER_HISTORY_NOTE])
+    if max_turns > 0:
+        merged = merged[-2 * max_turns :]
+    else:
+        merged = []
+    return [{"role": role, "content": text} for role, text in merged]
+
+
 class _Aborted(BaseException):
     """Raised inside the abandoned worker once the run already reached a terminal state."""
 
@@ -128,6 +209,20 @@ class _Correlation:
         self._lock = threading.Lock()
         self._call_ids: dict[UUID, str] = {}
         self._costs: dict[UUID, float] = {}
+        self.header_failures = 0
+        self.cost_header_missing = 0
+
+    def snapshot(self) -> dict[str, Any]:
+        """Correlation health for run metadata: failures make the run's proxy-side
+        attribution unreliable, so evals can exclude it."""
+        with self._lock:
+            return {
+                "correlation": {
+                    "header_failures": self.header_failures,
+                    "cost_header_missing": self.cost_header_missing,
+                },
+                "correlation_ok": self.header_failures == 0,
+            }
 
     def register(self, lc_run_id: UUID, call_id: str) -> None:
         with self._lock:
@@ -185,6 +280,8 @@ class _Correlation:
             for key, value in carrier.items():
                 headers[key] = value
         except Exception:
+            with self._lock:
+                self.header_failures += 1
             logger.warning("deep_agents_correlation_headers_failed", exc_info=True)
 
     def on_response(self, response: httpx.Response) -> None:
@@ -194,6 +291,8 @@ class _Correlation:
         try:
             cost = float(response.headers.get("x-litellm-response-cost", ""))
         except (TypeError, ValueError):
+            with self._lock:
+                self.cost_header_missing += 1
             return
         with self._lock:
             self._costs[lc_run_id] = cost
@@ -634,7 +733,11 @@ class _RunRecorder(BaseCallbackHandler):  # type: ignore[misc,valid-type]
                     content=json.dumps(
                         query_result, separators=(",", ":"), sort_keys=True
                     ),
-                    metadata={"tool_name": info["name"], "query_id": query_id},
+                    metadata={
+                        "tool_name": info["name"],
+                        "query_id": query_id,
+                        "arguments": info["arguments"],
+                    },
                 )
             )
             self.next_seq += 1
@@ -795,6 +898,7 @@ def execute_deep_agent_run(
             "grounding": "not_applied",
             "evidence": evidence(),
             **eval_meta,
+            **correlation.snapshot(),
             "cost_source": current_cost_source(),
             "llm_calls": [call.to_metadata() for call in calls()],
         }
@@ -923,6 +1027,10 @@ def execute_deep_agent_run(
             },
         )
         rec = recorder
+        initial_messages = [
+            *build_history_messages(loop._repo, conv_id, user_msg_id),
+            {"role": "user", "content": prompt},
+        ]
 
         def work() -> Any:
             agent = build_deep_agent(
@@ -935,7 +1043,7 @@ def execute_deep_agent_run(
                 before_tool_call=correlation.check_abort,
             )
             return agent.invoke(
-                {"messages": [{"role": "user", "content": prompt}]},
+                {"messages": initial_messages},
                 config={
                     "callbacks": [rec],
                     "recursion_limit": max(
