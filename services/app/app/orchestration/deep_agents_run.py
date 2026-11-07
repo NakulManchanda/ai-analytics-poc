@@ -18,9 +18,11 @@ import concurrent.futures
 import contextvars
 import json
 import logging
+import re
 import threading
 import time
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
@@ -89,6 +91,288 @@ _NO_ANSWER_TEXT = (
 )
 
 
+# Prior conversation context given to the Deep Agent on a follow-up turn (#226).
+# Bounds are character-based proxies (~4 chars per token): the overall budget below is
+# roughly 3k tokens. Every component of a turn is capped, not just the tool result.
+HISTORY_MAX_TURNS = 4
+HISTORY_MAX_TOTAL_CHARS = (
+    12_000  # ~3k tokens; overall budget over all restored messages
+)
+HISTORY_USER_MAX_CHARS = 1_000
+HISTORY_ASSISTANT_MAX_CHARS = 1_500
+HISTORY_ARGUMENTS_MAX_CHARS = 500
+HISTORY_TOOL_RESULT_MAX_CHARS = 2_000
+HISTORY_MAX_OBSERVATIONS_PER_TURN = 2  # the most recent observations are kept
+_TRUNCATED_MARKER = "[truncated]"
+_NO_ANSWER_HISTORY_NOTE = "(No answer was recorded for this turn.)"
+UNTRUSTED_TAG = "untrusted_tool_data"
+_TAG_RE = re.compile(r"<(\s*/?\s*" + UNTRUSTED_TAG + ")", re.IGNORECASE)
+
+
+@dataclass
+class HistoryResult:
+    """Restored history plus how much of it was bounded away (see ``metadata``)."""
+
+    messages: list[dict[str, str]]
+    metadata: dict[str, Any]
+
+
+def _clip(text: str, cap: int) -> tuple[str, bool]:
+    if len(text) <= cap:
+        return text, False
+    return text[: max(cap, 0)] + " " + _TRUNCATED_MARKER, True
+
+
+def _neutralize(text: str) -> str:
+    """Stop data from opening or closing an untrusted block: '<' becomes '&lt;'."""
+    return _TAG_RE.sub(r"&lt;\1", text)
+
+
+def _attr(value: object) -> str:
+    return (
+        _neutralize(str(value))
+        .replace("&", "&amp;")
+        .replace('"', "&quot;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace("\n", " ")
+    )
+
+
+@dataclass
+class _Obs:
+    tool: str
+    query_id: str | None
+    arguments: str | None  # serialized JSON, uncapped
+    content: str
+
+
+@dataclass
+class _Turn:
+    user: str
+    observations: list[_Obs]
+    assistant: str
+
+
+def _render_turn(
+    turn: _Turn,
+    *,
+    user_cap: int,
+    text_cap: int,
+    args_cap: int,
+    result_cap: int,
+    max_obs: int,
+) -> tuple[str, str, dict[str, int]]:
+    counts = {
+        "assistant_text": 0,
+        "arguments": 0,
+        "tool_results": 0,
+        "observations_dropped": 0,
+        "user_text": 0,
+    }
+    user, cut = _clip(turn.user, user_cap)
+    counts["user_text"] += cut
+    observations = turn.observations
+    if len(observations) > max_obs:
+        counts["observations_dropped"] += len(observations) - max_obs
+        observations = (
+            observations[len(observations) - max_obs :] if max_obs > 0 else []
+        )
+    blocks: list[str] = []
+    for obs in observations:
+        attrs = f'source="mcp" tool="{_attr(obs.tool)}"'
+        if obs.query_id:
+            attrs += f' query_id="{_attr(obs.query_id)}"'
+        if obs.arguments is not None:
+            args, cut = _clip(obs.arguments, args_cap)
+            counts["arguments"] += cut
+            attrs += f' arguments="{_attr(args)}"'
+        content, cut = _clip(obs.content, result_cap)
+        counts["tool_results"] += cut
+        blocks.append(
+            f"<{UNTRUSTED_TAG} {attrs}>\n{_neutralize(content)}\n</{UNTRUSTED_TAG}>"
+        )
+    answer, cut = _clip(turn.assistant, text_cap)
+    counts["assistant_text"] += cut
+    return user, "\n".join([*blocks, answer]), counts
+
+
+def build_history_messages(
+    repo: Any,
+    conversation_id: str,
+    current_message_id: str,
+    *,
+    max_turns: int = HISTORY_MAX_TURNS,
+    max_total_chars: int = HISTORY_MAX_TOTAL_CHARS,
+    max_user_chars: int = HISTORY_USER_MAX_CHARS,
+    max_assistant_chars: int = HISTORY_ASSISTANT_MAX_CHARS,
+    max_arguments_chars: int = HISTORY_ARGUMENTS_MAX_CHARS,
+    max_tool_chars: int = HISTORY_TOOL_RESULT_MAX_CHARS,
+    max_observations: int = HISTORY_MAX_OBSERVATIONS_PER_TURN,
+) -> HistoryResult:
+    """Prior turns of one conversation as plain, strictly alternating user/assistant
+    messages (no tool-role messages: provider tool-call pairing rules reject stored tool
+    messages replayed without call ids). Each stored tool observation is folded into the
+    assistant message of its turn inside an ``<untrusted_tool_data ...>`` block carrying its
+    provenance (tool, query_id, arguments), placed before the assistant's own answer. The
+    current turn's user message (and anything after it) is excluded. The result is empty or
+    starts with a user message and ends with an assistant message.
+
+    Bounds: turns are taken newest to oldest and kept only while the total character budget
+    allows (oldest dropped first); user text, assistant text, serialized arguments, each tool
+    result and the observations per turn (most recent kept) are individually capped. The
+    newest turn is always present: if it alone exceeds the budget its tool results, then
+    arguments, then assistant text are shrunk further. ``total_chars`` therefore stays within
+    ``budget_chars`` except when even the fully shrunk newest turn cannot fit; that floor is
+    the capped user text plus the block wrappers/markers of at most ``max_observations``
+    observations (tens of characters each, plus the capped tool/query names)."""
+    stored = repo.list_messages(conversation_id)
+    cutoff = next(
+        (m.sequence for m in stored if m.message_id == current_message_id), None
+    )
+    # entries: [role, user_or_assistant_text, observations]
+    merged: list[list[Any]] = []
+
+    def push(role: str, text: str, obs: list[_Obs]) -> None:
+        if merged and merged[-1][0] == role:
+            merged[-1][1] += "\n\n" + text
+            merged[-1][2] = [*merged[-1][2], *obs]
+        else:
+            merged.append([role, text, list(obs)])
+
+    pending: list[_Obs] = []
+    for message in stored:
+        if message.conversation_id != conversation_id:
+            continue
+        if message.message_id == current_message_id or (
+            cutoff is not None and message.sequence >= cutoff
+        ):
+            continue
+        if message.role == "tool":
+            arguments = message.metadata.get("arguments")
+            pending.append(
+                _Obs(
+                    tool=str(message.metadata.get("tool_name") or "tool"),
+                    query_id=message.metadata.get("query_id"),
+                    arguments=(
+                        json.dumps(dict(arguments), sort_keys=True, default=str)
+                        if isinstance(arguments, Mapping)
+                        else None
+                    ),
+                    content=message.content,
+                )
+            )
+        elif message.role == "assistant":
+            push("assistant", message.content, pending)
+            pending = []
+        elif message.role == "user":
+            # Consecutive user messages (a failed earlier turn) are merged by push().
+            if pending:  # earlier run ended before answering
+                push("assistant", _NO_ANSWER_HISTORY_NOTE, pending)
+                pending = []
+            push("user", message.content, [])
+    if pending:
+        push("assistant", _NO_ANSWER_HISTORY_NOTE, pending)
+    while merged and merged[0][0] != "user":
+        merged.pop(0)
+    if merged and merged[-1][0] == "user":
+        merged.append(["assistant", _NO_ANSWER_HISTORY_NOTE, []])
+    turns = [
+        _Turn(merged[i][1], merged[i + 1][2], merged[i + 1][1])
+        for i in range(0, len(merged) - 1, 2)
+    ]
+
+    caps = {
+        "user_cap": max_user_chars,
+        "text_cap": max_assistant_chars,
+        "args_cap": max_arguments_chars,
+        "result_cap": max_tool_chars,
+        "max_obs": max_observations,
+    }
+
+    def size(rendered: tuple[str, str, dict[str, int]]) -> int:
+        return len(rendered[0]) + len(rendered[1])
+
+    included: list[tuple[str, str, dict[str, int]]] = []  # newest first
+    total = 0
+    for turn in reversed(turns[-max_turns:] if max_turns > 0 else []):
+        rendered = _render_turn(turn, **caps)
+        if not included and total + size(rendered) > max_total_chars:
+            # The newest turn is always kept: shrink result, then arguments, then text.
+            shrunk = dict(caps)
+            for key in ("result_cap", "args_cap", "text_cap"):
+                if size(_render_turn(turn, **{**shrunk, key: 0})) <= max_total_chars:
+                    lo, hi = 0, shrunk[key]  # largest cap that fits (size is monotonic)
+                    while lo < hi:
+                        mid = (lo + hi + 1) // 2
+                        if (
+                            size(_render_turn(turn, **{**shrunk, key: mid}))
+                            <= max_total_chars
+                        ):
+                            lo = mid
+                        else:
+                            hi = mid - 1
+                    shrunk[key] = lo
+                    break
+                shrunk[key] = 0
+            rendered = _render_turn(turn, **shrunk)
+        elif total + size(rendered) > max_total_chars:
+            break
+        included.append(rendered)
+        total += size(rendered)
+    included.reverse()
+
+    truncated = {
+        "assistant_text": 0,
+        "arguments": 0,
+        "tool_results": 0,
+        "observations_dropped": 0,
+        "user_text": 0,
+    }
+    for _u, _a, counts in included:
+        for key, value in counts.items():
+            truncated[key] += value
+    messages: list[dict[str, str]] = []
+    for user, assistant, _counts in included:
+        messages.append({"role": "user", "content": user})
+        messages.append({"role": "assistant", "content": assistant})
+    return HistoryResult(
+        messages=messages,
+        metadata=history_metadata(
+            turns_available=len(turns),
+            turns_included=len(included),
+            total_chars=total,
+            budget_chars=max_total_chars,
+            truncated=truncated,
+        ),
+    )
+
+
+def history_metadata(
+    *,
+    turns_available: int = 0,
+    turns_included: int = 0,
+    total_chars: int = 0,
+    budget_chars: int = HISTORY_MAX_TOTAL_CHARS,
+    truncated: dict[str, int] | None = None,
+) -> dict[str, Any]:
+    return {
+        "turns_available": turns_available,
+        "turns_included": turns_included,
+        "turns_dropped": turns_available - turns_included,
+        "total_chars": total_chars,
+        "budget_chars": budget_chars,
+        "truncated": truncated
+        or {
+            "assistant_text": 0,
+            "arguments": 0,
+            "tool_results": 0,
+            "observations_dropped": 0,
+            "user_text": 0,
+        },
+    }
+
+
 class _Aborted(BaseException):
     """Raised inside the abandoned worker once the run already reached a terminal state."""
 
@@ -128,6 +412,44 @@ class _Correlation:
         self._lock = threading.Lock()
         self._call_ids: dict[UUID, str] = {}
         self._costs: dict[UUID, float] = {}
+        self.header_failures = 0
+        self.cost_header_missing = 0
+
+    def snapshot(
+        self, *, billed_calls: int = 0, estimated_calls: int = 0
+    ) -> dict[str, Any]:
+        """Correlation health for run metadata.
+
+        ``correlation_ok`` is header integrity only: failures make the run's proxy-side
+        attribution unreliable. ``billing_complete`` is separate and stricter: header
+        health is clean, no billed-cost header was missing or unparseable, and no recorded
+        LLM call was priced from the policy-table estimate (``estimated_calls == 0``), i.e.
+        every recorded call carries a provider-billed cost. Callers needing measured cost
+        (#228 cost comparisons) must NOT treat a run with ``billing_complete == False`` as a
+        trustworthy cost measurement.
+
+        A run with zero recorded LLM calls (failed or cancelled before the first model
+        call) is vacuously complete: there is nothing to bill. A request that was still in
+        flight when a run was abandoned is not recorded at all; that gap is tracked
+        separately (billed-cost reconciliation after cancellation, #226).
+        """
+        with self._lock:
+            billing_complete = (
+                self.header_failures == 0
+                and self.cost_header_missing == 0
+                and estimated_calls == 0
+            )
+            return {
+                "correlation": {
+                    "header_failures": self.header_failures,
+                    "cost_header_missing": self.cost_header_missing,
+                    "billing_complete": billing_complete,
+                    "billed_calls": billed_calls,
+                    "estimated_calls": estimated_calls,
+                },
+                "correlation_ok": self.header_failures == 0,
+                "billing_complete": billing_complete,
+            }
 
     def register(self, lc_run_id: UUID, call_id: str) -> None:
         with self._lock:
@@ -185,6 +507,8 @@ class _Correlation:
             for key, value in carrier.items():
                 headers[key] = value
         except Exception:
+            with self._lock:
+                self.header_failures += 1
             logger.warning("deep_agents_correlation_headers_failed", exc_info=True)
 
     def on_response(self, response: httpx.Response) -> None:
@@ -194,6 +518,8 @@ class _Correlation:
         try:
             cost = float(response.headers.get("x-litellm-response-cost", ""))
         except (TypeError, ValueError):
+            with self._lock:
+                self.cost_header_missing += 1
             return
         with self._lock:
             self._costs[lc_run_id] = cost
@@ -634,7 +960,11 @@ class _RunRecorder(BaseCallbackHandler):  # type: ignore[misc,valid-type]
                     content=json.dumps(
                         query_result, separators=(",", ":"), sort_keys=True
                     ),
-                    metadata={"tool_name": info["name"], "query_id": query_id},
+                    metadata={
+                        "tool_name": info["name"],
+                        "query_id": query_id,
+                        "arguments": info["arguments"],
+                    },
                 )
             )
             self.next_seq += 1
@@ -750,6 +1080,7 @@ def execute_deep_agent_run(
         - tracker.elapsed_seconds,
     )
     recorder: _RunRecorder | None = None
+    history = HistoryResult([], history_metadata())
     configured_model_id = ""
     pending_llm_call_id = ""
 
@@ -795,6 +1126,11 @@ def execute_deep_agent_run(
             "grounding": "not_applied",
             "evidence": evidence(),
             **eval_meta,
+            **correlation.snapshot(
+                billed_calls=sum(1 for c in calls() if c.cost_kind == "billed"),
+                estimated_calls=sum(1 for c in calls() if c.cost_kind != "billed"),
+            ),
+            "history": history.metadata,
             "cost_source": current_cost_source(),
             "llm_calls": [call.to_metadata() for call in calls()],
         }
@@ -923,6 +1259,11 @@ def execute_deep_agent_run(
             },
         )
         rec = recorder
+        history = build_history_messages(loop._repo, conv_id, user_msg_id)
+        initial_messages = [
+            *history.messages,
+            {"role": "user", "content": prompt},
+        ]
 
         def work() -> Any:
             agent = build_deep_agent(
@@ -935,7 +1276,7 @@ def execute_deep_agent_run(
                 before_tool_call=correlation.check_abort,
             )
             return agent.invoke(
-                {"messages": [{"role": "user", "content": prompt}]},
+                {"messages": initial_messages},
                 config={
                     "callbacks": [rec],
                     "recursion_limit": max(
