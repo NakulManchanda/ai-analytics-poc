@@ -33,7 +33,7 @@ from opentelemetry import trace as otel_trace
 
 from app.config import LLMConfigurationError
 from app.events import RunEvent, terminal_run_payload
-from app.llm import LiteLLMClient, LLMProviderError
+from app.llm import AgentCallReservation, LiteLLMClient, LLMProviderError
 from app.mcp_client import MCPToolError
 from app.metrics import emit_run_metrics
 from app.model_policy.pricing import PricingTable, default_pricing
@@ -563,6 +563,24 @@ class _Emitter:
             self._seq += 1
 
 
+def _messages_json(batches: Any) -> str:
+    return json.dumps(
+        [[{"role": m.type, "content": m.content} for m in batch] for batch in batches],
+        default=str,
+    )
+
+
+def _tools_json(invocation_params: Any) -> str:
+    """Serialized tool schemas LangChain bound to this request.
+
+    ``on_chat_model_start`` receives ``kwargs['invocation_params']['tools']``, verified
+    identical to the ``tools`` array in the outbound request body, so the reservation
+    covers the complete prompt (messages + tool definitions), not messages alone.
+    """
+    tools = (invocation_params or {}).get("tools") or []
+    return json.dumps(tools, default=str) if tools else ""
+
+
 def _message_text(message: Any) -> str:
     content = getattr(message, "content", message)
     if isinstance(content, str):
@@ -623,6 +641,9 @@ class _RunRecorder(BaseCallbackHandler):  # type: ignore[misc,valid-type]
         self.final_latency_ms: int | None = None
         self.last_failed_call_id: str | None = None
         self._calls: dict[UUID, tuple[str, float]] = {}
+        self.agent_alias = llm.planner_alias
+        self.agent_max_tokens: int | None = None
+        self._holds: dict[UUID, AgentCallReservation] = {}
         self._tools: dict[UUID, dict[str, Any]] = {}
         self.tools_succeeded = 0
         self.tools_failed = 0
@@ -739,6 +760,13 @@ class _RunRecorder(BaseCallbackHandler):  # type: ignore[misc,valid-type]
             tracker.ensure_cost_determinate()
             # App-side monthly Bedrock allowance, as in LiteLLMClient._prepare_request.
             self.llm._reserve_budget()
+            # Model policy (per-run reservation); fallbacks are not applied here.
+            # Reserve for messages AND the bound tool schemas (both are input tokens).
+            # Commit still does not cap actual usage above the reservation.
+            self._holds[run_id] = self.llm.begin_agent_call(
+                _messages_json(messages),
+                tools_text=_tools_json(kwargs.get("invocation_params")),
+            )
             call_id = self.loop._llm_call_id_factory()
             self._calls[run_id] = (call_id, self.loop._monotonic())
             self.correlation.register(run_id, call_id)
@@ -752,6 +780,7 @@ class _RunRecorder(BaseCallbackHandler):  # type: ignore[misc,valid-type]
         with self.lock:
             self._guard()
             call_id, started = self._calls.pop(run_id)
+            hold = self._holds.pop(run_id, None)
             latency_ms = int((self.loop._monotonic() - started) * 1000)
             message = response.generations[0][0].message
             usage = getattr(message, "usage_metadata", None) or {}
@@ -759,7 +788,7 @@ class _RunRecorder(BaseCallbackHandler):  # type: ignore[misc,valid-type]
             input_tokens = int(usage.get("input_tokens", 0) or 0)
             output_tokens = int(usage.get("output_tokens", 0) or 0)
             meta = getattr(message, "response_metadata", None) or {}
-            alias = self.llm.planner_alias
+            alias = self.agent_alias
             model_id = meta.get("model_name") or alias
             billed = self.correlation.release(run_id)
             result = SimpleNamespace(
@@ -769,6 +798,14 @@ class _RunRecorder(BaseCallbackHandler):  # type: ignore[misc,valid-type]
                 cost_usd=billed,
                 cost_kind="billed" if billed is not None else None,
             )
+            if hold is not None:
+                self.llm.end_agent_call(
+                    hold,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    usage_known=usage_known,
+                    cost_usd=billed,
+                )
             cost = self._call_cost(input_tokens, output_tokens, result)
             self._record_cost(input_tokens, output_tokens, cost)
             tool_calls = getattr(message, "tool_calls", None) or []
@@ -787,6 +824,8 @@ class _RunRecorder(BaseCallbackHandler):  # type: ignore[misc,valid-type]
                 result_cost_usd=billed,
                 cost_kind=result.cost_kind,
                 usage_known=usage_known,
+                configured_max_tokens=self.agent_max_tokens,
+                fallback_used=False,
             )
             self.llm_calls.append(call)
             self.emit(
@@ -826,6 +865,7 @@ class _RunRecorder(BaseCallbackHandler):  # type: ignore[misc,valid-type]
     def on_llm_error(self, error, *, run_id, **kwargs):  # type: ignore[no-untyped-def]
         with self.lock:
             entry = self._calls.pop(run_id, None)
+            self.llm.release_agent_call(self._holds.pop(run_id, None))
             self.correlation.release(run_id)
             if entry is None or self.abort.is_set():
                 return
@@ -834,7 +874,7 @@ class _RunRecorder(BaseCallbackHandler):  # type: ignore[misc,valid-type]
             code = _provider_failure(error).code if _is_provider(error) else None
             if code is None:
                 return  # budget/cancel/internal errors are not provider failures
-            alias = self.llm.planner_alias
+            alias = self.agent_alias
             result = SimpleNamespace(
                 model_alias=alias, model_id=alias, usage_known=False
             )
@@ -852,6 +892,7 @@ class _RunRecorder(BaseCallbackHandler):  # type: ignore[misc,valid-type]
                     model_alias=alias,
                     role="planner",
                     usage_known=False,
+                    configured_max_tokens=self.agent_max_tokens,
                     provider_status=getattr(error, "status_code", None),
                 )
             )
@@ -859,6 +900,13 @@ class _RunRecorder(BaseCallbackHandler):  # type: ignore[misc,valid-type]
                 self._record_cost(0, 0, cost)
             except BudgetExceededError:
                 pass  # keep the provider failure code, as the manual loop does
+
+    def release_open_holds(self) -> None:
+        """Return run-budget holds of calls still open when the run ends."""
+        with self.lock:
+            holds, self._holds = list(self._holds.values()), {}
+        for hold in holds:
+            self.llm.release_agent_call(hold)
 
     # -- tool calls ----------------------------------------------------------------
     def on_tool_start(self, serialized, input_str, *, run_id, inputs=None, **kwargs):  # type: ignore[no-untyped-def]
@@ -1244,6 +1292,13 @@ def execute_deep_agent_run(
                 tool_error=_tool_error(err),
             ) from err
 
+        try:
+            agent_alias, agent_max_tokens = llm.resolve_agent_role("planner")
+        except LLMProviderError as err:
+            raise OrchestrationError(
+                err.code, err.retryable, pending_llm_call_id, str(err)
+            ) from err
+
         recorder = _RunRecorder(
             loop=loop,
             llm=llm,
@@ -1255,6 +1310,8 @@ def execute_deep_agent_run(
             prompt=prompt,
             next_seq=next_seq,
         )
+        recorder.agent_alias = agent_alias
+        recorder.agent_max_tokens = agent_max_tokens
         client = http_client = httpx.Client(
             timeout=active_budgets.timeout_seconds,
             event_hooks={
@@ -1274,7 +1331,8 @@ def execute_deep_agent_run(
                 client=mcp,
                 base_url=llm.openai_base_url,
                 api_key=llm.api_key or "unused",
-                model=llm.planner_alias,
+                model=agent_alias,
+                max_tokens=agent_max_tokens,
                 http_client=client,
                 timeout=active_budgets.timeout_seconds,
                 before_tool_call=correlation.check_abort,
@@ -1414,6 +1472,8 @@ def execute_deep_agent_run(
         raise
     finally:
         abort.set()
+        if recorder is not None:
+            recorder.release_open_holds()
         if http_client is not None:  # worker was never submitted
             http_client.close()
         if executor is not None:

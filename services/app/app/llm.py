@@ -4,7 +4,7 @@ import logging
 import time
 import uuid
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import Any, Protocol
 
 import httpx
@@ -32,6 +32,7 @@ from app.model_policy import (
     RunBudgetExceededError,
     current_call_context,
 )
+from app.model_policy.budget import Reservation
 from app.model_policy.context import current_llm_call_id
 from app.prefix import (
     PrefixPartition,
@@ -1931,6 +1932,22 @@ class ServeLLMClient:
         )
 
 
+@dataclass(frozen=True)
+class AgentCallReservation:
+    """Policy decision and run-budget hold for one framework-issued model call."""
+
+    alias: str
+    max_tokens: int | None
+    reservation: Reservation | None
+    _open: list[bool] = field(default_factory=lambda: [True], repr=False, compare=False)
+
+    def _settle(self) -> bool:
+        """True exactly once: the first commit/release wins, later ones are no-ops."""
+        was_open = self._open[0]
+        self._open[0] = False
+        return was_open
+
+
 class LiteLLMClient(ServeLLMClient):
     """OpenAI-compatible client for the opt-in LiteLLM Proxy (Bedrock-first).
 
@@ -2067,6 +2084,78 @@ class LiteLLMClient(ServeLLMClient):
                 )
             return replace(result, fallback_used=index > 0)
         raise AssertionError("unreachable")  # pragma: no cover
+
+    # -- model policy for agent frameworks (Deep Agents) ---------------------------
+    # The framework owns the HTTP call, so it cannot go through ``_governed``. These
+    # methods apply the same entitlement -> per-call cap -> per-run reservation ->
+    # commit/release steps around one framework model call. Fallback aliases are
+    # intentionally NOT applied: the framework issues exactly one request per call.
+
+    def resolve_agent_role(self, role: str = "planner") -> tuple[str, int | None]:
+        """Entitlement check for the current tenant; returns (alias, per-call cap)."""
+        ctx = current_call_context()
+        try:
+            rp = self._runtime.policy.resolve(role, ctx.tenant_id)
+        except PolicyDeniedError as error:
+            raise LLMProviderError(
+                retryable=False, code="model_not_entitled"
+            ) from error
+        return rp.alias, rp.max_tokens
+
+    def begin_agent_call(
+        self, messages_text: str, role: str = "planner", tools_text: str = ""
+    ) -> "AgentCallReservation":
+        """Entitlement + cap + per-run reservation (when a run is bound) for one call.
+
+        ``tools_text`` is the serialized tool schemas sent with the request; they count
+        toward input tokens. NOTE: ``commit`` does not cap actual usage above the
+        reservation, and the manual ``_governed`` estimator excludes tool schemas.
+        """
+        rt = self._runtime
+        alias, max_tokens = self.resolve_agent_role(role)
+        reservation = None
+        run_id = current_call_context().run_id
+        if run_id is not None:
+            reserve_out = max_tokens or 1024
+            reserve_in = estimate_tokens(messages_text) + (
+                estimate_tokens(tools_text) if tools_text else 0
+            )
+            try:
+                reservation = rt.budgets.reserve(
+                    run_id,
+                    reserve_in + reserve_out,
+                    rt.pricing.estimate(alias, reserve_in, reserve_out),
+                )
+            except RunBudgetExceededError as error:
+                raise LLMProviderError(
+                    retryable=False, code="run_budget_exhausted"
+                ) from error
+        return AgentCallReservation(alias, max_tokens, reservation)
+
+    def end_agent_call(
+        self,
+        res: "AgentCallReservation",
+        *,
+        input_tokens: int,
+        output_tokens: int,
+        usage_known: bool,
+        cost_usd: float | None,
+    ) -> None:
+        """Replace the hold with actual spend (worst case kept when usage is unknown)."""
+        if res.reservation is None or not res._settle():
+            return
+        self._runtime.budgets.commit(
+            res.reservation,
+            input_tokens=input_tokens if usage_known else None,
+            output_tokens=output_tokens if usage_known else None,
+            usd=cost_usd,
+        )
+
+    def release_agent_call(self, res: "AgentCallReservation | None") -> None:
+        """Return the hold for a call that produced no billable usage; idempotent."""
+        if res is None or res.reservation is None or not res._settle():
+            return
+        self._runtime.budgets.release(res.reservation)
 
     def _post_completion(
         self, payload: dict[str, Any], headers: dict[str, str]
