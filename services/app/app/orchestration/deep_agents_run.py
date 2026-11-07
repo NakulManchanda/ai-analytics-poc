@@ -7,9 +7,9 @@ the terminal statuses/failure codes. ``_execute_loop`` is untouched; a few small
 helpers are deliberately duplicated from it rather than refactored out of it.
 
 Known differences from the manual loop are listed in ``docs``/the PR: the answer is not
-streamed (``answer.completed`` only), no catalogue short-circuit, no answer grounding
-check, no voice synthesis, no model-policy entitlement/per-run reservation (the proxy's
-guards still apply), ``write_todos`` calls produce no tool events.
+streamed (``answer.completed`` only), no catalogue short-circuit, no voice synthesis, no
+model-policy entitlement/per-run reservation (the proxy's guards still apply), ``write_todos``
+calls produce no tool events.
 """
 
 from __future__ import annotations
@@ -69,7 +69,7 @@ from app.state import (
     generate_tool_call_id,
     utcnow_isoformat,
 )
-from app.validation import scan_observation
+from app.validation import check_answer_grounding_multi, scan_observation
 
 if TYPE_CHECKING:
     from app.orchestration.loop import OrchestrationLoop
@@ -626,6 +626,7 @@ class _RunRecorder(BaseCallbackHandler):  # type: ignore[misc,valid-type]
         self._tools: dict[UUID, dict[str, Any]] = {}
         self.tools_succeeded = 0
         self.tools_failed = 0
+        self.evidence: list[dict[str, Any]] = []
 
     # -- helpers -------------------------------------------------------------------
     def _guard(self) -> None:
@@ -917,6 +918,7 @@ class _RunRecorder(BaseCallbackHandler):  # type: ignore[misc,valid-type]
             result_bytes = len(text.encode("utf-8"))
             self.tracker.record_tool_call(result_bytes=result_bytes)
             self.tools_succeeded += 1
+            self.evidence.append(query_result)
             row_count = query_result.get("row_count", 0)
             tool_call_id = info["tool_call_id"]
             self.emit(
@@ -1083,6 +1085,7 @@ def execute_deep_agent_run(
     history = HistoryResult([], history_metadata())
     configured_model_id = ""
     pending_llm_call_id = ""
+    grounding_report: dict[str, Any] = {}
 
     def telemetry(end_to_end_latency_ms: int) -> dict[str, Any]:
         rec = recorder
@@ -1123,7 +1126,8 @@ def execute_deep_agent_run(
             **extra,
             "telemetry": tel,
             "strategy": STRATEGY_NAME,
-            "grounding": "not_applied",
+            "grounding": "applied" if grounding_report else "not_applied",
+            **({"grounding_report": grounding_report} if grounding_report else {}),
             "evidence": evidence(),
             **eval_meta,
             **correlation.snapshot(
@@ -1317,6 +1321,23 @@ def execute_deep_agent_run(
                 answer = _message_text(message).strip()
                 break
         answer = answer or _NO_ANSWER_TEXT
+        report = check_answer_grounding_multi(answer, rec.evidence, question=prompt)
+        grounding_report.update(
+            ok=report.ok,
+            ungrounded_numbers=len(report.ungrounded_numbers),
+            unknown_query_ids=len(report.unknown_query_ids),
+            evidence_count=len(rec.evidence),
+        )
+        caveat = report.caveat()
+        if caveat is not None:
+            rec._add_step(
+                step_type="grounding_check",
+                status="failed" if not report.ok else "completed",
+                query_id=rec.last_query_id,
+                output_summary=caveat[:200],
+                metadata=report.to_metadata(),
+            )
+            answer = f"{answer}\n\n{caveat}"
         last_call_id = rec.llm_calls[-1].llm_call_id if rec.llm_calls else ""
         emit("answer.completed", {"answer": answer}, llm_call_id=last_call_id or None)
         loop._repo.add_message(

@@ -4,7 +4,11 @@ Everything here is plain Python: no model calls, no prompt text. It sits
 between the (probabilistic) model and the (authoritative) governed tools.
 """
 
-from app.validation.grounding import GroundingReport, check_answer_grounding
+from app.validation.grounding import (
+    GroundingReport,
+    check_answer_grounding,
+    check_answer_grounding_multi,
+)
 from app.validation.injection import ObservationFinding, scan_observation
 from app.validation.proposal import (
     ProposalValidation,
@@ -21,6 +25,7 @@ __all__ = [
     "ProposalValidation",
     "Violation",
     "check_answer_grounding",
+    "check_answer_grounding_multi",
     "retry_allowed",
     "scan_observation",
     "summarize_arguments",

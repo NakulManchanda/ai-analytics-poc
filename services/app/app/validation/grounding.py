@@ -10,7 +10,7 @@ LLM judge.
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 
 _NUMBER = re.compile(
@@ -187,9 +187,23 @@ def check_answer_grounding(
     *,
     question: str = "",
 ) -> GroundingReport:
+    return check_answer_grounding_multi(
+        answer, [evidence] if evidence else [], question=question
+    )
+
+
+def check_answer_grounding_multi(
+    answer: str,
+    evidences: Sequence[Mapping[str, object]],
+    *,
+    question: str = "",
+) -> GroundingReport:
+    """Like ``check_answer_grounding`` against several tool results: a number is
+    grounded if any evidence supports it, a cited query id is known if any matches."""
     report = GroundingReport()
-    direct = _numeric_leaves(evidence) if evidence else []
-    derived = _derived(evidence) if evidence else []
+    direct = [v for e in evidences for v in _numeric_leaves(e)]
+    derived = [v for e in evidences for v in _derived(e)]
+    known_ids = {e.get("query_id") for e in evidences}
     asked = [t.value for t in _tokens(question)]
     # Cited ids are checked separately; their digits are not data values.
     for token in _tokens(_QUERY_ID.sub(" ", answer)):
@@ -200,10 +214,9 @@ def check_answer_grounding(
         if not _supported(token, direct, derived):
             report.ungrounded_numbers.append(token.value)
             report.ungrounded_tokens.append(token.text)
-    known_id = evidence.get("query_id") if evidence else None
     for match in _QUERY_ID.finditer(answer):
         cited = match.group(1).rstrip(".:,;-")
-        if cited != known_id:
+        if cited not in known_ids:
             report.unknown_query_ids.append(cited)
     for sentence in re.split(r"(?<=[.!?])\s+|\n+", answer):
         if _CAUSAL.search(sentence) and not _HEDGE.search(sentence):
