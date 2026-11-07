@@ -226,6 +226,7 @@ def build_deep_agent(
     chat_model: Any | None = None,
     http_client: Any | None = None,
     timeout: float | None = None,
+    max_tokens: int | None = None,
     list_tools: Callable[[], ToolDefinitions] | None = None,
     before_tool_call: Callable[[], None] | None = None,
 ) -> Any:
@@ -243,6 +244,12 @@ def build_deep_agent(
         default_headers=dict(default_headers or {}),
         http_client=http_client,
         timeout=timeout,
+        # Send the cap as ``max_tokens`` (what the manual LiteLLM payload sends), not
+        # langchain-openai's ``max_completion_tokens`` (``extra_body`` is merged as-is),
+        # so the proxy applies it the same way.
+        **(
+            {"extra_body": {"max_tokens": max_tokens}} if max_tokens is not None else {}
+        ),
         # Exactly one request per model call, deterministic, like the manual loop.
         max_retries=0,
         temperature=0.0,
