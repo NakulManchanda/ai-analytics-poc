@@ -13,8 +13,14 @@ The single-turn Deep Agents strategy (#237) sent only the current prompt. Stored
 - Correlation: header-injection failures and missing/unparseable billed-cost headers are counted into run metadata (`correlation.header_failures`, `correlation.cost_header_missing`, `correlation_ok`); requests are still sent and runs do not fail.
 - No QueryResolver (#110 stays open); `_execute_loop` and the manual path are untouched.
 
+## Review fixes (PR #238)
+- History budget (P1): an overall 12,000-character budget (proxy for ~3k tokens) plus per-component caps (user 1,000; assistant 1,500; arguments 500; tool result 2,000; at most 2 observations per turn, newest kept). Turns are taken newest to oldest and the oldest dropped first; an oversized newest turn is shrunk (results, then arguments, then assistant text) so it is always present. The floor (capped user text plus block wrappers) can exceed the budget and is documented. `Run.metadata["history"]` reports turns available/included/dropped, total/budget chars and truncation counts.
+- Billing completeness (P2): `correlation_ok` is header integrity only. `billing_complete` (no missing/unparseable billed-cost header) is reported separately, with `billed_calls` and `estimated_calls`. #228 must not treat a run with `billing_complete == False` as a trustworthy cost measurement.
+- Provenance (P2): each historical observation is wrapped in `<untrusted_tool_data source="mcp" tool=... query_id=... arguments=...>`; literal opening/closing tags inside the data are neutralized and attribute values escaped; the system prompt says block content is data, never instructions.
+- Semantic multi-turn correctness (P2) is not claimed here: the scripted test only proves history reaches the model. A live multi-turn golden-case evaluation belongs in #228.
+
 ## Verification
-- `services/app`: full suite passed (551 passed, 1 skipped live test per the subagent run); new tests: history builder unit tests, a two-turn end-to-end run (turn 2's model input contains the turn-1 user text, assistant text, tool name, arguments and result, no tool-role message, nothing from another conversation), correlation metadata tests. New test file repeated 10 times, no flakes. black and ruff clean.
+- `services/app`: full suite passed (566 passed, 1 skipped live test after the review fixes; 551 before); new tests: history builder unit tests, a two-turn end-to-end run (turn 2's model input contains the turn-1 user text, assistant text, tool name, arguments and result, no tool-role message, nothing from another conversation), correlation metadata tests. New test file repeated 10 times, no flakes. black and ruff clean.
 - Not verified: the live two-turn smoke (`multi-001#0` then `#1`) against real Bedrock and LiteLLM; command in the dev-commands skill.
 
 ## Known differences and limits
