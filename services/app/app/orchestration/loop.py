@@ -272,6 +272,15 @@ class LLMCall:
         }
 
 
+# Root-span ``agent.framework`` per ``AGENT_STRATEGY`` (the strategy name itself is
+# ``agent.strategy``).
+_AGENT_FRAMEWORKS = {
+    "manual": "bespoke",
+    "crewai": "crewai",
+    "deep_agents": "deepagents",
+}
+
+
 class _TracedCalls(list[LLMCall]):
     """Call log that emits one OTEL span event per model call, so each call carries the
     prompt revision it actually rendered (a run-level attribute could not)."""
@@ -773,6 +782,7 @@ class OrchestrationLoop:
                     )
                 answer = result.answer
                 _safe_set_attribute(span, "ai.status", result.status)
+                _safe_set_attribute(span, "agent.step_count", len(result.steps))
                 if _trace_run_io_enabled() and result.answer:
                     _safe_set_attribute(span, "output.value", _clip(result.answer))
                 return result
@@ -808,6 +818,10 @@ class OrchestrationLoop:
                 # OpenInference key: Phoenix groups a conversation's traces into one session.
                 "session.id": submission.conversation_id,
                 "ai.turn_type": "text",
+                "agent.strategy": self._agent_strategy,
+                "agent.framework": _AGENT_FRAMEWORKS.get(
+                    self._agent_strategy, self._agent_strategy
+                ),
                 "gen_ai.request.model": self._configured_model_id(),
                 **(
                     {"ai.eval_run_id": submission.eval_run_id}

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import threading
 from collections.abc import Callable, Mapping
@@ -29,6 +30,8 @@ from app.orchestration.loop import (
 )
 from app.prefix import DEFAULT_SYSTEM_PROMPT, DEFAULT_TAXI_RULES
 from app.prompts import AGENT_GLOBAL
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from langchain_core.tools import BaseTool
@@ -175,14 +178,39 @@ def build_mcp_tools(
     return [make(name) for name in MCP_TOOL_NAMES]
 
 
-def build_allowlist_middleware() -> Any:
+def build_allowlist_middleware(
+    on_compaction: Callable[[dict[str, int]], None] | None = None,
+) -> Any:
+    """``on_compaction`` receives counts only when Deep Agents' summarization middleware
+    has compacted the context (its private ``_summarization_event`` state changed); it
+    is observed at the next model call."""
     from langchain.agents.middleware import AgentMiddleware
     from langchain_core.messages import ToolMessage
 
     class ToolAllowlistMiddleware(AgentMiddleware):
         """Show the model only allowlisted tools and refuse any other tool call."""
 
+        _compaction_cutoff: int | None = None
+
+        def _observe_compaction(self, request) -> None:  # type: ignore[no-untyped-def]
+            try:
+                event = request.state.get("_summarization_event")
+                cutoff = event.get("cutoff_index") if event else None
+                if cutoff is None or cutoff == self._compaction_cutoff:
+                    return
+                self._compaction_cutoff = cutoff
+                on_compaction(  # type: ignore[misc]
+                    {
+                        "cutoff_index": int(cutoff),
+                        "messages_total": len(request.state.get("messages", [])),
+                    }
+                )
+            except Exception:  # observability never fails the run
+                logger.warning("compaction_observe_failed", exc_info=True)
+
         def wrap_model_call(self, request, handler):  # type: ignore[no-untyped-def]
+            if on_compaction is not None:
+                self._observe_compaction(request)
             allowed = [
                 t
                 for t in request.tools
@@ -229,6 +257,7 @@ def build_deep_agent(
     max_tokens: int | None = None,
     list_tools: Callable[[], ToolDefinitions] | None = None,
     before_tool_call: Callable[[], None] | None = None,
+    on_compaction: Callable[[dict[str, int]], None] | None = None,
 ) -> Any:
     """Return a compiled Deep Agent. ``chat_model`` is a test seam; production passes
     the LiteLLM proxy coordinates instead."""
@@ -258,7 +287,7 @@ def build_deep_agent(
         model=llm,
         tools=build_mcp_tools(client, list_tools, before_tool_call),
         system_prompt=build_system_prompt(),
-        middleware=[TodoListMiddleware(), build_allowlist_middleware()],
+        middleware=[TodoListMiddleware(), build_allowlist_middleware(on_compaction)],
         subagents=[],
         backend=StateBackend(),
     )
