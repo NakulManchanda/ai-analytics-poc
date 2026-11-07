@@ -1126,7 +1126,7 @@ def execute_deep_agent_run(
             **extra,
             "telemetry": tel,
             "strategy": STRATEGY_NAME,
-            "grounding": "applied",
+            "grounding": "applied" if grounding_report else "not_applied",
             **({"grounding_report": grounding_report} if grounding_report else {}),
             "evidence": evidence(),
             **eval_meta,

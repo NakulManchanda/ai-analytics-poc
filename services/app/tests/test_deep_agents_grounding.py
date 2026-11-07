@@ -146,3 +146,54 @@ def test_failed_tool_call_is_not_evidence(monkeypatch: pytest.MonkeyPatch) -> No
     assert len(_grounding_steps(result)) == 1
     assert run.metadata["grounding_report"]["evidence_count"] == 0
     _assert_consistent(result, answers, persisted)
+
+
+# -- grounding status reflects whether the check ran ------------------------------------
+def test_completed_run_reports_grounding_applied(monkeypatch) -> None:
+    _result, run, _answers, _persisted = _run(monkeypatch, [_ai("done")])
+    assert run.metadata["grounding"] == "applied"
+    assert "grounding_report" in run.metadata
+
+
+def test_budget_exceeded_run_reports_grounding_not_applied(monkeypatch) -> None:
+    from app.orchestration.budgets import ExecutionBudgets
+
+    loop, repo, _pub = _setup(
+        monkeypatch,
+        [_tool("aggregate_taxi_data", ARGS), _ai("never reached")],
+        mcp=FakeMCP(RESULT),
+        budgets=ExecutionBudgets(max_llm_calls=1),
+    )
+    sub = loop.prepare_run("q")
+    assert loop.execute(sub).status == "budget_exceeded"
+    meta = repo.get_run(sub.run_id).metadata
+    assert meta["grounding"] == "not_applied"
+    assert "grounding_report" not in meta
+
+
+def test_cancelled_run_reports_grounding_not_applied(monkeypatch) -> None:
+    loop, repo, _pub = _setup(monkeypatch, [_ai("slow")], delay=2.0)
+    sub = loop.prepare_run("q")
+    loop.request_cancellation(sub.run_id)
+    assert loop.execute(sub).status == "cancelled"
+    meta = repo.get_run(sub.run_id).metadata
+    assert meta["grounding"] == "not_applied"
+    assert "grounding_report" not in meta
+
+
+def test_failed_run_reports_grounding_not_applied(monkeypatch) -> None:
+    import httpx
+    import openai
+    from app.orchestration.loop import OrchestrationError
+
+    request = httpx.Request("POST", "http://proxy.invalid/v1/chat/completions")
+    error = openai.APIStatusError(
+        "boom", response=httpx.Response(503, request=request), body=None
+    )
+    loop, repo, _pub = _setup(monkeypatch, [error])
+    sub = loop.prepare_run("q")
+    with pytest.raises(OrchestrationError):
+        loop.execute(sub)
+    meta = repo.get_run(sub.run_id).metadata
+    assert meta["grounding"] == "not_applied"
+    assert "grounding_report" not in meta
