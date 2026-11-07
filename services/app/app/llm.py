@@ -2103,16 +2103,23 @@ class LiteLLMClient(ServeLLMClient):
         return rp.alias, rp.max_tokens
 
     def begin_agent_call(
-        self, messages_text: str, role: str = "planner"
+        self, messages_text: str, role: str = "planner", tools_text: str = ""
     ) -> "AgentCallReservation":
-        """Entitlement + cap + per-run reservation (when a run is bound) for one call."""
+        """Entitlement + cap + per-run reservation (when a run is bound) for one call.
+
+        ``tools_text`` is the serialized tool schemas sent with the request; they count
+        toward input tokens. NOTE: ``commit`` does not cap actual usage above the
+        reservation, and the manual ``_governed`` estimator excludes tool schemas.
+        """
         rt = self._runtime
         alias, max_tokens = self.resolve_agent_role(role)
         reservation = None
         run_id = current_call_context().run_id
         if run_id is not None:
             reserve_out = max_tokens or 1024
-            reserve_in = estimate_tokens(messages_text)
+            reserve_in = estimate_tokens(messages_text) + (
+                estimate_tokens(tools_text) if tools_text else 0
+            )
             try:
                 reservation = rt.budgets.reserve(
                     run_id,

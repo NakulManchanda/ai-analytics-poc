@@ -570,6 +570,17 @@ def _messages_json(batches: Any) -> str:
     )
 
 
+def _tools_json(invocation_params: Any) -> str:
+    """Serialized tool schemas LangChain bound to this request.
+
+    ``on_chat_model_start`` receives ``kwargs['invocation_params']['tools']``, verified
+    identical to the ``tools`` array in the outbound request body, so the reservation
+    covers the complete prompt (messages + tool definitions), not messages alone.
+    """
+    tools = (invocation_params or {}).get("tools") or []
+    return json.dumps(tools, default=str) if tools else ""
+
+
 def _message_text(message: Any) -> str:
     content = getattr(message, "content", message)
     if isinstance(content, str):
@@ -750,7 +761,12 @@ class _RunRecorder(BaseCallbackHandler):  # type: ignore[misc,valid-type]
             # App-side monthly Bedrock allowance, as in LiteLLMClient._prepare_request.
             self.llm._reserve_budget()
             # Model policy (per-run reservation); fallbacks are not applied here.
-            self._holds[run_id] = self.llm.begin_agent_call(_messages_json(messages))
+            # Reserve for messages AND the bound tool schemas (both are input tokens).
+            # Commit still does not cap actual usage above the reservation.
+            self._holds[run_id] = self.llm.begin_agent_call(
+                _messages_json(messages),
+                tools_text=_tools_json(kwargs.get("invocation_params")),
+            )
             call_id = self.loop._llm_call_id_factory()
             self._calls[run_id] = (call_id, self.loop._monotonic())
             self.correlation.register(run_id, call_id)

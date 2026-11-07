@@ -18,7 +18,8 @@ The Deep Agents run called the proxy with `llm.planner_alias` directly and only 
 
 ## Known differences from manual policy
 - No fallback aliases: a transient provider error on the policy alias fails the run where manual might retry on another model.
-- The reservation estimate covers the serialized messages only, not the tool schemas the framework adds.
+- The Deep Agents reservation covers the serialized messages plus the bound tool schemas. `on_chat_model_start` exposes them as `kwargs['invocation_params']['tools']` (verified equal to the `tools` array in the outbound request body with the real `ChatOpenAI` over `httpx.MockTransport`), and `begin_agent_call(..., tools_text=...)` adds their estimate. Regression tests: a budget that fits messages alone but not messages + schemas ends `run_budget_exhausted` before any request, and the reserved amount is at least `estimate(messages) + estimate(tools)` plus the output cap.
+- `commit` still does not cap actual usage above the reservation (shared with the manual path), so this is not hard-cap parity; the estimate is only a pre-call gate. The manual estimator (`_governed`) still excludes tool schemas and is unchanged.
 - Entitlement is checked once per run up front and again per call; the monthly allowance is reserved before the run-budget reservation, matching manual order.
 - An abandoned worker's late request is not committed, so that spend is not in the run budget (billed-cost reconciliation after cancellation stays open in #226).
 

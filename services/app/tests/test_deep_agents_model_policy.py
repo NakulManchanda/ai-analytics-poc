@@ -329,3 +329,55 @@ def test_begin_agent_call_run_budget_exhausted() -> None:
     with call_context("default", "r2"), pytest.raises(LLMProviderError) as err:
         client.begin_agent_call("x")
     assert err.value.code == "run_budget_exhausted" and not err.value.retryable
+
+
+# -- tool schemas count toward the reservation --------------------------------------
+
+
+def _probe_reservation(monkeypatch) -> tuple[int, Any]:
+    """Run one call with a big budget; return (reserved tokens, outbound request body)."""
+    rt = _runtime(max_tokens=1_000_000)
+    reserved: list[int] = []
+    real_reserve = rt.budgets.reserve
+
+    def spy(run_id: str, tokens: int, usd: Any) -> Any:
+        reserved.append(tokens)
+        return real_reserve(run_id, tokens, usd)
+
+    rt.budgets.reserve = spy  # type: ignore[method-assign]
+    bodies: list[Any] = []
+    loop = _setup_real(
+        monkeypatch, rt, lambda r: bodies.append(json.loads(r.content)) or _completion()
+    )
+    assert loop.execute(loop.prepare_run("q")).status == "completed"
+    return reserved[0], bodies[0]
+
+
+def test_reservation_includes_tool_schemas(monkeypatch) -> None:
+    from app.llm import estimate_tokens
+
+    reserved, body = _probe_reservation(monkeypatch)
+    assert body["tools"], "request must carry tool schemas"
+    tools_est = estimate_tokens(json.dumps(body["tools"]))
+    msgs_est = estimate_tokens(json.dumps(body["messages"]))
+    assert tools_est > 0
+    # reserve = input estimate + per-call output cap (300 in _policy)
+    assert reserved >= msgs_est + tools_est + 300
+
+
+def test_budget_fitting_messages_only_is_rejected_before_request(monkeypatch) -> None:
+    from app.llm import estimate_tokens
+
+    with pytest.MonkeyPatch.context() as mp:
+        reserved, body = _probe_reservation(mp)
+    tools_est = estimate_tokens(json.dumps(body["tools"]))
+    # Message-only reservation would have fit; with schemas it must not.
+    budget = reserved - tools_est // 2
+    assert budget > reserved - tools_est
+    requests: list[Any] = []
+    rt = _runtime(max_tokens=budget)
+    loop = _setup_real(monkeypatch, rt, lambda r: requests.append(r) or _completion())
+    with pytest.raises(OrchestrationError) as err:
+        loop.execute(loop.prepare_run("q"))
+    assert err.value.code == "run_budget_exhausted" and not err.value.retryable
+    assert requests == []
