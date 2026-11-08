@@ -293,9 +293,6 @@ def run_reconcile(a) -> int:
     )
     for violation in result.violations:
         print(f"VIOLATION: {violation}", file=sys.stderr)
-    if result.rows_considered == 0:
-        print("VIOLATION: no tagged spend rows found for this run", file=sys.stderr)
-        return 4
     return 0 if result.ok else 4
 
 

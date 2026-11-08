@@ -74,6 +74,10 @@ def test_no_tagged_rows_fails_instead_of_passing_silently(tmp_path, capsys):
     _run(tmp_path, [], [{"spend": 1.0, "request_tags": []}])
     assert _reconcile(tmp_path) == 4
     assert "no tagged spend rows" in capsys.readouterr().err
+    report = json.loads(
+        (tmp_path / RUN / "report" / "spend_reconciliation.json").read_text()
+    )
+    assert report["ok"] is False
 
 
 def test_missing_inputs_are_errors(tmp_path, capsys):

@@ -50,6 +50,7 @@ class SpendReconciliation:
     duplicate_attempts: list[tuple[str, int]] = field(default_factory=list)
     cost_mismatches: list[str] = field(default_factory=list)  # call_ids
     estimated_calls: int = 0
+    unkeyed_rows: int = 0  # tagged rows lacking call_id or an integer attempt
     rows_considered: int = 0
 
     @property
@@ -71,7 +72,17 @@ class SpendReconciliation:
 
     @property
     def violations(self) -> list[str]:
-        out = [f"capture call {c} has no spend row" for c in self.capture_without_spend]
+        out = []
+        if self.rows_considered == 0:
+            out.append("no tagged spend rows found for this run")
+        out += [
+            f"capture call {c} has no spend row" for c in self.capture_without_spend
+        ]
+        if self.unkeyed_rows:
+            out.append(
+                f"{self.unkeyed_rows} tagged spend rows lack call_id or attempt "
+                "and cannot be deduplicated"
+            )
         out += [
             f"duplicate spend row for {c} attempt {a}"
             for c, a in self.duplicate_attempts
@@ -91,6 +102,7 @@ class SpendReconciliation:
             "ok": self.ok,
             "violations": self.violations,
             "rows_considered": self.rows_considered,
+            "unkeyed_rows": self.unkeyed_rows,
             "capture_calls": len(self.calls) + len(self.capture_without_spend),
             "estimated_calls": self.estimated_calls,
             "capture_cost_usd": self.capture_cost_usd,
@@ -134,6 +146,20 @@ def reconcile(
     result = SpendReconciliation(eval_run_id=eval_run_id, rows_considered=len(rows))
     calls = {r.call_id: r for r in records if r.record_type == "model_call"}
 
+    # Duplicate detection runs over ALL tagged rows, matched or orphan, because orphans
+    # are added to the reconciled cost: a repeated row must not inflate it unnoticed.
+    seen_keys: set[tuple[str, int]] = set()
+    for row in rows:
+        meta = _meta(row)
+        call_id, attempt = meta.get("call_id"), _as_int(meta.get("attempt"))
+        if not call_id or attempt is None:
+            result.unkeyed_rows += 1
+            continue
+        key = (call_id, attempt)
+        if key in seen_keys and key not in result.duplicate_attempts:
+            result.duplicate_attempts.append(key)
+        seen_keys.add(key)
+
     by_call: dict[str, list[dict[str, Any]]] = {}
     for row in rows:
         meta = _meta(row)
@@ -156,14 +182,6 @@ def reconcile(
         if not matched:
             result.capture_without_spend.append(call_id)
             continue
-        seen: set[int] = set()
-        for row in matched:
-            attempt = _as_int(_meta(row).get("attempt"))
-            if attempt is None:
-                continue
-            if attempt in seen:
-                result.duplicate_attempts.append((call_id, attempt))
-            seen.add(attempt)
         spend = sum(float(r.get("spend") or 0.0) for r in matched)
         delta = None
         if rec.cost_kind == "billed" and rec.cost_usd is not None:
