@@ -197,6 +197,7 @@ def test_happy_path(monkeypatch: pytest.MonkeyPatch) -> None:
         "tool.requested",
         "tool.started",
         "tool.completed",
+        "context.reduced",
         "llm.started",
         "llm.completed",
         "answer.completed",
@@ -205,8 +206,20 @@ def test_happy_path(monkeypatch: pytest.MonkeyPatch) -> None:
     assert [s.step_type for s in result.steps] == [
         "llm_proposal",
         "tool_call",
+        "context_reduced",
         "llm_final_answer",
     ]
+    # Graders read tool rows from context.reduced recent_messages (role=tool), as on the
+    # manual path; the durable step carries the same working context for event replay.
+    (reduced,) = [e for e in pub.events if e.event_type == "context.reduced"]
+    (tool_msg,) = reduced.payload["working_context"]["recent_messages"]
+    stored = json.loads(tool_msg["content"])
+    assert tool_msg["role"] == "tool" and stored["query_id"] == "qid_1"
+    assert isinstance(stored["rows"], list) and stored["rows"]
+    assert reduced.payload["query_id"] == "qid_1"
+    step = next(s for s in result.steps if s.step_type == "context_reduced")
+    assert step.query_id == "qid_1"
+    assert step.metadata["working_context"] == reduced.payload["working_context"]
     assert result.query_id == "qid_1"
     assert result.input_tokens == 200 and result.output_tokens == 40
     assert len(result.llm_calls) == 2

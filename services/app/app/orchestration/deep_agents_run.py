@@ -32,7 +32,7 @@ from opentelemetry import propagate
 from opentelemetry import trace as otel_trace
 
 from app.config import LLMConfigurationError
-from app.events import RunEvent, terminal_run_payload
+from app.events import RunEvent, context_reduced_payload, terminal_run_payload
 from app.llm import AgentCallReservation, LiteLLMClient, LLMProviderError
 from app.mcp_client import MCPToolError
 from app.metrics import emit_run_metrics
@@ -60,6 +60,7 @@ from app.orchestration.loop import (
     _tool_error,
     _TracedCalls,
 )
+from app.orchestration.reducer import sanitize_and_preview_tool_result
 from app.state import (
     Message,
     Run,
@@ -1026,23 +1027,48 @@ class _RunRecorder(BaseCallbackHandler):  # type: ignore[misc,valid-type]
                     output_summary="instruction-like text in tool observation",
                     metadata={"findings": [f.to_dict() for f in findings]},
                 )
-            self.loop._repo.add_message(
-                Message(
-                    message_id=generate_message_id(),
-                    conversation_id=self.conv_id,
-                    sequence=self.next_seq,
-                    role="tool",
-                    content=json.dumps(
-                        query_result, separators=(",", ":"), sort_keys=True
-                    ),
-                    metadata={
-                        "tool_name": info["name"],
-                        "query_id": query_id,
-                        "arguments": info["arguments"],
-                    },
-                )
+            tool_message = Message(
+                message_id=generate_message_id(),
+                conversation_id=self.conv_id,
+                sequence=self.next_seq,
+                role="tool",
+                content=json.dumps(query_result, separators=(",", ":"), sort_keys=True),
+                metadata={
+                    "tool_name": info["name"],
+                    "query_id": query_id,
+                    "arguments": info["arguments"],
+                },
             )
+            self.loop._repo.add_message(tool_message)
             self.next_seq += 1
+            # Evidence parity with the manual path: graders read tool results (rows) from
+            # context.reduced events, in recent_messages as the stored role="tool" message.
+            # Deep Agents has no ContextReducer, so without this every answer is ungradable.
+            working_context = {
+                "recent_messages": [
+                    {
+                        "message_id": tool_message.message_id,
+                        "role": "tool",
+                        "content": tool_message.content,
+                        "sequence": tool_message.sequence,
+                    }
+                ],
+                "recent_tool_observations": [
+                    sanitize_and_preview_tool_result(query_result)
+                ],
+            }
+            self.emit(
+                "context.reduced",
+                context_reduced_payload(query_id, row_count, working_context),
+                query_id=query_id,
+            )
+            self._add_step(
+                step_type="context_reduced",
+                status="completed",
+                query_id=query_id,
+                output_summary="tool result as grading evidence",
+                metadata={"row_count": row_count, "working_context": working_context},
+            )
 
     def on_tool_error(self, error, *, run_id, **kwargs):  # type: ignore[no-untyped-def]
         with self.lock:
