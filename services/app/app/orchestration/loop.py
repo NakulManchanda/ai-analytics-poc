@@ -786,6 +786,9 @@ class OrchestrationLoop:
                 if _trace_run_io_enabled() and result.answer:
                     _safe_set_attribute(span, "output.value", _clip(result.answer))
                 return result
+            except BaseException:
+                self._set_terminal_span_attributes(span, submission.run_id)
+                raise
             finally:
                 if self._capture is not None:
                     self._capture.capture_run(
@@ -799,6 +802,24 @@ class OrchestrationLoop:
                             else None
                         ),
                     )
+
+    def _set_terminal_span_attributes(self, span: Any, run_id: str) -> None:
+        """Failed runs still get ai.status and agent.step_count, read from durable state.
+
+        Fail-open: telemetry lookup problems never mask the original run error. If the
+        run never reached a terminal write, it is reported as failed with what was persisted.
+        """
+        status = "failed"
+        step_count = 0
+        try:
+            run = self._repo.get_run(run_id)
+            if run is not None and run.status != "in_progress":
+                status = run.status
+            step_count = len(self._repo.list_run_steps(run_id))
+        except Exception:
+            logger.warning("Failed to read terminal run state for span", exc_info=True)
+        _safe_set_attribute(span, "ai.status", status)
+        _safe_set_attribute(span, "agent.step_count", step_count)
 
     @contextlib.contextmanager
     def _run_span(self, submission: RunSubmission) -> Iterator[Any]:

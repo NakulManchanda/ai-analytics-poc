@@ -7,10 +7,11 @@ from types import SimpleNamespace
 from typing import Any
 
 import httpx
+import openai
 import pytest
-from app.llm import LocalFakeLLMClient
+from app.llm import LLMProviderError, LocalFakeLLMClient
 from app.orchestration.deep_agents_strategy import build_allowlist_middleware
-from app.orchestration.loop import OrchestrationLoop
+from app.orchestration.loop import OrchestrationError, OrchestrationLoop
 from app.state.repository import InMemoryStateRepository
 from opentelemetry import propagate, trace
 from opentelemetry.sdk.trace import TracerProvider
@@ -215,3 +216,50 @@ def test_manual_run_span_attributes() -> None:
     assert span.attributes["agent.strategy"] == "manual"
     assert span.attributes["agent.framework"] == "bespoke"
     assert span.attributes["agent.step_count"] == len(result.steps)
+
+
+def test_deep_agents_failed_run_sets_terminal_span_attributes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    error = openai.APIStatusError(
+        "boom",
+        response=httpx.Response(
+            503, request=httpx.Request("POST", "http://litellm.test")
+        ),
+        body=None,
+    )
+    loop, repo, _ = _setup(monkeypatch, [error])
+    loop._tracer, exporter = _tracer()
+    submission = loop.prepare_run("q")
+    with pytest.raises(OrchestrationError):
+        loop.execute(submission)
+    span = _run_span(exporter)
+    assert span.attributes["ai.status"] == "failed"
+    assert span.attributes["agent.step_count"] == len(
+        repo.list_run_steps(submission.run_id)
+    )
+    assert span.attributes["agent.strategy"] == "deep_agents"
+
+
+def test_manual_failed_run_sets_terminal_span_attributes() -> None:
+    class NoToolCallLLMClient(LocalFakeLLMClient):
+        def propose_taxi_query(self, prompt: str, schema: Any) -> Any:
+            raise LLMProviderError(retryable=False, code="no_tool_call")
+
+    tracer, exporter = _tracer()
+    repo = InMemoryStateRepository()
+    loop = OrchestrationLoop(
+        llm_client=NoToolCallLLMClient(),
+        mcp_client=FakeMCPClient(),  # type: ignore[arg-type]
+        state_repository=repo,
+        event_publisher=Publisher(),
+        tracer=tracer,
+    )
+    submission = loop.prepare_run("q")
+    with pytest.raises(ValueError):
+        loop.execute(submission)
+    span = _run_span(exporter)
+    assert span.attributes["ai.status"] == "failed"
+    assert span.attributes["agent.step_count"] == len(
+        repo.list_run_steps(submission.run_id)
+    )
