@@ -220,3 +220,30 @@ def test_two_sink_instances_do_not_duplicate(tmp_path: Path) -> None:
     assert b.write(_model("c2")) is True
     assert a.write(_model("c2")) is False
     assert len(_read(tmp_path / "t1" / "captures.jsonl")) == 2
+
+
+def test_deep_agents_final_call_records_the_answer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every Deep Agents model call is labelled planner; the final one still carries the
+    answer (graders read it from capture), the tool-proposing one does not."""
+    from tests.test_deep_agents_run import ARGS, _ai, _setup, _tool
+
+    loop, _, _ = _setup(
+        monkeypatch, [_tool("aggregate_taxi_data", ARGS), _ai("There were 2 trips.")]
+    )
+    loop._capture = CaptureRecorder(
+        CaptureSettings(directory=tmp_path, include_content=True), tenant_id="t1"
+    )
+    result = loop.execute(loop.prepare_run("q"))
+    assert result.answer == "There were 2 trips."
+    records = [
+        r
+        for path in tmp_path.rglob("captures.jsonl")
+        for r in _read(path)
+        if r["record_type"] == "model_call"
+    ]
+    by_step = sorted(records, key=lambda r: r["step"])
+    assert [r["role"] for r in by_step] == ["planner", "answer"]
+    assert by_step[0]["answer"] is None
+    assert by_step[1]["answer"] == "There were 2 trips."

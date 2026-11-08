@@ -181,9 +181,15 @@ class CaptureRecorder:
             step_no = step.sequence if step else next_step
             if not step:
                 next_step += 1
-            role = call.get("role") or (
-                _ROLE_BY_STEP.get(step.step_type, "answer") if step else "answer"
-            )
+            # The step is authoritative for the final answer: a strategy that labels every
+            # model call "planner" (Deep Agents) must still record its answer on the call
+            # that produced it, or graders see an empty answer.
+            if step and step.step_type == "llm_final_answer":
+                role = "answer"
+            else:
+                role = call.get("role") or (
+                    _ROLE_BY_STEP.get(step.step_type, "answer") if step else "answer"
+                )
             is_answer = role == "answer"
             usage_known = call.get("usage_known") is not False
             cost_usd, cost_kind, pricing_version = _cost(call)
