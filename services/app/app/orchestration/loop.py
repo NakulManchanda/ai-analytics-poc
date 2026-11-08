@@ -272,6 +272,15 @@ class LLMCall:
         }
 
 
+# Root-span ``agent.framework`` per ``AGENT_STRATEGY`` (the strategy name itself is
+# ``agent.strategy``).
+_AGENT_FRAMEWORKS = {
+    "manual": "bespoke",
+    "crewai": "crewai",
+    "deep_agents": "deepagents",
+}
+
+
 class _TracedCalls(list[LLMCall]):
     """Call log that emits one OTEL span event per model call, so each call carries the
     prompt revision it actually rendered (a run-level attribute could not)."""
@@ -773,9 +782,13 @@ class OrchestrationLoop:
                     )
                 answer = result.answer
                 _safe_set_attribute(span, "ai.status", result.status)
+                _safe_set_attribute(span, "agent.step_count", len(result.steps))
                 if _trace_run_io_enabled() and result.answer:
                     _safe_set_attribute(span, "output.value", _clip(result.answer))
                 return result
+            except BaseException:
+                self._set_terminal_span_attributes(span, submission.run_id)
+                raise
             finally:
                 if self._capture is not None:
                     self._capture.capture_run(
@@ -789,6 +802,24 @@ class OrchestrationLoop:
                             else None
                         ),
                     )
+
+    def _set_terminal_span_attributes(self, span: Any, run_id: str) -> None:
+        """Failed runs still get ai.status and agent.step_count, read from durable state.
+
+        Fail-open: telemetry lookup problems never mask the original run error. If the
+        run never reached a terminal write, it is reported as failed with what was persisted.
+        """
+        status = "failed"
+        step_count = 0
+        try:
+            run = self._repo.get_run(run_id)
+            if run is not None and run.status != "in_progress":
+                status = run.status
+            step_count = len(self._repo.list_run_steps(run_id))
+        except Exception:
+            logger.warning("Failed to read terminal run state for span", exc_info=True)
+        _safe_set_attribute(span, "ai.status", status)
+        _safe_set_attribute(span, "agent.step_count", step_count)
 
     @contextlib.contextmanager
     def _run_span(self, submission: RunSubmission) -> Iterator[Any]:
@@ -808,6 +839,10 @@ class OrchestrationLoop:
                 # OpenInference key: Phoenix groups a conversation's traces into one session.
                 "session.id": submission.conversation_id,
                 "ai.turn_type": "text",
+                "agent.strategy": self._agent_strategy,
+                "agent.framework": _AGENT_FRAMEWORKS.get(
+                    self._agent_strategy, self._agent_strategy
+                ),
                 "gen_ai.request.model": self._configured_model_id(),
                 **(
                     {"ai.eval_run_id": submission.eval_run_id}

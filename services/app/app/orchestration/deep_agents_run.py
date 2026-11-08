@@ -909,9 +909,34 @@ class _RunRecorder(BaseCallbackHandler):  # type: ignore[misc,valid-type]
             self.llm.release_agent_call(hold)
 
     # -- tool calls ----------------------------------------------------------------
+    @staticmethod
+    def _plan_updated(inputs: Any, input_str: Any) -> None:
+        """``ai.plan.updated`` span event with todo COUNTS only (never the todo text)."""
+        try:
+            if inputs is None:
+                inputs = json.loads(input_str)
+            todos = inputs.get("todos") if isinstance(inputs, Mapping) else None
+            if not isinstance(todos, list):
+                return
+            statuses = [
+                t.get("status") if isinstance(t, Mapping) else None for t in todos
+            ]
+            otel_trace.get_current_span().add_event(
+                "ai.plan.updated",
+                {
+                    "todos_total": len(todos),
+                    "pending": statuses.count("pending"),
+                    "in_progress": statuses.count("in_progress"),
+                    "completed": statuses.count("completed"),
+                },
+            )
+        except Exception:  # observability never fails the run
+            logger.warning("plan_event_failed", exc_info=True)
+
     def on_tool_start(self, serialized, input_str, *, run_id, inputs=None, **kwargs):  # type: ignore[no-untyped-def]
         name = (serialized or {}).get("name") or kwargs.get("name")
         if name == PLANNING_TOOL_NAME:
+            self._plan_updated(inputs, input_str)
             return
         with self.lock:
             self._guard()
@@ -1129,6 +1154,11 @@ def execute_deep_agent_run(
         remaining_seconds=lambda: active_budgets.timeout_seconds
         - tracker.elapsed_seconds,
     )
+    # Trace health at run start: an invalid context means no exporter/tracer is wired (the
+    # proxy and MCP then receive no traceparent); recorded, never fatal.
+    span_context = otel_trace.get_current_span().get_span_context()
+    trace_valid = span_context.is_valid
+    trace_id = format(span_context.trace_id, "032x") if trace_valid else None
     recorder: _RunRecorder | None = None
     history = HistoryResult([], history_metadata())
     configured_model_id = ""
@@ -1178,6 +1208,11 @@ def execute_deep_agent_run(
             **({"grounding_report": grounding_report} if grounding_report else {}),
             "evidence": evidence(),
             **eval_meta,
+            "trace": {
+                "context_valid": trace_valid,
+                "trace_id": trace_id,
+                "propagation_failures": correlation.header_failures,
+            },
             **correlation.snapshot(
                 billed_calls=sum(1 for c in calls() if c.cost_kind == "billed"),
                 estimated_calls=sum(1 for c in calls() if c.cost_kind != "billed"),
@@ -1336,6 +1371,9 @@ def execute_deep_agent_run(
                 http_client=client,
                 timeout=active_budgets.timeout_seconds,
                 before_tool_call=correlation.check_abort,
+                on_compaction=lambda counts: otel_trace.get_current_span().add_event(
+                    "ai.context.compacted", counts
+                ),
             )
             return agent.invoke(
                 {"messages": initial_messages},
