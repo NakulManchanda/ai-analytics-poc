@@ -60,6 +60,17 @@ def add_parsers(sub) -> None:
     p = common(sub.add_parser("run-freeze", help="snapshot this run's captures"))
     p.add_argument("--capture-dir", type=Path)
     p = common(sub.add_parser("run-grade", help="per-conversation provisional reports"))
+    p = common(
+        sub.add_parser(
+            "run-reconcile",
+            help="reconcile frozen capture calls with LiteLLM /spend/logs rows (#226)",
+        )
+    )
+    p.add_argument(
+        "--spend-logs",
+        type=Path,
+        help="raw /spend/logs JSON (default: <run>/spend_logs.json)",
+    )
     p = common(sub.add_parser("run-compare", help="compare with a frozen baseline"))
     p.add_argument("--baseline-results", type=Path, required=True)
     p.add_argument("--focus", help="comma list of case ids; trailing * = prefix")
@@ -254,6 +265,37 @@ def run_grade(a) -> int:
     return 0
 
 
+def run_reconcile(a) -> int:
+    from evals.spend import reconcile
+    from evals.traces import load_records
+
+    run_id, run_dir = _checked(a)
+    snap = run_dir / "captures.snapshot.jsonl"
+    if not snap.is_file():
+        raise RunError(f"{snap} missing; run `evals run-freeze` first")
+    spend_path = a.spend_logs or run_dir / "spend_logs.json"
+    if not spend_path.is_file():
+        raise RunError(
+            f"{spend_path} missing; pull /spend/logs first (make eval-reconcile)"
+        )
+    rows = json.loads(spend_path.read_text())
+    if not isinstance(rows, list):
+        raise RunError(f"{spend_path}: expected a JSON list of spend rows")
+    result = reconcile(load_records(snap), rows, run_id)
+    (run_dir / "report").mkdir(exist_ok=True)
+    out = run_dir / "report" / "spend_reconciliation.json"
+    write_json_atomic(out, result.to_json())
+    print(
+        f"{result.rows_considered} tagged spend rows; capture ${result.capture_cost_usd:.6f}, "
+        f"matched ${result.matched_spend_usd:.6f}, orphan ${result.orphan_spend_usd:.6f} "
+        f"({len(result.orphans)} rows), reconciled ${result.reconciled_cost_usd:.6f}; "
+        f"{result.estimated_calls} calls without a billed capture cost -> {out}"
+    )
+    for violation in result.violations:
+        print(f"VIOLATION: {violation}", file=sys.stderr)
+    return 0 if result.ok else 4
+
+
 def run_compare_cmd(a) -> int:
     from evals.run_compare import DEFAULT_FOCUS, render_compare
 
@@ -346,6 +388,7 @@ HANDLERS = {
     "run-live": run_live_cmd,
     "run-freeze": run_freeze,
     "run-grade": run_grade,
+    "run-reconcile": run_reconcile,
     "run-compare": run_compare_cmd,
     "run-review": run_review_cmd,
     "run-review-add": run_review_add,
