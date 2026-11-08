@@ -394,47 +394,72 @@ def _is_str_list(value: object) -> bool:
     return isinstance(value, list) and all(isinstance(v, str) for v in value)
 
 
-def _parse_describe_taxi_dataset(arguments: object) -> dict[str, object] | None:
+def _reject(problems: list[str] | None, message: str) -> None:
+    """Record why arguments were rejected (when the caller wants to know) and return None."""
+    if problems is not None:
+        problems.append(message)
+    return None
+
+
+def _unexpected_arguments(
+    arguments: object, allowed: set[str], problems: list[str] | None
+) -> bool:
+    """True (after recording why) when ``arguments`` is not an object of allowed keys."""
+    if not isinstance(arguments, Mapping):
+        _reject(problems, "arguments must be a JSON object")
+        return True
+    extra = sorted(set(arguments) - allowed)
+    if extra:
+        _reject(
+            problems,
+            f"unexpected argument(s): {', '.join(map(str, extra))}; "
+            f"allowed: {', '.join(sorted(allowed))}",
+        )
+        return True
+    return False
+
+
+_LIMIT_PROBLEM = f"limit must be an integer between 1 and {MAX_ROWS}"
+
+
+def _parse_describe_taxi_dataset(
+    arguments: object, problems: list[str] | None = None
+) -> dict[str, object] | None:
     args = arguments if arguments is not None else {}
-    if not isinstance(args, Mapping) or set(args) - {"include_column_stats"}:
+    if _unexpected_arguments(args, {"include_column_stats"}, problems):
         return None
     include_column_stats = args.get("include_column_stats", False)
     if not isinstance(include_column_stats, bool):
-        return None
+        return _reject(problems, "include_column_stats must be true or false")
     return {"include_column_stats": include_column_stats}
 
 
-def _parse_list_taxi_dimension_values(arguments: object) -> dict[str, object] | None:
-    if not isinstance(arguments, Mapping) or set(arguments) - {
-        "dimension",
-        "search",
-        "limit",
-    }:
+def _parse_list_taxi_dimension_values(
+    arguments: object, problems: list[str] | None = None
+) -> dict[str, object] | None:
+    if _unexpected_arguments(arguments, {"dimension", "search", "limit"}, problems):
         return None
     dimension = arguments.get("dimension")
     search = arguments.get("search")
     limit = arguments.get("limit", 20)
     if not isinstance(dimension, str) or not dimension:
-        return None
+        return _reject(problems, "dimension is required and must be a non-empty string")
     if search is not None and not isinstance(search, str):
-        return None
+        return _reject(problems, "search must be a string")
     if (
         isinstance(limit, bool)
         or not isinstance(limit, int)
         or not 1 <= limit <= MAX_ROWS
     ):
-        return None
+        return _reject(problems, _LIMIT_PROBLEM)
     return {"dimension": dimension, "search": search, "limit": limit}
 
 
-def _parse_aggregate_taxi_data(arguments: object) -> dict[str, object] | None:
-    if not isinstance(arguments, Mapping) or set(arguments) - {
-        "dimensions",
-        "measures",
-        "filters",
-        "order_by",
-        "limit",
-    }:
+def _parse_aggregate_taxi_data(
+    arguments: object, problems: list[str] | None = None
+) -> dict[str, object] | None:
+    allowed = {"dimensions", "measures", "filters", "order_by", "limit"}
+    if _unexpected_arguments(arguments, allowed, problems):
         return None
     dimensions = arguments.get("dimensions")
     measures = arguments.get("measures")
@@ -442,19 +467,28 @@ def _parse_aggregate_taxi_data(arguments: object) -> dict[str, object] | None:
     order_by = arguments.get("order_by")
     limit = arguments.get("limit", 20)
     if not _is_str_list(dimensions) or not dimensions:
-        return None
+        return _reject(
+            problems,
+            "dimensions is required and must be a non-empty list of dimension names "
+            "(an empty list or a missing field is not accepted; group by at least one)",
+        )
     if not _is_str_list(measures) or not measures:
-        return None
+        return _reject(
+            problems,
+            "measures is required and must be a non-empty list of measure names",
+        )
     if filters is not None and not isinstance(filters, Mapping):
-        return None
+        return _reject(problems, "filters must be an object or omitted")
     if order_by is not None and not isinstance(order_by, Mapping):
-        return None
+        return _reject(
+            problems, "order_by must be an object with a key (and optional direction)"
+        )
     if (
         isinstance(limit, bool)
         or not isinstance(limit, int)
         or not 1 <= limit <= MAX_ROWS
     ):
-        return None
+        return _reject(problems, _LIMIT_PROBLEM)
     return {
         "dimensions": dimensions,
         "measures": measures,
@@ -464,15 +498,18 @@ def _parse_aggregate_taxi_data(arguments: object) -> dict[str, object] | None:
     }
 
 
-def _parse_compare_taxi_segments(arguments: object) -> dict[str, object] | None:
-    if not isinstance(arguments, Mapping) or set(arguments) - {
+def _parse_compare_taxi_segments(
+    arguments: object, problems: list[str] | None = None
+) -> dict[str, object] | None:
+    allowed = {
         "segment_dimension",
         "comparison_mode",
         "measures",
         "baseline_filters",
         "comparison_filters",
         "limit",
-    }:
+    }
+    if _unexpected_arguments(arguments, allowed, problems):
         return None
     segment_dimension = arguments.get("segment_dimension")
     comparison_mode = arguments.get("comparison_mode")
@@ -483,23 +520,29 @@ def _parse_compare_taxi_segments(arguments: object) -> dict[str, object] | None:
     if segment_dimension is not None and (
         not isinstance(segment_dimension, str) or not segment_dimension
     ):
-        return None
+        return _reject(problems, "segment_dimension must be a non-empty string")
     if comparison_mode is not None and (
         not isinstance(comparison_mode, str) or not comparison_mode
     ):
-        return None
+        return _reject(problems, "comparison_mode must be a non-empty string")
     if not _is_str_list(measures) or not measures:
-        return None
+        return _reject(
+            problems,
+            "measures is required and must be a non-empty list of measure names",
+        )
     if not isinstance(baseline_filters, Mapping) or not isinstance(
         comparison_filters, Mapping
     ):
-        return None
+        return _reject(
+            problems,
+            "baseline_filters and comparison_filters are both required and must be objects",
+        )
     if (
         isinstance(limit, bool)
         or not isinstance(limit, int)
         or not 1 <= limit <= MAX_ROWS
     ):
-        return None
+        return _reject(problems, _LIMIT_PROBLEM)
     parsed: dict[str, object] = {
         "measures": measures,
         "baseline_filters": dict(baseline_filters),
@@ -515,7 +558,7 @@ def _parse_compare_taxi_segments(arguments: object) -> dict[str, object] | None:
     return parsed
 
 
-_EXTENDED_TOOL_PARSERS: dict[str, Callable[[object], dict[str, object] | None]] = {
+_EXTENDED_TOOL_PARSERS: dict[str, Callable[..., dict[str, object] | None]] = {
     "describe_taxi_dataset": _parse_describe_taxi_dataset,
     "list_taxi_dimension_values": _parse_list_taxi_dimension_values,
     "aggregate_taxi_data": _parse_aggregate_taxi_data,

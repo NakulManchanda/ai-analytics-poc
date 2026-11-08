@@ -53,7 +53,10 @@ def render_compare(
     new = merge_failed(graded, results)
     old = load_baseline(baseline)
     keys = sorted(set(new) | set(old))
-    L = [f"# {run_dir.name} vs frozen baseline (provisional grader v2)", ""]
+    L = [
+        f"# {run_dir.name} vs frozen baseline (provisional grader v3: omitted default arguments match)",
+        "",
+    ]
     L.append(
         f"turns: new {len(new)}, frozen {len(old)}; capture cost of graded turns: ${cost:.6f}"
     )

@@ -31,6 +31,7 @@ services:
       AGENT_MAX_LLM_CALLS: "${AGENT_MAX_LLM_CALLS:-}"
       AGENT_MAX_ITERATIONS: "${AGENT_MAX_ITERATIONS:-}"
       AGENT_TIMEOUT_SECONDS: "${AGENT_TIMEOUT_SECONDS:-}"
+      AGENT_PLANNING: "${AGENT_PLANNING:-}"
       METRICS_FILE: /app/metrics/runs.jsonl
     volumes:
       - ./metrics:/app/metrics

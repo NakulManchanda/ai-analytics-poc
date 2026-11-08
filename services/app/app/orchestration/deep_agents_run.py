@@ -39,9 +39,9 @@ from app.metrics import emit_run_metrics
 from app.model_policy.pricing import PricingTable, default_pricing
 from app.orchestration.budgets import BudgetExceededError, BudgetTracker
 from app.orchestration.deep_agents_strategy import (
-    MCP_TOOL_NAMES,
     PLANNING_TOOL_NAME,
     build_deep_agent,
+    offered_tool_names,
 )
 from app.orchestration.loop import (
     BUDGET_BASIS_CONSERVATIVE,
@@ -1204,7 +1204,7 @@ def execute_deep_agent_run(
             "planner_outcome": "tool_call" if used_tool else "answer",
             "selected_tool": rec.last_tool_name if rec else None,
             "rejected_outcome": None,
-            "offered_tools": [*MCP_TOOL_NAMES, PLANNING_TOOL_NAME],
+            "offered_tools": list(offered_tool_names()),
             "agent_strategy": STRATEGY_NAME,
         }
 

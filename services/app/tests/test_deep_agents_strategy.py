@@ -17,6 +17,8 @@ from app.orchestration.deep_agents_strategy import (
     build_deep_agent,
     build_mcp_tools,
     clear_tool_definition_cache,
+    planning_enabled,
+    slim_schema,
 )
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
@@ -139,13 +141,36 @@ def _tool_messages(out: Any) -> list[ToolMessage]:
     return [m for m in out["messages"] if isinstance(m, ToolMessage)]
 
 
-def test_model_sees_only_allowlisted_tools() -> None:
+def test_model_sees_only_allowlisted_tools_planning_is_opt_in(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("AGENT_PLANNING", raising=False)
     _, model = _run([AIMessage(content="done")], FakeMCP())
-
     assert model.bound
     for names in model.bound:
+        assert set(names) == set(MCP_TOOL_NAMES)  # write_todos costs ~1k tokens a call
+    assert PLANNING_TOOL_NAME in ALLOWED_TOOL_NAMES  # policy still allows it
+
+    monkeypatch.setenv("AGENT_PLANNING", "1")
+    _, planning_model = _run([AIMessage(content="done")], FakeMCP())
+    for names in planning_model.bound:
         assert set(names) == {*MCP_TOOL_NAMES, PLANNING_TOOL_NAME}
-    assert PLANNING_TOOL_NAME in ALLOWED_TOOL_NAMES
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("1", True),
+        ("true", True),
+        (" On ", True),
+        ("", False),
+        ("0", False),
+        ("no", False),
+    ],
+)
+def test_planning_flag_parsing(value: str, expected: bool) -> None:
+    assert planning_enabled({"AGENT_PLANNING": value}) is expected
+    assert planning_enabled({}) is False
 
 
 def test_tools_match_supplied_mcp_definitions() -> None:
@@ -155,7 +180,11 @@ def test_tools_match_supplied_mcp_definitions() -> None:
     assert [t.name for t in tools] == list(MCP_TOOL_NAMES)
     for tool in tools:
         assert tool.description == by_name[tool.name]["description"]
-        assert tool.args_schema == by_name[tool.name]["inputSchema"]
+        slim = tool.args_schema
+        original = by_name[tool.name]["inputSchema"]
+        # Slimming keeps every property and every required field; only noise is removed.
+        assert set(slim["properties"]) == set(original["properties"])
+        assert slim.get("required") == original.get("required")
 
 
 def test_definitions_are_fetched_once_per_process() -> None:
@@ -242,8 +271,102 @@ def test_invalid_args_return_tool_error_not_exception() -> None:
     )
 
     payload = json.loads(_tool_messages(out)[0].content)
-    assert payload == {"error": "invalid_arguments", "tool_name": "aggregate_taxi_data"}
+    assert payload["error"] == "invalid_arguments"
+    assert payload["tool_name"] == "aggregate_taxi_data"
+    # The model must be told what to change, or it repeats the identical call.
+    assert "dimensions" in payload["message"] and "non-empty list" in payload["message"]
     assert mcp.calls == []
+
+
+@pytest.mark.parametrize(
+    ("tool", "arguments", "expected"),
+    [
+        ("aggregate_taxi_data", {"measures": ["trip_count"]}, "dimensions is required"),
+        (
+            "aggregate_taxi_data",
+            {"dimensions": [], "measures": ["trip_count"]},
+            "dimensions is required",
+        ),
+        ("aggregate_taxi_data", {"dimensions": ["zone"]}, "measures is required"),
+        (
+            "aggregate_taxi_data",
+            {"dimensions": ["zone"], "measures": ["x"], "bogus": 1},
+            "unexpected argument(s): bogus",
+        ),
+        (
+            "aggregate_taxi_data",
+            {"dimensions": ["z"], "measures": ["x"], "limit": 0},
+            "limit must be an integer between 1 and",
+        ),
+        (
+            "compare_taxi_segments",
+            {"measures": ["x"], "baseline_filters": {}},
+            "baseline_filters and comparison_filters are both required",
+        ),
+        ("list_taxi_dimension_values", {}, "dimension is required"),
+        ("describe_taxi_dataset", {"include_column_stats": "yes"}, "true or false"),
+    ],
+)
+def test_invalid_arguments_say_why(tool: str, arguments: dict, expected: str) -> None:
+    mcp = FakeMCP()
+    out, _ = _run([_call(tool, arguments), AIMessage(content="x")], mcp)
+    message = json.loads(_tool_messages(out)[0].content)["message"]
+    assert expected in message
+    assert mcp.calls == []
+
+
+def test_slim_schema_keeps_constraints_and_drops_noise() -> None:
+    schema = {
+        "type": "object",
+        "required": ["measures"],
+        "properties": {
+            "zone": {
+                "anyOf": [{"type": "string"}, {"type": "null"}],
+                "default": None,
+                "description": "Exact zone name.",
+            },
+            "valid_only": {"type": "boolean", "default": True},
+            "filters": {
+                "anyOf": [
+                    {
+                        "type": "object",
+                        "description": "Optional filters.",
+                        "properties": {
+                            "code": {
+                                "anyOf": [{"type": "integer"}, {"type": "null"}],
+                                "default": None,
+                                "description": "1=a",
+                            }
+                        },
+                    },
+                    {"type": "null"},
+                ],
+                "default": None,
+            },
+            "either": {"anyOf": [{"type": "string"}, {"type": "integer"}]},
+        },
+    }
+    slim = slim_schema(schema)
+    props = slim["properties"]
+    assert props["zone"] == {"type": "string", "description": "Exact zone name."}
+    assert props["valid_only"] == {"type": "boolean", "default": True}
+    assert props["filters"]["type"] == "object"
+    assert props["filters"]["properties"]["code"] == {
+        "type": "integer",
+        "description": "1=a",
+    }
+    assert "default" not in props["filters"]
+    assert props["either"] == {"anyOf": [{"type": "string"}, {"type": "integer"}]}
+    assert slim["required"] == ["measures"]
+    assert schema["properties"]["zone"]["default"] is None  # input is not mutated
+
+
+def test_non_empty_arrays_are_hinted_in_the_tool_schema() -> None:
+    tools = {t.name: t for t in build_mcp_tools(FakeMCP(), lambda: MCP_DEFINITIONS)}  # type: ignore[arg-type]
+    props = tools["aggregate_taxi_data"].args_schema["properties"]
+    for field in ("dimensions", "measures"):
+        if props[field].get("type") == "array":
+            assert props[field]["minItems"] == 1
 
 
 def test_valid_call_reaches_mcp_client() -> None:

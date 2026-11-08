@@ -87,6 +87,7 @@ def test_plan_updated_event_has_counts_only(monkeypatch: pytest.MonkeyPatch) -> 
         {"content": "SECRET-TODO-C", "status": "pending"},
         {"content": "SECRET-TODO-D", "status": "pending"},
     ]
+    monkeypatch.setenv("AGENT_PLANNING", "1")  # write_todos is opt-in
     loop, _, _ = _setup(
         monkeypatch, [_tool("write_todos", {"todos": todos}), _ai("done")]
     )

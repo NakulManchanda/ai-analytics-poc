@@ -73,9 +73,19 @@ def _run_tool(
     """Validate, call the MCP tool, and return a JSON string. Never raises for tool
     failures: the model gets a bounded error object it can react to. ``before_call`` is a
     cooperative abort check that runs immediately before the MCP client is used."""
-    parsed = _PARSERS[name](dict(arguments))
+    problems: list[str] = []
+    parsed = _PARSERS[name](dict(arguments), problems)
     if parsed is None:
-        return json.dumps({"error": "invalid_arguments", "tool_name": name})
+        # Say what is wrong: an opaque error made the model repeat the identical call
+        # until the repeated-call guard ended the run.
+        return json.dumps(
+            {
+                "error": "invalid_arguments",
+                "tool_name": name,
+                "message": "; ".join(problems)[:400]
+                or "arguments do not match the tool schema",
+            }
+        )
     if before_call is not None:
         before_call()  # raises when the run already reached a terminal state
     try:
@@ -146,6 +156,61 @@ def _is_unknown_tool_error(err: MCPToolError) -> bool:
     return err.reason == "unknown_tool" or any(h in text for h in _UNKNOWN_TOOL_HINTS)
 
 
+# Array arguments the parsers require to be non-empty (the published schemas allow []).
+_NON_EMPTY_ARRAYS: frozenset[tuple[str, str]] = frozenset(
+    {
+        ("aggregate_taxi_data", "dimensions"),
+        ("aggregate_taxi_data", "measures"),
+        ("compare_taxi_segments", "measures"),
+    }
+)
+_NULL_SCHEMA = {"type": "null"}
+
+
+def slim_schema(node: Any) -> Any:
+    """Drop JSON-schema noise the model gains nothing from, keeping every constraint and
+    description: ``anyOf [X, null]`` becomes ``X`` (the parsers accept an omitted field
+    and ``None`` alike) and ``default: null`` is removed. The tool schemas are re-sent
+    on every model call, so this is a direct per-call token saving."""
+    if isinstance(node, list):
+        return [slim_schema(n) for n in node]
+    if not isinstance(node, dict):
+        return node
+    node = dict(node)
+    any_of = node.get("anyOf")
+    if isinstance(any_of, list):
+        rest = [o for o in any_of if o != _NULL_SCHEMA]
+        if len(rest) == 1 and len(rest) < len(any_of):
+            del node["anyOf"]
+            node = {**rest[0], **node}
+    if "default" in node and node["default"] is None:
+        del node["default"]
+    return {k: slim_schema(v) for k, v in node.items()}
+
+
+def _tool_schema(name: str, input_schema: dict[str, Any]) -> dict[str, Any]:
+    schema = slim_schema(input_schema)
+    properties = schema.get("properties", {})
+    for tool, field in _NON_EMPTY_ARRAYS:
+        prop = properties.get(field)
+        if tool == name and isinstance(prop, dict) and prop.get("type") == "array":
+            prop["minItems"] = 1
+    return schema
+
+
+def planning_enabled(env: Mapping[str, str] | None = None) -> bool:
+    """``write_todos`` planning is opt-in (``AGENT_PLANNING=1``): it was used in 1 of 43
+    golden turns while its definition and prompt section cost about 1k input tokens on
+    every model call."""
+    value = (os.environ if env is None else env).get("AGENT_PLANNING", "")
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def offered_tool_names(planning: bool | None = None) -> tuple[str, ...]:
+    planning = planning_enabled() if planning is None else planning
+    return (*MCP_TOOL_NAMES, PLANNING_TOOL_NAME) if planning else MCP_TOOL_NAMES
+
+
 def build_mcp_tools(
     client: DatasetProfileMCPClient,
     list_tools: Callable[[], ToolDefinitions] | None = None,
@@ -172,7 +237,7 @@ def build_mcp_tools(
             name=name,
             description=definition.get("description", ""),
             func=call,
-            args_schema=definition["inputSchema"],
+            args_schema=_tool_schema(name, definition["inputSchema"]),
         )
 
     return [make(name) for name in MCP_TOOL_NAMES]
@@ -258,6 +323,7 @@ def build_deep_agent(
     list_tools: Callable[[], ToolDefinitions] | None = None,
     before_tool_call: Callable[[], None] | None = None,
     on_compaction: Callable[[dict[str, int]], None] | None = None,
+    planning: bool | None = None,
 ) -> Any:
     """Return a compiled Deep Agent. ``chat_model`` is a test seam; production passes
     the LiteLLM proxy coordinates instead."""
@@ -283,11 +349,15 @@ def build_deep_agent(
         max_retries=0,
         temperature=0.0,
     )
+    use_planning = planning_enabled() if planning is None else planning
     return create_deep_agent(
         model=llm,
         tools=build_mcp_tools(client, list_tools, before_tool_call),
         system_prompt=build_system_prompt(),
-        middleware=[TodoListMiddleware(), build_allowlist_middleware(on_compaction)],
+        middleware=[
+            *([TodoListMiddleware()] if use_planning else []),
+            build_allowlist_middleware(on_compaction),
+        ],
         subagents=[],
         backend=StateBackend(),
     )

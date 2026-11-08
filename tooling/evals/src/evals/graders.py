@@ -73,16 +73,45 @@ def fabricated_numbers(answer: str) -> list[float]:
     return bad
 
 
+# Arguments whose omission means the same as passing the default (the MCP tool schemas and
+# the app parsers apply these). Subset matching treats an omitted default-valued argument as
+# present, so an agent that leaves out ``include_column_stats: false`` or the default
+# ``limit`` is not marked wrong. Values come from the published schemas; ``exact`` is strict.
+TOOL_ARG_DEFAULTS: dict[str, dict[str, object]] = {
+    "describe_taxi_dataset": {"include_column_stats": False},
+    "list_taxi_dimension_values": {"limit": 20, "search": None},
+    "aggregate_taxi_data": {"limit": 20, "filters": None, "order_by": None},
+    "compare_taxi_segments": {"limit": 20},
+}
+_NESTED_ARG_DEFAULTS: dict[tuple[str, ...], object] = {
+    ("order_by", "direction"): "desc"
+}
+_NO_DEFAULT = object()
+
+
 def args_match(expected: ExpectedTool, actual: dict[str, object]) -> bool:
     exact = expected.match == "exact"
+    top_defaults = TOOL_ARG_DEFAULTS.get(expected.name, {})
 
-    def eq(a: object, b: object) -> bool:
+    def default_for(path: tuple[str, ...]) -> object:
+        if len(path) == 1:
+            return top_defaults.get(path[0], _NO_DEFAULT)
+        return _NESTED_ARG_DEFAULTS.get(path, _NO_DEFAULT)
+
+    def eq(a: object, b: object, path: tuple[str, ...] = ()) -> bool:
         if isinstance(a, list) and isinstance(b, list):
             return sorted(map(str, a)) == sorted(map(str, b))
         if isinstance(a, dict) and isinstance(b, dict):
             if exact and a.keys() != b.keys():
                 return False
-            return all(k in b and eq(v, b[k]) for k, v in a.items())
+            return all(
+                (
+                    eq(v, b[k], (*path, str(k)))
+                    if k in b
+                    else (not exact and default_for((*path, str(k))) == v)
+                )
+                for k, v in a.items()
+            )
         return a == b
 
     return eq(expected.arguments, actual)

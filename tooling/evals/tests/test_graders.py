@@ -54,6 +54,48 @@ def test_args_subset_ignores_extras_and_list_order():
     )
 
 
+def test_omitted_default_arguments_match_but_other_values_do_not():
+    describe = ExpectedTool(
+        name="describe_taxi_dataset", arguments={"include_column_stats": False}
+    )
+    assert args_match(describe, {})  # omitting the default is the same call
+    assert args_match(describe, {"include_column_stats": False})
+    assert not args_match(describe, {"include_column_stats": True})
+    wants_stats = ExpectedTool(
+        name="describe_taxi_dataset", arguments={"include_column_stats": True}
+    )
+    assert not args_match(wants_stats, {})  # a non-default expectation must be given
+    agg = ExpectedTool(
+        name="aggregate_taxi_data",
+        arguments={
+            "dimensions": ["pickup_zone"],
+            "limit": 20,
+            "order_by": {"key": "trip_count", "direction": "desc"},
+        },
+    )
+    assert args_match(
+        agg, {"dimensions": ["pickup_zone"], "order_by": {"key": "trip_count"}}
+    )
+    assert not args_match(
+        agg,
+        {
+            "dimensions": ["pickup_zone"],
+            "limit": 5,
+            "order_by": {"key": "trip_count", "direction": "asc"},
+        },
+    )
+    # A tool without a known default stays strict, and exact matching ignores defaults.
+    assert not args_match(ExpectedTool(name="other", arguments={"limit": 20}), {})
+    assert not args_match(
+        ExpectedTool(
+            name="describe_taxi_dataset",
+            arguments={"include_column_stats": False},
+            match="exact",
+        ),
+        {},
+    )
+
+
 def test_tool_score_partial_and_no_expected():
     exp = [ExpectedTool(name="a"), ExpectedTool(name="b")]
     assert tool_score(exp, [ToolUse("a", {}, "ok", "q", 1)]) == 0.5
