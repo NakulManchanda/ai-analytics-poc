@@ -33,7 +33,7 @@ def _span(
 
 def _good() -> list[dict[str, Any]]:
     return [
-        _span("ai.run", "a", None, ROOT_ATTRS),
+        _span("ai.run", "a", None, dict(ROOT_ATTRS)),
         _span("litellm_proxy_request", "b", "a"),
         _span("litellm_request", "c", "b"),
         _span("mcp.request", "d", "a"),
@@ -42,8 +42,11 @@ def _good() -> list[dict[str, Any]]:
     ]
 
 
-def _rec(kind: str, call_id: str, trace_id: str | None = "t1") -> TraceRecord:
+def _rec(
+    kind: str, call_id: str, trace_id: str | None = "t1", status: str | None = None
+) -> TraceRecord:
     return TraceRecord(
+        status=status or ("completed" if kind == "tool_call" else None),
         record_type=kind,  # type: ignore[arg-type]
         run_id="run_1",
         turn_id="t",
@@ -135,7 +138,7 @@ def test_missing_root_attributes_and_wrong_run_id() -> None:
 def test_two_roots_fail() -> None:
     assert any(
         "exactly one ai.run" in p
-        for p in _problems(_good() + [_span("ai.run", "z", None, ROOT_ATTRS)])
+        for p in _problems(_good() + [_span("ai.run", "z", None, dict(ROOT_ATTRS))])
     )
 
 
@@ -150,8 +153,19 @@ def test_missing_litellm_or_mcp_spans_fail_against_capture_counts() -> None:
         "0 litellm_proxy_request spans for 1 capture model calls" in p for p in problems
     )
     assert any(
-        "0 mcp.tool.execute spans for 1 capture tool calls" in p for p in problems
+        "0 mcp.tool.execute spans for 1 completed capture tool calls" in p
+        for p in problems
     )
+
+
+def test_failed_tool_call_needs_no_execute_span_but_completed_does() -> None:
+    no_exec = [
+        s for s in _good() if s["name"] not in ("mcp.tool.execute", "duckdb.query")
+    ]
+    failed = [_rec("model_call", "m1"), _rec("tool_call", "k1", status="failed")]
+    assert check_traces(failed, lambda _t: no_exec).ok
+    completed = [_rec("model_call", "m1"), _rec("tool_call", "k1")]
+    assert not check_traces(completed, lambda _t: no_exec).ok
 
 
 def test_no_runs_is_not_ok() -> None:

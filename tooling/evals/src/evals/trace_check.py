@@ -45,7 +45,7 @@ class RunTraceResult:
     run_id: str
     trace_id: str | None
     model_calls: int
-    tool_calls: int
+    tool_calls: int  # completed capture tool calls (failed ones may never execute)
     spans: int = 0
     llm_spans: int = 0
     tool_spans: int = 0
@@ -134,7 +134,7 @@ def check_run(result: RunTraceResult, spans: list[dict[str, Any]]) -> None:
         )
     if result.tool_spans < result.tool_calls:
         result.problems.append(
-            f"{result.tool_spans} {TOOL_SPAN} spans for {result.tool_calls} capture tool calls"
+            f"{result.tool_spans} {TOOL_SPAN} spans for {result.tool_calls} completed capture tool calls"
         )
 
 
@@ -151,7 +151,10 @@ def expected_runs(records: list[TraceRecord]) -> list[RunTraceResult]:
         if rec.record_type == "model_call":
             run.model_calls += 1
         else:
-            run.tool_calls += 1
+            # A failed call may be rejected before the MCP tool runs and emit no execute
+            # span; a completed call always has one (verified on 43 real runs), so only
+            # completed calls set the minimum.
+            run.tool_calls += rec.status == "completed"
     for run_id, ids in trace_ids.items():
         if len(ids) > 1:
             runs[run_id].problems.append(
