@@ -472,32 +472,42 @@ eval-review-report: ## Human-review report: coverage, grader vs human disagreeme
 	@$(EVAL) run-review-report $(EVAL_RUN_ARG) --allow-incomplete
 
 # Prints the commands to pull main, clear this repo's Docker images and restart the stack. Pure echo.
-next-5-commands: ## Print the commands (with startup options) to pull main, clear this repo's images, restart, and try the latest features
-	@echo "Startup: Docker running; AWS credentials valid for the profile (aws sts get-caller-identity --profile <profile>); Bedrock access for step 8."
-	@echo "Scope: only the compose project ai_app_poc and this repo's images (including stale ones from merged worktrees). Other projects' containers (for example jobai-*) are not touched. Named volumes are kept (Phoenix traces, LiteLLM DB); wipe traces with: make phoenix-purge"
-	@echo "Options: AWS_PROFILE=<profile> (default 'default') | WEB_PORT (3000) | LITELLM_PORT (14000) | PHOENIX_PORT (16006) | LITELLM_OTEL=1 (routes traces through the Collector; JAEGER=1 adds Jaeger and forces run-I/O span text off)"
-	@echo ""
-	@echo "1. Latest main:"
-	@echo "   git checkout main && git pull --rebase origin main && git log --oneline -1"
-	@echo "2. Stop this project's stack (containers and network; volumes kept):"
-	@echo "   docker compose -p ai_app_poc down --remove-orphans"
-	@echo "3. Remove this repo's built images, including stale worktree ones:"
-	@echo "   docker images --format '{{.Repository}}:{{.Tag}}' | grep -E '^(ai_app_poc|[0-9]+-[a-z0-9-]+)-(app|web|worker|mcp):' | xargs docker rmi"
-	@echo "4. Clear the build cache so the rebuild is clean:"
-	@echo "   docker builder prune -f"
-	@echo "5. Optional: also drop the pulled third-party images (about 2.6 GB re-download; leave redis, another project uses it):"
-	@echo "   docker rmi ghcr.io/berriai/litellm:v1.106.0 arizephoenix/phoenix:version-20.26.1 postgres:16-alpine"
-	@echo "   (docker image prune -a would clear every project's unused images: not recommended here)"
-	@echo "6. Rebuild and start (use make eval-stack-up instead if you will run an eval):"
-	@echo "   make local-aws-litellm-compose AWS_PROFILE=<profile>"
-	@echo "7. Health check, no spend:"
-	@echo "   curl -sf http://localhost:3000/ -o /dev/null && echo web-ok && make litellm-ready"
-	@echo "8. One bounded paid call, then look at it in Phoenix (ai.run rows should now show Input/Output):"
-	@echo "   make litellm-smoke && make phoenix-ui"
-	@echo "9. Review a run with run ids and trace links (Phoenix filter by hand: attributes[\"ai\"][\"run_id\"] == \"run_...\"):"
-	@echo "   make eval-review-serve REVIEWER=<your name> EVAL_RUN=oct30-nova-pro-20261031T035237Z EVAL_BASELINE=metrics/evals/baselines/golden-2026-10-20.jsonl"
-	@echo "10. What is left to review, and stop everything when done:"
-	@echo "   make eval-review-report EVAL_RUN=oct30-nova-pro-20261031T035237Z && docker compose -p ai_app_poc down"
+next-5-commands: ## Print the commands (with startup options) to run a Deep Agents evaluation on main and check billing and traces
+	@echo 'Deep Agents evaluation on main (#241 #242 #243): restart, run, reconcile, check traces'
+	@echo 'Startup:'
+	@echo '- Needs: Docker running; AWS credentials valid for Bedrock (aws sts get-caller-identity --profile <profile>); real Bedrock spend on steps 2, 4, 5 and 10 (EVAL_CONFIRM=1).'
+	@echo '- The stack is already rebuilt on main with the strategy set. To restart it yourself:'
+	@echo '  AGENT_STRATEGY=deep_agents make eval-stack-up (app reads the strategy at boot). Back to manual: AGENT_STRATEGY=manual make eval-stack-up.'
+	@echo '- Options: LABEL (new each run) | WEB_PORT 3000 | LITELLM_PORT 14000 | PHOENIX_PORT 16006 | EVAL_RUN=<run_id> (default: metrics/evals/.current) | EVAL_BASELINE=metrics/evals/baselines/golden-2026-10-20.jsonl.'
+	@echo '- Keep the stack UP until step 8: eval-reconcile pulls /spend/logs (recent rows only) and eval-trace-check queries Phoenix.'
+	@echo '- Stop: docker compose -p ai_app_poc down (volumes kept; the unrelated jobai-* container is untouched).'
+	@echo ''
+	@echo 'Commands:'
+	@echo '1. Confirm the strategy and health (no spend):'
+	@echo '   docker exec ai_app_poc-app-1 printenv AGENT_STRATEGY (expect deep_agents) then curl -sf http://127.0.0.1:3000/ -o /dev/null && echo web-ok && make litellm-ready'
+	@echo '2. Two-turn smoke on one conversation (real Bedrock, 2 questions). Pass: the second answer keeps the first turn'\''s zones and metric.'
+	@echo '   W=http://127.0.0.1:3000; curl -s -X POST $$W/api/ask -H '\''content-type: application/json'\'' --data '\''{"prompt":"Which pickup zones have the most trips?"}'\'' → note conversation_id and run_id'
+	@echo '   curl -s -X POST $$W/api/ask -H '\''content-type: application/json'\'' --data '\''{"prompt":"Compare that with the second highest zone","conversation_id":"<conversation_id>"}'\'''
+	@echo '3. Look at that run in Phoenix (make phoenix-ui): filter name == "ai.run", attributes["agent"]["strategy"] == "deep_agents", attributes["ai"]["run_id"] == "<run_id>"; expect agent.framework, agent.step_count, LiteLLM and MCP spans under the same trace.'
+	@echo '4. Start the eval run, then the bounded smoke (one golden case):'
+	@echo '   make eval-start LABEL=deep-agents-1 && make eval-health && make eval-smoke EVAL_CONFIRM=1'
+	@echo '5. Full golden run (37 cases / 43 turns, real Bedrock):'
+	@echo '   make eval-run EVAL_CONFIRM=1'
+	@echo '   (all-in-one alternative: make eval-all LABEL=deep-agents-1 EVAL_CONFIRM=1 EVAL_BASELINE=metrics/evals/baselines/golden-2026-10-20.jsonl)'
+	@echo '6. Freeze and grade:'
+	@echo '   make eval-freeze && make eval-grade'
+	@echo '7. Compare with the manual baseline and see stack-lifetime spend:'
+	@echo '   make eval-compare EVAL_BASELINE=metrics/evals/baselines/golden-2026-10-20.jsonl && make eval-cost'
+	@echo '8. Billing and trace checks (stack still up). Exit 4 prints VIOLATION: / PROBLEM: lines; read report/spend_reconciliation.json (reconciled_cost_usd, orphans) and report/trace_check.json:'
+	@echo '   make eval-reconcile && make eval-trace-check'
+	@echo '9. Review and what is left to review:'
+	@echo '   make eval-review-serve REVIEWER=<your name> EVAL_BASELINE=metrics/evals/baselines/golden-2026-10-20.jsonl'
+	@echo '   make eval-review-report'
+	@echo '10. Optional cancelled-run check (does LiteLLM bill and tag a cancelled in-flight request?). Do this after step 5 and BEFORE step 6 so the cancelled run is tagged with the real eval run id but is not in the frozen capture:'
+	@echo '   R=$$(cat metrics/evals/.current); W=http://127.0.0.1:3000; id=$$(curl -s -X POST $$W/api/runs -H '\''content-type: application/json'\'' --data "{\"prompt\":\"Which pickup zones have the most trips?\",\"eval_run_id\":\"$$R\"}" | jq -r .run_id); sleep 1; curl -s -X POST $$W/api/runs/$$id/cancel'
+	@echo '   then, after steps 6 and 8, look at orphans in report/spend_reconciliation.json: an orphan row for that run id means the cancelled request was billed.'
+	@echo ''
+	@echo 'Read-only reminders: billing_complete=false or correlation_ok=false runs are not trustworthy for cost; runs before #241 lack agent.* span attributes.'
 
 eval-open: ## Open <run>/review.html in the browser
 	@r="$(or $(EVAL_RUN),$$(cat $(EVAL_ROOT)/.current 2>/dev/null))"; [ -f "$(EVAL_ROOT)/$$r/review.html" ] || { echo "no review.html for run '$$r' (make eval-review)"; exit 2; }; open "$(EVAL_ROOT)/$$r/review.html"
