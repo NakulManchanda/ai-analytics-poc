@@ -71,6 +71,14 @@ def add_parsers(sub) -> None:
         type=Path,
         help="raw /spend/logs JSON (default: <run>/spend_logs.json)",
     )
+    p = common(
+        sub.add_parser(
+            "run-trace-check",
+            help="check each run's Phoenix trace is complete and continuous (#226)",
+        )
+    )
+    p.add_argument("--phoenix-url", default="http://127.0.0.1:16006")
+    p.add_argument("--phoenix-project", default="default")
     p = common(sub.add_parser("run-compare", help="compare with a frozen baseline"))
     p.add_argument("--baseline-results", type=Path, required=True)
     p.add_argument("--focus", help="comma list of case ids; trailing * = prefix")
@@ -296,6 +304,33 @@ def run_reconcile(a) -> int:
     return 0 if result.ok else 4
 
 
+def run_trace_check(a) -> int:
+    from evals.trace_check import TraceCheckError, check_traces, phoenix_fetch
+    from evals.traces import load_records
+
+    _, run_dir = _checked(a)
+    snap = run_dir / "captures.snapshot.jsonl"
+    if not snap.is_file():
+        raise RunError(f"{snap} missing; run `evals run-freeze` first")
+    try:
+        result = check_traces(
+            load_records(snap), phoenix_fetch(a.phoenix_url, a.phoenix_project)
+        )
+    except TraceCheckError as err:
+        raise RunError(str(err)) from err
+    (run_dir / "report").mkdir(exist_ok=True)
+    out = run_dir / "report" / "trace_check.json"
+    write_json_atomic(out, result.to_json())
+    strategies = sorted({r.strategy or "?" for r in result.runs})
+    print(
+        f"{len(result.runs)} runs checked in Phoenix ({', '.join(strategies)}); "
+        f"{len(result.problems)} problems -> {out}"
+    )
+    for problem in result.to_json()["problems"]:
+        print(f"PROBLEM: {problem}", file=sys.stderr)
+    return 0 if result.ok else 4
+
+
 def run_compare_cmd(a) -> int:
     from evals.run_compare import DEFAULT_FOCUS, render_compare
 
@@ -389,6 +424,7 @@ HANDLERS = {
     "run-freeze": run_freeze,
     "run-grade": run_grade,
     "run-reconcile": run_reconcile,
+    "run-trace-check": run_trace_check,
     "run-compare": run_compare_cmd,
     "run-review": run_review_cmd,
     "run-review-add": run_review_add,
