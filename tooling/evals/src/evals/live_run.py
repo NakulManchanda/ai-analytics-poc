@@ -18,7 +18,10 @@ from urllib.parse import urlsplit
 from evals.runs import RunError, read_state, write_json_atomic
 
 CASES = Path("tooling/evals/datasets/golden/v1/cases.jsonl")
-TERMINAL = ("run.completed", "run.failed", "run.cancelled")
+# run.budget_exceeded is a durable terminal outcome (the run stopped on a configured limit);
+# without it a budget stop was recorded as an incomplete stream_error and blocked freeze/grade.
+TERMINAL = ("run.completed", "run.failed", "run.cancelled", "run.budget_exceeded")
+FAILED_TERMINALS = ("run.failed", "run.cancelled", "run.budget_exceeded")
 CONFIRMED_BY = (
     "operator-driver evals run-live: run-to-turn wiring only, not a golden review"
 )
@@ -265,11 +268,11 @@ def run_live(
                 (out / "events" / f"{run_ref}.txt").write_text(raw)
                 row.update(conversation_id=conv, run_id=run_ref, terminal=terminal)
             row["evidence"] = "complete" if terminal in TERMINAL else "incomplete"
-            # Turns after run.failed/run.cancelled still run on purpose (comparable turn counts, the
-            # follow-up is its own measurement); the marker lets analysis separate cascades.
+            # Turns after a failed/cancelled/budget-stopped turn still run on purpose (comparable turn
+            # counts, the follow-up is its own measurement); the marker lets analysis separate cascades.
             if prev_failed:
                 row["after_failed_turn"] = True
-            prev_failed = terminal in ("run.failed", "run.cancelled")
+            prev_failed = terminal in FAILED_TERMINALS
             row["wall_s"] = round(time.monotonic() - t0, 2)
             _append_row(results_p, row)
             rows.append(row)

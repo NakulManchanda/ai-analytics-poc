@@ -52,6 +52,10 @@ class Stub(BaseHTTPRequestHandler):
                 self.wfile.write(
                     b"event: run.started\ndata: {}\n\nevent: run.failed\ndata: {}\n\n"
                 )
+            elif mode == "budget":
+                self.wfile.write(
+                    b"event: run.started\ndata: {}\n\nevent: run.budget_exceeded\ndata: {}\n\n"
+                )
             elif mode == "text_only":  # terminal text inside data, never as an event
                 self.wfile.write(b'event: run.step\ndata: {"msg": "run.completed"}\n\n')
             elif mode == "stall":
@@ -243,6 +247,30 @@ def test_turns_after_a_failed_turn_still_run_and_are_marked(
         ("c-1", 1, True),
         ("c-2", 0, False),
         ("c-2", 1, True),
+    ]
+    assert json.loads((run / "state.json").read_text())["status"] == "complete"
+
+
+def test_budget_exceeded_is_valid_evidence_and_the_case_continues(
+    tmp_path, stub, cases, monkeypatch
+):
+    """A budget stop is a durable terminal outcome: complete evidence, follow-up still runs."""
+    MODE["events"] = "budget"
+    root = tmp_path / "root"
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(lr, "CASES", cases)
+    monkeypatch.setattr(lr.run_live, "__defaults__", (cases, False))
+    assert main(["run-start", "--root", str(root), "--label", "r"]) == 0
+    run = root / (root / ".current").read_text()
+    assert main(["run-live", "--root", str(root), "--web", stub, "--all"]) == 0
+    rows = rows_of(run / "results.jsonl")
+    assert len(rows) == 4 and {r["terminal"] for r in rows} == {"run.budget_exceeded"}
+    assert {r["evidence"] for r in rows} == {"complete"}
+    assert [r.get("after_failed_turn", False) for r in rows] == [
+        False,
+        True,
+        False,
+        True,
     ]
     assert json.loads((run / "state.json").read_text())["status"] == "complete"
 

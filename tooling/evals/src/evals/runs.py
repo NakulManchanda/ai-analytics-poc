@@ -177,9 +177,12 @@ def event_declined_outcome(events_file: Path) -> str | None:
 
 
 def failure_histogram(run_dir: Path, results: list[dict]) -> collections.Counter:
-    """Count ``failure_code`` over results rows whose terminal is ``run.failed``."""
+    """Count ``failure_code`` over ``run.failed`` rows; budget stops count as ``budget_exceeded``."""
     hist: collections.Counter = collections.Counter()
     for r in results:
+        if r.get("terminal") == "run.budget_exceeded":
+            hist["budget_exceeded"] += 1
+            continue
         if r.get("terminal") != "run.failed":
             continue
         run_id = r.get("run_id")

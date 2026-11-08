@@ -192,3 +192,12 @@ def test_compare_and_review_show_mcp_reasons(tmp_path):
         "MCP failure reasons: row_limit_exceeded: 1"
         in (run / "review.html").read_text()
     )
+
+
+def test_histogram_counts_budget_stops(tmp_path):
+    rows = [
+        {"run_id": "b1", "terminal": "run.budget_exceeded"},
+        {"run_id": "b2", "terminal": "run.budget_exceeded"},
+        {"run_id": "c1", "terminal": "run.completed"},
+    ]
+    assert failure_histogram(tmp_path, rows) == {"budget_exceeded": 2}
