@@ -1,7 +1,12 @@
 from __future__ import annotations
 
+import logging
+import os
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass, field
+
+logger = logging.getLogger(__name__)
 
 
 class BudgetExceededError(Exception):
@@ -25,6 +30,41 @@ class ExecutionBudgets:
     max_output_tokens: int = 4_000
     max_estimated_cost_usd: float = 0.50
     max_tool_result_bytes: int = 32_768  # 32 KiB
+
+    @classmethod
+    def from_env(cls, env: Mapping[str, str] | None = None) -> ExecutionBudgets:
+        """Defaults, with the ``AGENT_*`` limits in ``_ENV_OVERRIDES`` applied.
+
+        A blank or unset variable keeps the default. A value that is not a positive number
+        raises ``ValueError`` naming the variable, so a mistyped override fails at boot
+        instead of silently running under different limits.
+        """
+        env = os.environ if env is None else env
+        overrides: dict[str, int | float] = {}
+        for var, (name, kind) in _ENV_OVERRIDES.items():
+            raw = (env.get(var) or "").strip()
+            if not raw:
+                continue
+            try:
+                value = kind(raw)
+            except ValueError:
+                raise ValueError(f"{var} must be a number, got {raw!r}") from None
+            if not value > 0:
+                raise ValueError(f"{var} must be greater than 0, got {raw!r}")
+            overrides[name] = value
+        if overrides:
+            logger.info("Execution budget overrides from environment: %s", overrides)
+        return cls(**overrides)  # type: ignore[arg-type]
+
+
+# Environment variable -> (ExecutionBudgets field, parser). Cost and output caps stay fixed.
+_ENV_OVERRIDES: dict[str, tuple[str, type[int] | type[float]]] = {
+    "AGENT_MAX_ITERATIONS": ("max_iterations", int),
+    "AGENT_MAX_LLM_CALLS": ("max_llm_calls", int),
+    "AGENT_MAX_TOOL_CALLS": ("max_tool_calls", int),
+    "AGENT_TIMEOUT_SECONDS": ("timeout_seconds", float),
+    "AGENT_MAX_INPUT_TOKENS": ("max_input_tokens", int),
+}
 
 
 @dataclass

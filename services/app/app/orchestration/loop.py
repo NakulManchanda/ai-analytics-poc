@@ -626,7 +626,7 @@ class OrchestrationLoop:
         self._mcp_client = mcp_client
         self._mcp_client_factory = mcp_client_factory
         self._repo = state_repository or InMemoryStateRepository()
-        self._budgets = budgets or ExecutionBudgets()
+        self._budgets = budgets or ExecutionBudgets.from_env()
         self._publisher = event_publisher
         self._reducer = context_reducer or ContextReducer()
         self._voice_settings = voice_settings or VoiceSettings.from_environment()

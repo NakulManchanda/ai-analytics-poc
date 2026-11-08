@@ -26,6 +26,11 @@ services:
       REDIS_URL: redis://redis:6379/0
       LLM_PROVIDER: fake
       AGENT_STRATEGY: "${AGENT_STRATEGY:-manual}"
+      AGENT_MAX_INPUT_TOKENS: "${AGENT_MAX_INPUT_TOKENS:-}"
+      AGENT_MAX_TOOL_CALLS: "${AGENT_MAX_TOOL_CALLS:-}"
+      AGENT_MAX_LLM_CALLS: "${AGENT_MAX_LLM_CALLS:-}"
+      AGENT_MAX_ITERATIONS: "${AGENT_MAX_ITERATIONS:-}"
+      AGENT_TIMEOUT_SECONDS: "${AGENT_TIMEOUT_SECONDS:-}"
       METRICS_FILE: /app/metrics/runs.jsonl
     volumes:
       - ./metrics:/app/metrics
