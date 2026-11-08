@@ -74,13 +74,19 @@ class TraceCheck:
         }
 
 
-def _span_root(span: dict[str, Any], by_id: dict[str, dict[str, Any]]) -> str | None:
-    """Name of the top ancestor of ``span`` inside its trace (cycle-safe)."""
-    seen: set[str] = set()
-    while span.get("parent_id") in by_id and span["parent_id"] not in seen:
-        seen.add(span["parent_id"])
-        span = by_id[span["parent_id"]]
-    return span.get("name")
+def _top_ancestor(
+    span: dict[str, Any], by_id: dict[str, dict[str, Any]]
+) -> dict[str, Any] | None:
+    """The parentless span at the top of ``span``'s chain, or None if the chain is
+    broken: a parent that is not in the trace, or a cycle."""
+    seen = {span["context"]["span_id"]}
+    while span.get("parent_id"):
+        parent = span["parent_id"]
+        if parent not in by_id or parent in seen:
+            return None
+        seen.add(parent)
+        span = by_id[parent]
+    return span
 
 
 def check_run(result: RunTraceResult, spans: list[dict[str, Any]]) -> None:
@@ -94,11 +100,19 @@ def check_run(result: RunTraceResult, spans: list[dict[str, Any]]) -> None:
             f"expected exactly one {ROOT_SPAN} span, found {len(roots)}"
         )
     by_id = {s["context"]["span_id"]: s for s in spans}
-    detached = [s["name"] for s in spans if _span_root(s, by_id) != ROOT_SPAN]
+    detached = [
+        s["name"]
+        for s in spans
+        if (top := _top_ancestor(s, by_id)) is None or top.get("name") != ROOT_SPAN
+    ]
     if detached:
         result.problems.append(
-            f"{len(detached)} spans are not under {ROOT_SPAN} (broken parentage): "
-            + ", ".join(sorted(set(detached)))
+            f"{len(detached)} spans are not under {ROOT_SPAN} (missing parent, cycle "
+            "or another root): " + ", ".join(sorted(set(detached)))
+        )
+    if len(roots) == 1 and roots[0].get("parent_id"):
+        result.problems.append(
+            f"{ROOT_SPAN} has parent_id {roots[0]['parent_id']!r}; it must be the trace root"
         )
     if roots:
         attrs = roots[0].get("attributes") or {}
@@ -126,21 +140,31 @@ def check_run(result: RunTraceResult, spans: list[dict[str, Any]]) -> None:
 
 def expected_runs(records: list[TraceRecord]) -> list[RunTraceResult]:
     runs: dict[str, RunTraceResult] = {}
+    trace_ids: dict[str, set[str]] = {}
     for rec in records:
         run = runs.setdefault(
             rec.run_id, RunTraceResult(rec.run_id, None, model_calls=0, tool_calls=0)
         )
         run.trace_id = run.trace_id or rec.trace_id
+        if rec.trace_id:
+            trace_ids.setdefault(rec.run_id, set()).add(rec.trace_id)
         if rec.record_type == "model_call":
             run.model_calls += 1
         else:
             run.tool_calls += 1
+    for run_id, ids in trace_ids.items():
+        if len(ids) > 1:
+            runs[run_id].problems.append(
+                "capture records carry conflicting trace_ids: " + ", ".join(sorted(ids))
+            )
     return sorted(runs.values(), key=lambda r: r.run_id)
 
 
 def check_traces(records: list[TraceRecord], fetch: Fetch) -> TraceCheck:
     check = TraceCheck(runs=expected_runs(records))
     for run in check.runs:
+        if run.problems:  # conflicting capture trace_ids: nothing sound to query
+            continue
         if not run.trace_id:
             run.problems.append("capture records carry no trace_id")
             continue

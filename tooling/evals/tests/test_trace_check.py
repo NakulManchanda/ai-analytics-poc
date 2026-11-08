@@ -84,6 +84,45 @@ def test_detached_litellm_span_is_broken_parentage() -> None:
     assert any("not under ai.run" in p for p in _problems(spans))
 
 
+def test_ai_run_with_missing_parent_fails() -> None:
+    spans = _good()
+    spans[0]["parent_id"] = "not-in-trace"
+    problems = _problems(spans)
+    assert any("must be the trace root" in p for p in problems)
+    assert any("not under ai.run" in p for p in problems)
+
+
+def test_ai_run_with_a_parent_in_the_trace_fails() -> None:
+    spans = _good()
+    spans[0][
+        "parent_id"
+    ] = "d"  # ai.run under an mcp span, which itself is under ai.run
+    problems = _problems(spans)
+    assert any("must be the trace root" in p for p in problems)
+    assert any("not under ai.run" in p for p in problems)
+
+
+def test_parent_cycle_fails() -> None:
+    spans = _good()
+    spans[1]["parent_id"] = "c"  # b -> c -> b, cut off from ai.run
+    assert any("not under ai.run" in p for p in _problems(spans))
+
+
+def test_self_parent_fails() -> None:
+    spans = _good()
+    spans[3]["parent_id"] = "d"
+    assert any("not under ai.run" in p for p in _problems(spans))
+
+
+def test_conflicting_trace_ids_in_one_run_fail_without_querying() -> None:
+    def boom(_t: str) -> list[dict[str, Any]]:
+        raise AssertionError("must not query")
+
+    records = [_rec("model_call", "m1", "t1"), _rec("model_call", "m2", "t2")]
+    result = check_traces(records, boom)
+    assert any("conflicting trace_ids: t1, t2" in p for p in result.problems)
+
+
 def test_missing_root_attributes_and_wrong_run_id() -> None:
     spans = _good()
     del spans[0]["attributes"]["agent.strategy"]
