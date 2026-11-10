@@ -10,15 +10,18 @@ In the v5 eval run (43 golden turns, default budgets), every one of the 6 `tool.
 - The Deep Agents tool schema already carries `minItems: 1` (checked in the running app container), but the model ignores it.
 - The published description is one sentence and does not say how to ask for a single total, so `[]` looks like the natural encoding.
 
-## Change
-`services/app/app/orchestration/deep_agents_strategy.py` appends one short hint to the `aggregate_taxi_data` description (Deep Agents only; the MCP server, the parser and the manual path are untouched). It states that `[]` is rejected and that a single total is requested by grouping on the filtered dimension.
-
-## Deliberately not done
-Allowing an empty `dimensions` (a single total with no grouping) would change the MCP contract, the golden expectations and the manual path (#207). That is a product decision and is left open.
+## Change (revised: the contract changed, not just the description)
+The first commit on this branch only appended a hint to the description. After review the contract itself was changed so the natural call works:
+- `dataset_spike/query_spec.py::validate_dimensions`: an empty list is valid and means one overall total. The compiler already handled it (no `GROUP BY`, output columns = measures only); test added.
+- `app/validation/proposal.py::_check_name_list(allow_empty=True)` for `dimensions` (the manual path accepts it too), `loop.py::_parse_aggregate_taxi_data` accepts `[]` (the field is still required), and the Deep Agents schema no longer forces `minItems: 1` on `dimensions`.
+- The description hint now says: "dimensions [] returns one overall total; add names to group."
+- Grader v4: an expected dimension that the call omits still matches when an equality filter on that same name pins it (`dimensions: []` with `filters.pickup_borough = Manhattan` is the golden `["pickup_borough"]` call). Without this the golden set would grade the right call as incorrect. The compare header says `provisional grader v4`; older runs must be regraded before comparison.
+- Guard: if a Deep Agents final answer contains `<untrusted_tool_data` and no tool succeeded in the run, the answer is replaced by a fixed "no verified figures" message and a failed `grounding_check` step is recorded (the fabricated-block defect on `conv_2da5763fad494a8f` turn 3).
 
 ## Verification
-- `uv run pytest tests/test_deep_agents_strategy.py tests/test_deep_agents_run.py`: 56 passed, 1 skipped (live LiteLLM check); black and ruff clean.
-- Effect on behaviour is **not measured yet**. To measure: restart the stack with `AGENT_STRATEGY=deep_agents`, then `make eval-start LABEL=deep-agents-desc-v1 && make eval-health && make eval-run EVAL_CONFIRM=1` and the freeze/grade/compare steps; success is zero `invalid_arguments` events and fewer extra `aggregate_taxi_data` calls than v5 (6 failures, 61 tool calls). About $0.35.
+- `services/app` 636 passed, 1 skipped (live LiteLLM); `services/mcp` 57 passed; `services/dataset_spike` 57 passed; `tooling/evals` 204 passed, 2 skipped; black and ruff clean.
+- Behaviour is **not measured live yet**. Success means zero `invalid_arguments`, fewer `aggregate_taxi_data` calls than v5 (6 failures, 61 tool calls), and no new step-budget breaches.
+- Not changed, and why: replacing the custom allowlist with `excluded_tools` (works, measured, low gain); switching model, a `create_agent` baseline and Bedrock prompt caching (each needs a decision or provisioning).
 
 ## Bigger picture: what the empty-`dimensions` fix does not cover
 Breakdown of the v5 graded rows (43 golden turns, grader v3), counted from `report/conv_*.json`:
