@@ -456,7 +456,9 @@ def test_aggregate_description_explains_single_total_without_touching_others() -
     hinted = _tool_description("aggregate_taxi_data", "Aggregate.")
     assert hinted.startswith("Aggregate.")
     assert "dimensions []" in hinted and "one overall total" in hinted
-    assert _tool_description("describe_taxi_dataset", "Describe.") == "Describe."
+    assert "tip_rate" in hinted and "order_by.key" in hinted
+    # Tools without a hint keep their published description unchanged.
+    assert _tool_description("list_taxi_dimension_values", "List.") == "List."
 
 
 def test_compare_comparison_filters_point_to_baseline_filters() -> None:
