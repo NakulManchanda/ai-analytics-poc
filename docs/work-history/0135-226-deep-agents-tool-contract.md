@@ -7,12 +7,13 @@ Step 1 of the Deep Agents improvement list: stop the model from sending `dimensi
 v5 (`deep-agents-defaults-v5-20261108T043701Z`): 6 of 6 tool failures were that call, in 3 runs; one run hit the tool-call cap. `minItems: 1` was already in the schema.
 
 ## Decisions
-- Keep the "at least one dimension" contract (the golden set expects it); fix the model-facing description instead.
-- Deep Agents only: the hint lives in `deep_agents_strategy.py`, not in the MCP server, so the manual path is unchanged.
+- First commit only added a description hint; after review the contract changed: empty `dimensions` means one overall total (MCP validator, app validator, Deep Agents parser and schema). The manual path accepts it too.
+- Grader v4: an expected dimension pinned by an equality filter may be omitted.
+- Guard against fabricated `untrusted_tool_data` answers when no tool ran.
 - No live eval run in this PR; the measurement command is in `docs/deep-agents/01-tool-contract.md`.
 
 ## Verification
-Focused Deep Agents tests 56 passed, 1 skipped; black and ruff clean. Behavioural effect unmeasured.
+Suites: app 636, mcp 57, dataset_spike 57, evals 204 passed; black and ruff clean. Behavioural effect unmeasured; the live run is next.
 
 ## PR / merge state
 Draft PR from `feat/226-deep-agents-tool-description`.
