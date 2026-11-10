@@ -179,7 +179,7 @@ def test_tools_match_supplied_mcp_definitions() -> None:
     by_name = {d["name"]: d for d in MCP_DEFINITIONS}
     assert [t.name for t in tools] == list(MCP_TOOL_NAMES)
     for tool in tools:
-        assert tool.description == by_name[tool.name]["description"]
+        assert tool.description.startswith(by_name[tool.name]["description"])
         slim = tool.args_schema
         original = by_name[tool.name]["inputSchema"]
         # Slimming keeps every property and every required field; only noise is removed.
@@ -446,3 +446,12 @@ def test_default_path_does_not_import_langchain_or_deepagents() -> None:
     )
     proc = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
     assert proc.returncode == 0, proc.stderr
+
+
+def test_aggregate_description_explains_single_total_without_touching_others() -> None:
+    from app.orchestration.deep_agents_strategy import _tool_description
+
+    hinted = _tool_description("aggregate_taxi_data", "Aggregate.")
+    assert hinted.startswith("Aggregate.")
+    assert "[] is rejected" in hinted and 'dimensions ["pickup_borough"]' in hinted
+    assert _tool_description("describe_taxi_dataset", "Describe.") == "Describe."

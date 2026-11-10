@@ -166,6 +166,22 @@ _NON_EMPTY_ARRAYS: frozenset[tuple[str, str]] = frozenset(
 )
 _NULL_SCHEMA = {"type": "null"}
 
+# Deep Agents-only guidance appended to a published tool description. The schema already
+# says minItems 1, but the model still sent dimensions [] for single-total questions
+# (6 rejected calls in 3 of the 43 v5 golden turns); how to ask for one total is not
+# obvious from the schema. Keep it short: descriptions are re-sent on every model call.
+_DESCRIPTION_HINTS: dict[str, str] = {
+    "aggregate_taxi_data": (
+        " dimensions needs at least one name; [] is rejected. For a single total,"
+        " group by the dimension you filter on (filter pickup_borough=Manhattan ->"
+        ' dimensions ["pickup_borough"]).'
+    ),
+}
+
+
+def _tool_description(name: str, published: str) -> str:
+    return published + _DESCRIPTION_HINTS.get(name, "")
+
 
 def slim_schema(node: Any) -> Any:
     """Drop JSON-schema noise the model gains nothing from, keeping every constraint and
@@ -235,7 +251,7 @@ def build_mcp_tools(
 
         return StructuredTool(
             name=name,
-            description=definition.get("description", ""),
+            description=_tool_description(name, definition.get("description", "")),
             func=call,
             args_schema=_tool_schema(name, definition["inputSchema"]),
         )
