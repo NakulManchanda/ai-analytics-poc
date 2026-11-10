@@ -274,7 +274,10 @@ def test_invalid_args_return_tool_error_not_exception() -> None:
     assert payload["error"] == "invalid_arguments"
     assert payload["tool_name"] == "aggregate_taxi_data"
     # The model must be told what to change, or it repeats the identical call.
-    assert "dimensions" in payload["message"] and "non-empty list" in payload["message"]
+    assert (
+        "dimensions" in payload["message"]
+        and "list of dimension names" in payload["message"]
+    )
     assert mcp.calls == []
 
 
@@ -282,11 +285,6 @@ def test_invalid_args_return_tool_error_not_exception() -> None:
     ("tool", "arguments", "expected"),
     [
         ("aggregate_taxi_data", {"measures": ["trip_count"]}, "dimensions is required"),
-        (
-            "aggregate_taxi_data",
-            {"dimensions": [], "measures": ["trip_count"]},
-            "dimensions is required",
-        ),
         ("aggregate_taxi_data", {"dimensions": ["zone"]}, "measures is required"),
         (
             "aggregate_taxi_data",
@@ -364,9 +362,9 @@ def test_slim_schema_keeps_constraints_and_drops_noise() -> None:
 def test_non_empty_arrays_are_hinted_in_the_tool_schema() -> None:
     tools = {t.name: t for t in build_mcp_tools(FakeMCP(), lambda: MCP_DEFINITIONS)}  # type: ignore[arg-type]
     props = tools["aggregate_taxi_data"].args_schema["properties"]
-    for field in ("dimensions", "measures"):
-        if props[field].get("type") == "array":
-            assert props[field]["minItems"] == 1
+    assert props["measures"]["minItems"] == 1
+    # dimensions [] is valid (one overall total), so it must not be forbidden.
+    assert "minItems" not in props["dimensions"]
 
 
 def test_valid_call_reaches_mcp_client() -> None:
@@ -453,5 +451,5 @@ def test_aggregate_description_explains_single_total_without_touching_others() -
 
     hinted = _tool_description("aggregate_taxi_data", "Aggregate.")
     assert hinted.startswith("Aggregate.")
-    assert "[] is rejected" in hinted and 'dimensions ["pickup_borough"]' in hinted
+    assert "dimensions []" in hinted and "one overall total" in hinted
     assert _tool_description("describe_taxi_dataset", "Describe.") == "Describe."

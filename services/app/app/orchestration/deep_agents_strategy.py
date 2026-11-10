@@ -159,22 +159,18 @@ def _is_unknown_tool_error(err: MCPToolError) -> bool:
 # Array arguments the parsers require to be non-empty (the published schemas allow []).
 _NON_EMPTY_ARRAYS: frozenset[tuple[str, str]] = frozenset(
     {
-        ("aggregate_taxi_data", "dimensions"),
         ("aggregate_taxi_data", "measures"),
         ("compare_taxi_segments", "measures"),
     }
 )
 _NULL_SCHEMA = {"type": "null"}
 
-# Deep Agents-only guidance appended to a published tool description. The schema already
-# says minItems 1, but the model still sent dimensions [] for single-total questions
-# (6 rejected calls in 3 of the 43 v5 golden turns); how to ask for one total is not
-# obvious from the schema. Keep it short: descriptions are re-sent on every model call.
+# Deep Agents-only guidance appended to a published tool description. Empty dimensions is
+# valid (one overall total) but is not obvious from the schema. Keep it short:
+# descriptions are re-sent on every model call.
 _DESCRIPTION_HINTS: dict[str, str] = {
     "aggregate_taxi_data": (
-        " dimensions needs at least one name; [] is rejected. For a single total,"
-        " group by the dimension you filter on (filter pickup_borough=Manhattan ->"
-        ' dimensions ["pickup_borough"]).'
+        " dimensions [] returns one overall total; add names to group."
     ),
 }
 

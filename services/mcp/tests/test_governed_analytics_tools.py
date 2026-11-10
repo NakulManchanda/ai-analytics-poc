@@ -187,11 +187,11 @@ def test_validation_failure_never_reaches_duckdb():
         ) as client:
             return await client.call_tool(
                 "aggregate_taxi_data",
-                {"dimensions": [], "measures": ["trip_count"]},
+                {"dimensions": ["not_a_dimension"], "measures": ["trip_count"]},
             )
 
     result = asyncio.run(exercise())
-    assert result.data["error"]["code"] == "invalid_dimensions"
+    assert result.data["error"]["code"] == "unknown_dimension"
     assert result.data["error"]["retryable"] is False
     assert executed is False
 
