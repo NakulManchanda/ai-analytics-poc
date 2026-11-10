@@ -98,6 +98,15 @@ def _run_tool(
                 "error": "tool_failed",
                 "retryable": err.retryable,
                 **_tool_error(err, name),
+                # The governed server's own validation text ("order_by.key must be one
+                # of the requested output columns") is what lets the model correct the
+                # call; a bare reason code made it repeat or give up. Only for that
+                # envelope: transport errors can carry internal detail.
+                **(
+                    {"message": err.message[:300]}
+                    if err.reason == "tool_error_envelope"
+                    else {}
+                ),
             }
         )
     return json.dumps(result, default=str)
@@ -200,9 +209,25 @@ def slim_schema(node: Any) -> Any:
     return {k: slim_schema(v) for k, v in node.items()}
 
 
+# ``compare_taxi_segments`` publishes the full filters schema twice (baseline and
+# comparison, about 2.5k characters each). Both take the same fields, so the second copy
+# is replaced by a pointer to the first; the MCP server still validates every key.
+_FILTERS_POINTER = {
+    "type": "object",
+    "description": "Same fields and values as baseline_filters; omit a field to leave it "
+    "unrestricted.",
+}
+
+
 def _tool_schema(name: str, input_schema: dict[str, Any]) -> dict[str, Any]:
     schema = slim_schema(input_schema)
     properties = schema.get("properties", {})
+    if (
+        name == "compare_taxi_segments"
+        and "baseline_filters" in properties
+        and "comparison_filters" in properties
+    ):
+        properties["comparison_filters"] = dict(_FILTERS_POINTER)
     for tool, field in _NON_EMPTY_ARRAYS:
         prop = properties.get(field)
         if tool == name and isinstance(prop, dict) and prop.get("type") == "array":
@@ -216,6 +241,15 @@ def planning_enabled(env: Mapping[str, str] | None = None) -> bool:
     every model call."""
     value = (os.environ if env is None else env).get("AGENT_PLANNING", "")
     return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def plain_react_enabled(env: Mapping[str, str] | None = None) -> bool:
+    """``AGENT_HARNESS=create_agent`` swaps ``create_deep_agent`` for LangChain's plain
+    ``create_agent`` with the same tools, prompt and allowlist. It is an experiment
+    switch to separate Deep Agents harness overhead from the ReAct loop style; default
+    off, and the strategy, events and budgets are unchanged."""
+    value = (os.environ if env is None else env).get("AGENT_HARNESS", "")
+    return value.strip().lower() == "create_agent"
 
 
 def offered_tool_names(planning: bool | None = None) -> tuple[str, ...]:
@@ -362,6 +396,18 @@ def build_deep_agent(
         temperature=0.0,
     )
     use_planning = planning_enabled() if planning is None else planning
+    if plain_react_enabled():
+        from langchain.agents import create_agent
+
+        return create_agent(
+            model=llm,
+            tools=build_mcp_tools(client, list_tools, before_tool_call),
+            system_prompt=build_system_prompt(),
+            middleware=[
+                *([TodoListMiddleware()] if use_planning else []),
+                build_allowlist_middleware(on_compaction),
+            ],
+        )
     return create_deep_agent(
         model=llm,
         tools=build_mcp_tools(client, list_tools, before_tool_call),
