@@ -152,3 +152,16 @@ def test_review_escapes_and_is_offline(tmp_path, capsys):
 def test_missing_baseline_is_a_clean_error(tmp_path):
     with pytest.raises(RunError, match="baseline results file not found"):
         load_baseline(tmp_path / "nope.jsonl")
+
+
+def test_load_run_reports_ignores_run_level_checks(tmp_path) -> None:
+    import json
+
+    from evals.runs import load_run_reports
+
+    report = tmp_path / "report"
+    report.mkdir()
+    (report / "conv_a.json").write_text(json.dumps({"rows": []}))
+    (report / "spend_reconciliation.json").write_text(json.dumps({"ok": True}))
+    (report / "trace_check.json").write_text(json.dumps({"ok": True}))
+    assert load_run_reports(tmp_path) == ({}, 0.0)

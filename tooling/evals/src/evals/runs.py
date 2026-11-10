@@ -41,8 +41,13 @@ def load_run_reports(run_dir: Path) -> tuple[dict[tuple[str, int], dict], float]
     """Graded turns (keyed by golden case/turn) and total cost from ``report/*.json``."""
     turns: dict[tuple[str, int], dict] = {}
     cost = 0.0
+    # Only the per-conversation reports: report/ also holds run-level checks such as
+    # spend_reconciliation.json and trace_check.json (no "rows"), written after grading.
     for f in sorted((run_dir / "report").glob("*.json")):
-        for r in json.loads(f.read_text())["rows"]:
+        data = json.loads(f.read_text())
+        if "rows" not in data:
+            continue
+        for r in data["rows"]:
             cost += r.get("cost_usd") or 0.0
             if r.get("graded") and r["case_id"] is not None:
                 turns[(r["case_id"], r["turn_index"])] = dict(
