@@ -21,6 +21,12 @@ The first commit on this branch only appended a hint to the description. After r
 ## Verification
 - `services/app` 636 passed, 1 skipped (live LiteLLM); `services/mcp` 57 passed; `services/dataset_spike` 57 passed; `tooling/evals` 204 passed, 2 skipped; black and ruff clean.
 - Behaviour is **not measured live yet**. Success means zero `invalid_arguments`, fewer `aggregate_taxi_data` calls than v5 (6 failures, 61 tool calls), and no new step-budget breaches.
+- To measure it live (from this worktree; it rebuilds the local stack, about $0.35 and 5 minutes). Labels cannot be reused, so use a new `-vN` for reruns:
+  ```
+  AGENT_STRATEGY=deep_agents make eval-stack-up
+  make eval-start LABEL=deep-agents-empty-dims-v1 && make eval-health && make eval-run EVAL_CONFIRM=1
+  make eval-freeze && make eval-grade && make eval-compare EVAL_BASELINE=metrics/evals/baselines/golden-2026-10-20.jsonl && make eval-reconcile && make eval-trace-check
+  ```
 - Not changed, and why: replacing the custom allowlist with `excluded_tools` (works, measured, low gain); switching model, a `create_agent` baseline and Bedrock prompt caching (each needs a decision or provisioning).
 
 ## Bigger picture: what the empty-`dimensions` fix does not cover
