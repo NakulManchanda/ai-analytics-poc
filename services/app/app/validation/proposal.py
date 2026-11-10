@@ -230,9 +230,15 @@ def _check_limit(args: Mapping[str, Any], out: _Collector) -> None:
 
 
 def _check_name_list(
-    values: object, allowed: frozenset[str], label: str, code: str, out: _Collector
+    values: object,
+    allowed: frozenset[str],
+    label: str,
+    code: str,
+    out: _Collector,
+    *,
+    allow_empty: bool = False,
 ) -> None:
-    if not isinstance(values, list) or not values:
+    if not isinstance(values, list) or (not values and not allow_empty):
         out.add("invalid_type", f"{label} must be a non-empty list")
         return
     if len(values) > MAX_LIST_LENGTH:
@@ -427,7 +433,12 @@ def _validate_aggregate(
     )
     if "dimensions" in args:
         _check_name_list(
-            args["dimensions"], DIMENSIONS, "dimensions", "unknown_dimension", out
+            args["dimensions"],
+            DIMENSIONS,
+            "dimensions",
+            "unknown_dimension",
+            out,
+            allow_empty=True,
         )
     if "measures" in args:
         _check_name_list(args["measures"], MEASURES, "measures", "unknown_measure", out)

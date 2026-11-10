@@ -255,8 +255,9 @@ def validate_measure(value: object) -> MeasureName:
 
 
 def validate_dimensions(values: object) -> list[DimensionName]:
-    if not isinstance(values, list) or not values:
-        _fail("invalid_dimensions", "dimensions must be a non-empty list")
+    # An empty list is valid: no grouping, one overall total row.
+    if not isinstance(values, list):
+        _fail("invalid_dimensions", "dimensions must be a list (use [] for one total)")
     if len(values) > MAX_LIST_LENGTH:
         _fail("invalid_dimensions", f"at most {MAX_LIST_LENGTH} dimensions are allowed")
     dimensions = [validate_dimension(value) for value in values]

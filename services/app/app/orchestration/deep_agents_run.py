@@ -86,6 +86,10 @@ STRATEGY_NAME = "deep_agents"
 # LangGraph supersteps allowed per budgeted iteration (model node + tool node + middleware).
 RECURSION_STEPS_PER_ITERATION = 4
 _POLL_INTERVAL_SECONDS = 0.05
+_FABRICATED_TOOL_ANSWER_TEXT = (
+    "I could not run a query for that follow-up, so I have no verified figures to give. "
+    "Please ask again with the details (for example the zones or dates)."
+)
 _NO_ANSWER_TEXT = (
     "The model did not return a usable response for that question. "
     "Please try again or rephrase it."
@@ -1443,6 +1447,17 @@ def execute_deep_agent_run(
                 answer = _message_text(message).strip()
                 break
         answer = answer or _NO_ANSWER_TEXT
+        if f"<{UNTRUSTED_TAG}" in answer and not rec.evidence:
+            # The model copied the tool-result wrapper from restored history instead of
+            # calling a tool: numbers and query ids in it are invented. Never show them.
+            rec._add_step(
+                step_type="grounding_check",
+                status="failed",
+                query_id=None,
+                output_summary="answer imitated a tool result without calling a tool",
+                metadata={"fabricated_tool_block": True},
+            )
+            answer = _FABRICATED_TOOL_ANSWER_TEXT
         report = check_answer_grounding_multi(answer, rec.evidence, question=prompt)
         grounding_report.update(
             ok=report.ok,
