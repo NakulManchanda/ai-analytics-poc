@@ -59,6 +59,25 @@ Reading it:
 - The cost went up slightly because the model made more calls, not because the contract change cost anything.
 - Not like-for-like: grader v3 vs v4; older runs need regrading.
 
+## Second measured run: `deep-agents-empty-dims-v2` (all changes above, code at `834cfd3`)
+| | v5 (grader v3) | v1 (v4) | **v2 (v4)** |
+|---|---|---|---|
+| completed / budget stop / failed | 41 / 2 / 0 | 42 / 1 / 0 | **41 / 1 / 1** |
+| tool.failed | 6 | 5 | **0** |
+| tool calls / model calls | 61 / 86 | 64 / 93 | **53 / 83** |
+| execution / tool / answer correct | 31 / 12 / 19 | 31 / 12 / 18 | **34 / 14 / 16** |
+| answer needs_review | 8 | 8 | **11** |
+| input tokens per turn | 8.6k | 9.4k | **6.9k** |
+| cost (billed, reconciled to the cent) | $0.3323 | $0.3604 | **$0.1628** |
+| trace check | 0 problems | 0 problems | 1 problem (below) |
+
+- Prompt caching is active in a real run: the LiteLLM spend rows now show nonzero cache read and cache creation tokens (they were 0 in v5 and v1), and billed cost fell by about 55% against v1 with 10 fewer model calls. The raw cache-token totals in `spend_logs.json` can include rows outside this run, so use the reconciled cost, not those sums, as the evidence.
+- Tool failures went from 6 and 5 to 0, and tool calls fell from 64 to 53.
+- Execution (34) and tool (31 to 34 and 12 to 14) improved; remaining execution failures: 5 step-budget breaches (2-3 steps against a budget of 1) and 1 run error. Remaining tool mismatches: about 9 "expected aggregate_taxi_data not matched", 5 compare, 3 unneeded calls, 3 legacy `query_taxi_data` expectations, 2 extra calls.
+- Answer-correct fell from 19 to 16 while answer needs_review rose from 8 to 11; that is not a clear regression or gain, and the 11 needs_review turns have not been read.
+- The one failed run (`uns-002#0`, "Predict how many trips there will be in February 2024") is a Bedrock error, `litellm_proxy_http_424`: "Model produced invalid sequence as part of ToolUse" from `taxi-planner` (Nova Pro), with no tool call made. The unparented `Failed Proxy Server Request` span in the trace check comes from that same run; the same 424 and span problem appeared on `uns-005` in earlier runs, so this is a known provider-error pattern, not new. Whether caching or the new tool descriptions make it more likely is unknown from one run.
+- Not like-for-like: v5 was graded with grader v3; v1 and v2 with v4.
+
 ## Not done
 - **Model change** (Nova Pro for every call vs Micro for the answer, or a model on LangChain's suggested list): needs provisioning and your decision; a listed profile is not access.
 - **`create_agent` comparison run** with `AGENT_HARNESS=create_agent`.
@@ -66,4 +85,4 @@ Reading it:
 - Planning comparison (`AGENT_PLANNING=1`), as the #226 issue asks.
 
 ## Next measurement
-One more run, `deep-agents-empty-dims-v2`, on the current branch head (all of steps 1, 2 and 4). Then, if wanted, a `create_agent` run with `AGENT_HARNESS=create_agent` for step 3. Commands are in doc 01.
+Read the 11 answer `needs_review` turns and the 5 step-budget breaches; then, if wanted, a `create_agent` run with `AGENT_HARNESS=create_agent` for step 3. Commands are in doc 01.
