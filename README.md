@@ -11,6 +11,54 @@ A cost-governed enterprise analytics copilot (Track B: Tool-Using Agent) over th
 
 Features application-owned durable conversation orchestration, strict FastMCP tool boundaries, reconstructed Server-Sent Events (SSE), and an inference gateway (guard, tenant quotas, admission control, class-aware priority queuing, prefix-aware routing) in front of two colocated vLLM worker replicas on an NVIDIA A100 GPU.
 
+## Experimental AI Platform: Research Tracks and Evidence
+
+This repository is a **single NYC Taxi analytics application used as a controlled experimental testbed**, not a claim that every listed framework is deployed at once. We compare a small number of interchangeable implementations behind stable interfaces, and retain reproducible runs, failure analysis, and measured trade-offs. The existing Track B GPU serving submission is one track within this broader program.
+
+**Experimental method:** hypothesis -> baseline -> one changed variable -> fixed workload/golden dataset -> trace + quantitative scores + human review -> failure analysis -> regression test -> decision (keep, change, or discard). Record the model/version, prompt SHA, harness/version, dataset version, configuration, environment, seed when supported, run IDs, cost, p50/p95 latency, and evidence links for each comparison. Separate **implemented**, **in progress**, and **proposed** capabilities; never label planned experiments as production behavior.
+
+| Track | Comparison / stack | Research question | Evaluation and artifacts | Status |
+| --- | --- | --- | --- | --- |
+| **A. Agent harness: low-level** | Application-owned Python/FastAPI ReAct loop and deterministic baseline; explicit state transitions, bounded context, retries, checkpoint and recovery | What reliability and control do we gain or lose by owning the loop? | Tool-call validity, plan adherence, recovery after interruption, token cost, task completion; event/capture replay | **Implemented foundation**; broader failure matrix proposed |
+| **B. Agent harness: framework** | Compare existing low-level harness against **LangGraph / Deep Agents**, and optionally **OpenAI Agents SDK**, **Claude Agent SDK**, or **Strands** one at a time through the same agent adapter | When does an external harness improve planning, delegation, compaction, and long-running execution enough to justify complexity? | Same prompts, tool contracts, budget, datasets, model policy and judge protocol; quality/latency/cost comparison | **Proposed experiments**; do not assume adapters already exist |
+| **C. MCP application** | FastMCP + DuckDB read-only taxi analytics with independently testable tool discovery, schema contracts and permissions | Does structured tool use produce a valid, evidence-backed analytical result without arbitrary SQL or tenant leakage? | Tool selection, argument schema validity, execution correctness, result provenance, injection/permission denial cases | **Implemented foundation**; adversarial tests proposed |
+| **D. Evals + human review** | Versioned golden dataset, deterministic checks + DeepEval / optional model-as-judge, **human rubric review** | Are plans, tool actions, and final answers independently correct, safe and supported? | Three separate ratings (**plan**, **tool**, **answer**) with reviewer disagreement, adjudication, calibration and regression gates | **Offline eval foundation implemented**; full three-axis human-review workflow proposed |
+| **E. LLM observability only** | OpenTelemetry GenAI spans -> Collector -> **Arize Phoenix** for model/agent traces; Prometheus + Grafana + Loki for operational telemetry (optional Jaeger) | Can we explain why an agent failed and correlate each step to model calls, tools, approvals, costs and runtime health? | Trace completeness, run-to-span correlation, missing/duplicate spans, sensitive-field redaction, incident reconstruction | **Implemented tracing/stack foundation**; coverage audit proposed |
+| **F. Inference and serving** | LiteLLM/Bedrock baseline vs owned FastAPI gateway -> K3s/HAMi -> two vLLM workers; admission, routing, KV locality, overflow | Under fixed GPU budgets, which admission and placement policies improve goodput and tail latency? | TTFT, p95/p99 latency, goodput, rejected work, queue wait, decode slots, KV pressure, cache hits and cost | **Implemented Track B experiment foundation**; expand measured comparisons |
+| **G. Workflow, security, approvals** | Proposed AWS Step Functions / Bedrock AgentCore experiment vs application-owned DynamoDB + Redis orchestration; policy gates before writes | Can long-running agents resume safely, await human approval, preserve least privilege and verify external side effects? | Interrupted/replayed runs, permission-denial accuracy, duplicate-write prevention, verified resulting state, injection/tenant-boundary tests | **Proposed**; read-only taxi MCP remains the baseline |
+
+### Evals: three independent review dimensions
+
+| Dimension | What is reviewed | Example rubric (0–4 each) |
+| --- | --- | --- |
+| **Plan quality** | Is the chosen sequence necessary, feasible, within permissions and budgets, and sensitive to missing information? | 0 unsafe/invalid; 1 mostly wrong; 2 partially workable; 3 sound; 4 minimal, complete and well-justified |
+| **Tool quality** | Was the correct tool selected with valid arguments, proper authorization, honest error handling and independently verifiable effects? | 0 unsafe/wrong action; 1 invalid; 2 partly correct; 3 correct; 4 correct, efficient and verified |
+| **Answer quality** | Are calculations accurate, claims supported by tool evidence, uncertainty stated, and the user request satisfied? | 0 false/unsupported; 1 major errors; 2 partial; 3 accurate; 4 accurate, complete, attributable |
+
+Store **three separate scores**, not a single subjective pass/fail. Every review should keep `case_id`, `run_id`, `trace_id`, stage, model/harness/prompt versions, selected tool calls, expected vs observed results, reviewer ID or blinded pseudonym, per-axis ratings, reasons, and adjudication status. Use a 0–4 rubric, plus **hard failure flags** for unsafe writes, authorization bypass, cross-tenant exposure, fabricated evidence and missing post-action verification. A high average score must not hide a critical security failure.
+
+**Human-in-the-loop process (proposed):** sample successful cases and failures -> human reviewers grade plan/tool/answer independently -> compare with deterministic/LLM judges -> adjudicate disagreements -> add corrected examples to versioned golden data -> replay baseline/candidate -> block regressions on critical failures. Log false positives, missed risks, completion and **cost per verified correct outcome**, not just model fluency.
+
+### Tracing and experimental boundaries
+
+```text
+React / alternative harness -> FastMCP tool calls -> DuckDB evidence
+            |                         |
+            +---- OTEL GenAI spans ---+--> OTEL Collector --> Phoenix (LLM trace inspection)
+                           |                             
+                           +--> Prometheus / Grafana / Loki (runtime metrics/logs)
+                           |
+Model provider adapter --> [Bedrock / LiteLLM] OR [owned inference gateway -> vLLM]
+```
+
+**Phoenix is the trace analysis UI**, not a replacement for Prometheus/Grafana metrics or the durable run record. Correlate `run_id`, `trace_id`, `llm_call_id`, `tool_call_id`, tenant-safe identifiers, prompt SHA and dataset version; redact sensitive prompts/tool outputs by policy. Do not combine multiple changed harnesses, models, and inference backends in a single causal comparison.
+
+**Execution order:** (1) baseline and replay fixtures, (2) three-axis eval with human calibration, (3) Phoenix trace integrity and failures, (4) harness A/B trials, (5) MCP adversarial and workflow/approval tests, (6) inference policy trials. Each experiment produces a short evidence report: hypothesis, setup, sample size, score breakdown, latency/cost distributions, representative Phoenix traces, failures, decision and follow-up regression cases.
+
+**Existing evidence and implementation entry points:** [evals](docs/evals.md) · [observability](infra/observability/core/) · [inference experiments](docs/inference-experiments/inference-experiments-reference.md) · [design](DESIGN.md) · [agent experiments epic](https://github.com/NakulManchanda/ai-analytics-poc/issues/224) · [multi-agent benchmark](https://github.com/NakulManchanda/ai-analytics-poc/issues/230).
+
+_Research motivation:_ [Okta — Principal Software Engineer, Applied AI](https://www.okta.com/company/careers/principal-software-engineer-applied-ai/) emphasizes harness execution, model choice, approval state, policy-checked tool use, replayable evals and evidence of resulting state. This project uses the taxi workload to test those engineering properties; it is not affiliated with Okta.
+
 ---
 
 ## Architecture (Track B Serving & Application Stack)
