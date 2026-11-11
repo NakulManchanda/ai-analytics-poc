@@ -1,15 +1,62 @@
-# AI Analytics POC: Enterprise Analytics Copilot on a Scarce GPU (Track B)
+# NYC Taxi AI Analytics — Experimental Agent & Inference Platform
 
-> 🚀 **Course Submission & Architecture Answers (Start Here)**: **[`docs/inference.md`](docs/inference.md)** | **[DESIGN.md](DESIGN.md)** | **[Executed Evidence Notebook & HTML](docs/inference-experiments/evidence/notebook/)**  
-> 📚 **System Design Deep-Dive Blog**: Read **[What Happens When a User Clicks "Run Analysis" in an AI App?](docs/system-design-blog.md)** for a comprehensive architectural breakdown of Agent Loops, FastMCP tool boundaries, Context Reducers, and SSE event streaming.
+**One working analytics application, multiple independently measurable AI platform stacks.** This repository explores end-to-end application engineering, agent harnesses, MCP tool execution, model access, inference policies, GPU serving, tracing and evals against a common NYC Taxi dataset.
+
+> **Start here:** [Track B inference submission](docs/inference.md) · [System design](DESIGN.md) · [Executed GPU experiment evidence](docs/inference-experiments/evidence/notebook/) · [Architecture walkthrough](docs/system-design-blog.md) · [Evals and limitations](docs/evals.md)
+
+## The Full Stack — 10 Layers Across 4 Domains
+
+```mermaid
+flowchart TB
+    UI["1 · APPLICATION<br/>React · FastAPI · multi-turn chat · SSE · analytics UI"] --> H
+    subgraph HARNESS["2 · AGENT HARNESSES — independent experiment lane"]
+      direction LR
+      H["Custom deterministic + bounded ReAct<br/>existing"]
+      C["CrewAI<br/>course strategy"]
+      D["Deep Agents / LangGraph<br/>proposed benchmark"]
+    end
+    H --> MCP["3 · MCP TOOLS<br/>FastMCP · read-only DuckDB · Parquet"]
+    H --> ROUTE{"4 · MODEL ACCESS<br/>choose provider path"}
+    ROUTE --> L["LiteLLM Proxy<br/>aliases · usage / cost"]
+    L --> B["AWS Bedrock"]
+    ROUTE --> G
+    subgraph POLICIES["5 · OWN MODEL GATEWAY — serving policies"]
+      G["Guard + tenant quotas"] --> A["Admission / shed + priority queues"]
+      A --> P["Prefix-aware placement + KV hop / overflow"]
+    end
+    P --> V["6 · INFERENCE ENGINE<br/>vLLM · Qwen3 · PagedAttention · LMCache / Mooncake"]
+    V --> GPU["7 · GPU / NEO-CLOUD INFRA<br/>NVIDIA A100 · K3s · HAMi slicing · DCGM"]
+    O["8 · OBSERVABILITY<br/>OTEL → Collector → Phoenix traces<br/>Prometheus · Grafana · Loki"]
+    E["9 · EVALUATIONS<br/>capture.v1 · DeepEval · golden cases<br/>plan/tool/answer human review (proposed)"]
+    S["10 · STATE / DELIVERY<br/>DynamoDB · Redis · ECS · Terraform · S3 / CloudFront"]
+    H -. "traces" .-> O
+    G -. "policies / metrics" .-> O
+    V -. "GPU metrics" .-> O
+    H -. "replay" .-> E
+    H -. "runs" .-> S
+```
+
+| Domain | Layers | Technologies and engineering questions |
+| --- | --- | --- |
+| **Application & agents** | 1–3 | React, FastAPI, multi-turn, SSE; custom ReAct/deterministic orchestration; CrewAI course strategy; future Deep Agents benchmark; FastMCP/DuckDB tools |
+| **Model access & gateway** | 4–5 | LiteLLM/Bedrock **or** owned GPU gateway; tenant budgets, guards, admission/shedding, class-based queues, placement and KV locality |
+| **Inference & GPU** | 6–7 | vLLM, Qwen3, prefix caching, LMCache/Mooncake; neo-cloud rented NVIDIA A100, K3s/HAMi GPU slicing, DCGM and capacity experiments |
+| **Production evidence & operations** | 8–10 | OTEL/Phoenix LLM traces, Prometheus/Grafana/Loki infrastructure metrics; deterministic/DeepEval and proposed human review; DynamoDB, Redis, AWS and Terraform |
+
+**Two alternative LLM paths, not one chained pipeline:** `app → LiteLLM → Bedrock` and `app → owned gateway → vLLM → A100`. The model gateway is where we test decisions such as `guard → quota → admission → placement → queue → KV hop`. Phoenix is the LLM trace explorer; Grafana/Prometheus/Loki cover operational health. Harness comparisons are a **separate experiment lane** and must use common tools, models, prompts and eval datasets for meaningful A/B results.
+
+**Evidence status:** The custom harness, MCP, model access, tracing foundation, and Track B GPU experiments are documented in this repository. Deep Agents/LangGraph side-by-side results and full human scoring of **plan / tool / answer** are **proposed**, not completed. See [evals status](docs/evals.md): its 37 golden cases are pending human review.
+
+<details>
+<summary>Application screenshot — NYC Taxi Analytics Control Room</summary>
 
 ![Taxi Analytics Control Room UI](docs/images/taxi-analytics-control-room.png)
 
-*The Taxi Analytics Control Room UI: the copilot calls FastMCP DuckDB tools (`average_trip_metrics`, `read_schema`) over millions of NYC taxi rows, and answers with structured figures alongside the real-time SSE execution inspector.*
+The analytics UI displays tool-driven query results and execution events from the FastMCP + DuckDB application.
 
-A cost-governed enterprise analytics copilot (Track B: Tool-Using Agent) over the NYC Yellow Taxi dataset (millions of trip records in Parquet tables). It answers natural language operational and financial questions, citing exact query results from DuckDB views.
+</details>
 
-Features application-owned durable conversation orchestration, strict FastMCP tool boundaries, reconstructed Server-Sent Events (SSE), and an inference gateway (guard, tenant quotas, admission control, class-aware priority queuing, prefix-aware routing) in front of two colocated vLLM worker replicas on an NVIDIA A100 GPU.
+---
 
 ## Experimental AI Platform: Research Tracks and Evidence
 
