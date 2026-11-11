@@ -6,42 +6,24 @@
 
 ## The Full Stack — 10 Layers Across 4 Domains
 
-```mermaid
-flowchart TB
-    UI["1 · APPLICATION<br/>React · FastAPI · multi-turn chat · SSE · analytics UI"] --> H
-    subgraph HARNESS["2 · AGENT HARNESSES — independent experiment lane"]
-      direction LR
-      H["Custom deterministic + bounded ReAct<br/>existing"]
-      C["CrewAI<br/>course strategy"]
-      D["Deep Agents / LangGraph<br/>proposed benchmark"]
-    end
-    H --> MCP["3 · MCP TOOLS<br/>FastMCP · read-only DuckDB · Parquet"]
-    H --> ROUTE{"4 · MODEL ACCESS<br/>choose provider path"}
-    ROUTE --> L["LiteLLM Proxy<br/>aliases · usage / cost"]
-    L --> B["AWS Bedrock"]
-    ROUTE --> G
-    subgraph POLICIES["5 · OWN MODEL GATEWAY — serving policies"]
-      G["Guard + tenant quotas"] --> A["Admission / shed + priority queues"]
-      A --> P["Prefix-aware placement + KV hop / overflow"]
-    end
-    P --> V["6 · INFERENCE ENGINE<br/>vLLM · Qwen3 · PagedAttention · LMCache / Mooncake"]
-    V --> GPU["7 · GPU / NEO-CLOUD INFRA<br/>NVIDIA A100 · K3s · HAMi slicing · DCGM"]
-    O["8 · OBSERVABILITY<br/>OTEL → Collector → Phoenix traces<br/>Prometheus · Grafana · Loki"]
-    E["9 · EVALUATIONS<br/>capture.v1 · DeepEval · golden cases<br/>plan/tool/answer human review (proposed)"]
-    S["10 · STATE / DELIVERY<br/>DynamoDB · Redis · ECS · Terraform · S3 / CloudFront"]
-    H -. "traces" .-> O
-    G -. "policies / metrics" .-> O
-    V -. "GPU metrics" .-> O
-    H -. "replay" .-> E
-    H -. "runs" .-> S
-```
+A **layered architecture view** rather than a request-flow diagram. Each row is a different ownership boundary. The agent harness is a separately benchmarked component; observability, evaluation, and cloud/state are cross-cutting layers, not steps every request must traverse.
 
-| Domain | Layers | Technologies and engineering questions |
-| --- | --- | --- |
-| **Application & agents** | 1–3 | React, FastAPI, multi-turn, SSE; custom ReAct/deterministic orchestration; CrewAI course strategy; future Deep Agents benchmark; FastMCP/DuckDB tools |
-| **Model access & gateway** | 4–5 | LiteLLM/Bedrock **or** owned GPU gateway; tenant budgets, guards, admission/shedding, class-based queues, placement and KV locality |
-| **Inference & GPU** | 6–7 | vLLM, Qwen3, prefix caching, LMCache/Mooncake; neo-cloud rented NVIDIA A100, K3s/HAMi GPU slicing, DCGM and capacity experiments |
-| **Production evidence & operations** | 8–10 | OTEL/Phoenix LLM traces, Prometheus/Grafana/Loki infrastructure metrics; deterministic/DeepEval and proposed human review; DynamoDB, Redis, AWS and Terraform |
+| Stack layer (top → bottom) |
+| :--- |
+| **01 · Application & Experience**<br>React · FastAPI · multi-turn conversations · SSE execution timeline · analytical charts / map experiments |
+| **↓ 02 · Agent Harness — independent experiment track**<br>**Existing baseline:** deterministic orchestration + custom bounded ReAct (planning, tool loop, budgets, context reduction, cancellation/checkpoints). **Alternative frameworks to benchmark:** Deep Agents / LangGraph; optionally CrewAI and other SDKs. Do not confuse proposed comparisons with deployed implementations. |
+| **↓ 03 · MCP & Data Tools**<br>FastMCP · bounded read-only DuckDB tools · Parquet taxi dataset · validated tool contracts |
+| **↓ 04 · Model Access & Provider Routing**<br>LiteLLM Proxy · model aliases · tokens / cost accounting · AWS Bedrock **or** direct owned inference gateway path |
+| **↓ 05 · Owned Model Gateway & Policy Engine**<br>Guard → tenant quota → admission / shedding → prefix-aware placement → per-worker priority queues → KV hop / overflow decisions |
+| **↓ 06 · GPU Model Serving**<br>vLLM · Qwen3 · PagedAttention · continuous batching · prefix caching · LMCache / Mooncake KV transfer |
+| **↓ 07 · Neo-cloud GPU Infrastructure**<br>Rented NVIDIA A100 · K3s · HAMi GPU slicing · DCGM exporter · GPU capacity experiments |
+| **↔ 08 · Observability (cross-cutting)**<br>OpenTelemetry GenAI spans → Collector → **Arize Phoenix** for LLM/agent traces; Prometheus · Grafana · Loki for service, gateway and GPU operations |
+| **↔ 09 · Evaluation & Human Review (cross-cutting)**<br>`capture.v1` · golden dataset · deterministic graders · DeepEval · replay/baseline comparison · proposed independent **plan / tool / answer** human ratings |
+| **↔ 10 · State, Cloud & Delivery (cross-cutting)**<br>DynamoDB durable conversations · Redis coordination/SSE · ECS Fargate · Terraform · S3 / CloudFront · CI/CD |
+
+**Four engineering domains:** Application & agent harnesses (01–03) · Model access and control policies (04–05) · GPU inference (06–07) · Operational evidence and infrastructure (08–10).
+
+**Harness distinction:** The **custom deterministic/ReAct loop** is the application-owned baseline. **Deep Agents/LangGraph** are the planned independent comparison. **CrewAI** appears in earlier Track B course/design documentation as a multi-agent strategy, not proof that the current app is running CrewAI; it is an optional comparison candidate here, not the default harness.
 
 **Two alternative LLM paths, not one chained pipeline:** `app → LiteLLM → Bedrock` and `app → owned gateway → vLLM → A100`. The model gateway is where we test decisions such as `guard → quota → admission → placement → queue → KV hop`. Phoenix is the LLM trace explorer; Grafana/Prometheus/Loki cover operational health. Harness comparisons are a **separate experiment lane** and must use common tools, models, prompts and eval datasets for meaningful A/B results.
 
