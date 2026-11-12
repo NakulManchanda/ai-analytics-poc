@@ -44,6 +44,14 @@ The inference lab runs **K3s + HAMi on one NVIDIA A100**, with two colocated vLL
 
 Both [worker manifests](../infra/inference/k8s/workers/worker-a.yaml) and [HAMi bootstrap](../infra/inference/scripts/bootstrap.sh) define these settings.
 
+### Two-stage worker readiness
+
+**Kubernetes startup probe ≠ inference warmup.** The vLLM `/health` startup probe allows up to **300 seconds** (30 checks × 10 seconds) for model weights, CUDA initialization, compilation and CUDA graph setup without premature liveness restarts. Kubernetes readiness then confirms the HTTP server is healthy; it does **not** prove an inference request can finish promptly.
+
+The gateway's separate **warm gate** (`WARM_GATE=1`) waits for **3 consecutive healthy worker metric scrapes**, then sends a real **one-token completion** directly to that worker's `/v1/chat/completions` endpoint (`Qwen/Qwen3-0.6B`, user message `ping`, `max_tokens=1`, `temperature=0`; 30-second request timeout). Only a successful response from the **same healthy epoch** marks the worker warm and eligible for normal placement. That probe pays the first-inference cost before user traffic.
+
+When an already-warm worker becomes unhealthy and returns, gateway traffic ramps back in at **2 then 4 concurrent slots**, increasing every **30 seconds** only while queue and KV headroom permit. This is a *serving readiness policy*, not a guarantee of a particular TTFT or a full KV cache.
+
 ## Gateway routing and KV mobility
 
 | Setting | Current configuration |
