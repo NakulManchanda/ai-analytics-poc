@@ -1,68 +1,35 @@
-# Context Engineering & Evidence Retrieval — Current Implementation
+# Context Engineering & Evidence Retrieval
 
-This document describes the application's implemented retrieval and context flow. Alternative approaches and future designs are documented separately in [context engineering research](../research/context/README.md).
+The NYC Taxi assistant grounds answers in **structured SQL evidence** retrieved through governed MCP tools. It does not require document chunking or vector retrieval for its current analytical workload.
 
-## Purpose and boundaries
-
-Users ask analytical questions about NYC Taxi data. The application maps each question to a governed MCP analytical operation, executes SQL through DuckDB against Parquet data, and uses returned evidence to generate a grounded answer. This is **tool-grounded structured-data retrieval**, not a chunk/vector document index. Indexing, BM25, embeddings, and reranking are **not requirements** for this workload today.
-
-**Code owners:** [orchestration loop](../../services/app/app/orchestration/loop.py) · [MCP client](../../services/app/app/mcp_client.py) · [query catalogue](../../services/app/app/query_catalogue.py) · [context reducer](../../services/app/app/orchestration/reducer.py) · [grounding checks](../../services/app/app/validation/grounding.py).
-
-## Request and evidence flow
+## Request flow
 
 ```text
-User Qn + conversation_id
-    → persist user question and run
-    → load dataset schema from MCP
-    → exact catalogue lookup OR model proposal of allowlisted tool + arguments
-    → validate arguments and execute MCP/DuckDB SQL
-    → persist tool observation (query_id, rows, metadata)
-    → build reduced WorkingContext for run evidence
-    → model answer grounded in SQL result
-    → check numeric/query-id claims against tool observation
-    → persist assistant answer and publish SSE execution events
+Question → Tool catalogue / LLM planner → Validated MCP call
+         → DuckDB / Parquet SQL → Tool observation
+         → Context reduction + answer generation
+         → Grounding checks → Persist answer / SSE events
 ```
 
-The catalogue skips the planning model for known questions. It is an **exact normalized-question routing optimization**, not semantic retrieval. A model-proposed tool call is checked against a bounded tool contract before execution.
+- **Tool selection:** known questions use an exact-match catalogue; otherwise the model proposes an allowlisted tool and validated arguments.
+- **Evidence:** SQL results include rows, columns, counts, and query identifiers. Tool observations are persisted for subsequent inspection.
+- **Context reducer:** retains the current question, recent messages, short previews of older messages, schema, budgets, and at most **three preview rows per current observation** plus an artifact reference.
+- **Grounding:** checks numeric claims and query identifiers against the underlying tool observation; flags unsupported causal claims.
 
-## What the ContextReducer actually does
+**Important distinction:** `WorkingContext` is recorded for evaluation and observability, but the model clients assemble their actual prompt separately. The reduced SQL preview is **not guaranteed to be the context the answer model consumes**.
 
-`ContextReducer.reduce()` produces a `WorkingContext` containing:
-- current user message, **up to four recent historical messages** (the default two-turn setting counts messages, not reconstructed dialogue pairs), and a deterministic preview summary of older messages (up to 60 characters per message);
-- available tools, dataset schema, assumptions, failures, and remaining execution/token/cost budgets;
-- current tool observations summarized to **columns, row count, at most three preview rows, query id, execution time, and an artifact reference**.
+## Follow-up context by runtime
 
-The reduced context is recorded in `context.reduced` events and run-step metadata. **Important:** the model clients build answer prompts separately, often from the original `query_result`, so the existence of `WorkingContext` does **not** establish that the final model prompt always uses its reduced observation. The distinction should be verified with end-to-end prompt-contract tests.
-
-## Follow-up questions: what is sent to the model?
-
-Durable history is stored by conversation ID, including user messages, tool observations, and assistant answers. **The model payload depends on the selected runtime path:**
-
-| Runtime | Second-turn model context |
+| Runtime | Model receives for Q2 |
 | --- | --- |
-| **Manual ReAct + LiteLLM/Bedrock** | A new single-turn tool proposal over **Q2 and schema**; the answer call gets **Q2 and current SQL result**. `conversation_id` is supplied for correlation, but stored Q1/tool/A1 history is **not** included in the model message payload on this path. |
-| **Manual ReAct + owned vLLM gateway** | `prefix_render.render_conversation_prompt` constructs **system + stored Q1 + prior tool observation + A1 + Q2**, excluding Q2 from stored history before appending it once. This path currently has **no bounded history selection in that renderer**. |
-| **Opt-in Deep Agents** | Restores **up to four previous user/assistant turns** plus up to **two prior tool observations per turn**, then Q2. Caps: **12,000 characters total**; previous user text 1,000, assistant answer 1,500, each tool result 2,000. Observations are embedded as marked *untrusted tool data*, not free-standing tool-role messages. |
+| **Manual ReAct + LiteLLM/Bedrock** | Q2 with schema/tool instructions, followed by Q2's current SQL result for answering; stored Q1/A1 are not passed as model history. |
+| **Manual ReAct + owned vLLM** | System instructions, stored Q1, prior tool observation, A1, then Q2; history rendering is not currently bounded. |
+| **Deep Agents** | Up to four earlier turns with bounded answers and selected tool observations, followed by Q2; prior tool content is marked untrusted. |
 
-The manual history renderer lives in [prefix_render.py](../../services/app/app/prefix_render.py); Deep Agents uses [build_history_messages](../../services/app/app/orchestration/deep_agents_run.py). They are separate model-prompt construction paths and can differ in behavior.
+The model receives a **conversation ID** for correlation where supported; that does not itself restore conversational history.
 
-**Example:** Q1 “Which zone has the most pickups?” → tool returns ranked counts → A1 cites top zone → Q2 “What about second place?” The intended behavior is to resolve “second place” against the prior analytical intent and evidence. Stored history alone does not guarantee the follow-up is correctly resolved.
+## Current limitations
 
-## Existing safeguards and evidence
+**Broader query routing and explicit multi-turn query resolution are pending.** Bounded context selection and prompt parity across all model paths also need evaluation. Test follow-ups such as “compare that with second place,” plus full vs reduced SQL evidence for accuracy, token use, and cost.
 
-- **MCP/tool validation:** tool allowlists, argument validation, result sanitization, bounded operations.
-- **Answer grounding:** checks numeric claims and query identifiers against tool observations; unsupported causal claims are flagged.
-- **Observability:** run events, `context.reduced` data, token/cost/run telemetry, and OpenTelemetry/Phoenix traces.
-- **Tests:** [reducer tests](../../services/app/tests/test_context_reducer.py), [tool tests](../../services/app/tests/test_governed_mcp_client.py), [grounding tests](../../services/app/tests/test_validation_grounding.py), and [Deep Agents history tests](../../services/app/tests/test_deep_agents_history.py).
-
-## Open implementation gaps / experiments
-
-| Area | Status / measurement |
-| --- | --- |
-| **Query routing** | Exact catalogue and model tool-selection implemented; broader intent-aware routing is **pending**. Compare selection accuracy, cost, fallback and latency. |
-| **Multi-turn query resolution** | Some contextual history paths exist; an explicit, independently observable **query-resolution/rewrite stage is pending**. Evaluate ambiguous follow-ups such as “what about second place?” |
-| **Prompt/context parity** | **Pending**: verify the actual model prompt consumes selected/reduced evidence consistently across manual Bedrock, owned vLLM, and Deep Agents. |
-| **Memory selection** | **Pending experiment**: full history vs bounded recent window vs relevant historical observations, measured on correctness, tokens, and latency. |
-| **SQL observation reduction** | **Pending benchmark**: full SQL result vs three-row preview vs tailored aggregate; score evidence preservation, grounded answers, and cost. |
-
-Do not conflate **document retrieval** with **structured query execution**. Adopt document chunking, vectors, or reranking only when a real corpus and a measurable retrieval failure justify them. Broader alternatives live in [research notes](../research/context/README.md).
+**Code:** [Orchestration](../../services/app/app/orchestration/loop.py) · [MCP client](../../services/app/app/mcp_client.py) · [ContextReducer](../../services/app/app/orchestration/reducer.py) · [Conversation renderer](../../services/app/app/prefix_render.py) · [Grounding](../../services/app/app/validation/grounding.py).
