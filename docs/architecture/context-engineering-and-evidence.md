@@ -2,6 +2,18 @@
 
 The NYC Taxi analytics assistant uses **retrieval-augmented generation over structured data**: the agent retrieves results from read-only MCP tools backed by DuckDB/Parquet, then generates an answer grounded in those results. This is **SQL/tool-based RAG**, not document RAG; it does not use chunking, embeddings, or a vector index.
 
+## Baseline model path
+
+| Step | Choice | Why |
+| --- | --- | --- |
+| **Agent** | **Custom ReAct** | Default bounded orchestration |
+| **Model gateway** | **LiteLLM** | Managed model access and usage tracking |
+| **Planner** | **Nova Pro** | Better comparative-query tool and argument selection in evaluations |
+| **Answer model** | **Nova Micro** | Lower-cost grounded answer generation |
+| **Provider** | **AWS Bedrock** | Managed inference runtime |
+
+**Best-evaluated baseline:** Custom ReAct → LiteLLM → Bedrock (**Nova Pro planner + Nova Micro answer model**).
+
 ## Retrieval and answer flow
 
 ```mermaid
@@ -47,8 +59,6 @@ The dotted path matters: **the ContextReducer produces a working-context record,
 | `compare_taxi_segments` | Compare two filtered populations |
 
 The MCP server also publishes the dataset schema as a **resource**. Analytical tools enforce input schemas and bounded results; they are not a general-purpose SQL execution endpoint.
-
-**Baseline model path:** Custom ReAct → LiteLLM → AWS Bedrock, using **Nova Pro for tool planning** and **Nova Micro for answer generation**. Evaluation favored Nova Pro for comparative queries that require more reliable tool/argument selection; Nova Micro keeps answer generation inexpensive.
 
 ## Conversation context
 
