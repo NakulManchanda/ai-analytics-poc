@@ -45,7 +45,7 @@ Each document describes **current behavior, code ownership, limitations, and evi
 
 | Area | Implementation documentation |
 | --- | --- |
-| **Application & MCP evidence retrieval** | [Context engineering, SQL observations, context reducer, and follow-up history](docs/architecture/context-engineering-and-evidence.md) |
+| **RAG & MCP tools** | [SQL retrieval, governed MCP tools, context handling and grounding](docs/architecture/context-engineering-and-evidence.md) |
 | **Agent harness & prompt contracts** | [Agent harness architecture](docs/agent-harness.md) · [Prompt/prefix contract](docs/prefix-contract.md) |
 | **Evaluation & human review** | [Eval pipeline and human review](docs/evals.md) · [Capture format](docs/capture.md) |
 | **Model access & governance** | [LiteLLM integration](docs/litellm-proxy.md) · [Model roles and spend policies](docs/model-policy.md) |
