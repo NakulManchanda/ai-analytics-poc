@@ -46,10 +46,10 @@ Each document describes **current behavior, code ownership, limitations, and evi
 | Area | Implementation documentation |
 | --- | --- |
 | **Application & MCP evidence retrieval** | [Context engineering, SQL observations, context reducer, and follow-up history](docs/architecture/context-engineering-and-evidence.md) |
-| **Agent harness & prompt contracts** | [Custom orchestration and overall architecture](DESIGN.md) · [Prompt/prefix contract](docs/prefix-contract.md) |
+| **Agent harness & prompt contracts** | [Agent harness architecture](docs/agent-harness.md) · [Prompt/prefix contract](docs/prefix-contract.md) |
 | **Evaluation & human review** | [Eval pipeline and human review](docs/evals.md) · [Capture format](docs/capture.md) |
 | **Model access & governance** | [LiteLLM integration](docs/litellm-proxy.md) · [Model roles and spend policies](docs/model-policy.md) |
-| **Inference gateway & GPU serving** | [Gateway implementation](services/gateway/README.md) · [Inference experiments and measured evidence](docs/inference-experiments/inference-evidence-index.md) |
+| **Inference gateway & GPU serving** | [Inference architecture](docs/inference.md) · [Gateway implementation](services/gateway/README.md) · [Inference experiments and measured evidence](docs/inference-experiments/inference-evidence-index.md) |
 | **Telemetry and operations** | [Observability setup](docs/observability-stack.md) · [Local operation](docs/local-uat-guide.md) |
 
 
