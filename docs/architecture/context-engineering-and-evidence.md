@@ -1,35 +1,63 @@
-# Context Engineering & Evidence Retrieval
+# RAG & MCP Tools Architecture
 
-The NYC Taxi assistant grounds answers in **structured SQL evidence** retrieved through governed MCP tools. It does not require document chunking or vector retrieval for its current analytical workload.
+The NYC Taxi analytics assistant uses **retrieval-augmented generation over structured data**: the agent retrieves results from read-only MCP tools backed by DuckDB/Parquet, then generates an answer grounded in those results. This is **SQL/tool-based RAG**, not document RAG; it does not use chunking, embeddings, or a vector index.
 
-## Request flow
+## Retrieval and answer flow
 
-```text
-Question → Tool catalogue / LLM planner → Validated MCP call
-         → DuckDB / Parquet SQL → Tool observation
-         → Context reduction + answer generation
-         → Grounding checks → Persist answer / SSE events
+```mermaid
+flowchart TD
+  Q[User question] --> C{Known question?}
+  C -->|Yes| K[Deterministic query catalogue]
+  C -->|No| P[LLM tool planner]
+  K --> V[Tool and argument validation]
+  P --> V
+  V --> M[FastMCP analytics tools]
+  M --> D[(DuckDB / pinned Parquet)]
+  D --> O[Bounded SQL result + query ID]
+  O --> A[Grounded answer]
+  A --> G[Numeric / citation checks]
+  G --> R[Persist answer + SSE events]
+  O -.-> X[ContextReducer: bounded working context]
+  X -.-> E[Run events / diagnostics]
 ```
 
-- **Tool selection:** known questions use an exact-match catalogue; otherwise the model proposes an allowlisted tool and validated arguments.
-- **Evidence:** SQL results include rows, columns, counts, and query identifiers. Tool observations are persisted for subsequent inspection.
-- **Context reducer:** retains the current question, recent messages, short previews of older messages, schema, budgets, and at most **three preview rows per current observation** plus an artifact reference.
-- **Grounding:** checks numeric claims and query identifiers against the underlying tool observation; flags unsupported causal claims.
+The dotted path matters: **the ContextReducer produces a working-context record, but the answer model's prompt is assembled separately**. Reduced observations are not guaranteed to replace the full current query result in every model path.
 
-**Important distinction:** `WorkingContext` is recorded for evaluation and observability, but the model clients assemble their actual prompt separately. The reduced SQL preview is **not guaranteed to be the context the answer model consumes**.
+## Implemented modules
 
-## Follow-up context by runtime
-
-| Runtime | Model receives for Q2 |
+| Module | Responsibility |
 | --- | --- |
-| **Manual ReAct + LiteLLM/Bedrock** | Q2 with schema/tool instructions, followed by Q2's current SQL result for answering; stored Q1/A1 are not passed as model history. |
-| **Manual ReAct + owned vLLM** | System instructions, stored Q1, prior tool observation, A1, then Q2; history rendering is not currently bounded. |
-| **Deep Agents** | Up to four earlier turns with bounded answers and selected tool observations, followed by Q2; prior tool content is marked untrusted. |
+| **Query catalogue** | Maps recognized questions to fixed tool calls without a planner model request. Other questions use the model planner. |
+| **MCP tool layer** | Exposes validated read-only analytics; callers cannot submit arbitrary SQL or dataset paths. |
+| **DuckDB retrieval** | Runs allowlisted analytical queries against the pinned January 2024 taxi dataset and zone lookup. |
+| **Result validation** | Checks tool output shape, row/byte limits, and safe failure envelopes before evidence reaches orchestration. |
+| **ContextReducer** | Retains recent messages, summarizes older history, and records up to three preview rows plus evidence references and remaining budgets. |
+| **Answer grounding** | Checks numeric claims and query IDs against returned evidence; flags causal claims the dataset cannot establish. |
 
-The model receives a **conversation ID** for correlation where supported; that does not itself restore conversational history.
+## MCP tool catalogue
 
-## Current limitations
+| Tool | Purpose |
+| --- | --- |
+| `get_dataset_profile` | Dataset identity and profile metadata |
+| `describe_taxi_dataset` | Schema, coverage and code dictionaries |
+| `list_taxi_dimension_values` | Valid values for a supported dimension |
+| `query_taxi_data` | Fixed analyses such as popular pickup zones and peak hours |
+| `average_trip_metrics` | Regional fare and distance metrics |
+| `aggregate_taxi_data` | Grouped measures, filters, sorting and limits |
+| `compare_taxi_segments` | Compare two filtered populations |
 
-**Broader query routing and explicit multi-turn query resolution are pending.** Bounded context selection and prompt parity across all model paths also need evaluation. Test follow-ups such as “compare that with second place,” plus full vs reduced SQL evidence for accuracy, token use, and cost.
+The MCP server also publishes the dataset schema as a **resource**. Analytical tools enforce input schemas and bounded results; they are not a general-purpose SQL execution endpoint.
 
-**Code:** [Orchestration](../../services/app/app/orchestration/loop.py) · [MCP client](../../services/app/app/mcp_client.py) · [ContextReducer](../../services/app/app/orchestration/reducer.py) · [Conversation renderer](../../services/app/app/prefix_render.py) · [Grounding](../../services/app/app/validation/grounding.py).
+## Conversation context
+
+| Agent/model path | Follow-up behavior |
+| --- | --- |
+| **Custom ReAct + LiteLLM/Bedrock** | Planner receives the current question rather than prior Q/A and tool history. |
+| **Custom ReAct + owned vLLM** | Includes stored conversation and tool evidence; history rendering is not bounded. |
+| **Deep Agents** | Restores a bounded selection of prior turns and tool observations, with tool content marked as untrusted. |
+
+## Next improvement
+
+**Multi-turn query resolution:** Interpret follow-ups such as “compare that with the second-highest zone” using the preceding question, filters, and retrieved evidence **before selecting the next MCP tool**. This is not yet a dedicated, consistent stage across model paths.
+
+**Implementation:** [MCP server](../../services/mcp/mcp_server/server.py) · [Tool schemas](../../services/mcp/mcp_server/schemas.py) · [Query catalogue](../../services/app/app/query_catalogue.py) · [MCP client](../../services/app/app/mcp_client.py) · [ContextReducer](../../services/app/app/orchestration/reducer.py) · [Grounding](../../services/app/app/validation/grounding.py).
