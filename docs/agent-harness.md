@@ -26,4 +26,4 @@ Both strategies execute against governed tools, but **their prompt, history, and
 
 **Current gaps:** explicit multi-turn query resolution, strategy-equivalent prompt contracts, and controlled ReAct-versus-Deep-Agents benchmark results.
 
-**Code:** [Orchestration](../services/app/app/orchestration/) · [MCP client](../services/app/app/mcp_client.py) · [Context engineering](architecture/context-engineering-and-evidence.md) · [Evaluation](evals.md) · [Inference architecture](../DESIGN.md).
+**Code:** [Orchestration](../services/app/app/orchestration/) · [MCP client](../services/app/app/mcp_client.py) · [Context engineering](architecture/context-engineering-and-evidence.md) · [Evaluation](evals.md) · [Inference architecture](inference.md).
