@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1000" viewBox="0 0 1200 1000" role="img" aria-labelledby="title desc">
+<title id="title">NYC Taxi AI Analytics experimental platform: circular stack map</title>
+<desc id="desc">Application and owned ReAct agent harness are central. Eight surrounding cards show MCP tools, model access, owned gateway, GPU serving, GPU infrastructure, observability, evaluations, and cloud state. Lines indicate conceptual dependencies, not request execution order.</desc>
+<rect width="1200" height="1000" rx="26" fill="#FCFCFE"/>
+<circle cx="600" cy="477" r="295" fill="none" stroke="#DDE3EA" stroke-width="2" stroke-dasharray="5 9"/>
+<circle cx="600" cy="477" r="225" fill="#F5F8FF" stroke="#DFE8F8" stroke-width="2"/>
+<text x="600" y="43" text-anchor="middle" font-family="Arial,sans-serif" font-size="24" font-weight="700" fill="#17283B">Experimental AI Platform — Circular Stack</text>
+<text x="600" y="70" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" fill="#506175">One application · independent harness experiments · shared platform evidence</text>
+<line x1="600" y1="477" x2="600" y2="115" stroke="#BCC7D6" stroke-width="2" stroke-dasharray="5 6"/><line x1="600" y1="477" x2="930" y2="225" stroke="#BCC7D6" stroke-width="2" stroke-dasharray="5 6"/><line x1="600" y1="477" x2="1015" y2="470" stroke="#BCC7D6" stroke-width="2" stroke-dasharray="5 6"/><line x1="600" y1="477" x2="915" y2="715" stroke="#BCC7D6" stroke-width="2" stroke-dasharray="5 6"/><line x1="600" y1="477" x2="600" y2="840" stroke="#BCC7D6" stroke-width="2" stroke-dasharray="5 6"/><line x1="600" y1="477" x2="285" y2="715" stroke="#BCC7D6" stroke-width="2" stroke-dasharray="5 6"/><line x1="600" y1="477" x2="185" y2="470" stroke="#BCC7D6" stroke-width="2" stroke-dasharray="5 6"/><line x1="600" y1="477" x2="270" y2="225" stroke="#BCC7D6" stroke-width="2" stroke-dasharray="5 6"/><circle cx="600" cy="477" r="178" fill="#E8EEFD" stroke="#799BDE" stroke-width="3"/>
+<text x="600" y="405" text-anchor="middle" font-size="15" font-family="Arial,sans-serif" fill="#3C5F9F" font-weight="700">01 · APPLICATION</text>
+<text x="600" y="431" text-anchor="middle" font-size="15" font-family="Arial,sans-serif" fill="#17283B">React · FastAPI · multi-turn</text>
+<text x="600" y="452" text-anchor="middle" font-size="15" font-family="Arial,sans-serif" fill="#17283B">SSE · analytics UI</text>
+<line x1="492" y1="472" x2="708" y2="472" stroke="#A9BCE0"/>
+<text x="600" y="499" text-anchor="middle" font-size="15" font-family="Arial,sans-serif" fill="#3C5F9F" font-weight="700">02 · AGENT HARNESS</text>
+<text x="600" y="523" text-anchor="middle" font-size="15" font-family="Arial,sans-serif" fill="#17283B">Custom ReAct + deterministic</text>
+<text x="600" y="548" text-anchor="middle" font-size="13" font-family="Arial,sans-serif" fill="#536783">Deep Agents / LangGraph: proposed</text>
+<rect x="460" y="58" width="280" height="114" rx="17" fill="#E5F5F1" stroke="#86CBB9" stroke-width="2"/>
+ <text x="600" y="88" text-anchor="middle" font-family="Arial,sans-serif" font-size="16" font-weight="700" fill="#17283B">03 · MCP &amp; DATA TOOLS</text>
+ <text x="600" y="119" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" fill="#31485D">FastMCP · DuckDB</text>
+ <text x="600" y="143" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" fill="#31485D">Parquet · bounded reads</text><rect x="790" y="168" width="280" height="114" rx="17" fill="#E5F5F1" stroke="#86CBB9" stroke-width="2"/>
+ <text x="930" y="198" text-anchor="middle" font-family="Arial,sans-serif" font-size="16" font-weight="700" fill="#17283B">04 · MODEL ACCESS</text>
+ <text x="930" y="229" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" fill="#31485D">LiteLLM · model aliases</text>
+ <text x="930" y="253" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" fill="#31485D">Bedrock or owned gateway</text><rect x="875" y="413" width="280" height="114" rx="17" fill="#E5F5F1" stroke="#86CBB9" stroke-width="2"/>
+ <text x="1015" y="443" text-anchor="middle" font-family="Arial,sans-serif" font-size="16" font-weight="700" fill="#17283B">05 · GATEWAY POLICIES</text>
+ <text x="1015" y="474" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" fill="#31485D">Guard · quota · admission</text>
+ <text x="1015" y="498" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" fill="#31485D">Placement · queue · KV hop</text><rect x="775" y="658" width="280" height="114" rx="17" fill="#E5F5F1" stroke="#86CBB9" stroke-width="2"/>
+ <text x="915" y="688" text-anchor="middle" font-family="Arial,sans-serif" font-size="16" font-weight="700" fill="#17283B">06 · GPU MODEL SERVING</text>
+ <text x="915" y="719" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" fill="#31485D">vLLM · Qwen3 · PagedAttention</text>
+ <text x="915" y="743" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" fill="#31485D">Prefix cache · Mooncake</text><rect x="460" y="783" width="280" height="114" rx="17" fill="#E5F5F1" stroke="#86CBB9" stroke-width="2"/>
+ <text x="600" y="813" text-anchor="middle" font-family="Arial,sans-serif" font-size="16" font-weight="700" fill="#17283B">07 · NEO-CLOUD GPU</text>
+ <text x="600" y="844" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" fill="#31485D">A100 · K3s · HAMi slices</text>
+ <text x="600" y="868" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" fill="#31485D">DCGM · capacity evidence</text><rect x="145" y="658" width="280" height="114" rx="17" fill="#F2EAFE" stroke="#C8A7F6" stroke-width="2"/>
+ <text x="285" y="688" text-anchor="middle" font-family="Arial,sans-serif" font-size="16" font-weight="700" fill="#17283B">08 · OBSERVABILITY</text>
+ <text x="285" y="719" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" fill="#31485D">OTEL · Phoenix traces</text>
+ <text x="285" y="743" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" fill="#31485D">Grafana · Prometheus · Loki</text><rect x="45" y="413" width="280" height="114" rx="17" fill="#F2EAFE" stroke="#C8A7F6" stroke-width="2"/>
+ <text x="185" y="443" text-anchor="middle" font-family="Arial,sans-serif" font-size="16" font-weight="700" fill="#17283B">09 · EVALUATIONS</text>
+ <text x="185" y="474" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" fill="#31485D">Golden cases · DeepEval</text>
+ <text x="185" y="498" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" fill="#31485D">Human review (proposed)</text><rect x="130" y="168" width="280" height="114" rx="17" fill="#F2EAFE" stroke="#C8A7F6" stroke-width="2"/>
+ <text x="270" y="198" text-anchor="middle" font-family="Arial,sans-serif" font-size="16" font-weight="700" fill="#17283B">10 · CLOUD &amp; STATE</text>
+ <text x="270" y="229" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" fill="#31485D">DynamoDB · Redis · AWS</text>
+ <text x="270" y="253" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" fill="#31485D">Terraform · CI/CD</text><rect x="340" y="944" width="520" height="31" rx="15" fill="#F0F3F8"/>
+<text x="600" y="965" text-anchor="middle" font-family="Arial,sans-serif" font-size="13" fill="#52647A">Outer connections show platform relationships — not a sequential request flow</text>
+</svg>
