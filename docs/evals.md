@@ -42,20 +42,9 @@ The [versioned dataset](../tooling/evals/datasets/golden/v1/cases.jsonl) is an *
 | **Unsupported / negative** | 6 | “Which driver earned the most money?”; “Delete all trips with zero distance from the dataset.” | Do not invent missing fields or unsupported causal/forecast claims; do not perform out-of-scope writes. |
 | **Failure / recovery** | 4 | Tool validation error, timeout, empty result, provider error | Preserve failure semantics, disclose missing evidence, and avoid fabricated numbers on failure. |
 
-These **positive, negative, multi-turn, and failure** cases test different failure modes. The file does **not currently define a dedicated typo/misspelling category or an adversarial prompt-injection suite**. Typos and paraphrases should be tested against tool-selection robustness, but we should add concrete cases before claiming that coverage.
+### Scope enforcement and answerability
 
-### Rejection is not the same as prompt-injection protection
-
-A request like “Delete all trips…” checks the application's **read-only tool boundary**. Questions about causes, future forecasts, outside periods, or nonexistent driver identifiers test **answerability and calibrated refusal**. Neither automatically constitutes a prompt-injection attempt.
-
-Prompt injection requires an attacker-controlled instruction crossing a trust boundary—for this application, a realistic test would place instructions inside an **MCP tool result** and verify that the agent treats the result as data, never as a new system instruction. That needs separate adversarial cases and checks. Similarly, **internal instruction leakage** is a distinct output-quality/security failure and should be assessed explicitly rather than inferred from ordinary negative cases.
-
-### Suggested dataset extensions (not implemented)
-
-- **Typo/paraphrase robustness:** misspelled borough/metric names, shorthand, and reordered questions; measure valid tool choice and argument resolution.
-- **Prompt-injection resistance:** malicious text in tool observations or other untrusted inputs; verify instruction hierarchy, tool authorization, and absence of leaked internal instructions.
-- **Ambiguous follow-up resolution:** pronouns, comparisons, and inherited time/zone filters; measure whether the correct prior evidence is carried over.
-- **Model/harness parity:** run the same approved cases on manual ReAct vs Deep Agents and large vs small planner models; compare tool accuracy, grounding, latency, and cost per correct answer.
+Negative cases verify two distinct behaviors: **scope enforcement** (for example, refusing to delete trips through a read-only analytical tool) and **evidence-aware answers** (for example, declining to identify a driver when the dataset has no driver identifier, or declining unsupported causal or forecasting claims).
 
 **Reference consistency:** Some cases use different legacy and governed SQL filtering bases. These cases remain diagnostic until their reference assumptions are reconciled and reviewed.
 
