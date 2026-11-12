@@ -29,6 +29,38 @@ React / FastAPI → Agent → MCP / DuckDB (SQL evidence)
 
 The gateway does **not** load model weights or execute inference. See [gateway service](../services/gateway/README.md), [prefix contract](prefix-contract.md), and [model access](litellm-proxy.md).
 
+## Serving topology and startup configuration
+
+The inference lab runs **K3s + HAMi on one NVIDIA A100**, with two colocated vLLM workers sharing the GPU. The workers are separate scheduling targets, **not two physical GPUs**.
+
+| Layer | Configured settings | Why it matters |
+| --- | --- | --- |
+| **K3s / HAMi** | K3s NVIDIA runtime; `hami-scheduler`; two workers, each requesting 50% GPU memory and 50% GPU cores | Isolates worker resource shares for routing experiments; does not double physical GPU compute |
+| **Model / engine** | vLLM `v0.11.0`; pinned `Qwen/Qwen3-0.6B`; `bfloat16` | Reproducible, small-model serving baseline |
+| **Context / batching** | `--max-model-len 8192`; `--max-num-seqs 8`; `--max-num-batched-tokens 2048` | Caps context and concurrent sequences; gateway dispatch slots match the 8-sequence worker limit |
+| **KV / prefix cache** | `--block-size 16`; `--kv-cache-dtype auto`; `--enable-prefix-caching`; `--gpu-memory-utilization 0.45` | Paged KV allocation and reuse of identical token prefixes within each worker |
+| **Tool calls** | `--enable-auto-tool-choice`; `--tool-call-parser hermes` | Enables model-emitted structured tool calls |
+| **Startup** | `/health` startup probe: 10-second interval × 30 attempts; readiness and liveness follow | Avoids restarting vLLM during weight loading / CUDA initialization |
+
+Both [worker manifests](../infra/inference/k8s/workers/worker-a.yaml) and [HAMi bootstrap](../infra/inference/scripts/bootstrap.sh) define these settings.
+
+## Gateway routing and KV mobility
+
+| Setting | Current configuration |
+| --- | --- |
+| **Placement** | `PLACEMENT_POLICY=prefix_then_load`; conversation-owner preference with `PLACEMENT_SPILL_QUEUE=4` |
+| **Capacity** | `MAX_DECODE_SLOTS=8`, `WORKER_MAX_INFLIGHT=8` per worker; `BATCH_SLOT_RESERVE=0.25` |
+| **Admission** | `MAX_MODEL_LEN=8192`; `KV_FREE_MIN=0.10`; tenant concurrency limit 10 |
+| **Warm workers** | 3 healthy scrapes + warm probe; return-to-service ramp of 2 then 4 slots |
+| **Optional overflow** | Disabled by default (`OVERFLOW_ENABLED=0`) |
+
+**Three separate mechanisms:**
+1. **Gateway prefix routing** uses `x-prefix-id` and worker/load observations to favor an existing KV owner, then spills when needed.
+2. **vLLM prefix caching** reuses matching token blocks **within** a worker. A placement decision is not proof of a cache hit.
+3. **LMCache + Mooncake** is an **opt-in experimental** cross-worker transfer path (TCP/CPU staging). Its rendered worker config adds `MooncakeKVConnector` via `--kv-transfer-config`, and the gateway must enable `KV_HOP_ENABLED=1`. Compatible model, tokenizer, prefix contract and cache namespace are required. **Live transfer benefit remains unproven**.
+
+Configuration sources: [gateway manifest](../infra/inference/k8s/gateway/gateway.yaml) · [placement policy](../services/gateway/placement.py) · [Mooncake bundle](../infra/inference/mooncake/render.py) · [prefix contract](prefix-contract.md).
+
 ## Important design choices
 
 - **Admission precedes queuing:** reject requests beyond budgets, capacity, or viable deadlines before they consume GPU work.
