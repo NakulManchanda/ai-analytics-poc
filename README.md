@@ -6,6 +6,10 @@
 
 ## The Full Stack — 10 Layers Across 4 Domains
 
+![Circular AI platform stack — application and agent harness at the center, with eight surrounding architecture capabilities](docs/images/experimental-platform-circular-stack.svg)
+
+**How to read it:** The central application and custom ReAct harness drive the taxi workload. Surrounding capabilities represent independently owned platform concerns, not a single execution sequence. Proposed Deep Agents benchmarking and human-review workflows are labeled accordingly. The table below remains the detailed, accessible layer reference.
+
 A **layered architecture view** rather than a request-flow diagram. Each row is a different ownership boundary. The agent harness is a separately benchmarked component; observability, evaluation, and cloud/state are cross-cutting layers, not steps every request must traverse.
 
 | Stack layer (top → bottom) |
