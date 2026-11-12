@@ -712,3 +712,19 @@ class TestAirportTripDimensionIsSanitizerSafe:
                 assert not isinstance(value, bool), row
         labels = {row[0] for row in result["rows"]}
         assert labels <= {"airport", "non_airport"}
+
+
+def test_empty_dimensions_compile_to_one_overall_total() -> None:
+    from dataset_spike.query_compiler import compile_aggregate_query
+    from dataset_spike.query_spec import build_aggregate_spec
+
+    spec = build_aggregate_spec(
+        dimensions=[],
+        measures=["average_fare"],
+        filters={"pickup_borough": "Manhattan"},
+        order_by=None,
+        limit=20,
+    )
+    query = compile_aggregate_query(spec)
+    assert query.output_columns == ["average_fare"]
+    assert "GROUP BY" not in query.sql

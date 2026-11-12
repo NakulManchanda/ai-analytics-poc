@@ -89,7 +89,31 @@ _NESTED_ARG_DEFAULTS: dict[tuple[str, ...], object] = {
 _NO_DEFAULT = object()
 
 
+def _with_pinned_dimensions(
+    expected: ExpectedTool, actual: dict[str, object]
+) -> dict[str, object]:
+    """An expected dimension the call omits still matches when an equality filter on that
+    same name pins it to one value: grouping by it adds no information (``dimensions: []``
+    with ``filters.pickup_borough = Manhattan`` is the same total as grouping by
+    ``pickup_borough``). Only ``aggregate_taxi_data`` calls are adjusted."""
+    if expected.name != "aggregate_taxi_data":
+        return actual
+    want, have = expected.arguments.get("dimensions"), actual.get("dimensions")
+    filters = actual.get("filters")
+    if not (isinstance(want, list) and isinstance(have, list)):
+        return actual
+    if not isinstance(filters, dict):
+        return actual
+    pinned = [
+        d
+        for d in want
+        if d not in have and isinstance(filters.get(d), (str, int, float, bool))
+    ]
+    return {**actual, "dimensions": [*have, *pinned]} if pinned else actual
+
+
 def args_match(expected: ExpectedTool, actual: dict[str, object]) -> bool:
+    actual = _with_pinned_dimensions(expected, actual)
     exact = expected.match == "exact"
     top_defaults = TOOL_ARG_DEFAULTS.get(expected.name, {})
 

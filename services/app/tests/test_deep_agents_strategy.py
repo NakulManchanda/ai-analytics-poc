@@ -179,7 +179,7 @@ def test_tools_match_supplied_mcp_definitions() -> None:
     by_name = {d["name"]: d for d in MCP_DEFINITIONS}
     assert [t.name for t in tools] == list(MCP_TOOL_NAMES)
     for tool in tools:
-        assert tool.description == by_name[tool.name]["description"]
+        assert tool.description.startswith(by_name[tool.name]["description"])
         slim = tool.args_schema
         original = by_name[tool.name]["inputSchema"]
         # Slimming keeps every property and every required field; only noise is removed.
@@ -274,18 +274,20 @@ def test_invalid_args_return_tool_error_not_exception() -> None:
     assert payload["error"] == "invalid_arguments"
     assert payload["tool_name"] == "aggregate_taxi_data"
     # The model must be told what to change, or it repeats the identical call.
-    assert "dimensions" in payload["message"] and "non-empty list" in payload["message"]
+    assert (
+        "dimensions" in payload["message"]
+        and "list of dimension names" in payload["message"]
+    )
     assert mcp.calls == []
 
 
 @pytest.mark.parametrize(
     ("tool", "arguments", "expected"),
     [
-        ("aggregate_taxi_data", {"measures": ["trip_count"]}, "dimensions is required"),
         (
             "aggregate_taxi_data",
-            {"dimensions": [], "measures": ["trip_count"]},
-            "dimensions is required",
+            {"dimensions": "zone", "measures": ["trip_count"]},
+            "dimensions must be a list",
         ),
         ("aggregate_taxi_data", {"dimensions": ["zone"]}, "measures is required"),
         (
@@ -364,9 +366,9 @@ def test_slim_schema_keeps_constraints_and_drops_noise() -> None:
 def test_non_empty_arrays_are_hinted_in_the_tool_schema() -> None:
     tools = {t.name: t for t in build_mcp_tools(FakeMCP(), lambda: MCP_DEFINITIONS)}  # type: ignore[arg-type]
     props = tools["aggregate_taxi_data"].args_schema["properties"]
-    for field in ("dimensions", "measures"):
-        if props[field].get("type") == "array":
-            assert props[field]["minItems"] == 1
+    assert props["measures"]["minItems"] == 1
+    # dimensions [] is valid (one overall total), so it must not be forbidden.
+    assert "minItems" not in props["dimensions"]
 
 
 def test_valid_call_reaches_mcp_client() -> None:
@@ -446,3 +448,112 @@ def test_default_path_does_not_import_langchain_or_deepagents() -> None:
     )
     proc = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
     assert proc.returncode == 0, proc.stderr
+
+
+def test_aggregate_description_explains_single_total_without_touching_others() -> None:
+    from app.orchestration.deep_agents_strategy import _tool_description
+
+    hinted = _tool_description("aggregate_taxi_data", "Aggregate.")
+    assert hinted.startswith("Aggregate.")
+    assert "dimensions []" in hinted and "one overall total" in hinted
+    assert "tip_rate" in hinted and "order_by.key" in hinted
+    # Tools without a hint keep their published description unchanged.
+    assert _tool_description("list_taxi_dimension_values", "List.") == "List."
+
+
+def test_compare_comparison_filters_point_to_baseline_filters() -> None:
+    from app.orchestration.deep_agents_strategy import _tool_schema
+
+    filters = {
+        "type": "object",
+        "description": "Optional filters.",
+        "properties": {
+            f"f{i}": {"type": "string", "description": "x" * 80} for i in range(30)
+        },
+    }
+    schema = {
+        "type": "object",
+        "properties": {
+            "measures": {"type": "array", "items": {"type": "string"}},
+            "baseline_filters": filters,
+            "comparison_filters": dict(filters),
+        },
+    }
+    out = _tool_schema("compare_taxi_segments", schema)
+    props = out["properties"]
+    assert props["baseline_filters"] == filters  # the one full copy is kept
+    assert "properties" not in props["comparison_filters"]
+    assert "baseline_filters" in props["comparison_filters"]["description"]
+    assert len(json.dumps(out)) < len(json.dumps(schema)) - 2000
+    # Other tools are untouched.
+    assert (
+        _tool_schema("aggregate_taxi_data", schema)["properties"]["comparison_filters"]
+        == filters
+    )
+
+
+def test_plain_react_harness_is_opt_in_and_builds_the_same_tools(monkeypatch) -> None:
+    from app.orchestration.deep_agents_strategy import (
+        build_deep_agent,
+        plain_react_enabled,
+    )
+
+    assert plain_react_enabled({}) is False
+    assert plain_react_enabled({"AGENT_HARNESS": "create_agent"}) is True
+    monkeypatch.setenv("AGENT_HARNESS", "create_agent")
+    agent = build_deep_agent(
+        client=FakeMCP(),  # type: ignore[arg-type]
+        base_url="http://x",
+        api_key="k",
+        model="m",
+        chat_model=FakeChatModel(script=[AIMessage(content="ok")], bound=[], seen=[]),
+        list_tools=lambda: MCP_DEFINITIONS,
+    )
+    out = agent.invoke({"messages": [("user", "hi")]})
+    assert out["messages"][-1].content == "ok"
+
+
+def test_envelope_error_message_reaches_the_model_but_transport_detail_does_not() -> (
+    None
+):
+    envelope = MCPToolError(
+        False,
+        "order_by.key must be one of the requested output columns",
+        reason="tool_error_envelope",
+    )
+    out, _ = _run(
+        [
+            _call(
+                "aggregate_taxi_data", {"dimensions": [], "measures": ["trip_count"]}
+            ),
+            AIMessage(content="x"),
+        ],
+        FakeMCP(error=envelope),
+    )
+    payload = json.loads(_tool_messages(out)[0].content)
+    assert payload["reason"] == "tool_error_envelope"
+    assert (
+        payload["message"] == "order_by.key must be one of the requested output columns"
+    )
+
+    transport = MCPToolError(
+        True, "connect to http://internal:8001 failed", reason="transport_error"
+    )
+    out, _ = _run(
+        [_call("describe_taxi_dataset", {}), AIMessage(content="x")],
+        FakeMCP(error=transport),
+    )
+    assert "message" not in json.loads(_tool_messages(out)[0].content)
+
+
+def test_omitted_dimensions_means_one_overall_total() -> None:
+    mcp = FakeMCP(result={"rows": [[15.05]], "row_count": 1})
+    out, _ = _run(
+        [
+            _call("aggregate_taxi_data", {"measures": ["average_fare"]}),
+            AIMessage(content="x"),
+        ],
+        mcp,
+    )
+    assert mcp.calls[0][1]["dimensions"] == []
+    assert "error" not in json.loads(_tool_messages(out)[0].content)
