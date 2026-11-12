@@ -19,26 +19,30 @@ An open-source **NYC Taxi analytics application** used to explore agent orchestr
 | **Evaluations** | Replay golden cases and grade correctness, tool behavior, faithfulness, and cost. |
 | **Cloud & state** | Preserve conversations and run state with DynamoDB/Redis; deploy using AWS/Terraform. |
 
+## Tools we built
+
+| Tool | Why it exists |
+| --- | --- |
+| **[Human review workbench](tooling/evals/src/evals/review_server.py)** | Review frozen runs, save **tool / answer / follow-up resolution** verdicts, compare humans with graders, and open the related **Phoenix trace**. Plan scoring is a future addition. |
+| **[Evaluation harness](tooling/evals/)** | Replay captured runs against a 37-case golden dataset; grade correctness, grounding, tool use, cost, and baseline-vs-candidate regressions. Golden cases still await human approval. |
+| **[Inference gateway](services/gateway/)** | Policy-owned guardrails, tenant quotas, admission/shedding, prefix-aware placement, queues, and KV-hop/overflow. |
+| **[Trace and evidence pipeline](docs/observability-stack.md)** | Correlate app, MCP, and LiteLLM traces in **Phoenix**; link human reviews back to a run's trace. |
+| **[Workload benchmark runner](tooling/benchmarks/)** | Replay fixed app and gateway scenarios; collect goodput, TTFT, queue and routing metrics for repeatable comparisons. |
+| **[Model policy engine](services/app/app/model_policy/)** | Assign planner/answer model roles, enforce tenant entitlements and token/spend budgets, and track priced vs unknown usage. |
+
 ## Experiments and benchmarks
 
-| Area | Experiment / benchmark |
+| Theme | Comparison |
 | --- | --- |
-| **Inference bottlenecks** | Offered-load sweep: **KV capacity vs decode slots vs queueing**, using goodput, TTFT, p99, and GPU metrics. |
-| **Warmup and caching** | Cold vs warm worker; first-pass vs reused-prefix TTFT. |
-| **Gateway placement** | **Least-loaded vs prefix-aware routing** on identical multi-turn traces. |
-| **Gateway admission** | **Admission on vs off** under overload: interactive goodput, tail latency, fairness, and sheds. |
-| **KV locality** | Local reuse vs recompute vs **LMCache/Mooncake KV migration**; compare transfer cost and TTFT. |
-| **Model economics** | Planner/answer model roles, **Nova Pro vs Micro** trade-offs, tokens and per-run cost controls; a full controlled quality benchmark remains future work. |
-| **Agent reliability** | Bounded ReAct, multi-turn state, cancellation/replay, tool validation, and failure handling. |
-| **Evals & tracing** | Versioned **37-case golden dataset**, deterministic/recorded-judge regression checks, capture/replay, and Phoenix trace inspection. **Golden cases are pending human review; recorded judge fixtures are synthetic.** |
+| **Capacity and warmup** | GPU limits: KV memory vs decode slots vs queue; cold vs warm worker. |
+| **Caching and placement** | First-pass vs reused-prefix TTFT; least-loaded vs prefix-aware placement. |
+| **Admission and KV mobility** | Admission on/off under overload; local KV reuse vs recompute vs LMCache/Mooncake hop. |
+| **Agent reliability and models** | Bounded multi-turn ReAct, cancellation and replay; Nova Pro planner vs Micro cost and tool-plan behavior. |
+| **Quality and observability** | Golden-case and recorded-judge regression checks; human vs grader disagreements linked to Phoenix traces. |
 
 ## Next experiments
 
-- **Agent harness:** custom ReAct **vs Deep Agents/LangGraph** on the same tasks, tools, models, budgets, and latency/cost measures. *CrewAI was not directly benchmarked.*
-- **Planner models:** larger capable planner **vs smaller cheaper planner**, measuring valid tool plans, final accuracy, latency, and cost per correct answer.
-- **Human evaluation:** separately rate **plan, tool action, and final answer**; calibrate model judges against reviewers.
-- **Self-hosted inference:** compare owned vLLM serving against managed model endpoints for quality, throughput, isolation, and cost.
-- **Security and recovery:** adversarial MCP tests, authorization boundaries, approvals, and crash/restart replay.
+**Agent harness comparison:** custom ReAct vs opt-in **Deep Agents/LangGraph** using equivalent tasks, tools, and budgets (implementation exists; controlled benchmark still needed). **Planner economics:** capable vs smaller models on plan quality and cost per correct answer. **Human grading:** add plan ratings alongside implemented tool/answer reviews. **Self-hosted inference:** compare vLLM with managed endpoints. **Security:** adversarial MCP access and approval/recovery tests.
 
-**Implementation and evidence:** [Inference experiments](docs/inference-experiments/inference-experiments-reference.md) · [GPU evidence](docs/inference-experiments/evidence/notebook/) · [Evals and limitations](docs/evals.md) · [Model policy](docs/model-policy.md) · [Architecture](DESIGN.md) · [Local setup](docs/local-uat-guide.md) · [Deployment](docs/demo-runtime.md)
+**Explore the evidence:** [Inference benchmark methodology](docs/inference-experiments/inference-experiments-reference.md) · [GPU results](docs/inference-experiments/evidence/notebook/) · [Evaluation limitations](docs/evals.md) · [Model policies](docs/model-policy.md) · [Architecture](DESIGN.md) · [Run locally](docs/local-uat-guide.md)
 
