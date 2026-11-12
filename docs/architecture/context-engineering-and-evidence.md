@@ -48,6 +48,8 @@ The dotted path matters: **the ContextReducer produces a working-context record,
 
 The MCP server also publishes the dataset schema as a **resource**. Analytical tools enforce input schemas and bounded results; they are not a general-purpose SQL execution endpoint.
 
+**Baseline model path:** Custom ReAct → LiteLLM → AWS Bedrock, using **Nova Pro for tool planning** and **Nova Micro for answer generation**. Evaluation favored Nova Pro for comparative queries that require more reliable tool/argument selection; Nova Micro keeps answer generation inexpensive.
+
 ## Conversation context
 
 | Agent/model path | Follow-up behavior |
