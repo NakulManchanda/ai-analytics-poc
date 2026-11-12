@@ -1,142 +1,33 @@
-# LiteLLM Proxy (default model path, Bedrock-first)
+# LiteLLM Model Access
 
-Decision: [ADR 0012](decisions/0012-litellm-bedrock-model-proxy.md). Issue #168, epic #167.
+LiteLLM provides a **stable model gateway for managed Bedrock models**. The application owns agent execution, budgets, state and tool calls; the proxy translates model aliases into provider requests and records usage.
 
-## What it is
+## Request flow
 
-A separate LiteLLM Proxy service, now the default model path locally (`make local-aws-litellm-compose`) and in Terraform (ai-app `LLM_PROVIDER=litellm`). The app (`LiteLLMClient`, `LLM_PROVIDER=litellm`) calls
-stable aliases; the proxy maps them to Bedrock. The app still owns every LLM call, loop budget and
-durable state. Deployed (ECS) proxy is stateless. Local Compose adds Postgres so the Admin UI and call logs work.
-
-| Alias | Used for | Target |
-| --- | --- | --- |
-| `taxi-planner` | tool proposal calls | Bedrock Nova Pro |
-| `taxi-answer` | answers (streaming and not), `ask` | Bedrock Nova Micro |
-| `taxi-classifier` | reserved for later slices | Bedrock Nova Micro |
-
-Config: `infra/litellm/config.yaml` (image pinned in `docker-compose.litellm.yml`).
-
-## Run locally
-
-```bash
-make local-aws-litellm-compose   # default; proxy + Postgres + app on real AWS
-make litellm-ui                  # Admin UI: http://127.0.0.1:14000/ui (admin / LITELLM_MASTER_KEY from .env)
-make litellm-traffic             # follow every intercepted request/response (DEBUG logs)
-make litellm-ready               # readiness check
-make litellm-spend               # per-alias calls, failures, tokens, cost
-make litellm-errors              # failed calls with the provider error
-make litellm-env                 # generate LITELLM_MASTER_KEY into git-ignored .env (value never printed)
-make litellm-calls               # compact table of recent proxy calls (needs jq); SESSION=conv_... LIMIT=20
-make phoenix-ui                  # Phoenix trace UI: http://127.0.0.1:16006 (no login; project default)
-make phoenix-up / phoenix-down   # start/restart or stop only Phoenix (traces kept)
-make phoenix-purge               # delete every stored Phoenix trace
-make litellm-smoke               # real run through the app; asserts the proxy logged its calls (spends a few tokens)
-make local-bedrock-direct-compose  # rollback: direct Bedrock, no proxy
+```text
+FastAPI agent → Model policy → LiteLLM proxy → AWS Bedrock
+                  │                 │
+             run limits       spend logs / traces
 ```
 
-`LITELLM_PORT` overrides the host port (default 14000, loopback only). `local-aws-compose` remains as a deprecated alias.
-Call metadata is stored in Postgres; read it via the UI or `GET /spend/logs`. Bodies are stored only with `LITELLM_CAPTURE=1`.
+| Alias | Responsibility | Model |
+| --- | --- | --- |
+| `taxi-planner` | Select governed analytical tools | Nova Pro |
+| `taxi-answer` | Generate grounded answers | Nova Micro |
+| `taxi-classifier` | Reserved classification role | Nova Micro |
 
-## Terraform
+Routing is **configuration-driven**, not an LLM router. Model mapping lives in [proxy configuration](../infra/litellm/config.yaml).
 
-`infra/terraform/litellm.tf` runs the proxy as an internal ECS service (Service Connect name `litellm`), with a
-dedicated Bedrock-only task role and a Secrets Manager master key. Not applied by this PR.
+## Security, cost and traces
 
-## Secrets and identity
+- App-level model policies enforce role budgets, tenant entitlements and permitted fallbacks; a shared DynamoDB allowance limits Bedrock spending.
+- AWS SDK credentials or IAM task roles authorize Bedrock requests. The proxy requires `LITELLM_API_KEY`.
+- App `call_id`/`run_id` correlate capture records with proxy spend rows, including retries and fallback attempts.
+- W3C trace propagation links app, MCP and proxy spans in **Phoenix**; proxy logs and optional request capture support debugging.
+- Prompt/response body capture is **opt-in** (`LITELLM_CAPTURE=1`). Default logs are metadata-focused.
 
-- `LITELLM_MASTER_KEY` is supplied via the environment only; never commit it.
-- Bedrock credentials come from the AWS SDK chain (mounted `~/.aws` locally, a task/instance role on AWS),
-  the same identity and model allowlist as the direct client. Config contains only `bedrock/` models, so
-  there is no path to a public provider.
-- `LITELLM_API_KEY` in the app is the proxy key it presents; `LITELLM_PROXY_URL`,
-  `LITELLM_PLANNER_ALIAS`, `LITELLM_ANSWER_ALIAS` override defaults.
+## Runtime boundaries
 
-## Correlation headers (#189)
+The proxy is a required dependency only on the LiteLLM path; direct Bedrock is an alternate path. **The owned vLLM inference gateway is separate from LiteLLM.** The local tracing/Compose integration is implemented; deployed ECS proxy tracing and rollout have not been verified in the documented state.
 
-The app sends these headers so a proxy spend-log row can be mapped to an app run and, 1:1, to a capture `call_id`:
-
-| Header | Sent when | Lands in spend logs as |
-|---|---|---|
-| `x-litellm-session-id` | a conversation id exists | `session_id` |
-| `x-litellm-spend-logs-metadata` | a run id or call id exists (every orchestrated model call, not eval-only) | `metadata.spend_logs_metadata` = `{"run_id","call_id","attempt","eval_run_id"?}` |
-| `x-litellm-tags: eval_run_id:<id>` | only when the run has an `eval_run_id` | `request_tags` |
-
-- `call_id` is the app's `llm_call_id`, identical to the capture `call_id`. `attempt` is the 1-based physical proxy request within that logical call (policy fallbacks on transient errors issue several), so `(call_id, attempt)` identifies one spend row. The proxy's own `request_id` stays unrelated.
-- Calls outside a run (for example `ask`) send no correlation headers. Header construction is fail-open: an error is logged and the headers are omitted; the call is never failed.
-- `eval_run_id` is a correlation label only. It is not an authorization, tenant or billing boundary; budgets and entitlements never read it.
-
-## Observability
-
-- Readiness: `GET /health/readiness` (Compose healthcheck); liveness `GET /health/liveliness`.
-- The client injects W3C `traceparent` so proxy spans join the app trace; the proxy `otel` callback exports
-  via `OTEL_*` env vars. Locally, `LITELLM_OTEL=1 make local-aws-litellm-compose` adds
-  `docker-compose.observability.yml` and `docker-compose.litellm-otel.yml` (`OTEL_EXPORTER=otlp_http`,
-  `OTEL_ENDPOINT=http://otel-collector:4318`, service `litellm-proxy`); the Collector forwards to Phoenix, so app, MCP and proxy spans share one trace there (`JAEGER=1` also adds Jaeger at `http://127.0.0.1:16686`).
-  Without that overlay the callback uses its console exporter.
-- The selected alias is the `model` in the request and the response's `model` field.
-
-## Operational dependency and rollback
-
-With the flag on, the proxy is a hard dependency for model calls (a down proxy maps to retryable
-`litellm_proxy_unavailable`; HTTP 503/504/529 retryable, other statuses not).
-
-Rollback: locally use `make local-bedrock-direct-compose`; in Terraform set ai-app `LLM_PROVIDER` back to `bedrock` (its task role keeps Bedrock access). The GPU gateway and the direct `gateway_chat` replayer never use the proxy.
-
-## Spend guard
-
-`LiteLLMClient` reserves the shared DynamoDB Bedrock allowance (`DynamoDBBedrockBudget`) once per proxy
-request, exactly like the direct client, so the monthly cap still applies on the default path. An exhausted
-or unavailable allowance maps to `bedrock_budget_exhausted` / `bedrock_budget_unavailable` before the proxy is
-called. `LITELLM_API_KEY` is required when `LLM_PROVIDER=litellm` (startup fails closed without it).
-Proxy-native budgets and per-key limits are #170.
-
-## Phoenix trace UI (#190)
-
-`docker-compose.phoenix.yml` is part of the default local path (`LITELLM_COMPOSE` in the Makefile; the proxy's Phoenix logger is in `docker-compose.phoenix-litellm.yml`, split out so the observability stack can layer Phoenix without LiteLLM). It runs Arize
-Phoenix next to the proxy and sets `PHOENIX_COLLECTOR_HTTP_ENDPOINT` on the proxy, which makes LiteLLM attach its
-Phoenix logger beside the `otel` callback. `infra/litellm/config.yaml` is unchanged because the same file is the deployed
-proxy's config; the overlay is local only and never reaches Terraform. `PHOENIX_PORT` overrides the host port (default
-16006, loopback only). The overlay also turns on app and MCP tracing and exports it straight to Phoenix, so one trace is the
-whole run: `ai.run` -> LLM calls -> `mcp.request` -> `mcp.tool.execute` -> `duckdb.query`. The app sets `session.id` to the
-conversation id on `ai.run`, so Phoenix's Sessions tab groups a conversation's runs. Everything lands in the `default` project.
-
-Each model call is an LLM span with the full input messages, offered tools, the response (including proposed tool
-calls and arguments), tokens, cost and duration. **Prompt and response bodies are stored locally in the `phoenix_data`
-volume by default**, independent of `LITELLM_CAPTURE`; `make phoenix-purge` deletes them.
-
-Tool result rows are not on the MCP spans by default (they carry the tool name and, for aggregates, `ai.row_count` and
-`ai.truncated`). `MCP_TRACE_RESULTS=1 make local-aws-litellm-compose` adds a bounded preview to the `duckdb.query` span:
-`ai.result.preview` (JSON `{columns, rows}`), `ai.result.preview_rows` and `ai.result.preview_truncated`, capped at
-`MCP_TRACE_RESULT_MAX_BYTES` (default 4096, clamped to 256..65536) by keeping only leading whole rows (the serialized preview never exceeds the byte cap; if even the column header cannot fit, no
-preview is exported and `ai.result.preview_omitted` is set). It is off by default
-because rows are data; the tool's own result is never trimmed. Human verdicts stay with the review workflow in #190.
-
-The `ai.run` span carries a bounded (200 characters) question as `input.value` and the answer, or `failed: <code>`, as `output.value` when `AI_TRACE_RUN_IO=1`, so Phoenix's Input/Output columns are filled. The app default is off (spans stay metadata-only for any backend); `docker-compose.phoenix.yml` turns it on for the local Phoenix path (`AI_TRACE_RUN_IO=0` to disable). The flag is exporter-independent (the text goes on the span wherever spans are sent). With the Collector path (`LITELLM_OTEL=1`, the observability stack) spans still end up only in Phoenix, so it stays on; `docker-compose.jaeger.yml` (`JAEGER=1`) also sends spans to Jaeger and forces it to `0`; a test checks both. Find one run with the spans filter `attributes["ai"]["run_id"] == "run_..."`.
-
-MCP discovery requests (`initialize`, `tools/list`, `resources/list`, `ping`) that arrive without a caller trace, such as the UI's
-status polling, are no longer traced, so they stop appearing as one-span traces. Tool calls and resource reads are always traced.
-
-Known gaps: Phoenix's own total cost can show $0 for Nova models (use the span's `llm.response.cost`).
-
-## Deploying the Nova Pro planner (#207)
-
-`infra/litellm/config.yaml` maps `taxi-planner` to Nova Pro and the other aliases to Nova Micro; the Terraform `bedrock_model_arns` allowlist (ai-app and LiteLLM task roles) must contain both ARNs before the proxy is redeployed, or planner calls fail with 403. Order: `terraform plan` (expect only the added Nova Pro ARN in the two IAM policies), apply with explicit approval, redeploy the proxy, then verify on the deployed stack and record the evidence in the work-history entry:
-
-- one real turn answered end to end; the planner span names `taxi-planner` and the model is Nova Pro (proxy logs or `GET /spend/logs`);
-- `x-litellm-response-cost` / spend-log cost for the planner call, and token usage, consistent with the price table in `app/model_policy/pricing.py`;
-- the streamed answer (Nova Micro) still streams (`answer.delta` events) and its usage is recorded;
-- no `litellm_proxy_http_403` in the proxy logs.
-
-`tests/test_litellm_config_pricing.py` keeps the proxy mapping, the price table and the IAM allowlist in step; changing an alias mapping requires updating `ALIAS_MODELS` in the same PR.
-
-## Prompt capture is opt-in
-
-Proxy spend-log logging is metadata-only by default (Phoenix traces above are separate and do hold bodies). `LITELLM_CAPTURE=1 make local-aws-litellm-compose` stores prompts and
-responses in Postgres and prints bodies (DEBUG) for evaluation capture; without it `make litellm-calls` shows `-`
-in the TOOL column and Logs has no request/response JSON. Deployed ECS never stores bodies.
-
-## Known limitations
-
-- Terraform is validated only (no plan/apply); the ECS rollout is unverified.
-- OTEL: the proxy exporter is configured only for local Compose (`LITELLM_OTEL=1`); the deployed ECS proxy has no OTEL exporter configured.
-- Cancellation and deadline behaviour through the proxy have no proxy-specific tests.
+**References:** [Model policies](model-policy.md) · [Evaluation capture](capture.md) · [Local runtime guide](local-uat-guide.md) · [Architecture](inference.md).

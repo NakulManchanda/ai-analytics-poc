@@ -39,7 +39,20 @@ Ask questions about millions of NYC taxi trips in natural language. A **React + 
 
 **Next:** stronger self-hosted vs managed inference comparisons, GPU efficiency and cost per successful request.
 
-## Evidence & reproducibility
+## Engineering deep dives — as built
 
-[Inference runs](docs/inference-experiments/inference-experiments-reference.md) · [GPU measurements](docs/inference-experiments/evidence/notebook/) · [Eval limitations](docs/evals.md) · [Architecture](DESIGN.md) · [Run locally](docs/local-uat-guide.md)
+Each document describes **current behavior, code ownership, limitations, and evidence**. Exploratory designs and possible future implementations remain separate in [research](docs/research/context/README.md).
+
+| Area | Implementation documentation |
+| --- | --- |
+| **RAG & MCP tools** | [SQL retrieval, governed MCP tools, context handling and grounding](docs/architecture/context-engineering-and-evidence.md) |
+| **Agent harness & prompt contracts** | [Agent harness architecture](docs/agent-harness.md) · [Prompt/prefix contract](docs/prefix-contract.md) |
+| **Evaluation & human review** | [Eval pipeline and human review](docs/evals.md) · [Capture format](docs/capture.md) |
+| **Model access & governance** | [LiteLLM integration](docs/litellm-proxy.md) · [Model roles and spend policies](docs/model-policy.md) |
+| **Inference gateway & GPU serving** | [Inference architecture](docs/inference.md) · [Gateway implementation](services/gateway/README.md) · [Inference experiments and measured evidence](docs/inference-experiments/inference-evidence-index.md) |
+| **Telemetry and operations** | [Observability setup](docs/observability-stack.md) · [Local operation](docs/local-uat-guide.md) |
+
+
+
+**Evidence:** [GPU measurements](docs/inference-experiments/evidence/notebook/) · [Experiment methodology](docs/inference-experiments/inference-experiments-reference.md)
 

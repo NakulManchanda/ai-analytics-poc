@@ -1,11 +1,15 @@
-# AI Analytics Observability Stack
+# AI Platform Observability
 
-| Layer | Tool | What to emit |
+The application and inference system use complementary telemetry: **traces for execution flow**, **metrics for operational capacity**, **events for user-visible progress**, and **captured evidence for evaluation**.
+
+| Signal | Implementation | Purpose |
 | --- | --- | --- |
-| **Tracing**<br>Every run | OpenTelemetry<br>OTEL Collector<br>Phoenix (Jaeger optional)<br>Langfuse | Spans for `ai.run`, `llm.plan`, `mcp.tool`, and `duckdb.query`<br>Duration, tokens, model, `run_id`, `trace_id`, and status |
-| **Metrics**<br>Operations | CloudWatch EMF<br>JSONL + Streamlit | p50/p95/p99 latency<br>TTFT, input/output tokens, cost per run, and success/error rate |
-| **Events**<br>Product timeline | Redis + SSE<br>Timeline Inspector | Run received/completed<br>Tool started/completed, answer deltas, and cancellation |
-| **Quality**<br>Evaluation signals | Langfuse evaluations | Sampled faithfulness, answer relevance, tool correctness, and hallucination flag |
-| **Logs**<br>Debugging | Structured stdout<br>CloudWatch Logs | `run_id`, `trace_id`, component, error code, retry, and failure details |
-| **Dashboards**<br>Visibility | CloudWatch<br>Streamlit<br>Grafana (Day 2) | Latency by AI stage, token/cost trends, failure taxonomy, and voice/realtime latency |
-| **Alerting**<br>Incidents | CloudWatch Alarms<br>SNS | p95 latency increase, error-rate increase, queue delay, and cost-budget threshold |
+| **Distributed tracing** | OpenTelemetry → Collector / Phoenix | Correlate agent, LiteLLM, MCP, and tool operations by run/trace ID |
+| **Operational metrics** | Prometheus / Grafana; GPU DCGM exporter | TTFT, latency, queues, admission decisions, GPU/KV pressure |
+| **Product events** | Redis + SSE | Live/replayed run progress, tool steps, answer deltas and cancellation |
+| **Structured logs** | Service logs, CloudWatch/Loki where configured | Error codes, request IDs, and operational diagnosis |
+| **Quality evidence** | Capture records + golden graders + human review | Connect answer/tool verdicts to model calls and Phoenix traces |
+
+The **human review workbench links a frozen evaluation run to its Phoenix trace**; grading and observability are complementary, not interchangeable. Some collectors and dashboards are environment-specific—an item in this architecture does not imply every backend runs in every deployment.
+
+**References:** [Evaluations](evals.md) · [Capture format](capture.md) · [Inference dashboards](inference-experiments/README.md).
