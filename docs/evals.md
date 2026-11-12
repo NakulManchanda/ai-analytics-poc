@@ -1,10 +1,10 @@
-# Evaluation foundations
+# Evaluation System
 
-Scope: the offline `tooling/evals/` slice of #171, plus real `capture.v1` ingest and the session report (#176). The live direct-Bedrock vs LiteLLM comparison is still a follow-up.
+The NYC Taxi analytics evaluation system measures **answer correctness, governed tool use, multi-turn resolution, failure behavior, and cost**. It combines a versioned golden dataset, deterministic graders, recorded LLM-judge verdicts, captured run evidence, and a separate human review workbench.
 
-**Status: the baseline/candidate/regressed fixtures (traces, run manifests, recorded judge scores) are synthetic. `fixtures/captured/` holds one recorded real-shaped session produced by the real loop with a scripted provider (NOT live Bedrock). All 37 golden cases are `pending_human_review`.** Nothing here is a live model observation or a human-approved reference yet.
+**Dataset and evidence status:** The 37 golden cases have not yet been approved by a human reviewer. Committed baseline/candidate/regression fixtures use synthetic or scripted provider results, not live model-quality measurements. Provisional reports can validate the evaluation pipeline but must not be presented as measured live-model performance.
 
-**Experiment procedures:** [Live baselines, regressions, and model comparisons](evaluation/running-evaluations.md). The rest of this document covers evaluation architecture, golden cases, graders, capture/session reporting, and human review.
+**Running experiments:** [Baselines, regression comparisons, and model experiments](evaluation/running-evaluations.md).
 
 ## Feedback loop
 
@@ -12,10 +12,10 @@ Scope: the offline `tooling/evals/` slice of #171, plus real `capture.v1` ingest
 2. **Triage**: failures and expensive or slow runs are clustered; interesting ones become *candidate*
    cases. Production/demo observations are never golden by themselves.
 3. **Review**: a human writes the reference SQL, `evals refresh-reference` computes the expected facts
-   on the pinned parquet, and the case lands in `datasets/golden/<version>/` through a PR. A model
+   on the pinned parquet, and the reviewed case is versioned in `datasets/golden/<version>/`. A model
    answer or model SQL is never ground truth.
 4. **Grade**: deterministic graders (numeric facts, tool arguments, step budget, evidence present,
-   limitation stated, no fabricated numbers) run on every PR over recorded fixtures. DeepEval judge
+   limitation stated, no fabricated numbers) run in CI over recorded fixtures. DeepEval judge
    metrics are replayed from recorded verdicts.
 5. **Compare**: `evals report` diffs a candidate run against a baseline using the thresholds pinned in
    the run manifest (dataset version and hash, model alias, prompt version, judge model, thresholds).
@@ -27,7 +27,7 @@ Scope: the offline `tooling/evals/` slice of #171, plus real `capture.v1` ingest
 
 14 deterministic catalogue questions, 8 ReAct investigations, 5 multi-turn conversations, 6
 unsupported/causal requests, 4 failure scenarios (tool validation error, timeout, empty result,
-provider error). Every `review.status` is `pending_human_review` until the PR reviewer promotes it.
+provider error). Every `review.status` is `pending_human_review` until a human reviewer approves it.
 Facts use tolerances (counts 0.1%, averages 1%) and accept `23.8%` for `0.2376`.
 
 ## Golden dataset: why these cases were chosen
@@ -57,7 +57,7 @@ Prompt injection requires an attacker-controlled instruction crossing a trust bo
 - **Ambiguous follow-up resolution:** pronouns, comparisons, and inherited time/zone filters; measure whether the correct prior evidence is carried over.
 - **Model/harness parity:** run the same approved cases on manual ReAct vs Deep Agents and large vs small planner models; compare tool accuracy, grounding, latency, and cost per correct answer.
 
-**Review status:** All 37 cases are still `pending_human_review`. Baseline/candidate/regressed judge fixtures are synthetic, not proof of live model quality. Some references have different legacy/governed SQL filtering bases; adjudicate them before treating the dataset as authoritative for pass-rate comparisons.
+**Reference consistency:** Some cases use different legacy and governed SQL filtering bases. These cases remain diagnostic until their reference assumptions are reconciled and reviewed.
 
 ## Judge metrics and their limits
 
@@ -76,7 +76,7 @@ is unverified against a real judge in this slice.
   `fixtures/` are synthetic.
 - Small dataset: a one-case swing moves pass rate ~2.7 points. Thresholds are initial guesses.
 
-## Captured traffic: candidate -> reviewed golden -> comparison (#176)
+## Captured traffic: candidate → reviewed golden → comparison
 
 Real `capture.v1` JSONL has `run_id`/`turn_id`/`call_id`/`conversation_id` but no `case_id`/`turn_index`.
 
@@ -85,9 +85,9 @@ Real `capture.v1` JSONL has `run_id`/`turn_id`/`call_id`/`conversation_id` but n
 3. `resolve()` grades a matched run only if the golden case is `review.status == "reviewed"`. Runs that are unmatched, or matched to a still-pending case, stay *candidate only* and are not graded. `--provisional` grades against pending references and the report is then marked PROVISIONAL.
 4. `evals session-report --traces ... --matches ... [--conversation-id ID] [--provisional]` writes the per-session report: answer correctness, tool behavior (actual vs expected), tokens, cost, latency. LIVE is derived only from the `execution_mode` recorded in the capture and requires every record to say `live`; anything else (scripted, unverified, missing) prints NOT LIVE. `--origin live` is only a cross-check and is refused when the capture is not recorded as live. The file must hold exactly one conversation, or select one with `--conversation-id`; otherwise the command errors. Unknown tokens/cost render `n/a` and totals are marked as lower bounds.
 
-`build_turns()` no longer raises on unlinked records; it skips them (use `build_run_views()` for raw capture). Tool status `completed` (the app) and `ok` (synthetic) both count as success.
+`build_turns()` skips unlinked records (use `build_run_views()` for raw capture). Tool status `completed` (the app) and `ok` (synthetic) both count as success.
 
-`fixtures/captured/taxi-session.jsonl` is a two-turn session (`multi-001`) recorded by `services/app/tests/capture_session_fixture.py`: real `OrchestrationLoop`, `LiteLLMClient`, model policy/pricing and capture recorder; scripted provider (httpx mock) and scripted MCP. Answers, token counts and latency are scripted, so correctness passing is by construction; it proves the pipeline, not model quality. `matches.json` there is fixture wiring by the agent, not a golden review. `report.md` is the PROVISIONAL report for it. Replace with a live Bedrock capture (same commands; it reports LIVE only if the capture was recorded with `CAPTURE_EXECUTION_MODE=live`, which is an operator assertion made at capture time) once a run is available.
+`fixtures/captured/taxi-session.jsonl` is a two-turn session (`multi-001`) recorded by `services/app/tests/capture_session_fixture.py`: real `OrchestrationLoop`, `LiteLLMClient`, model policy/pricing and capture recorder; scripted provider (httpx mock) and scripted MCP. Answers, token counts and latency are scripted, so correctness passing is by construction; it proves the pipeline, not model quality. `matches.json` maps the scripted fixture to golden turns; it is not a human-approved reference. `report.md` is the PROVISIONAL report for it. A live-provider comparison requires a separate capture with `CAPTURE_EXECUTION_MODE=live`; that flag is asserted at capture time and is not independently proof of provider execution.
 
 ## Grading outcomes and basis tags
 
@@ -121,14 +121,13 @@ uv run --project tooling/evals evals session-report \
 ## Known gaps
 
 - A first live provisional baseline exists only as local, uncommitted evidence; the committed session report is local-scripted. Its legacy grader score is not a trusted quality metric.
-- `multi-001` carries the `diagnostic` tag: it is graded and listed in a separate "Diagnostic cases" section of delta reports, but excluded from the aggregate pass rate, tool-correctness mean, per-category rates and regression gates. It is retained for query-resolution (#110) diagnosis until the filter contract between `query_taxi_data` and the governed tools is reconciled. Its turn 2 asserts the entities (nested subset match on `baseline_filters`/`comparison_filters`: JFK Airport vs Midtown Center); subset matching recurses into nested objects, `exact` still requires identical keys.
-- Golden cases are all pending human review, so strict mode grades nothing; reviewing `multi-001` is the next human step.
+- `multi-001` carries the `diagnostic` tag: it is graded and listed in a separate "Diagnostic cases" section of delta reports, but excluded from the aggregate pass rate, tool-correctness mean, per-category rates and regression gates. It is retained for query-resolution diagnosis until the filter contract between `query_taxi_data` and the governed tools is reconciled. Its turn 2 asserts the entities (nested subset match on `baseline_filters`/`comparison_filters`: JFK Airport vs Midtown Center); subset matching recurses into nested objects, `exact` still requires identical keys.
+- Golden cases are all pending human review, so strict mode grades nothing; cases must be reviewed before strict grading can produce approved results.
 - Matching is manual by design; there is no automatic promotion of captured runs to golden cases.
 
-Fixtures are synthetic, so no real model quality or cost decision is supported yet. The `app_runs` direct vs LiteLLM rerun, quality-qualified goodput joined with the benchmark SLO
-goodput (here: pass rate only), failure clustering and judge calibration are follow-ups.
+**Evaluation limitations:** The committed scripted fixtures do not support conclusions about live model quality or cost. Provider comparisons, quality-qualified goodput, failure clustering, and judge-to-human calibration require measured live runs.
 
-## Human review of a frozen run (#190)
+## Human review workbench
 
 Verdicts are stored beside the frozen evidence in `<run>/reviews.jsonl` (append-only, schema v1, bound to the run id and `captures.snapshot.sha256`); the evidence, golden cases and grader reports are never edited. A modified snapshot blocks reading and writing reviews.
 
