@@ -19,4 +19,4 @@ The gateway exposes `/serve`, `/v1/chat/completions`, `/tokenize`, `/metrics` an
 
 **Ownership:** service policy and routing live in [this directory](./); Kubernetes deployments, vLLM workers, HAMi, KV transfer, and observability live under [inference infrastructure](../../infra/inference/).
 
-**Evidence:** [Inference architecture](../../DESIGN.md) · [Experiment results](../../docs/inference-experiments/inference-evidence-index.md).
+**Evidence:** [Inference architecture](../../docs/inference.md) · [Experiment results](../../docs/inference-experiments/inference-evidence-index.md).
