@@ -30,4 +30,4 @@ Routing is **configuration-driven**, not an LLM router. Model mapping lives in [
 
 The proxy is a required dependency only on the LiteLLM path; direct Bedrock is an alternate path. **The owned vLLM inference gateway is separate from LiteLLM.** The local tracing/Compose integration is implemented; deployed ECS proxy tracing and rollout have not been verified in the documented state.
 
-**References:** [Model policies](model-policy.md) · [Evaluation capture](capture.md) · [Local runtime guide](local-uat-guide.md) · [Architecture](../DESIGN.md).
+**References:** [Model policies](model-policy.md) · [Evaluation capture](capture.md) · [Local runtime guide](local-uat-guide.md) · [Architecture](inference.md).
