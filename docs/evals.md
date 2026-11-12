@@ -28,6 +28,35 @@ unsupported/causal requests, 4 failure scenarios (tool validation error, timeout
 provider error). Every `review.status` is `pending_human_review` until the PR reviewer promotes it.
 Facts use tolerances (counts 0.1%, averages 1%) and accept `23.8%` for `0.2376`.
 
+## Golden dataset: why these cases were chosen
+
+The [versioned dataset](../tooling/evals/datasets/golden/v1/cases.jsonl) is an **agent-behavior benchmark for governed SQL analytics**, not a general-purpose document QA dataset. Each case records the user question (and follow-ups), expected behavior, allowed/expected tools and arguments, step limits, and—where relevant—reference SQL with expected facts. The reference SQL is hand-authored and the numerical facts are refreshed against pinned Parquet data; candidate model output is never automatically promoted to ground truth.
+
+| Category | Cases | Actual example | Quality boundary being tested |
+| --- | ---: | --- | --- |
+| **Deterministic / positive** | 14 | “Which pickup zones have the most trips?” | Correct catalogue/tool selection, SQL-backed facts, bounded execution. |
+| **ReAct / investigation** | 8 | “Do cash riders really tip less than card riders?” | Appropriate tools and caveats: cash tips are not recorded, so the answer must not treat missing tips as zero. |
+| **Multi-turn** | 5 | “What are the busiest pickup hours?” → “Break that hour down by borough” | Resolve prior references and carry filters/analytical intent across turns; some cases deliberately expose unresolved basis differences. |
+| **Unsupported / negative** | 6 | “Which driver earned the most money?”; “Delete all trips with zero distance from the dataset.” | Do not invent missing fields or unsupported causal/forecast claims; do not perform out-of-scope writes. |
+| **Failure / recovery** | 4 | Tool validation error, timeout, empty result, provider error | Preserve failure semantics, disclose missing evidence, and avoid fabricated numbers on failure. |
+
+These **positive, negative, multi-turn, and failure** cases test different failure modes. The file does **not currently define a dedicated typo/misspelling category or an adversarial prompt-injection suite**. Typos and paraphrases should be tested against tool-selection robustness, but we should add concrete cases before claiming that coverage.
+
+### Rejection is not the same as prompt-injection protection
+
+A request like “Delete all trips…” checks the application's **read-only tool boundary**. Questions about causes, future forecasts, outside periods, or nonexistent driver identifiers test **answerability and calibrated refusal**. Neither automatically constitutes a prompt-injection attempt.
+
+Prompt injection requires an attacker-controlled instruction crossing a trust boundary—for this application, a realistic test would place instructions inside an **MCP tool result** and verify that the agent treats the result as data, never as a new system instruction. That needs separate adversarial cases and checks. Similarly, **internal instruction leakage** is a distinct output-quality/security failure and should be assessed explicitly rather than inferred from ordinary negative cases.
+
+### Suggested dataset extensions (not implemented)
+
+- **Typo/paraphrase robustness:** misspelled borough/metric names, shorthand, and reordered questions; measure valid tool choice and argument resolution.
+- **Prompt-injection resistance:** malicious text in tool observations or other untrusted inputs; verify instruction hierarchy, tool authorization, and absence of leaked internal instructions.
+- **Ambiguous follow-up resolution:** pronouns, comparisons, and inherited time/zone filters; measure whether the correct prior evidence is carried over.
+- **Model/harness parity:** run the same approved cases on manual ReAct vs Deep Agents and large vs small planner models; compare tool accuracy, grounding, latency, and cost per correct answer.
+
+**Review status:** All 37 cases are still `pending_human_review`. Baseline/candidate/regressed judge fixtures are synthetic, not proof of live model quality. Some references have different legacy/governed SQL filtering bases; adjudicate them before treating the dataset as authoritative for pass-rate comparisons.
+
 ## Judge metrics and their limits
 
 Metrics: answer quality (GEval), tool correctness (DeepEval, deterministic), faithfulness, task
