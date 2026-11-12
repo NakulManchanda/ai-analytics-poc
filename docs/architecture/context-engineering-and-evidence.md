@@ -1,6 +1,6 @@
 # Context Engineering & Evidence Retrieval — Current Implementation
 
-> **Status:** As-built description of the NYC Taxi analytics application. This document explains current runtime behavior, not a generic document-RAG reference design. Research and potential alternatives remain in [docs/research/context/](../research/context/).
+This document describes the application's implemented retrieval and context flow. Alternative approaches and future designs are documented separately in [context engineering research](../research/context/README.md).
 
 ## Purpose and boundaries
 
@@ -32,7 +32,7 @@ The catalogue skips the planning model for known questions. It is an **exact nor
 - available tools, dataset schema, assumptions, failures, and remaining execution/token/cost budgets;
 - current tool observations summarized to **columns, row count, at most three preview rows, query id, execution time, and an artifact reference**.
 
-The reduced context is recorded in `context.reduced` events and run-step metadata. **Important:** the model clients build answer prompts separately, often from the original `query_result`, so the existence of `WorkingContext` does **not** establish that the final model prompt always uses its reduced observation. That is a concrete area for an end-to-end prompt-contract test, not a claim to hide.
+The reduced context is recorded in `context.reduced` events and run-step metadata. **Important:** the model clients build answer prompts separately, often from the original `query_result`, so the existence of `WorkingContext` does **not** establish that the final model prompt always uses its reduced observation. The distinction should be verified with end-to-end prompt-contract tests.
 
 ## Follow-up questions: what is sent to the model?
 
@@ -44,9 +44,9 @@ Durable history is stored by conversation ID, including user messages, tool obse
 | **Manual ReAct + owned vLLM gateway** | `prefix_render.render_conversation_prompt` constructs **system + stored Q1 + prior tool observation + A1 + Q2**, excluding Q2 from stored history before appending it once. This path currently has **no bounded history selection in that renderer**. |
 | **Opt-in Deep Agents** | Restores **up to four previous user/assistant turns** plus up to **two prior tool observations per turn**, then Q2. Caps: **12,000 characters total**; previous user text 1,000, assistant answer 1,500, each tool result 2,000. Observations are embedded as marked *untrusted tool data*, not free-standing tool-role messages. |
 
-The manual history renderer lives in [prefix_render.py](../../services/app/app/prefix_render.py); Deep Agents uses [build_history_messages](../../services/app/app/orchestration/deep_agents_run.py). Both should be treated as independently versioned prompt contracts.
+The manual history renderer lives in [prefix_render.py](../../services/app/app/prefix_render.py); Deep Agents uses [build_history_messages](../../services/app/app/orchestration/deep_agents_run.py). They are separate model-prompt construction paths and can differ in behavior.
 
-**Example:** Q1 “Which zone has the most pickups?” → tool returns ranked counts → A1 cites top zone → Q2 “What about second place?” A reliable planner should resolve “second place” against the prior analytical intent/evidence. Stored history alone does not guarantee the follow-up is correctly resolved.
+**Example:** Q1 “Which zone has the most pickups?” → tool returns ranked counts → A1 cites top zone → Q2 “What about second place?” The intended behavior is to resolve “second place” against the prior analytical intent and evidence. Stored history alone does not guarantee the follow-up is correctly resolved.
 
 ## Existing safeguards and evidence
 
