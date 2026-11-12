@@ -54,5 +54,5 @@ Each document describes **current behavior, code ownership, limitations, and evi
 
 
 
-[Inference runs](docs/inference-experiments/inference-experiments-reference.md) · [GPU measurements](docs/inference-experiments/evidence/notebook/) · [Eval limitations](docs/evals.md) · [Architecture](DESIGN.md) · [Run locally](docs/local-uat-guide.md)
+**Evidence:** [GPU measurements](docs/inference-experiments/evidence/notebook/) · [Experiment methodology](docs/inference-experiments/inference-experiments-reference.md)
 
