@@ -12,7 +12,7 @@ Ask questions about millions of NYC taxi trips in natural language. A **React + 
 
 **Built:** application-owned deterministic and bounded **ReAct** orchestration (tool loops, context reduction, budgets, retries, cancellation), plus an opt-in **Deep Agents/LangGraph** strategy.
 
-**Benchmark direction:** custom ReAct **vs Deep Agents**, then **large vs small planner models** (e.g. Nova Pro vs Micro), holding tools and tasks constant. Compare tool-selection correctness, answer quality, task completion, latency, and **cost per correct answer**. CrewAI is not a completed benchmark.
+**Benchmark direction:** custom ReAct **vs Deep Agents**, then **large vs small planner models** (e.g. Nova Pro vs Micro), holding tools and tasks constant. Compare tool-selection correctness, answer quality, task completion, latency, and **cost per correct answer**.
 
 ## Evaluation & observability tools we built
 
@@ -29,7 +29,9 @@ Ask questions about millions of NYC taxi trips in natural language. A **React + 
 
 **Built:** an owned **[model gateway](services/gateway/)** with guards, tenant quotas, admission/shedding, prefix-aware placement, per-worker queues and KV-hop/overflow decisions. **vLLM/Qwen** runs on an **A100 with K3s/HAMi**; a separate **LiteLLM → Bedrock** path supports hosted models.
 
-**Benchmarked with our [scenario replay tool](tooling/benchmarks/):**
+**Repeatable inference workloads:** The [scenario replay tool](tooling/benchmarks/) generates fixed-prefix, multi-turn agent traffic, including CrewAI-shaped workloads, to exercise realistic prefill/decode pressure and cache reuse. The workload generator is distinct from the agent-harness quality benchmark.
+
+**Inference comparisons:**
 - **Capacity:** KV memory vs decode slots vs queues; cold vs warm worker.
 - **Placement/cache:** least-loaded vs prefix-aware routing; first-pass vs reused prefix.
 - **Overload:** admission on vs off, measuring goodput, p99, fairness and shed reasons.
