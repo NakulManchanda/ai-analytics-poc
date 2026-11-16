@@ -1,5 +1,9 @@
 # Deep Agents improvements (#226, epic #224)
 
+> [!IMPORTANT]
+> **Goal (#226 / epic #224, feeds #228):** Close the tool-accuracy, execution, and 3x token/cost gap between the `deep_agents` harness and the manual ReAct loop on the 43-turn golden evaluation set (and evaluate conversation-aware resolution for #110).
+> **This PR (#244) goal:** Stop `invalid_arguments` tool-call loops (`dimensions: []` / omitted `dimensions` and opaque validation errors), cut per-call input token and billed cost overhead (schema deduplication + Bedrock prompt caching: `tool.failed` 6 → 0, billed cost \$0.360 → \$0.163 in v2), add `AGENT_HARNESS=create_agent` to isolate harness vs. model overhead, and block fabricated `<untrusted_tool_data>` answers when no tool ran.
+
 Why Deep Agents trails the manual loop on the 43 golden turns, and the five improvements chosen to close the gap. Detail for step 1 is in [01-tool-contract.md](01-tool-contract.md); the rest is here.
 
 ## Starting point (v5, grader v3, default budgets)

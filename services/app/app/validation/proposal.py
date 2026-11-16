@@ -428,7 +428,7 @@ def _validate_aggregate(
     _check_keys(
         args,
         {"dimensions", "measures", "filters", "order_by", "limit"},
-        {"dimensions", "measures"},
+        {"measures"},
         out,
     )
     if "dimensions" in args:

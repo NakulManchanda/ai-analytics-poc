@@ -678,7 +678,11 @@ def test_legacy_equivalence_rejected_when_expected_borough_missing_in_actual():
 def test_args_match_omitted_dimension_pinned_by_equality_filter() -> None:
     exp = ExpectedTool(
         name="aggregate_taxi_data",
-        arguments={"dimensions": ["pickup_borough"], "measures": ["average_fare"]},
+        arguments={
+            "dimensions": ["pickup_borough"],
+            "measures": ["average_fare"],
+            "filters": {"pickup_borough": "Manhattan"},
+        },
     )
     pinned = {
         "dimensions": [],
@@ -686,6 +690,14 @@ def test_args_match_omitted_dimension_pinned_by_equality_filter() -> None:
         "filters": {"pickup_borough": "Manhattan"},
     }
     assert args_match(exp, pinned)
+    # An expectation that does not filter on pickup_borough must not match an omitted dimension.
+    unfiltered = ExpectedTool(
+        name="aggregate_taxi_data",
+        arguments={"dimensions": ["pickup_borough"], "measures": ["average_fare"]},
+    )
+    assert not args_match(unfiltered, pinned)
+    # A filter pinning to a different value does not match.
+    assert not args_match(exp, {**pinned, "filters": {"pickup_borough": "Queens"}})
     # No pinning filter: an omitted dimension is a real difference.
     assert not args_match(exp, {"dimensions": [], "measures": ["average_fare"]})
     # A filter on a different column does not pin it.

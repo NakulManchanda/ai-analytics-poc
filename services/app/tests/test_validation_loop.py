@@ -17,10 +17,16 @@ GOOD = ("query_taxi_data", {"analysis": "top_pickup_zones", "limit": 5})
 
 
 class RecordingMCP:
-    def __init__(self, rows: list[list[object]] | None = None, fail: bool = False):
+    def __init__(
+        self,
+        rows: list[list[object]] | None = None,
+        fail: bool = False,
+        allow_aggregate: bool = False,
+    ):
         self.calls: list[tuple[str, dict[str, Any]]] = []
         self.rows = rows or [["JFK Airport", 1500], ["LaGuardia Airport", 1200]]
         self.fail = fail
+        self.allow_aggregate = allow_aggregate
 
     def get_dataset_schema(self) -> dict[str, Any]:
         return {"dataset": "nyc-taxi", "month": "2024-01", "columns": ["fare_amount"]}
@@ -42,7 +48,18 @@ class RecordingMCP:
     def aggregate_taxi_data(self, **kwargs: Any) -> dict[str, Any]:
         kwargs.pop("run_id", None)
         self.calls.append(("aggregate_taxi_data", kwargs))
-        raise AssertionError("must not execute")
+        if not self.allow_aggregate:
+            raise AssertionError("must not execute")
+        if self.fail:
+            raise MCPToolError(retryable=False, message="tenant denied")
+        return {
+            "columns": ["trip_count"],
+            "rows": [[1500]],
+            "row_count": 1,
+            "execution_duration_ms": 12,
+            "query_id": "fake-agg-123",
+            "truncated": False,
+        }
 
 
 class ScriptedLLM(LocalFakeLLMClient):
@@ -235,3 +252,34 @@ def test_raw_arguments_not_persisted_in_steps_or_errors() -> None:
     dumped = repr(repo._run_steps) + repr(repo._runs)
     assert secret not in dumped
     assert "arguments_sha256" in dumped and "argument_keys" in dumped
+
+
+def test_aggregate_omitted_dimensions_executes_without_retry() -> None:
+    llm = ScriptedLLM(
+        [
+            (
+                "aggregate_taxi_data",
+                {
+                    "measures": ["trip_count"],
+                    "filters": {"pickup_borough": "Manhattan"},
+                },
+            )
+        ]
+    )
+    mcp = RecordingMCP(allow_aggregate=True)
+    loop, _ = run_loop(llm, mcp)
+    result = loop.run(QUESTION)
+    assert result.status == "completed"
+    assert len(llm.prompts) == 1
+    assert mcp.calls == [
+        (
+            "aggregate_taxi_data",
+            {
+                "dimensions": [],
+                "measures": ["trip_count"],
+                "filters": {"pickup_borough": "Manhattan"},
+                "order_by": None,
+                "limit": 20,
+            },
+        )
+    ]

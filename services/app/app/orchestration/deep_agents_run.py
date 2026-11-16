@@ -857,12 +857,15 @@ class _RunRecorder(BaseCallbackHandler):  # type: ignore[misc,valid-type]
                 )
             else:
                 self.final_latency_ms = latency_ms
+                preview = _message_text(message)
+                if f"<{UNTRUSTED_TAG}" in preview and not self.evidence:
+                    preview = _FABRICATED_TOOL_ANSWER_TEXT
                 self._add_step(
                     step_type="llm_final_answer",
                     status="completed",
                     llm_call_id=call_id,
                     input_summary=f"question: {self.prompt[:80]}",
-                    output_summary=f"answer: {_message_text(message)[:80]}",
+                    output_summary=f"answer: {preview[:80]}",
                     duration_ms=latency_ms,
                     metadata=call.to_metadata(),
                 )
@@ -1447,7 +1450,8 @@ def execute_deep_agent_run(
                 answer = _message_text(message).strip()
                 break
         answer = answer or _NO_ANSWER_TEXT
-        if f"<{UNTRUSTED_TAG}" in answer and not rec.evidence:
+        fabricated_tool_block = f"<{UNTRUSTED_TAG}" in answer and not rec.evidence
+        if fabricated_tool_block:
             # The model copied the tool-result wrapper from restored history instead of
             # calling a tool: numbers and query ids in it are invented. Never show them.
             rec._add_step(
@@ -1460,10 +1464,11 @@ def execute_deep_agent_run(
             answer = _FABRICATED_TOOL_ANSWER_TEXT
         report = check_answer_grounding_multi(answer, rec.evidence, question=prompt)
         grounding_report.update(
-            ok=report.ok,
+            ok=report.ok and not fabricated_tool_block,
             ungrounded_numbers=len(report.ungrounded_numbers),
             unknown_query_ids=len(report.unknown_query_ids),
             evidence_count=len(rec.evidence),
+            **({"fabricated_tool_block": True} if fabricated_tool_block else {}),
         )
         caveat = report.caveat()
         if caveat is not None:

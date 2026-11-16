@@ -92,22 +92,27 @@ _NO_DEFAULT = object()
 def _with_pinned_dimensions(
     expected: ExpectedTool, actual: dict[str, object]
 ) -> dict[str, object]:
-    """An expected dimension the call omits still matches when an equality filter on that
-    same name pins it to one value: grouping by it adds no information (``dimensions: []``
-    with ``filters.pickup_borough = Manhattan`` is the same total as grouping by
-    ``pickup_borough``). Only ``aggregate_taxi_data`` calls are adjusted."""
+    """An expected dimension the call omits still matches when both the expected and
+    actual calls pin that same dimension with an identical equality filter: grouping by
+    it adds no information (``dimensions: []`` with ``filters.pickup_borough = Manhattan``
+    is the same total as grouping by ``pickup_borough`` with that same filter). Only
+    ``aggregate_taxi_data`` calls are adjusted."""
     if expected.name != "aggregate_taxi_data":
         return actual
     want, have = expected.arguments.get("dimensions"), actual.get("dimensions")
-    filters = actual.get("filters")
+    exp_filters = expected.arguments.get("filters")
+    act_filters = actual.get("filters")
     if not (isinstance(want, list) and isinstance(have, list)):
         return actual
-    if not isinstance(filters, dict):
+    if not (isinstance(exp_filters, dict) and isinstance(act_filters, dict)):
         return actual
     pinned = [
         d
         for d in want
-        if d not in have and isinstance(filters.get(d), (str, int, float, bool))
+        if d not in have
+        and isinstance(exp_filters.get(d), (str, int, float, bool))
+        and type(act_filters.get(d)) is type(exp_filters.get(d))
+        and act_filters.get(d) == exp_filters.get(d)
     ]
     return {**actual, "dimensions": [*have, *pinned]} if pinned else actual
 
