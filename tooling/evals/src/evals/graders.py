@@ -80,13 +80,28 @@ def fabricated_numbers(answer: str) -> list[float]:
 TOOL_ARG_DEFAULTS: dict[str, dict[str, object]] = {
     "describe_taxi_dataset": {"include_column_stats": False},
     "list_taxi_dimension_values": {"limit": 20, "search": None},
-    "aggregate_taxi_data": {"limit": 20, "filters": None, "order_by": None},
+    "aggregate_taxi_data": {
+        "limit": 20,
+        "filters": None,
+        "order_by": None,
+        "dimensions": [],
+    },
     "compare_taxi_segments": {"limit": 20},
 }
 _NESTED_ARG_DEFAULTS: dict[tuple[str, ...], object] = {
     ("order_by", "direction"): "desc"
 }
 _NO_DEFAULT = object()
+
+
+def _normalize_actual(
+    expected: ExpectedTool, actual: dict[str, object]
+) -> dict[str, object]:
+    """An omitted ``dimensions`` argument on ``aggregate_taxi_data`` represents one overall
+    total (the same as ``dimensions: []``). Explicit ``None`` (null) is not valid."""
+    if expected.name == "aggregate_taxi_data" and "dimensions" not in actual:
+        return {**actual, "dimensions": []}
+    return actual
 
 
 def _with_pinned_dimensions(
@@ -118,6 +133,7 @@ def _with_pinned_dimensions(
 
 
 def args_match(expected: ExpectedTool, actual: dict[str, object]) -> bool:
+    actual = _normalize_actual(expected, actual)
     actual = _with_pinned_dimensions(expected, actual)
     exact = expected.match == "exact"
     top_defaults = TOOL_ARG_DEFAULTS.get(expected.name, {})

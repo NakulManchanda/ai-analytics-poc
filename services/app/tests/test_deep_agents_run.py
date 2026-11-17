@@ -328,6 +328,37 @@ def test_repeated_tool_call_is_budget_exceeded(
     assert result.status == "budget_exceeded"
 
 
+@pytest.mark.parametrize(
+    "first_args,second_args",
+    [
+        (
+            {"measures": ["trip_count"]},
+            {"dimensions": [], "measures": ["trip_count"]},
+        ),
+        (
+            {"dimensions": [], "measures": ["trip_count"]},
+            {"measures": ["trip_count"]},
+        ),
+    ],
+)
+def test_repeated_tool_call_omitted_vs_empty_dimensions_detected(
+    monkeypatch: pytest.MonkeyPatch,
+    first_args: dict[str, Any],
+    second_args: dict[str, Any],
+) -> None:
+    loop, _repo, _pub = _setup(
+        monkeypatch,
+        [
+            _tool("aggregate_taxi_data", first_args, "a"),
+            _tool("aggregate_taxi_data", second_args, "b"),
+            _ai("x"),
+        ],
+    )
+    result = loop.execute(loop.prepare_run("q"))
+    assert result.status == "budget_exceeded"
+    assert result.failure_code == "budget_exceeded"
+
+
 def test_cancellation(monkeypatch: pytest.MonkeyPatch) -> None:
     loop, repo, pub = _setup(monkeypatch, [_ai("slow")], delay=2.0)
     submission = loop.prepare_run("q")

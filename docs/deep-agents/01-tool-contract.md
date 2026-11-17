@@ -23,9 +23,11 @@ The first commit on this branch only appended a hint to the description. After r
 - `_run_tool` now adds the MCP server's own message to the tool result for `tool_error_envelope` failures only (transport errors can carry internal detail and stay a closed reason code).
 - An omitted `dimensions` is treated as `[]` by both `validate_proposal` and `_parse_aggregate_taxi_data` so manual ReAct and Deep Agents behave identically.
 - `eval-compare` crashed once `report/` held run-level checks (`spend_reconciliation.json`, `trace_check.json`); `load_run_reports` now skips report files without `rows`. Compare can run before or after reconcile.
+- The eval grader normalizes a missing `dimensions` field to `[]` before grading (without treating explicit null as valid).
+- Deep Agents repeat guard uses validated, normalized arguments for signature computation so calls with omitted vs explicit `[]` dimensions deduplicate in either order.
 
 ## Verification
-- `services/app` 641 passed, 1 skipped (live LiteLLM); `services/mcp` 57 passed; `services/dataset_spike` 57 passed; `tooling/evals` 205 passed, 2 skipped; black and ruff clean.
+- `services/app` 643 passed, 1 skipped (live LiteLLM); `services/mcp` 57 passed; `services/dataset_spike` 57 passed; `tooling/evals` 205 passed, 2 skipped; black and ruff clean.
 - Behaviour is **not measured live yet**. Success means zero `invalid_arguments`, fewer `aggregate_taxi_data` calls than v5 (6 failures, 61 tool calls), and no new step-budget breaches.
 - To measure it live (from this worktree; it rebuilds the local stack, about $0.35 and 5 minutes). Labels cannot be reused, so use a new `-vN` for reruns:
   ```

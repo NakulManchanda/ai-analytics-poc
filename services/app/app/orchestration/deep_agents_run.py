@@ -44,6 +44,7 @@ from app.orchestration.deep_agents_strategy import (
     offered_tool_names,
 )
 from app.orchestration.loop import (
+    _EXTENDED_TOOL_PARSERS,
     BUDGET_BASIS_CONSERVATIVE,
     BUDGET_BASIS_REPORTED,
     BUDGET_BASIS_UNRESOLVABLE,
@@ -955,7 +956,10 @@ class _RunRecorder(BaseCallbackHandler):  # type: ignore[misc,valid-type]
                     inputs = {}
             arguments = dict(inputs) if isinstance(inputs, Mapping) else {}
             self.emit("tool.requested", {"tool_name": name, **arguments})
-            signature = f"{name}:{json.dumps(arguments, sort_keys=True, default=str)}"
+            parser = _EXTENDED_TOOL_PARSERS.get(name)
+            parsed = parser(arguments) if parser is not None else None
+            sig_args = parsed if parsed is not None else arguments
+            signature = f"{name}:{json.dumps(sig_args, sort_keys=True, default=str)}"
             if signature in self.executed_signatures:
                 raise BudgetExceededError(
                     f"Repeated equivalent tool call detected: {signature}",

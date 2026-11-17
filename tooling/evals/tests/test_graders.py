@@ -690,6 +690,28 @@ def test_args_match_omitted_dimension_pinned_by_equality_filter() -> None:
         "filters": {"pickup_borough": "Manhattan"},
     }
     assert args_match(exp, pinned)
+    # An omitted dimensions field is normalized to [] so it matches pinned expectations...
+    omitted = {"measures": ["average_fare"], "filters": {"pickup_borough": "Manhattan"}}
+    assert args_match(exp, omitted)
+    # ...and golden expectations for an overall total.
+    overall_exp = ExpectedTool(
+        name="aggregate_taxi_data",
+        arguments={"dimensions": [], "measures": ["average_fare"]},
+    )
+    assert args_match(overall_exp, {"measures": ["average_fare"]})
+    assert args_match(overall_exp, {"dimensions": [], "measures": ["average_fare"]})
+    # Explicit null is never treated as a valid list or omitted field.
+    assert not args_match(
+        exp,
+        {
+            "dimensions": None,
+            "measures": ["average_fare"],
+            "filters": {"pickup_borough": "Manhattan"},
+        },
+    )
+    assert not args_match(
+        overall_exp, {"dimensions": None, "measures": ["average_fare"]}
+    )
     # An expectation that does not filter on pickup_borough must not match an omitted dimension.
     unfiltered = ExpectedTool(
         name="aggregate_taxi_data",
