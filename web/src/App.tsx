@@ -1,5 +1,7 @@
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { MapDemo } from "./map/MapDemo";
+import { MapPanel } from "./map/MapPanel";
+import { launchFromToolRequest, type MapLaunch } from "./map/fromTool";
 import { ContextInspector } from "./ContextInspector";
 import { TimelineInspector } from "./TimelineInspector";
 import { useVoiceInput } from "./useVoiceInput";
@@ -65,6 +67,13 @@ function LiveApp() {
   const [activeTab, setActiveTab] = useState<"timeline" | "context">("timeline");
   const [streamingAnswer, setStreamingAnswer] = useState<string>("");
   const hydrationVersion = useRef(0);
+
+  // Map panel: opened by the Map button or by "Show on map" under an answer.
+  const [mapOpen, setMapOpen] = useState(false);
+  const [mapLaunch, setMapLaunch] = useState<MapLaunch | undefined>(undefined);
+  const [mapKey, setMapKey] = useState(0);
+  const [mapLaunchByRun, setMapLaunchByRun] = useState<Record<string, MapLaunch>>({});
+  const promptRef = useRef<HTMLTextAreaElement | null>(null);
   const activeAbortController = useRef<AbortController | null>(null);
 
   // Voice Input State & Audio Streaming
@@ -263,6 +272,9 @@ function LiveApp() {
             if (eventType === "answer.delta" && typeof p.delta === "string") {
               accumulatedAnswer += p.delta;
               setStreamingAnswer(accumulatedAnswer);
+            } else if (eventType === "tool.requested") {
+              const launch = launchFromToolRequest(p);
+              if (launch) setMapLaunchByRun((prev) => (prev[runId] ? prev : { ...prev, [runId]: launch }));
             } else if (eventType === "answer.audio" && typeof p.data === "string") {
               // Handle audio event: decode base64 MP3 and play
               handleAudioEvent(p.data);
@@ -309,6 +321,7 @@ function LiveApp() {
           "message",
           "answer.delta",
           "answer.audio",
+          "tool.requested",
           "run.received",
           "run.completed",
           "run.failed",
@@ -374,6 +387,17 @@ function LiveApp() {
     }
     // Stop audio playback if running
     stopAudio();
+  };
+
+  const openMap = (launch?: MapLaunch) => {
+    setMapLaunch(launch);
+    setMapKey((k) => k + 1);
+    setMapOpen(true);
+  };
+
+  const askAboutZone = (text: string) => {
+    setPrompt(text);
+    promptRef.current?.focus();
   };
 
   const handleInspectRun = (runId: string) => {
@@ -457,6 +481,15 @@ function LiveApp() {
                             Inspect Run
                           </button>
                         )}
+                        {turn.role === "assistant" && turn.runId && mapLaunchByRun[turn.runId] && (
+                          <button
+                            type="button"
+                            className="inspect-link-btn"
+                            onClick={() => openMap(mapLaunchByRun[turn.runId as string])}
+                          >
+                            Show on map
+                          </button>
+                        )}
                       </div>
                     )}
                   </article>
@@ -470,6 +503,7 @@ function LiveApp() {
             <label htmlFor="prompt">Ask about NYC taxi activity</label>
             <textarea
               id="prompt"
+              ref={promptRef}
               value={prompt}
               onChange={(event) => setPrompt(event.target.value)}
               disabled={isRunning}
@@ -489,6 +523,14 @@ function LiveApp() {
                 title={isListening ? "Stop listening" : "Speak your question using microphone"}
               >
                 {isListening ? "⏹ Stop Listening" : isVoiceProcessing ? "⏳ Transcribing…" : "🎤 Voice"}
+              </button>
+              <button
+                type="button"
+                className="btn-text"
+                aria-expanded={mapOpen}
+                onClick={() => (mapOpen ? setMapOpen(false) : openMap(mapLaunch))}
+              >
+                Map
               </button>
               {isRunning && (
                 <button
@@ -761,6 +803,15 @@ function LiveApp() {
               )}
             </div>
           </form>
+
+          {mapOpen && (
+            <MapPanel
+              key={mapKey}
+              launch={mapLaunch}
+              onAskAboutZone={askAboutZone}
+              onClose={() => setMapOpen(false)}
+            />
+          )}
         </section>
 
         {/* Right Column: Telemetry Timeline & Working Context Inspector */}
