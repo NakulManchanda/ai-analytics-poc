@@ -1,0 +1,147 @@
+{
+  "artifact_id": "map_9804bc824f4410bd",
+  "evidence": {
+    "dataset": "nyc-yellow-taxi-2024-01",
+    "query_id": "query_fixture0001",
+    "run_id": "run_fixture0001",
+    "tool_call_id": "call_fixture0001",
+    "tool_name": "aggregate_taxi_data"
+  },
+  "filters": {
+    "pickup_borough": "Queens"
+  },
+  "geography": {
+    "id": "nyc_tlc_taxi_zones",
+    "version": "v1"
+  },
+  "layers": [
+    {
+      "kind": "choropleth",
+      "measure": "trip_count",
+      "regions": [
+        {
+          "label": "JFK Airport",
+          "location_ids": [
+            132
+          ],
+          "value": 154000
+        },
+        {
+          "label": "LaGuardia Airport",
+          "location_ids": [
+            138
+          ],
+          "value": 142000
+        },
+        {
+          "label": "Corona",
+          "location_ids": [
+            56,
+            57
+          ],
+          "value": 21000
+        },
+        {
+          "label": "Astoria",
+          "location_ids": [
+            7
+          ],
+          "value": 18500
+        },
+        {
+          "label": "Jackson Heights",
+          "location_ids": [
+            129
+          ],
+          "value": 16000
+        },
+        {
+          "label": "Long Island City/Queens Plaza",
+          "location_ids": [
+            146
+          ],
+          "value": 14200
+        },
+        {
+          "label": "Elmhurst",
+          "location_ids": [
+            82
+          ],
+          "value": 11800
+        },
+        {
+          "label": "Flushing",
+          "location_ids": [
+            92
+          ],
+          "value": 9400
+        },
+        {
+          "label": "Forest Hills",
+          "location_ids": [
+            95
+          ],
+          "value": 7600
+        },
+        {
+          "label": "Jamaica",
+          "location_ids": [
+            130
+          ],
+          "value": 6100
+        },
+        {
+          "label": "Sunnyside",
+          "location_ids": [
+            226
+          ],
+          "value": 4300
+        },
+        {
+          "label": "Rego Park",
+          "location_ids": [
+            196
+          ],
+          "value": 2900
+        }
+      ],
+      "scale": {
+        "kind": "sequential",
+        "max": 154000,
+        "min": 0,
+        "palette": "blues"
+      },
+      "unit": "trips"
+    },
+    {
+      "kind": "highlight",
+      "label": "Top zone",
+      "location_ids": [
+        132
+      ]
+    }
+  ],
+  "provenance": {
+    "generated_by": "app",
+    "interpretation": "spatial_pattern_not_causal",
+    "source": "aggregate_taxi_data result"
+  },
+  "schema": "map_artifact",
+  "title": "Trip count by pickup zone",
+  "unmapped": [
+    {
+      "label": "Outside of NYC",
+      "reason": "no_geometry",
+      "value": 120
+    }
+  ],
+  "version": 1,
+  "view": {
+    "center": [
+      40.7,
+      -74.0
+    ],
+    "fit": "all",
+    "zoom": 11
+  }
+}
