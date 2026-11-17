@@ -32,6 +32,7 @@ services:
       AGENT_MAX_ITERATIONS: "${AGENT_MAX_ITERATIONS:-}"
       AGENT_TIMEOUT_SECONDS: "${AGENT_TIMEOUT_SECONDS:-}"
       AGENT_PLANNING: "${AGENT_PLANNING:-}"
+      AGENT_HARNESS: "${AGENT_HARNESS:-}"
       METRICS_FILE: /app/metrics/runs.jsonl
     volumes:
       - ./metrics:/app/metrics
