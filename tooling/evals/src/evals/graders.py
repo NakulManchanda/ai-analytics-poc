@@ -99,12 +99,8 @@ def _normalize_actual(
 ) -> dict[str, object]:
     """An omitted ``dimensions`` argument on ``aggregate_taxi_data`` represents one overall
     total (the same as ``dimensions: []``) in subset mode. Explicit ``None`` (null) is not
-    valid, and ``exact`` matching stays strict."""
-    if (
-        expected.match != "exact"
-        and expected.name == "aggregate_taxi_data"
-        and "dimensions" not in actual
-    ):
+    valid."""
+    if expected.name == "aggregate_taxi_data" and "dimensions" not in actual:
         return {**actual, "dimensions": []}
     return actual
 
@@ -138,9 +134,10 @@ def _with_pinned_dimensions(
 
 
 def args_match(expected: ExpectedTool, actual: dict[str, object]) -> bool:
-    actual = _normalize_actual(expected, actual)
-    actual = _with_pinned_dimensions(expected, actual)
     exact = expected.match == "exact"
+    if not exact:
+        actual = _normalize_actual(expected, actual)
+        actual = _with_pinned_dimensions(expected, actual)
     top_defaults = TOOL_ARG_DEFAULTS.get(expected.name, {})
 
     def default_for(path: tuple[str, ...]) -> object:

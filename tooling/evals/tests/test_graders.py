@@ -729,6 +729,16 @@ def test_args_match_omitted_dimension_pinned_by_equality_filter() -> None:
     )
     assert args_match(exact_empty, {"dimensions": [], "measures": ["average_fare"]})
     assert not args_match(exact_empty, {"measures": ["average_fare"]})
+    exact_pinned = ExpectedTool(
+        name="aggregate_taxi_data",
+        arguments={
+            "dimensions": ["pickup_borough"],
+            "measures": ["average_fare"],
+            "filters": {"pickup_borough": "Manhattan"},
+        },
+        match="exact",
+    )
+    assert not args_match(exact_pinned, pinned)
     # An expectation that does not filter on pickup_borough must not match an omitted dimension.
     unfiltered = ExpectedTool(
         name="aggregate_taxi_data",
