@@ -14,7 +14,7 @@ Live map panel / "Show on map":
                -> web parseMapArtifact -> ZoneMap (SVG + table fallback)
 ```
 
-- **App owns orchestration and validation:** `services/app/app/routers/maps.py` validates request inputs against closed measure and filter allowlists, calls MCP, builds and validates the `map_artifact` v1 payload, and caches serialized bytes in an in-process 64-entry LRU.
+- **App owns orchestration and validation:** `services/app/app/routers/maps.py` validates request inputs against closed measure and filter allowlists, calls MCP, builds and validates the `map_artifact` v1 payload, and caches serialized bytes in an in-process 64-entry LRU. On startup (`services/app/app/main.py` lifespan), a background daemon thread pre-warms the six curated pickup measures (`trip_count`, `average_fare`, `average_tip`, `tip_rate`, `average_distance`, `average_duration_minutes`) into that LRU cache (fail-open if MCP is unavailable).
 - **Planner isolation:** `map_taxi_zones` is an app-only MCP tool. It is excluded from planner-offered tool lists on both the manual ReAct path and Deep Agents (`_NON_PLANNER_MCP_TOOLS`), keeping the planner prompt and prefix contract unchanged.
 - **Chat link:** When a completed run's `tool.requested` SSE event carries `aggregate_taxi_data` with `pickup_zone` or `dropoff_zone` in `dimensions`, the UI shows a **Show on map** button under that answer. Clicking it opens `MapPanel` prefilled with the zone role, first measure, and supported filters; the client sends those parameters to `POST /api/map/zones` for server validation.
 

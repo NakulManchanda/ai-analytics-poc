@@ -26,6 +26,14 @@ from app.mcp_client import DatasetProfileMCPClient, MCPToolError
 
 CACHE_SIZE = 64
 CACHE_CONTROL = "private, max-age=300"
+CURATED_MEASURES: tuple[str, ...] = (
+    "trip_count",
+    "average_fare",
+    "average_tip",
+    "tip_rate",
+    "average_distance",
+    "average_duration_minutes",
+)
 
 # Closed measure -> unit table (keys mirror dataset_spike MeasureName).
 MEASURE_UNITS: dict[str, str] = {
@@ -128,11 +136,100 @@ def _ms(start: float) -> str:
     return f"{(time.perf_counter() - start) * 1000:.1f}"
 
 
+def _cache_key(
+    zone_role: Literal["pickup", "dropoff"],
+    measure: str,
+    filters: dict[str, FilterScalar],
+) -> str:
+    return json.dumps(
+        {
+            "zone_role": zone_role,
+            "measure": measure,
+            "filters": filters,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+
+def _fetch_and_build(
+    mcp_client_factory: Callable[[], DatasetProfileMCPClient],
+    *,
+    zone_role: Literal["pickup", "dropoff"],
+    measure: str,
+    filters: dict[str, FilterScalar],
+) -> tuple[bytes, str, float]:
+    started = time.perf_counter()
+    try:
+        result = mcp_client_factory().map_taxi_zones(
+            zone_role=zone_role,
+            measure=measure,
+            filters=filters or None,
+        )
+    except MCPToolError as error:
+        if error.reason in {"tool_error_envelope", "invalid_request"}:
+            raise _fail(422, "invalid_request") from None
+        if error.reason in {"transport_error", "not_configured"}:
+            raise _fail(502, "mcp_unavailable") from None
+        raise _fail(502, "mcp_bad_result") from None
+    mcp_ms = _ms(started)
+
+    built = time.perf_counter()
+    try:
+        artifact = build_zone_choropleth_from_ids(
+            result,
+            measure=measure,
+            unit=MEASURE_UNITS[measure],
+            filters=filters,
+            zone_role=zone_role,
+        )
+        payload = artifact.model_dump(mode="json", by_alias=True)
+        validate_map_artifact(payload)
+    except MapArtifactError:
+        raise _fail(502, "artifact_invalid") from None
+    body = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode()
+    return body, mcp_ms, built
+
+
+def warm_curated_zones(
+    cache: _ResponseCache,
+    mcp_client_factory: Callable[[], DatasetProfileMCPClient],
+    measures: tuple[str, ...] = CURATED_MEASURES,
+) -> int:
+    """Best-effort startup pre-warming for the curated pickup zone measures."""
+    warmed = 0
+    for measure in measures:
+        key = _cache_key("pickup", measure, {})
+        if cache.get(key) is not None:
+            warmed += 1
+            continue
+        try:
+            body, _, _ = _fetch_and_build(
+                mcp_client_factory,
+                zone_role="pickup",
+                measure=measure,
+                filters={},
+            )
+        except HTTPException as exc:
+            # Fail open on startup; stop early if MCP is not configured.
+            detail = exc.detail if isinstance(exc.detail, dict) else {}
+            if detail.get("code") == "mcp_unavailable":
+                break
+            continue
+        except Exception:
+            continue
+        cache.put(key, body)
+        warmed += 1
+    return warmed
+
+
 def create_maps_router(
     mcp_client_factory: Callable[[], DatasetProfileMCPClient],
+    *,
+    cache: _ResponseCache | None = None,
 ) -> APIRouter:
     router = APIRouter()
-    cache = _ResponseCache()
+    response_cache = cache or _ResponseCache()
 
     # Sync handler on purpose: the MCP client blocks, so FastAPI runs it in a thread.
     @router.post("/api/map/zones")
@@ -141,49 +238,19 @@ def create_maps_router(
         if unknown:
             raise _fail(422, "invalid_request")
         filters = dict(sorted((request.filters or {}).items()))
-        key = json.dumps(
-            {
-                "zone_role": request.zone_role,
-                "measure": request.measure,
-                "filters": filters,
-            },
-            sort_keys=True,
-            separators=(",", ":"),
-        )
+        key = _cache_key(request.zone_role, request.measure, filters)
         started = time.perf_counter()
-        cached = cache.get(key)
+        cached = response_cache.get(key)
         if cached is not None:
             return _response(cached, "hit", f"cache;dur={_ms(started)}")
 
-        try:
-            result = mcp_client_factory().map_taxi_zones(
-                zone_role=request.zone_role,
-                measure=request.measure,
-                filters=filters or None,
-            )
-        except MCPToolError as error:
-            if error.reason in {"tool_error_envelope", "invalid_request"}:
-                raise _fail(422, "invalid_request") from None
-            if error.reason in {"transport_error", "not_configured"}:
-                raise _fail(502, "mcp_unavailable") from None
-            raise _fail(502, "mcp_bad_result") from None
-        mcp_ms = _ms(started)
-
-        built = time.perf_counter()
-        try:
-            artifact = build_zone_choropleth_from_ids(
-                result,
-                measure=request.measure,
-                unit=MEASURE_UNITS[request.measure],
-                filters=filters,
-                zone_role=request.zone_role,
-            )
-            payload = artifact.model_dump(mode="json", by_alias=True)
-            validate_map_artifact(payload)
-        except MapArtifactError:
-            raise _fail(502, "artifact_invalid") from None
-        body = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode()
-        cache.put(key, body)
+        body, mcp_ms, built = _fetch_and_build(
+            mcp_client_factory,
+            zone_role=request.zone_role,
+            measure=request.measure,
+            filters=filters,
+        )
+        response_cache.put(key, body)
         return _response(body, "miss", f"mcp;dur={mcp_ms}, build;dur={_ms(built)}")
 
     return router

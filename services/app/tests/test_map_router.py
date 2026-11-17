@@ -219,3 +219,43 @@ def test_measure_units_cover_every_dataset_measure() -> None:
     assert measures == set(maps.MEASURE_UNITS)
     filters = text.split("class FilterField(StrEnum):")[1].split("\n\n")[0]
     assert set(re.findall(r'= "([a-z0-9_]+)"', filters)) == maps.FILTER_KEYS
+
+
+def test_warm_curated_zones_populates_cache_for_all_curated_measures() -> None:
+    from fastapi import FastAPI
+
+    class DynamicMapClient(FakeMapClient):
+        def map_taxi_zones(self, **kwargs):  # type: ignore[override]
+            self.calls.append(kwargs)
+            m = str(kwargs["measure"])
+            return {
+                **ZONE_RESULT,
+                "columns": ["location_id", "zone", "borough", m],
+                "measures": [m],
+            }
+
+    client = DynamicMapClient()
+    cache = maps._ResponseCache()
+    warmed = maps.warm_curated_zones(cache, lambda: client)
+    assert warmed == len(maps.CURATED_MEASURES)
+    assert len(client.calls) == len(maps.CURATED_MEASURES)
+
+    app = FastAPI()
+    app.include_router(maps.create_maps_router(lambda: client, cache=cache))
+    http = TestClient(app)
+    for measure in maps.CURATED_MEASURES:
+        res = http.post(
+            "/api/map/zones", json={"zone_role": "pickup", "measure": measure}
+        )
+        assert res.status_code == 200
+        assert res.headers["x-map-cache"] == "hit"
+    assert len(client.calls) == len(maps.CURATED_MEASURES)
+
+
+def test_warm_curated_zones_fails_open_when_mcp_unavailable() -> None:
+    client = FakeMapClient(
+        error=MCPToolError(retryable=True, message="down", reason="transport_error")
+    )
+    cache = maps._ResponseCache()
+    assert maps.warm_curated_zones(cache, lambda: client) == 0
+    assert len(client.calls) == 1
