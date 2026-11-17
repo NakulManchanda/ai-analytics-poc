@@ -40,11 +40,20 @@ describe("parseMapArtifact", () => {
     ["long title", (p: any) => (p.title = "x".repeat(121))],
     ["control char", (p: any) => (p.title = "a\u0000b")],
     ["too many filters", (p: any) => (p.filters = Object.fromEntries(Array.from({ length: 17 }, (_, i) => [`k${i}`, i])))],
+    ["unknown tool name", (p: any) => (p.evidence.tool_name = "run_sql")],
     ["non-scalar filter", (p: any) => (p.filters = { k: ["a"] })],
   ])("rejects %s", (_name, mutate) => {
     const p = clone();
     mutate(p);
     expect(parseMapArtifact(p, zoneIds).ok).toBe(false);
+  });
+
+  it("accepts null run and tool call ids from the map endpoint", () => {
+    const p = clone();
+    p.evidence.run_id = null;
+    p.evidence.tool_call_id = null;
+    p.evidence.tool_name = "map_taxi_zones";
+    expect(parseMapArtifact(p, zoneIds).ok).toBe(true);
   });
 
   it("accepts fit on named zones", () => {

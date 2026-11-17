@@ -108,10 +108,10 @@ class Geography(_Model):
 
 
 class Evidence(_Model):
-    run_id: _text(128)
-    tool_call_id: _text(128)
+    run_id: _text(128) | None
+    tool_call_id: _text(128) | None
     query_id: _text(128)
-    tool_name: _text(80)
+    tool_name: Literal["aggregate_taxi_data", "map_taxi_zones"]
     dataset: _text(80)
 
 
@@ -255,6 +255,148 @@ def _filter_value(value: object) -> str | int | float | bool | None:
     return None
 
 
+def _finish_artifact(
+    *,
+    regions: list[dict],
+    unmapped: list[dict],
+    measure: str,
+    unit: str,
+    zone_dimension: str,
+    highlight_top_n: int,
+    filters: dict[str, object] | None,
+    run_id: str | None,
+    tool_call_id: str | None,
+    tool_name: str,
+    query_id: str,
+) -> MapArtifact:
+    """Assemble and validate the payload shared by both builders."""
+    values = [r["value"] for r in regions]
+    layers: list[dict] = [
+        {
+            "kind": "choropleth",
+            "measure": measure,
+            "unit": unit,
+            "scale": {
+                "kind": "sequential",
+                "palette": "blues",
+                "min": min(0, *values) if values else 0,
+                "max": max(values) if values else 0,
+            },
+            "regions": regions,
+        }
+    ]
+    top = sorted(regions, key=lambda r: (-r["value"], r["label"]))[
+        : max(highlight_top_n, 0)
+    ]
+    if top:
+        layers.append(
+            {
+                "kind": "highlight",
+                "label": "Top zone" if len(top) == 1 else f"Top {len(top)} zones",
+                "location_ids": [i for r in top for i in r["location_ids"]],
+            }
+        )
+
+    clean_filters = {}
+    for key, raw in (filters or {}).items():
+        value = _filter_value(raw)
+        if value is not None and isinstance(key, str):
+            clean_filters[key[:40]] = value
+    digest = hashlib.sha256(
+        f"{run_id or ''}|{tool_call_id or ''}|{query_id}".encode()
+    ).hexdigest()[:16]
+    payload = {
+        "schema": "map_artifact",
+        "version": 1,
+        "artifact_id": f"map_{digest}",
+        "geography": {"id": GEOGRAPHY_ID, "version": GEOGRAPHY_VERSION},
+        "evidence": {
+            "run_id": run_id,
+            "tool_call_id": tool_call_id,
+            "query_id": query_id,
+            "tool_name": tool_name,
+            "dataset": DATASET_ID,
+        },
+        "title": f"{measure.replace('_', ' ').capitalize()} by {zone_dimension.replace('_', ' ')}"[
+            :120
+        ],
+        "layers": layers,
+        "unmapped": unmapped[:300],
+        "filters": clean_filters,
+        "view": {"fit": "all"},
+        "provenance": {
+            "generated_by": "app",
+            "source": f"{tool_name} result",
+            "interpretation": "spatial_pattern_not_causal",
+        },
+    }
+    return validate_map_artifact(payload)
+
+
+def build_zone_choropleth_from_ids(
+    result: dict[str, object],
+    *,
+    measure: str,
+    unit: str,
+    filters: dict[str, object] | None,
+    zone_role: str,
+    highlight_top_n: int = 1,
+) -> MapArtifact:
+    """Build a choropleth from a ``map_taxi_zones`` envelope keyed by location id.
+
+    Rows whose id has no geometry become ``unmapped``; no id is ever invented.
+    """
+    columns, rows, query_id = (
+        result.get("columns"),
+        result.get("rows"),
+        result.get("query_id"),
+    )
+    if (
+        not isinstance(columns, list)
+        or not isinstance(rows, list)
+        or not isinstance(query_id, str)
+        or any(c not in columns for c in ("location_id", "zone", measure))
+    ):
+        raise MapArtifactError("invalid_result")
+    ii, zi, mi = (columns.index(c) for c in ("location_id", "zone", measure))
+    regions: list[dict] = []
+    unmapped: list[dict] = []
+    seen: set[int] = set()
+    for row in rows:
+        if not isinstance(row, (list, tuple)) or len(row) <= max(ii, zi, mi):
+            continue
+        value = _number(row[mi])
+        location_id = row[ii]
+        if value is None or isinstance(location_id, bool):
+            continue
+        if not isinstance(location_id, int):
+            continue
+        name = row[zi] if isinstance(row[zi], str) and row[zi] else "Unknown"
+        label = name[:80]
+        if location_id in _zone_ids():
+            if location_id not in seen:
+                seen.add(location_id)
+                regions.append(
+                    {"label": label, "location_ids": [location_id], "value": value}
+                )
+        else:
+            reason = "no_geometry" if name in _NO_GEOMETRY_NAMES else "unknown_zone"
+            unmapped.append({"label": label, "value": value, "reason": reason})
+    return _finish_artifact(
+        regions=regions,
+        unmapped=unmapped,
+        measure=measure,
+        unit=unit,
+        zone_dimension=f"{zone_role} zone",
+        highlight_top_n=highlight_top_n,
+        filters=filters,
+        run_id=None,
+        tool_call_id=None,
+        tool_name="map_taxi_zones",
+        query_id=query_id,
+    )
+
+
 def build_zone_choropleth(
     result: dict[str, object],
     *,
@@ -307,64 +449,16 @@ def build_zone_choropleth(
             seen.add(name)
             regions.append({"label": label, "location_ids": list(ids), "value": value})
 
-    values = [r["value"] for r in regions]
-    layers: list[dict] = [
-        {
-            "kind": "choropleth",
-            "measure": measure,
-            "unit": unit,
-            "scale": {
-                "kind": "sequential",
-                "palette": "blues",
-                "min": min(0, *values) if values else 0,
-                "max": max(values) if values else 0,
-            },
-            "regions": regions,
-        }
-    ]
-    top = sorted(regions, key=lambda r: (-r["value"], r["label"]))[
-        : max(highlight_top_n, 0)
-    ]
-    if top:
-        layers.append(
-            {
-                "kind": "highlight",
-                "label": "Top zone" if len(top) == 1 else f"Top {len(top)} zones",
-                "location_ids": [i for r in top for i in r["location_ids"]],
-            }
-        )
-
-    clean_filters = {}
-    for key, raw in (filters or {}).items():
-        value = _filter_value(raw)
-        if value is not None and isinstance(key, str):
-            clean_filters[key[:40]] = value
-    digest = hashlib.sha256(f"{run_id}|{tool_call_id}|{query_id}".encode()).hexdigest()[
-        :16
-    ]
-    payload = {
-        "schema": "map_artifact",
-        "version": 1,
-        "artifact_id": f"map_{digest}",
-        "geography": {"id": GEOGRAPHY_ID, "version": GEOGRAPHY_VERSION},
-        "evidence": {
-            "run_id": run_id,
-            "tool_call_id": tool_call_id,
-            "query_id": query_id,
-            "tool_name": tool_name,
-            "dataset": DATASET_ID,
-        },
-        "title": f"{measure.replace('_', ' ').capitalize()} by {zone_dimension.replace('_', ' ')}"[
-            :120
-        ],
-        "layers": layers,
-        "unmapped": unmapped[:300],
-        "filters": clean_filters,
-        "view": {"fit": "all"},
-        "provenance": {
-            "generated_by": "app",
-            "source": f"{tool_name} result",
-            "interpretation": "spatial_pattern_not_causal",
-        },
-    }
-    return validate_map_artifact(payload)
+    return _finish_artifact(
+        regions=regions,
+        unmapped=unmapped,
+        measure=measure,
+        unit=unit,
+        zone_dimension=zone_dimension,
+        highlight_top_n=highlight_top_n,
+        filters=filters,
+        run_id=run_id,
+        tool_call_id=tool_call_id,
+        tool_name=tool_name,
+        query_id=query_id,
+    )

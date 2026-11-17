@@ -17,6 +17,7 @@ from app.routers.conversations import create_conversations_router
 from app.routers.events import create_events_router
 from app.routers.health import router as health_router
 from app.routers.jobs import create_jobs_router
+from app.routers.maps import create_maps_router
 from app.routers.runs import RunDispatcher, create_runs_router
 from app.routers.status import router as status_router
 from app.state import DynamoDBStateRepository, InMemoryStateRepository, StateRepository
@@ -94,6 +95,9 @@ def create_app(
             job_producer=job_producer,
             redis_client=redis_client,
         )
+    )
+    application.include_router(
+        create_maps_router(lambda: mcp_client or FastMCPDatasetProfileClient())
     )
     application.include_router(status_router)
     application.include_router(voice_router)

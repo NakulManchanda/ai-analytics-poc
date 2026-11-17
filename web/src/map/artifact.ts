@@ -33,10 +33,10 @@ export interface MapArtifact {
   artifact_id: string;
   geography: { id: "nyc_tlc_taxi_zones"; version: "v1" };
   evidence: {
-    run_id: string;
-    tool_call_id: string;
+    run_id: string | null;
+    tool_call_id: string | null;
     query_id: string;
-    tool_name: string;
+    tool_name: "aggregate_taxi_data" | "map_taxi_zones";
     dataset: string;
   };
   title: string;
@@ -135,8 +135,14 @@ export function parseMapArtifact(input: unknown, zoneIds: ReadonlySet<number>): 
   if (geo && (geo.id !== "nyc_tlc_taxi_zones" || geo.version !== "v1")) err("geography", "unsupported value");
   const ev = obj(root.evidence, "evidence", ["run_id", "tool_call_id", "query_id", "tool_name", "dataset"]);
   if (ev) {
-    for (const k of ["run_id", "tool_call_id", "query_id"]) text(ev[k], `evidence.${k}`, 128);
-    for (const k of ["tool_name", "dataset"]) text(ev[k], `evidence.${k}`, 80);
+    for (const k of ["run_id", "tool_call_id"]) {
+      if (ev[k] !== null) text(ev[k], `evidence.${k}`, 128);
+    }
+    text(ev.query_id, "evidence.query_id", 128);
+    if (ev.tool_name !== "aggregate_taxi_data" && ev.tool_name !== "map_taxi_zones") {
+      err("evidence.tool_name", "unsupported value");
+    }
+    text(ev.dataset, "evidence.dataset", 80);
   }
   text(root.title, "title", 120);
 

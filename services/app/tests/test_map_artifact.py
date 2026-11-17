@@ -288,3 +288,67 @@ def test_builder_rejects_malformed_tool_result():
         with pytest.raises(MapArtifactError) as info:
             build_zone_choropleth(bad, **BUILD_ARGS)
         assert info.value.code == "invalid_result"
+
+
+ID_RESULT = {
+    "columns": ["location_id", "zone", "borough", "trip_count"],
+    "rows": [
+        [132, "JFK Airport", "Queens", 50],
+        [56, "Corona", "Queens", 7],
+        [57, "Corona", "Queens", 9],
+        [264, "Unknown", "Unknown", 3],
+        [265, "N/A", "Unknown", 2],
+        [999, "Mystery", "Nowhere", 1],
+    ],
+    "row_count": 6,
+    "query_id": "query_ids0001",
+    "truncated": False,
+}
+
+
+def test_builder_from_ids_maps_by_id_and_routes_the_rest_to_unmapped():
+    from app.artifacts import build_zone_choropleth_from_ids
+
+    artifact = build_zone_choropleth_from_ids(
+        ID_RESULT,
+        measure="trip_count",
+        unit="trips",
+        filters={"pickup_week_part": "weekend"},
+        zone_role="pickup",
+    )
+    regions = artifact.layers[0].regions
+    assert [(r.label, r.location_ids) for r in regions] == [
+        ("JFK Airport", [132]),
+        ("Corona", [56]),
+        ("Corona", [57]),
+    ]
+    assert {(u.label, u.reason) for u in artifact.unmapped} == {
+        ("Unknown", "unknown_zone"),
+        ("N/A", "no_geometry"),
+        ("Mystery", "unknown_zone"),
+    }
+    assert artifact.layers[1].location_ids == [132]
+    assert artifact.evidence.run_id is None and artifact.evidence.tool_call_id is None
+    assert artifact.evidence.tool_name == "map_taxi_zones"
+    assert artifact.title == "Trip count by pickup zone"
+    assert validate_map_artifact(json.loads(canonical_json(artifact)))
+
+
+def test_builder_from_ids_rejects_a_result_without_the_measure_column():
+    from app.artifacts import build_zone_choropleth_from_ids
+
+    with pytest.raises(MapArtifactError) as excinfo:
+        build_zone_choropleth_from_ids(
+            {**ID_RESULT, "columns": ["location_id", "zone"]},
+            measure="trip_count",
+            unit="trips",
+            filters=None,
+            zone_role="pickup",
+        )
+    assert excinfo.value.code == "invalid_result"
+
+
+def test_tool_name_outside_the_allowlist_is_rejected():
+    payload = valid()
+    payload["evidence"]["tool_name"] = "run_sql"
+    assert reject(payload) == "invalid_schema"
