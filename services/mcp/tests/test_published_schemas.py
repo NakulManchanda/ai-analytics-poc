@@ -102,3 +102,12 @@ def test_unknown_filter_still_returns_validator_envelope():
     error = asyncio.run(exercise()).data["error"]
     assert error["code"] == "unknown_filter"
     assert error["retryable"] is False
+
+
+def test_map_taxi_zones_schema_is_closed():
+    schema = _schemas()["map_taxi_zones"]
+    props = schema["properties"]
+    assert props["zone_role"]["enum"] == ["pickup", "dropoff"]
+    assert props["measure"]["enum"] == [m.value for m in MeasureName]
+    _assert_typed_filters(props["filters"])
+    assert set(schema["required"]) == {"zone_role", "measure"}

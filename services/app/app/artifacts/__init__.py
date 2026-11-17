@@ -7,4 +7,9 @@ from .map_artifact import (
     validate_map_artifact,
 )
 
-__all__ = ["MapArtifact", "MapArtifactError", "build_zone_choropleth", "validate_map_artifact"]
+__all__ = [
+    "MapArtifact",
+    "MapArtifactError",
+    "build_zone_choropleth",
+    "validate_map_artifact",
+]

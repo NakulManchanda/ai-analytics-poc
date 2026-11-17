@@ -162,7 +162,9 @@ class Provenance(_Model):
     interpretation: Literal["spatial_pattern_not_causal"]
 
 
-FilterValue = Annotated[str, Field(max_length=80), AfterValidator(_clean)] | int | float | bool
+FilterValue = (
+    Annotated[str, Field(max_length=80), AfterValidator(_clean)] | int | float | bool
+)
 
 
 class MapArtifact(_Model):
@@ -174,7 +176,10 @@ class MapArtifact(_Model):
     title: _text(120)
     layers: list[Annotated[Choropleth | Highlight, Field(discriminator="kind")]]
     unmapped: list[Unmapped] = Field(max_length=300)
-    filters: dict[Annotated[str, Field(min_length=1, max_length=40), AfterValidator(_clean)], FilterValue]
+    filters: dict[
+        Annotated[str, Field(min_length=1, max_length=40), AfterValidator(_clean)],
+        FilterValue,
+    ]
     view: View
     provenance: Provenance
 
@@ -182,7 +187,9 @@ class MapArtifact(_Model):
         kinds = [layer.kind for layer in self.layers]
         if kinds.count("choropleth") != 1 or kinds.count("highlight") > 1:
             raise _Reject("invalid_value")
-        choropleth = next(layer for layer in self.layers if isinstance(layer, Choropleth))
+        choropleth = next(
+            layer for layer in self.layers if isinstance(layer, Choropleth)
+        )
         ids = [i for region in choropleth.regions for i in region.location_ids]
         if len(ids) != len(set(ids)) or choropleth.scale.min > choropleth.scale.max:
             raise _Reject("invalid_value")
@@ -213,7 +220,9 @@ def canonical_json(artifact: MapArtifact) -> str:
 def validate_map_artifact(payload: object) -> MapArtifact:
     """Validate an untrusted payload or raise ``MapArtifactError`` with a closed code."""
     try:
-        size = len(json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode())
+        size = len(
+            json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode()
+        )
     except (TypeError, ValueError, RecursionError):
         raise MapArtifactError("invalid_schema") from None
     if size > MAX_ARTIFACT_BYTES:
@@ -239,7 +248,9 @@ def _number(value: object) -> int | float | None:
 def _filter_value(value: object) -> str | int | float | bool | None:
     if isinstance(value, (str, int, float, bool)):
         return value
-    if isinstance(value, (list, tuple)) and all(isinstance(v, (str, int, float)) for v in value):
+    if isinstance(value, (list, tuple)) and all(
+        isinstance(v, (str, int, float)) for v in value
+    ):
         return ", ".join(str(v) for v in value)[:80]
     return None
 
@@ -262,7 +273,11 @@ def build_zone_choropleth(
     names map to every LocationID carrying that name; names without geometry or
     absent from the index become ``unmapped`` rows. No id is ever invented.
     """
-    columns, rows, query_id = result.get("columns"), result.get("rows"), result.get("query_id")
+    columns, rows, query_id = (
+        result.get("columns"),
+        result.get("rows"),
+        result.get("query_id"),
+    )
     if (
         not isinstance(columns, list)
         or not isinstance(rows, list)
@@ -307,7 +322,9 @@ def build_zone_choropleth(
             "regions": regions,
         }
     ]
-    top = sorted(regions, key=lambda r: (-r["value"], r["label"]))[: max(highlight_top_n, 0)]
+    top = sorted(regions, key=lambda r: (-r["value"], r["label"]))[
+        : max(highlight_top_n, 0)
+    ]
     if top:
         layers.append(
             {
@@ -322,7 +339,9 @@ def build_zone_choropleth(
         value = _filter_value(raw)
         if value is not None and isinstance(key, str):
             clean_filters[key[:40]] = value
-    digest = hashlib.sha256(f"{run_id}|{tool_call_id}|{query_id}".encode()).hexdigest()[:16]
+    digest = hashlib.sha256(f"{run_id}|{tool_call_id}|{query_id}".encode()).hexdigest()[
+        :16
+    ]
     payload = {
         "schema": "map_artifact",
         "version": 1,

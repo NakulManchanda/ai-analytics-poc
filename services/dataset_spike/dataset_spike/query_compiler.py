@@ -12,6 +12,7 @@ from dataclasses import dataclass
 
 from dataset_spike.query_spec import (
     FARE_AMOUNT_BUCKET_EDGES,
+    MAX_ZONE_ROWS,
     PASSENGER_COUNT_BUCKET_EDGES,
     TRIP_DISTANCE_BUCKET_EDGES,
     TRIP_DURATION_BUCKET_EDGES,
@@ -441,4 +442,33 @@ def compile_compare_whole_segments_query(
         sql=sql,
         parameters=list(baseline_params) + list(comparison_params),
         output_columns=output_columns,
+    )
+
+
+def compile_zone_measure_query(
+    zone_role: str, measure: MeasureName, filters: TaxiFilters | None
+) -> CompiledQuery:
+    """One measure per taxi zone id; ``zone_role`` selects a fixed column pair."""
+    # Fixed fragments keyed by the already-validated role, never request text.
+    id_column, alias = (
+        ("t.PULocationID", "pz") if zone_role == "pickup" else ("t.DOLocationID", "dz")
+    )
+    where_clauses, parameters = _compile_filters(filters, True)
+    where_clauses = [f"{id_column} IS NOT NULL", *where_clauses]
+    sql = " ".join(
+        (
+            f"SELECT {id_column}::INTEGER AS location_id, "
+            f"{alias}.Zone AS zone, {alias}.Borough AS borough, "
+            f'{_MEASURE_EXPRESSIONS[measure]} AS "{measure.value}"',
+            _from_clause(True),
+            f"WHERE {' AND '.join(where_clauses)}",
+            f"GROUP BY {id_column}, {alias}.Zone, {alias}.Borough",
+            "ORDER BY location_id ASC",
+            "LIMIT ?",
+        )
+    )
+    return CompiledQuery(
+        sql=sql,
+        parameters=[*parameters, MAX_ZONE_ROWS + 1],
+        output_columns=["location_id", "zone", "borough", measure.value],
     )

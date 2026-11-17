@@ -1,7 +1,7 @@
 import asyncio
 
 from dataset_spike.analytics import DatasetProfile
-from dataset_spike.query_spec import QueryValidationError
+from dataset_spike.query_spec import QueryValidationError, validate_zone_role
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
@@ -250,3 +250,59 @@ def test_governed_tool_call_creates_bounded_telemetry_attributes():
 
     exported = json.dumps(dict(duckdb_span.attributes))
     assert "SELECT" not in exported
+
+
+def test_map_taxi_zones_tool_calls_runner_and_validates_inputs():
+    from fastmcp import Client
+    from mcp_server.server import build_mcp
+
+    calls = []
+
+    def map_runner(**kwargs):
+        calls.append(kwargs)
+        validate_zone_role(kwargs["zone_role"])
+        if kwargs["measure"] == "bogus":
+            raise QueryValidationError("unknown_measure", "'bogus' is not allowlisted")
+        return {
+            "columns": ["location_id", "zone", "borough", "trip_count"],
+            "rows": [[1, "Alpha", "Manhattan", 5]],
+            "row_count": 1,
+            "execution_duration_ms": 1,
+            "query_id": "q9",
+            "truncated": False,
+            "query_class": "zone_map",
+        }
+
+    async def exercise():
+        async with Client(
+            build_mcp(profile_loader=_profile, map_zones_runner=map_runner)
+        ) as client:
+            ok = await client.call_tool(
+                "map_taxi_zones",
+                {
+                    "zone_role": "pickup",
+                    "measure": "trip_count",
+                    "filters": {"pickup_week_part": "weekend"},
+                },
+            )
+            bad_measure = await client.call_tool(
+                "map_taxi_zones",
+                {"zone_role": "pickup", "measure": "bogus"},
+                raise_on_error=False,
+            )
+            bad_role = await client.call_tool(
+                "map_taxi_zones",
+                {"zone_role": "sideways", "measure": "trip_count"},
+                raise_on_error=False,
+            )
+        return ok, bad_measure, bad_role
+
+    ok, bad_measure, bad_role = asyncio.run(exercise())
+    assert ok.data["rows"] == [[1, "Alpha", "Manhattan", 5]]
+    assert calls[0] == {
+        "zone_role": "pickup",
+        "measure": "trip_count",
+        "filters": {"pickup_week_part": "weekend"},
+    }
+    assert bad_measure.data["error"]["code"] == "unknown_measure"
+    assert bad_role.data["error"]["code"] == "invalid_zone_role"
