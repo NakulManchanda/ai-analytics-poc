@@ -1167,3 +1167,29 @@ button.sample-chip:focus-visible,
   cursor: pointer;
   padding: 0 4px;
 }
+
+/* Zone map (map artifact renderer) */
+.zone-map { margin: 0; max-width: 960px; }
+.zm-svg { width: 100%; height: auto; background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 6px; }
+.zm-zone { fill: #eef1f3; stroke: #b8c4cb; stroke-width: 0.6; }
+.zm-zone.zm-highlight { stroke: #111827; stroke-width: 2.5; }
+.zm-title { margin: 12px 0 6px; font-size: 1rem; }
+.zm-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 0.85rem; }
+.zm-swatches { display: inline-flex; }
+.zm-swatch { display: inline-block; width: 28px; height: 12px; }
+.zm-legend-highlight { margin-left: 12px; font-weight: 600; }
+.zm-filters, .zm-provenance, .zm-disclaimer { margin: 6px 0; font-size: 0.82rem; color: var(--color-text-muted); }
+.zm-table { border-collapse: collapse; margin-top: 8px; font-size: 0.82rem; }
+.zm-table caption { text-align: left; font-weight: 600; padding-bottom: 4px; }
+.zm-table th, .zm-table td { border-bottom: 1px solid var(--color-border); padding: 3px 12px 3px 0; text-align: left; }
+.zm-notice, .zm-loading { font-size: 0.9rem; color: var(--color-text-muted); }
+.zm-blues-0 { fill: #deebf7; background: #deebf7; }
+.zm-blues-1 { fill: #9ecae1; background: #9ecae1; }
+.zm-blues-2 { fill: #6baed6; background: #6baed6; }
+.zm-blues-3 { fill: #3182bd; background: #3182bd; }
+.zm-blues-4 { fill: #08519c; background: #08519c; }
+.zm-oranges-0 { fill: #fee6ce; background: #fee6ce; }
+.zm-oranges-1 { fill: #fdae6b; background: #fdae6b; }
+.zm-oranges-2 { fill: #fd8d3c; background: #fd8d3c; }
+.zm-oranges-3 { fill: #e6550d; background: #e6550d; }
+.zm-oranges-4 { fill: #a63603; background: #a63603; }

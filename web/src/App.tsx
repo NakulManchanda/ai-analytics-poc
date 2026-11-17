@@ -1,4 +1,5 @@
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import { MapDemo } from "./map/MapDemo";
 import { ContextInspector } from "./ContextInspector";
 import { TimelineInspector } from "./TimelineInspector";
 import { useVoiceInput } from "./useVoiceInput";
@@ -43,6 +44,11 @@ function mcpLabel(status: Status): string {
 }
 
 export default function App() {
+  if (new URLSearchParams(window.location.search).get("demo") === "map") return <MapDemo />;
+  return <LiveApp />;
+}
+
+function LiveApp() {
   const [status, setStatus] = useState<Status>(initialStatus);
   const [prompt, setPrompt] = useState("");
   const [answer, setAnswer] = useState<AskResponse | null>(null);
