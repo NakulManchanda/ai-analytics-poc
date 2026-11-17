@@ -461,16 +461,16 @@ def _parse_aggregate_taxi_data(
     allowed = {"dimensions", "measures", "filters", "order_by", "limit"}
     if _unexpected_arguments(arguments, allowed, problems):
         return None
-    dimensions = arguments.get("dimensions")
+    # An omitted field means the same as []: one overall total (models drop it).
+    dimensions = arguments.get("dimensions", [])
     measures = arguments.get("measures")
     filters = arguments.get("filters")
     order_by = arguments.get("order_by")
     limit = arguments.get("limit", 20)
-    if not _is_str_list(dimensions) or not dimensions:
+    if not _is_str_list(dimensions):
         return _reject(
             problems,
-            "dimensions is required and must be a non-empty list of dimension names "
-            "(an empty list or a missing field is not accepted; group by at least one)",
+            "dimensions must be a list of dimension names (use [] for one overall total)",
         )
     if not _is_str_list(measures) or not measures:
         return _reject(

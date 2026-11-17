@@ -11,10 +11,20 @@ model_list:
     litellm_params:
       model: bedrock/amazon.nova-pro-v1:0
       aws_region_name: us-east-1
+      # Bedrock prompt caching: a cache point after the system message makes the shared
+      # prefix (tools + system prompt, about 4k tokens) a cached prefix on later calls.
+      cache_control_injection_points:
+        - location: message
+          role: system
   - model_name: taxi-answer
     litellm_params:
       model: bedrock/amazon.nova-micro-v1:0
       aws_region_name: us-east-1
+      # Bedrock prompt caching: a cache point after the system message makes the shared
+      # prefix (tools + system prompt, about 4k tokens) a cached prefix on later calls.
+      cache_control_injection_points:
+        - location: message
+          role: system
 
 litellm_settings:
   drop_params: true      # e.g. vLLM-only knobs never reach Bedrock

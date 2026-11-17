@@ -54,7 +54,7 @@ def render_compare(
     old = load_baseline(baseline)
     keys = sorted(set(new) | set(old))
     L = [
-        f"# {run_dir.name} vs frozen baseline (provisional grader v3: omitted default arguments match)",
+        f"# {run_dir.name} vs frozen baseline (provisional grader v4: omitted default arguments match; a dimension pinned by an equality filter may be omitted)",
         "",
     ]
     L.append(

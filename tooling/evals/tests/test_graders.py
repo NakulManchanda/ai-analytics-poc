@@ -673,3 +673,81 @@ def test_legacy_equivalence_rejected_when_expected_borough_missing_in_actual():
     res = _v2grade(turn, view)
     assert res.tool == "incorrect"
     assert any("expected aggregate_taxi_data not matched" in r for r in res.reasons)
+
+
+def test_args_match_omitted_dimension_pinned_by_equality_filter() -> None:
+    exp = ExpectedTool(
+        name="aggregate_taxi_data",
+        arguments={
+            "dimensions": ["pickup_borough"],
+            "measures": ["average_fare"],
+            "filters": {"pickup_borough": "Manhattan"},
+        },
+    )
+    pinned = {
+        "dimensions": [],
+        "measures": ["average_fare"],
+        "filters": {"pickup_borough": "Manhattan"},
+    }
+    assert args_match(exp, pinned)
+    # An omitted dimensions field is normalized to [] so it matches pinned expectations...
+    omitted = {"measures": ["average_fare"], "filters": {"pickup_borough": "Manhattan"}}
+    assert args_match(exp, omitted)
+    # ...and golden expectations for an overall total.
+    overall_exp = ExpectedTool(
+        name="aggregate_taxi_data",
+        arguments={"dimensions": [], "measures": ["average_fare"]},
+    )
+    assert args_match(overall_exp, {"measures": ["average_fare"]})
+    assert args_match(overall_exp, {"dimensions": [], "measures": ["average_fare"]})
+    # Explicit null is never treated as a valid list or omitted field.
+    assert not args_match(
+        exp,
+        {
+            "dimensions": None,
+            "measures": ["average_fare"],
+            "filters": {"pickup_borough": "Manhattan"},
+        },
+    )
+    assert not args_match(
+        overall_exp, {"dimensions": None, "measures": ["average_fare"]}
+    )
+    # Exact matching stays strict: omitted dimensions is not normalized to [].
+    exact_omitted = ExpectedTool(
+        name="aggregate_taxi_data",
+        arguments={"measures": ["average_fare"]},
+        match="exact",
+    )
+    assert args_match(exact_omitted, {"measures": ["average_fare"]})
+    assert not args_match(
+        exact_omitted, {"dimensions": [], "measures": ["average_fare"]}
+    )
+    exact_empty = ExpectedTool(
+        name="aggregate_taxi_data",
+        arguments={"dimensions": [], "measures": ["average_fare"]},
+        match="exact",
+    )
+    assert args_match(exact_empty, {"dimensions": [], "measures": ["average_fare"]})
+    assert not args_match(exact_empty, {"measures": ["average_fare"]})
+    exact_pinned = ExpectedTool(
+        name="aggregate_taxi_data",
+        arguments={
+            "dimensions": ["pickup_borough"],
+            "measures": ["average_fare"],
+            "filters": {"pickup_borough": "Manhattan"},
+        },
+        match="exact",
+    )
+    assert not args_match(exact_pinned, pinned)
+    # An expectation that does not filter on pickup_borough must not match an omitted dimension.
+    unfiltered = ExpectedTool(
+        name="aggregate_taxi_data",
+        arguments={"dimensions": ["pickup_borough"], "measures": ["average_fare"]},
+    )
+    assert not args_match(unfiltered, pinned)
+    # A filter pinning to a different value does not match.
+    assert not args_match(exp, {**pinned, "filters": {"pickup_borough": "Queens"}})
+    # No pinning filter: an omitted dimension is a real difference.
+    assert not args_match(exp, {"dimensions": [], "measures": ["average_fare"]})
+    # A filter on a different column does not pin it.
+    assert not args_match(exp, {**pinned, "filters": {"payment_type": "credit_card"}})

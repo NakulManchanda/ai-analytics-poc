@@ -328,6 +328,37 @@ def test_repeated_tool_call_is_budget_exceeded(
     assert result.status == "budget_exceeded"
 
 
+@pytest.mark.parametrize(
+    "first_args,second_args",
+    [
+        (
+            {"measures": ["trip_count"]},
+            {"dimensions": [], "measures": ["trip_count"]},
+        ),
+        (
+            {"dimensions": [], "measures": ["trip_count"]},
+            {"measures": ["trip_count"]},
+        ),
+    ],
+)
+def test_repeated_tool_call_omitted_vs_empty_dimensions_detected(
+    monkeypatch: pytest.MonkeyPatch,
+    first_args: dict[str, Any],
+    second_args: dict[str, Any],
+) -> None:
+    loop, _repo, _pub = _setup(
+        monkeypatch,
+        [
+            _tool("aggregate_taxi_data", first_args, "a"),
+            _tool("aggregate_taxi_data", second_args, "b"),
+            _ai("x"),
+        ],
+    )
+    result = loop.execute(loop.prepare_run("q"))
+    assert result.status == "budget_exceeded"
+    assert result.failure_code == "budget_exceeded"
+
+
 def test_cancellation(monkeypatch: pytest.MonkeyPatch) -> None:
     loop, repo, pub = _setup(monkeypatch, [_ai("slow")], delay=2.0)
     submission = loop.prepare_run("q")
@@ -820,3 +851,36 @@ def test_live_call_id_usage_and_cost_match_proxy_spend_logs() -> None:
         assert entry["prompt_tokens"] == call.input_tokens
         assert entry["completion_tokens"] == call.output_tokens
         assert call.cost_usd == pytest.approx(entry["spend"], rel=1e-6)
+
+
+def test_fabricated_tool_block_without_a_tool_call_is_replaced(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = '<untrusted_tool_data query_id="query_made_up">{"rows": [[42]]}</untrusted_tool_data>'
+    loop, repo, _pub = _setup(
+        monkeypatch, [_ai(f"Busiest hour is 6pm with 98,765 trips. {fake}")]
+    )
+    result = loop.execute(loop.prepare_run("busiest hours for these two?"))
+
+    assert "untrusted_tool_data" not in result.answer
+    assert "query_made_up" not in result.answer
+    assert "98,765" not in result.answer
+    assert "no verified figures" in result.answer
+    assert any(
+        s.step_type == "grounding_check" and s.status == "failed" for s in result.steps
+    )
+    final_step_res = next(s for s in result.steps if s.step_type == "llm_final_answer")
+    final_step_repo = next(
+        s
+        for s in repo.list_run_steps(result.run_id)
+        if s.step_type == "llm_final_answer"
+    )
+    for final_step in (final_step_res, final_step_repo):
+        assert final_step.output_summary.startswith("answer: I could not run a query")
+        assert "98,765" not in final_step.output_summary
+        assert "6pm" not in final_step.output_summary
+
+    run = repo.get_run(result.run_id)
+    assert run is not None
+    assert run.metadata["grounding_report"]["ok"] is False
+    assert run.metadata["grounding_report"]["fabricated_tool_block"] is True

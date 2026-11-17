@@ -66,6 +66,14 @@ def test_aggregate_semantic_checks() -> None:
         "limit": 10,
     }
     assert validate_proposal("aggregate_taxi_data", good, schema=SCHEMA).ok
+    assert validate_proposal(
+        "aggregate_taxi_data", {"measures": ["average_fare"]}, schema=SCHEMA
+    ).ok
+    assert validate_proposal(
+        "aggregate_taxi_data",
+        {"dimensions": [], "measures": ["average_fare"]},
+        schema=SCHEMA,
+    ).ok
     bad_dim = dict(good, dimensions=["rider_ssn"])
     assert "unknown_dimension" in codes(
         validate_proposal("aggregate_taxi_data", bad_dim)

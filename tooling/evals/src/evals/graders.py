@@ -80,7 +80,12 @@ def fabricated_numbers(answer: str) -> list[float]:
 TOOL_ARG_DEFAULTS: dict[str, dict[str, object]] = {
     "describe_taxi_dataset": {"include_column_stats": False},
     "list_taxi_dimension_values": {"limit": 20, "search": None},
-    "aggregate_taxi_data": {"limit": 20, "filters": None, "order_by": None},
+    "aggregate_taxi_data": {
+        "limit": 20,
+        "filters": None,
+        "order_by": None,
+        "dimensions": [],
+    },
     "compare_taxi_segments": {"limit": 20},
 }
 _NESTED_ARG_DEFAULTS: dict[tuple[str, ...], object] = {
@@ -89,8 +94,50 @@ _NESTED_ARG_DEFAULTS: dict[tuple[str, ...], object] = {
 _NO_DEFAULT = object()
 
 
+def _normalize_actual(
+    expected: ExpectedTool, actual: dict[str, object]
+) -> dict[str, object]:
+    """An omitted ``dimensions`` argument on ``aggregate_taxi_data`` represents one overall
+    total (the same as ``dimensions: []``) in subset mode. Explicit ``None`` (null) is not
+    valid."""
+    if expected.name == "aggregate_taxi_data" and "dimensions" not in actual:
+        return {**actual, "dimensions": []}
+    return actual
+
+
+def _with_pinned_dimensions(
+    expected: ExpectedTool, actual: dict[str, object]
+) -> dict[str, object]:
+    """An expected dimension the call omits still matches when both the expected and
+    actual calls pin that same dimension with an identical equality filter: grouping by
+    it adds no information (``dimensions: []`` with ``filters.pickup_borough = Manhattan``
+    is the same total as grouping by ``pickup_borough`` with that same filter). Only
+    ``aggregate_taxi_data`` calls are adjusted."""
+    if expected.name != "aggregate_taxi_data":
+        return actual
+    want, have = expected.arguments.get("dimensions"), actual.get("dimensions")
+    exp_filters = expected.arguments.get("filters")
+    act_filters = actual.get("filters")
+    if not (isinstance(want, list) and isinstance(have, list)):
+        return actual
+    if not (isinstance(exp_filters, dict) and isinstance(act_filters, dict)):
+        return actual
+    pinned = [
+        d
+        for d in want
+        if d not in have
+        and isinstance(exp_filters.get(d), (str, int, float, bool))
+        and type(act_filters.get(d)) is type(exp_filters.get(d))
+        and act_filters.get(d) == exp_filters.get(d)
+    ]
+    return {**actual, "dimensions": [*have, *pinned]} if pinned else actual
+
+
 def args_match(expected: ExpectedTool, actual: dict[str, object]) -> bool:
     exact = expected.match == "exact"
+    if not exact:
+        actual = _normalize_actual(expected, actual)
+        actual = _with_pinned_dimensions(expected, actual)
     top_defaults = TOOL_ARG_DEFAULTS.get(expected.name, {})
 
     def default_for(path: tuple[str, ...]) -> object:

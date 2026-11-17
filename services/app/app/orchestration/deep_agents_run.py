@@ -44,6 +44,7 @@ from app.orchestration.deep_agents_strategy import (
     offered_tool_names,
 )
 from app.orchestration.loop import (
+    _EXTENDED_TOOL_PARSERS,
     BUDGET_BASIS_CONSERVATIVE,
     BUDGET_BASIS_REPORTED,
     BUDGET_BASIS_UNRESOLVABLE,
@@ -86,6 +87,10 @@ STRATEGY_NAME = "deep_agents"
 # LangGraph supersteps allowed per budgeted iteration (model node + tool node + middleware).
 RECURSION_STEPS_PER_ITERATION = 4
 _POLL_INTERVAL_SECONDS = 0.05
+_FABRICATED_TOOL_ANSWER_TEXT = (
+    "I could not run a query for that follow-up, so I have no verified figures to give. "
+    "Please ask again with the details (for example the zones or dates)."
+)
 _NO_ANSWER_TEXT = (
     "The model did not return a usable response for that question. "
     "Please try again or rephrase it."
@@ -853,12 +858,15 @@ class _RunRecorder(BaseCallbackHandler):  # type: ignore[misc,valid-type]
                 )
             else:
                 self.final_latency_ms = latency_ms
+                preview = _message_text(message)
+                if f"<{UNTRUSTED_TAG}" in preview and not self.evidence:
+                    preview = _FABRICATED_TOOL_ANSWER_TEXT
                 self._add_step(
                     step_type="llm_final_answer",
                     status="completed",
                     llm_call_id=call_id,
                     input_summary=f"question: {self.prompt[:80]}",
-                    output_summary=f"answer: {_message_text(message)[:80]}",
+                    output_summary=f"answer: {preview[:80]}",
                     duration_ms=latency_ms,
                     metadata=call.to_metadata(),
                 )
@@ -948,7 +956,10 @@ class _RunRecorder(BaseCallbackHandler):  # type: ignore[misc,valid-type]
                     inputs = {}
             arguments = dict(inputs) if isinstance(inputs, Mapping) else {}
             self.emit("tool.requested", {"tool_name": name, **arguments})
-            signature = f"{name}:{json.dumps(arguments, sort_keys=True, default=str)}"
+            parser = _EXTENDED_TOOL_PARSERS.get(name)
+            parsed = parser(arguments) if parser is not None else None
+            sig_args = parsed if parsed is not None else arguments
+            signature = f"{name}:{json.dumps(sig_args, sort_keys=True, default=str)}"
             if signature in self.executed_signatures:
                 raise BudgetExceededError(
                     f"Repeated equivalent tool call detected: {signature}",
@@ -1443,12 +1454,25 @@ def execute_deep_agent_run(
                 answer = _message_text(message).strip()
                 break
         answer = answer or _NO_ANSWER_TEXT
+        fabricated_tool_block = f"<{UNTRUSTED_TAG}" in answer and not rec.evidence
+        if fabricated_tool_block:
+            # The model copied the tool-result wrapper from restored history instead of
+            # calling a tool: numbers and query ids in it are invented. Never show them.
+            rec._add_step(
+                step_type="grounding_check",
+                status="failed",
+                query_id=None,
+                output_summary="answer imitated a tool result without calling a tool",
+                metadata={"fabricated_tool_block": True},
+            )
+            answer = _FABRICATED_TOOL_ANSWER_TEXT
         report = check_answer_grounding_multi(answer, rec.evidence, question=prompt)
         grounding_report.update(
-            ok=report.ok,
+            ok=report.ok and not fabricated_tool_block,
             ungrounded_numbers=len(report.ungrounded_numbers),
             unknown_query_ids=len(report.unknown_query_ids),
             evidence_count=len(rec.evidence),
+            **({"fabricated_tool_block": True} if fabricated_tool_block else {}),
         )
         caveat = report.caveat()
         if caveat is not None:
