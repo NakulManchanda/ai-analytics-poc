@@ -51,6 +51,7 @@ myfiles/
 work/
 data/
 artifacts/
+!services/app/app/artifacts/
 metrics/*.jsonl
 metrics/inference/
 metrics/evidence/
