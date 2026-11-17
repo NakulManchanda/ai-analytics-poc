@@ -98,8 +98,13 @@ def _normalize_actual(
     expected: ExpectedTool, actual: dict[str, object]
 ) -> dict[str, object]:
     """An omitted ``dimensions`` argument on ``aggregate_taxi_data`` represents one overall
-    total (the same as ``dimensions: []``). Explicit ``None`` (null) is not valid."""
-    if expected.name == "aggregate_taxi_data" and "dimensions" not in actual:
+    total (the same as ``dimensions: []``) in subset mode. Explicit ``None`` (null) is not
+    valid, and ``exact`` matching stays strict."""
+    if (
+        expected.match != "exact"
+        and expected.name == "aggregate_taxi_data"
+        and "dimensions" not in actual
+    ):
         return {**actual, "dimensions": []}
     return actual
 

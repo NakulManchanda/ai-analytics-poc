@@ -712,6 +712,23 @@ def test_args_match_omitted_dimension_pinned_by_equality_filter() -> None:
     assert not args_match(
         overall_exp, {"dimensions": None, "measures": ["average_fare"]}
     )
+    # Exact matching stays strict: omitted dimensions is not normalized to [].
+    exact_omitted = ExpectedTool(
+        name="aggregate_taxi_data",
+        arguments={"measures": ["average_fare"]},
+        match="exact",
+    )
+    assert args_match(exact_omitted, {"measures": ["average_fare"]})
+    assert not args_match(
+        exact_omitted, {"dimensions": [], "measures": ["average_fare"]}
+    )
+    exact_empty = ExpectedTool(
+        name="aggregate_taxi_data",
+        arguments={"dimensions": [], "measures": ["average_fare"]},
+        match="exact",
+    )
+    assert args_match(exact_empty, {"dimensions": [], "measures": ["average_fare"]})
+    assert not args_match(exact_empty, {"measures": ["average_fare"]})
     # An expectation that does not filter on pickup_borough must not match an omitted dimension.
     unfiltered = ExpectedTool(
         name="aggregate_taxi_data",
