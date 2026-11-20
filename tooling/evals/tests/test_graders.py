@@ -800,7 +800,14 @@ def test_single_entity_comma_phrase_accepts_both_factually_equivalent_answers():
             value=30.50,
         )
     ]
-    bad, _unsure = check_entity_value_association(
-        manhattan_fact, "Manhattan averaged $20, while Queens averaged $30.50."
-    )
-    assert any("manhattan" in r and "30.5" in r for r in bad), bad
+    for wrong_entity_answer in (
+        "Manhattan averaged $20, while Queens averaged $30.50.",
+        "Manhattan averaged $20, with Queens averaging $30.50.",
+    ):
+        bad, _unsure = check_entity_value_association(
+            manhattan_fact, wrong_entity_answer
+        )
+        assert any("manhattan" in r and "30.5" in r for r in bad), (
+            wrong_entity_answer,
+            bad,
+        )
