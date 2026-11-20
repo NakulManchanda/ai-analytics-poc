@@ -1,18 +1,12 @@
 import { useState } from "react";
-import {
-  buildCancelledStream,
-  buildConcurrentSpecialistStream,
-  buildSingleAgentBaseline,
-} from "./fixtures";
+import { buildExperimentScenarios } from "./experiments";
+import { buildCancelledStream } from "./fixtures";
 import { SpecialistWorkbench } from "./SpecialistWorkbench";
 
-type DemoScenarioId = "concurrent" | "cancelled";
-
 export function WorkbenchDemo() {
-  const [scenario, setScenario] = useState<DemoScenarioId>("concurrent");
-  const concurrentEvents = buildConcurrentSpecialistStream();
-  const baselineEvents = buildSingleAgentBaseline();
-  const cancelledEvents = buildCancelledStream();
+  const scenarios = buildExperimentScenarios();
+  const [selectedId, setSelectedId] = useState<string>("airport_anomaly");
+  const activeScenario = scenarios.find((s) => s.id === selectedId);
 
   return (
     <main style={{ fontFamily: "system-ui, sans-serif", color: "#0f172a" }}>
@@ -22,37 +16,49 @@ export function WorkbenchDemo() {
           display: "flex",
           justifyContent: "space-between",
           alignItems: "center",
+          gap: 12,
+          flexWrap: "wrap",
           padding: "12px 20px",
           borderBottom: "1px solid #e2e8f0",
         }}
       >
-        <div>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
           <strong>AI Analytics · Specialist Workbench Demo</strong>
-          {" · "}
-          <button type="button" onClick={() => setScenario("concurrent")}>
-            Concurrent Specialists (Retry + Artifacts)
-          </button>{" "}
-          <button type="button" onClick={() => setScenario("cancelled")}>
+          {scenarios.map((sc) => (
+            <button
+              key={sc.id}
+              type="button"
+              aria-pressed={selectedId === sc.id}
+              onClick={() => setSelectedId(sc.id)}
+            >
+              {sc.label}
+            </button>
+          ))}
+          <button
+            type="button"
+            aria-pressed={selectedId === "cancelled"}
+            onClick={() => setSelectedId("cancelled")}
+          >
             Mid-Flight Cancellation
           </button>
         </div>
         <a href="/">Back to live app</a>
       </nav>
 
-      {scenario === "concurrent" ? (
-        <SpecialistWorkbench
-          key="concurrent"
-          title="Queens Pickup Concentration & Temporal Fare Patterns"
-          question="Where are Queens taxi pickups concentrated in Jan 2024, and how do hourly volumes and weekday/weekend fares compare?"
-          events={concurrentEvents}
-          baselineEvents={baselineEvents}
-        />
-      ) : (
+      {selectedId === "cancelled" || !activeScenario ? (
         <SpecialistWorkbench
           key="cancelled"
           title="Mid-Flight Cancellation Stream"
           question="Demonstrates truthful cancellation of active specialist workers."
-          events={cancelledEvents}
+          events={buildCancelledStream()}
+        />
+      ) : (
+        <SpecialistWorkbench
+          key={activeScenario.id}
+          title={activeScenario.label}
+          question={activeScenario.question}
+          events={activeScenario.events}
+          baselineEvents={activeScenario.baselineEvents}
         />
       )}
     </main>
