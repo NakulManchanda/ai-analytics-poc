@@ -1,0 +1,40 @@
+{
+  "name": "web",
+  "$schema": "../node_modules/nx/schemas/project-schema.json",
+  "projectType": "application",
+  "sourceRoot": "web/src",
+  "tags": ["scope:web", "type:app"],
+  "targets": {
+    "test": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "inputs": ["default", "mapContract"],
+      "options": {
+        "command": "npm --prefix web test"
+      }
+    },
+    "build": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "inputs": ["default", "mapContract"],
+      "outputs": ["{workspaceRoot}/web/dist"],
+      "options": {
+        "command": "npm --prefix web run build"
+      }
+    },
+    "dev": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "npm --prefix web exec -- vite"
+      }
+    },
+    "deploy": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "./scripts/deploy_frontend.sh"
+      }
+    }
+  }
+}

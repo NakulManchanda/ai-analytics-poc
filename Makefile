@@ -15,7 +15,7 @@ KV_BUNDLE_OUT = $(or $(OUT),work/kv-hop.yaml)
 # JAEGER=1 adds the optional Jaeger overlay.
 OBS_COMPOSE = -f docker-compose.yml -f docker-compose.phoenix.yml -f docker-compose.observability.yml $(if $(filter 1,$(JAEGER)),-f docker-compose.jaeger.yml)
 
-.PHONY: help eval-stack-up eval-start eval-health eval-smoke eval-run eval-freeze eval-grade eval-compare eval-cost eval-reconcile eval-trace-check eval-review eval-review-serve eval-review-report next-5-commands eval-open eval-all check-bootstrap dev app-serve-dev mcp-dev mcp-smoke dataset-test dataset-smoke smoke test bench-test evals-test evals-report gateway-test mcp-test infra-test web-test zone-geometry compose-smoke observability-up observability-down observability-smoke observability-jaeger-smoke observability-dev-up observability-dev-info observability-dev-ask observability-dev-burst observability-dev-metrics observability-dev-logs observability-dev-down local-aws-litellm-compose local-aws-compose local-litellm-compose local-bedrock-direct-compose litellm-traffic litellm-env litellm-smoke litellm-calls litellm-spend litellm-errors litellm-ready litellm-ui litellm-traffic local-aws-refresh phoenix-up phoenix-down phoenix-ui phoenix-purge local-serve-compose local-serve-refresh local-bedrock-compose bedrock-smoke m5-bedrock-smoke m6-bedrock-smoke dashboard tf-dispatch tf-resume tf-park inference-validate inference-sync inference-config inference-secret inference-bootstrap inference-deploy inference-up inference-tunnel inference-connect inference-smoke inference-warmup inference-capacity inference-restart inference-gateway-restart inference-controls-on inference-controls-off inference-verify-workers inference-e1 inference-fresh-up inference-tmux-start inference-tmux-end inference-serve-smoke inference-run inference-pull-evidence inference-pull-range inference-kv-image inference-kv-render inference-kv-smoke evidence-analyze evidence-notebook evidence-notebook-open inference-teardown replay-fanout replay-multi-turn replay-compare-strategies replay-strategy-manual replay-strategy-crewai replay-e3-least-loaded replay-e3-prefix-then-load replay-e4-admission-on replay-e4-admission-off replay-e3-large-prefix-least-loaded replay-e3-large-prefix-prefix-then-load replay-e5 replay-arrival-rate trace-request
+.PHONY: help eval-stack-up eval-start eval-health eval-smoke eval-run eval-freeze eval-grade eval-compare eval-cost eval-reconcile eval-trace-check eval-review eval-review-serve eval-review-report next-5-commands eval-open eval-all check-bootstrap dev app-serve-dev mcp-dev mcp-smoke dataset-test dataset-smoke smoke test nx-test nx-affected nx-graph bench-test evals-test evals-report gateway-test mcp-test infra-test web-test zone-geometry compose-smoke observability-up observability-down observability-smoke observability-jaeger-smoke observability-dev-up observability-dev-info observability-dev-ask observability-dev-burst observability-dev-metrics observability-dev-logs observability-dev-down local-aws-litellm-compose local-aws-compose local-litellm-compose local-bedrock-direct-compose litellm-traffic litellm-env litellm-smoke litellm-calls litellm-spend litellm-errors litellm-ready litellm-ui litellm-traffic local-aws-refresh phoenix-up phoenix-down phoenix-ui phoenix-purge local-serve-compose local-serve-refresh local-bedrock-compose bedrock-smoke m5-bedrock-smoke m6-bedrock-smoke dashboard tf-dispatch tf-resume tf-park inference-validate inference-sync inference-config inference-secret inference-bootstrap inference-deploy inference-up inference-tunnel inference-connect inference-smoke inference-warmup inference-capacity inference-restart inference-gateway-restart inference-controls-on inference-controls-off inference-verify-workers inference-e1 inference-fresh-up inference-tmux-start inference-tmux-end inference-serve-smoke inference-run inference-pull-evidence inference-pull-range inference-kv-image inference-kv-render inference-kv-smoke evidence-analyze evidence-notebook evidence-notebook-open inference-teardown replay-fanout replay-multi-turn replay-compare-strategies replay-strategy-manual replay-strategy-crewai replay-e3-least-loaded replay-e3-prefix-then-load replay-e4-admission-on replay-e4-admission-off replay-e3-large-prefix-least-loaded replay-e3-large-prefix-prefix-then-load replay-e5 replay-arrival-rate trace-request
 
 
 help: ## Show available commands
@@ -400,6 +400,18 @@ test: ## Run application, benchmark tooling, gateway, MCP, dataset spike, infra,
 	uv run --project services/app pytest tests
 	$(MAKE) evals-test
 	$(MAKE) web-test
+
+NX_TARGETS ?= test,lint,format-check,compile,build,fixture-report
+NX_BASE ?= main
+
+nx-test: ## Run cached deterministic Nx targets across all 5 Nx projects (web, app, mcp, evals, gateway)
+	NX_DAEMON=false NX_TUI=false npx nx run-many -t $(NX_TARGETS)
+
+nx-affected: ## Run cached deterministic Nx targets for projects affected since NX_BASE (default: main)
+	NX_DAEMON=false NX_TUI=false npx nx affected -t $(NX_TARGETS) --base=$(NX_BASE) --head=HEAD
+
+nx-graph: ## Open the interactive Nx project graph in the browser
+	npx nx graph
 
 bench-test: ## Run offline benchmark/replay tooling tests (tooling/benchmarks; needs the app extra for catalogue/prefix checks)
 	uv run --project tooling/benchmarks --extra app pytest tooling/benchmarks/tests

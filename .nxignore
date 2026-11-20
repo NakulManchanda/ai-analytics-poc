@@ -1,0 +1,10 @@
+.venv/
+vev/
+.worktrees/
+.vscode/
+metrics/
+data/
+**/__pycache__/
+**/.venv/
+web/dist/
+infra/terraform/.terraform/

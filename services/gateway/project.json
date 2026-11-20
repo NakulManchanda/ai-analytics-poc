@@ -1,0 +1,62 @@
+{
+  "name": "gateway",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "projectType": "application",
+  "sourceRoot": "services/gateway",
+  "tags": ["scope:gateway", "type:service"],
+  "targets": {
+    "test": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "inputs": [
+        "default",
+        "pythonTooling",
+        "{workspaceRoot}/services/app/pyproject.toml",
+        "{workspaceRoot}/services/app/uv.lock",
+        "inferenceBundle"
+      ],
+      "options": {
+        "command": "uv run --project services/app pytest infra/inference/tests"
+      }
+    },
+    "lint": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "inputs": [
+        "default",
+        "pythonTooling",
+        "{workspaceRoot}/services/app/pyproject.toml",
+        "{workspaceRoot}/services/app/uv.lock"
+      ],
+      "options": {
+        "command": "uv run --project services/app ruff check services/gateway"
+      }
+    },
+    "format-check": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "inputs": [
+        "default",
+        "pythonTooling",
+        "{workspaceRoot}/services/app/pyproject.toml",
+        "{workspaceRoot}/services/app/uv.lock"
+      ],
+      "options": {
+        "command": "uv run --project services/app black --check services/gateway"
+      }
+    },
+    "compile": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "inputs": [
+        "default",
+        "pythonTooling",
+        "{workspaceRoot}/services/app/pyproject.toml",
+        "{workspaceRoot}/services/app/uv.lock"
+      ],
+      "options": {
+        "command": "uv run --project services/app python -m compileall -q services/gateway"
+      }
+    }
+  }
+}

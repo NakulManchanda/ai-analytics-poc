@@ -1,0 +1,64 @@
+{
+  "name": "app",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "projectType": "application",
+  "sourceRoot": "services/app/app",
+  "tags": ["scope:app", "type:service"],
+  "targets": {
+    "test": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "inputs": [
+        "default",
+        "pythonTooling",
+        "mapContract",
+        "captureContract",
+        "mcpToolSchemas",
+        "datasetSpike",
+        "litellmConfig",
+        "terraformConfig"
+      ],
+      "options": {
+        "command": "uv run --project services/app pytest services/app/tests"
+      }
+    },
+    "lint": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "inputs": ["default", "pythonTooling"],
+      "options": {
+        "command": "uv run --project services/app ruff check services/app"
+      }
+    },
+    "format-check": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "inputs": ["default", "pythonTooling"],
+      "options": {
+        "command": "uv run --project services/app black --check services/app"
+      }
+    },
+    "compile": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "inputs": ["default", "pythonTooling"],
+      "options": {
+        "command": "uv run --project services/app python -m compileall -q services/app/app"
+      }
+    },
+    "dev": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "uv run --project services/app uvicorn app.main:app --host 0.0.0.0 --port 8080 --reload"
+      }
+    },
+    "worker": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "uv run --project services/app python -m app.worker"
+      }
+    }
+  }
+}
