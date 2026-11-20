@@ -1,4 +1,4 @@
-# Opt-In Temporal Eval Workflow Pilot (#253)
+# Opt-In Temporal Eval Workflow Pilot
 
 This document records the opt-in local Temporal pilot for offline golden-dataset evaluations (`tooling/evals/`), its real OS-process `SIGKILL` crash-recovery proofs, a side-by-side comparison against the existing file-checkpointed `evals run-live --resume` CLI, and an evidence-backed **keep / stop** recommendation.
 
@@ -29,12 +29,12 @@ flowchart LR
   - **Single-run scope:** This pilot orchestrates **one** eval run through case execution, freeze, grade, and review — it does not yet orchestrate both arms of a matched A/B experiment (tracked separately).
   - **Manual spend reconciliation:** Spend reconciliation (`make eval-reconcile`) and Phoenix trace checking (`make eval-trace-check`) remain manual post-run steps rather than part of `--finalize`, because `/spend/logs` requires `LITELLM_MASTER_KEY` against the live proxy.
   - **Stream timeouts:** A completed SSE call that ends in `timeout` or `stream_error` is recorded in `results.jsonl` as `evidence="incomplete"` and leaves that case incomplete rather than auto-replaying SSE on resume.
-  - **Per-case concurrency guard:** Overlapping worker attempts for the same case are prevented by an exclusive non-blocking per-case lock (`<run_dir>/.locks/<case_id>.lock`), and torn JSONL tails are repaired atomically on disk under lock before appending.
+  - **Per-case concurrency and artifact integrity:** Overlapping worker attempts for the same case are prevented by an exclusive non-blocking per-case lock (`<run_dir>/.locks/<case_id>.lock`), torn JSONL tails are repaired atomically on disk under lock before appending (`results.jsonl`, `submissions.jsonl`, `submitted.jsonl`), `finalize_eval_activity` verifies or atomically regenerates `captures.snapshot.sha256` before grading, and the starter sets `WorkflowIDReusePolicy.REJECT_DUPLICATE` with `result_type=EvalBatchResult` so re-running after completion attaches cleanly to the closed workflow instead of starting a second execution.
 - **Optional dependency isolation:** `temporalio>=1.20,<2` is isolated under `[project.optional-dependencies] temporal` (and `[dependency-groups] dev` so CI executes the crash-recovery proof). Default `evals` commands never import `temporalio`.
 
 ## Real OS-Process `SIGKILL` Crash-Recovery Proof
 
-`tooling/evals/tests/test_temporal_pilot.py` runs against a real local Temporal server (`WorkflowEnvironment.start_local()`, Temporal CLI 1.10.1 / Server 1.32.2), a local fixture HTTP server simulating `/api/runs`, replayable SSE `/api/runs/{id}/events`, `capture.v1` JSONL emission, and separate OS child worker processes (`evals temporal-worker`) terminated mid-flight with `os.kill(pid, signal.SIGKILL)`. All three scenarios use three real golden cases (`det-001`, 2-turn `multi-001`, and `det-004` — 4 turns total) with `finalize=True`:
+`tooling/evals/tests/test_temporal_pilot.py` runs 15 automated tests (including real OS-process `SIGKILL` recovery, POST timeout/4xx classification, per-case locking, on-disk torn JSONL tail repair through final report generation, missing/truncated `captures.snapshot.sha256` recovery, and closed-workflow `REJECT_DUPLICATE` attach) against a real local Temporal server (`WorkflowEnvironment.start_local()`, Temporal CLI 1.10.1 / Server 1.32.2), a local fixture HTTP server simulating `/api/runs`, replayable SSE `/api/runs/{id}/events`, `capture.v1` JSONL emission, and separate OS child worker processes (`evals temporal-worker`) terminated mid-flight with `os.kill(pid, signal.SIGKILL)`. All three `SIGKILL` scenarios use three real golden cases (`det-001`, 2-turn `multi-001`, and `det-004` — 4 turns total) with `finalize=True`:
 
 | Scenario | Crash Point (`SIGKILL`) | Server Lookup Endpoint | Observed `POST /api/runs` Calls | Observed Recovery & Report Outcome |
 | --- | --- | --- | --- | --- |

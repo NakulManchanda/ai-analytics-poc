@@ -44,6 +44,11 @@ Automated scores are evidence for review, not substitutes for validated referenc
 
 The [review tool](../tooling/evals/src/evals/review_server.py) opens frozen runs, links to **Phoenix traces**, and records separate **tool, answer, and multi-turn resolution** verdicts. Reviews are append-only and bound to the evidence snapshot; reports highlight grader/human disagreements and incomplete reviews.
 
+## Execution runners and durability
+
+- **Default runner (`evals run-live` / `make eval-run`):** Single-process local CLI that checkpoints each turn into `metrics/evals/<run_id>/` (`results.jsonl`, `matches.json`, `submitted.jsonl`, `events/`, `state.json`) and supports `--resume` to rerun incomplete cases. Follow with `make eval-freeze`, `make eval-grade`, `make eval-reconcile`, and `make eval-trace-check`.
+- **Opt-in Temporal pilot (`evals run-temporal` / `make eval-temporal-run`):** Local Temporal workflow + separate `evals temporal-worker` process that schedules each whole multi-turn case as one Activity over the unchanged `FastAPI -> MCP` path, reconciles post-accept worker crashes via SSE replay, records blind-window crashes as `ambiguous_submission` without blind retries, and optionally runs freeze/grade/review for a single run. Kept strictly opt-in (see [keep/stop analysis](evaluation/temporal-eval-pilot.md)); matched two-arm A/B orchestration and automated spend reconciliation remain outside the pilot.
+
 ## Current limitations
 
 All **37 golden cases await human approval**. Committed benchmark fixtures are **synthetic or scripted**, so their scores must not be presented as verified live model performance. Some cases use different SQL filtering bases and remain diagnostic until reconciled.

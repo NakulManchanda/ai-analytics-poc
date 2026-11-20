@@ -22,6 +22,7 @@ The root `Makefile` is the operator interface; `make help` lists every target. P
 `make eval-stack-up` → `make eval-start LABEL=<new-name>` → `make eval-health` → `make eval-smoke EVAL_CONFIRM=1` → `make eval-run EVAL_CONFIRM=1` → `make eval-freeze && make eval-grade` → `make eval-compare EVAL_BASELINE=metrics/evals/baselines/golden-2026-10-20.jsonl` → `make eval-cost` → `make eval-reconcile` (needs the stack still up; reconciles the run's capture against LiteLLM spend, exits 4 on a violation) → `make eval-trace-check` (needs Phoenix up; checks each run's trace is one continuous `ai.run` tree with LiteLLM and MCP spans). Shortcut: `make eval-all LABEL=<name> EVAL_CONFIRM=1`. `EVAL_RUN=<run_id>` selects a run other than `metrics/evals/.current`. Runs live in `metrics/evals/<run_id>/` (gitignored). Details: `docs/evals.md`.
 - **CrewAI strategy** (default is `manual`): the app reads `AGENT_STRATEGY` at boot, so set it on the stack step, then use a new label: `AGENT_STRATEGY=crewai make eval-stack-up` → `make eval-all LABEL=<name>-crewai EVAL_CONFIRM=1 EVAL_BASELINE=metrics/evals/baselines/golden-2026-10-20.jsonl`. Switch back with `AGENT_STRATEGY=manual make eval-stack-up` (or unset it) before the next manual run.
 - **Run budget overrides** (defaults 20,000 input tokens, 5 tool calls; Deep Agents often exceeds them): set at stack start, e.g. `AGENT_STRATEGY=deep_agents AGENT_MAX_INPUT_TOKENS=40000 AGENT_MAX_TOOL_CALLS=8 make eval-stack-up`, and use a label that says so. Variables: `AGENT_MAX_INPUT_TOKENS`, `AGENT_MAX_TOOL_CALLS`, `AGENT_MAX_LLM_CALLS`, `AGENT_MAX_ITERATIONS`, `AGENT_TIMEOUT_SECONDS`. Deep Agents planning (`write_todos`) is off unless `AGENT_PLANNING=1`.
+- **Opt-in Temporal eval pilot** (single-run, local only; see `docs/evaluation/temporal-eval-pilot.md`): `make eval-temporal-up` → `make eval-temporal-worker` (foreground terminal) → `make eval-temporal-run EVAL_CONFIRM=1 [EVAL_CASES="det-001 multi-001"] [EVAL_FINALIZE=1]` → `make eval-reconcile` → `make eval-temporal-down`.
 
 ## Deep Agents two-turn smoke (live; the user runs it; real Bedrock)
 Start the stack with the strategy: `AGENT_STRATEGY=deep_agents make eval-stack-up` (needs `LLM_PROVIDER=litellm`, which the eval stack uses). Then, with `W=http://127.0.0.1:${WEB_PORT:-3000}`:
@@ -42,7 +43,7 @@ Same golden question through both strategies, then compare in Phoenix (`make pho
 - `make eval-review` + `make eval-open` — static read-only report.
 
 ## Tests
-`make evals-test` (offline eval tooling), `make test` (all suites), `make mcp-test`, `make web-test`, `make compose-smoke`, `make smoke`. Focused: `uv run --project services/app pytest services/app/tests/<file>`.
+`make evals-test` (offline eval tooling), `make test` (all suites), `make nx-test` / `make nx-affected` / `make nx-graph` (Nx task runner across `web`, `app`, `mcp`, `evals`, `gateway`; run `npm ci` once at root), `make mcp-test`, `make web-test`, `make compose-smoke`, `make smoke`. Focused: `uv run --project services/app pytest services/app/tests/<file>`.
 
 ## Change workflow (see AGENTS.md)
 - `git worktree add .worktrees/<issue>-<slug> -b feat/<issue>-<slug> main`; scratch state in `.vscode/myfiles/<issue>-<slug>/`.
