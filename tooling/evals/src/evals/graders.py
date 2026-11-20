@@ -474,6 +474,12 @@ def check_entity_value_association(
         tuple(sorted(_entity_tokens(f))) for f in facts if _entity_tokens(f)
     }
     multi_entity_metric = len(distinct_measures) > 1 and len(distinct_entities) > 1
+    if len(distinct_entities) <= 1:
+        # Single-entity answers often attach metrics in a trailing ", with ..." phrase;
+        # include sentence-level scopes so comma clauses do not split one entity from its value.
+        segs = segs + [
+            s.strip() for s in re.split(r"[;\n]|\.\s+", answer) if s and s.strip()
+        ]
 
     for fact in facts:
         if fact.kind != "number" or fact.value is None:

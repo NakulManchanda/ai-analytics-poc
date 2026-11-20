@@ -37,7 +37,7 @@ Complete Issue #179 (Epic #167) by:
 
 ---
 
-## Experiment 2 (Fresh Unseen Holdout A/B — PROVISIONAL SHIP, n=2 trials/arm): `answer@1.0.0` vs `answer@1.1.0`
+## Experiment 2 (Fresh Unseen Holdout A/B — NOT PROMOTED, n=2 trials/arm): `answer@1.0.0` vs `answer@1.1.0`
 
 - **Motivating failure cluster (from Experiment 1 baseline):** `det-009#0`, `react-008#0`, `det-010#0`, and `det-014#0` all had `tool=correct` but `answer=incorrect` due to comparative superlative inversion, row/metric label-pairing mismatches, or ungrounded derived figures on the Nova Micro answer call (`answer@1.0.0`).
 - **Single variable changed (`answer` & `answer-with-schema` `1.0.0 → 1.1.0`, `planner-single-turn@1.2.0` unchanged):** appended `_ANSWER_GROUNDING_RULE` to the global instruction region:
@@ -56,9 +56,9 @@ Complete Issue #179 (Epic #167) by:
 | Reconciled LiteLLM spend (`0` orphans, `ok=True`) | `$0.039245` | `$0.039232` | `$0.039081` | `$0.039144` |
 | Phoenix trace continuity (`0` problems) | `11/11` | `11/11` | `11/11` | `11/11` |
 
-**Paired-answer audit (`hold-006#0`):** Inspecting the actual captured answers across both trials revealed that **both `1.0.0` and `1.1.0` were factually correct** (`rate code 4`, `$108.95`, `6,145 trips`). `1.0.0` tripped a deterministic grader association false alarm (`code` sat closer to `4` than `108.95`), whereas `1.1.0` passed the grader by echoing the raw query row `[[4, 108.95, 6145]]`.
+**Paired-answer audit (`hold-006#0`):** Inspecting the actual captured answers across both trials revealed that **both `1.0.0` and `1.1.0` were factually correct** (`rate code 4`, `$108.95`, `6,145 trips`). `1.0.0` tripped a deterministic grader comma-clause false alarm (`code` sat in `"is **4**"` while `$108.95` sat in `", with an average fare of **$108.95**"`), whereas `1.1.0` satisfied the grader only by echoing the raw query row `[[4, 108.95, 6145]]`. Fixed the single-entity sentence-scope check in `tooling/evals/src/evals/graders.py` and added a regression test accepting both factually equivalent phrasings. Offline regrading of all 4 frozen holdout captures confirms `hold-006#0` now grades `correct` in both `1.0.0` and `1.1.0` across both trials (`T1: 3/10 vs 3/10`, `T2: 3/10 vs 4/10`, with Trial 2's remaining `+1` on `hold-002#0` attributable to planner tool-limit variance rather than the answer prompt).
 
-**Decision:** **PROVISIONAL SHIP `answer@1.1.0` / `answer-with-schema@1.1.0`** (pending human review sign-off on `hold-001`..`hold-010` at SHA-256 `35a29020307c427ba0b174d42c347e525018ee778e7ea18c5bc954e11460c97b`). Across both repeated trials (`n=2` per arm), `answer@1.1.0` produced zero regressions across all 22 turns per arm at effectively identical cost (mean `$0.039188` vs `$0.039163`, `+$0.000025`), while paired-answer inspection showed the apparent `+1` grader gain on `hold-006#0` was a grader phrasing quirk rather than a factual error in `1.0.0`. (Trial 2's extra `+1` on `hold-002#0` came from planner tool-limit stochasticity rather than the answer prompt.)
+**Decision:** **NOT PROMOTED — keep `answer@1.0.0` active and archive `answer@1.1.0`**. Without evidence of a genuine factual improvement over `1.0.0`, there is no reason to ship `1.1.0`. Human sign-off on `hold-001`..`hold-010` at SHA-256 `35a29020307c427ba0b174d42c347e525018ee778e7ea18c5bc954e11460c97b` remains pending before closing #179.
 
 ## Known limitations
 

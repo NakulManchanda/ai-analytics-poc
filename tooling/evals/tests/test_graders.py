@@ -751,3 +751,40 @@ def test_args_match_omitted_dimension_pinned_by_equality_filter() -> None:
     assert not args_match(exp, {"dimensions": [], "measures": ["average_fare"]})
     # A filter on a different column does not pin it.
     assert not args_match(exp, {**pinned, "filters": {"payment_type": "credit_card"}})
+
+
+def test_single_entity_comma_phrase_accepts_both_factually_equivalent_answers():
+    """#179: both answer@1.0.0 prose and answer@1.1.0 prose+row must pass hold-006#0."""
+    from evals.graders import check_entity_value_association
+
+    facts = [
+        Fact(
+            label="top_rate_code_avg_fare",
+            kind="number",
+            row=0,
+            col="avg_fare",
+            rel_tol=0.01,
+            value=108.95,
+        ),
+        Fact(
+            label="top_rate_code_trips",
+            kind="number",
+            row=0,
+            col="trips",
+            rel_tol=0.001,
+            value=6145.0,
+        ),
+    ]
+    ans_v100 = (
+        "Based on the provided query result, the rate code with the highest average "
+        "fare is **4**, with an average fare of **$108.95**. This rate code also has "
+        "**6,145 trips**."
+    )
+    ans_v110 = (
+        "Based on the provided query result, the rate code with the highest average "
+        "fare is **rate code 4**, with an **average fare of $108.95** and **6,145 trips**.\n\n"
+        "Here is the exact row from the query result:\n```\n[[4, 108.95, 6145]]\n```"
+    )
+    for ans in (ans_v100, ans_v110):
+        bad, unsure = check_entity_value_association(facts, ans)
+        assert not bad and not unsure, (ans, bad, unsure)
