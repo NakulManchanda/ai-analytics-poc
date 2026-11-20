@@ -42,7 +42,7 @@ Complete Issue #179 (Epic #167) by:
 - **Motivating failure cluster (from Experiment 1 baseline):** `det-009#0`, `react-008#0`, `det-010#0`, and `det-014#0` all had `tool=correct` but `answer=incorrect` due to comparative superlative inversion, row/metric label-pairing mismatches, or ungrounded derived figures on the Nova Micro answer call (`answer@1.0.0`).
 - **Single variable changed (`answer` & `answer-with-schema` `1.0.0 → 1.1.0`, `planner-single-turn@1.2.0` unchanged):** appended `_ANSWER_GROUNDING_RULE` to the global instruction region:
   > `When comparing groups, verify which row has the highest or lowest value directly from the query result before naming it, pair every number with its exact row and metric label, and cite only numbers present in the query result.`
-- **Dataset:** Fresh, unseen 10-case / 11-turn `holdout` split (`tooling/evals/datasets/holdout/v1/cases.jsonl`, `hold-001`..`hold-010`, `pending_human_review`), executed via `make eval-start EVAL_SPLIT=holdout` + `make eval-run EVAL_CONFIRM=1` (no `EVAL_SPLIT` repeated) on isolated `eval_179_ho` / `eval_179_ho2` stacks (`AGENT_STRATEGY=manual`, Nova Pro planner + Nova Micro answer).
+- **Dataset:** Fresh, unseen 10-case / 11-turn `holdout` split (`tooling/evals/datasets/holdout/v1/cases.jsonl`, SHA-256 `35a29020307c427ba0b174d42c347e525018ee778e7ea18c5bc954e11460c97b`, `hold-001`..`hold-010`, `pending_human_review`), executed via `make eval-start EVAL_SPLIT=holdout` + `make eval-run EVAL_CONFIRM=1` (no `EVAL_SPLIT` repeated) on isolated `eval_179_ho` / `eval_179_ho2` stacks (`AGENT_STRATEGY=manual`, Nova Pro planner + Nova Micro answer).
 
 | Metric (10 fresh holdout cases / 11 turns) | T1 Base `1.0.0` | T1 Cand `1.1.0` | T2 Base `1.0.0` | T2 Cand `1.1.0` |
 |---|---|---|---|---|
@@ -56,7 +56,9 @@ Complete Issue #179 (Epic #167) by:
 | Reconciled LiteLLM spend (`0` orphans, `ok=True`) | `$0.039245` | `$0.039232` | `$0.039081` | `$0.039144` |
 | Phoenix trace continuity (`0` problems) | `11/11` | `11/11` | `11/11` | `11/11` |
 
-**Decision:** **PROVISIONAL SHIP `answer@1.1.0` / `answer-with-schema@1.1.0`** (pending human review sign-off on `hold-001`..`hold-010`). Across both repeated trials (`n=2` per arm), `hold-006#0` improved `0/2 → 2/2` with identical planner tool calls and zero regressions across all 22 turns per arm, at effectively identical cost (mean `$0.039188` vs `$0.039163`, `+$0.000025`). (Trial 2's extra `+1` on `hold-002#0` came from planner tool-limit stochasticity rather than the answer prompt.)
+**Paired-answer audit (`hold-006#0`):** Inspecting the actual captured answers across both trials revealed that **both `1.0.0` and `1.1.0` were factually correct** (`rate code 4`, `$108.95`, `6,145 trips`). `1.0.0` tripped a deterministic grader association false alarm (`code` sat closer to `4` than `108.95`), whereas `1.1.0` passed the grader by echoing the raw query row `[[4, 108.95, 6145]]`.
+
+**Decision:** **PROVISIONAL SHIP `answer@1.1.0` / `answer-with-schema@1.1.0`** (pending human review sign-off on `hold-001`..`hold-010` at SHA-256 `35a29020307c427ba0b174d42c347e525018ee778e7ea18c5bc954e11460c97b`). Across both repeated trials (`n=2` per arm), `answer@1.1.0` produced zero regressions across all 22 turns per arm at effectively identical cost (mean `$0.039188` vs `$0.039163`, `+$0.000025`), while paired-answer inspection showed the apparent `+1` grader gain on `hold-006#0` was a grader phrasing quirk rather than a factual error in `1.0.0`. (Trial 2's extra `+1` on `hold-002#0` came from planner tool-limit stochasticity rather than the answer prompt.)
 
 ## Known limitations
 
