@@ -170,11 +170,18 @@ def run_start(a) -> int:
             )
     if a.split and a.cases:
         raise RunError("pass either --split or --cases, not both")
-    selected_cases = list(a.cases)
-    if a.split:
-        from evals.dataset import load_cases
+    from evals.dataset import (
+        DEFAULT_DATASET,
+        DEFAULT_SPLITS,
+        load_splits,
+        splits_sha256,
+    )
 
-        selected_cases = [c.id for c in load_cases(DATASET) if c.split == a.split]
+    selected_cases = list(a.cases)
+    split_hash: str | None = None
+    if a.split:
+        selected_cases = load_splits(DEFAULT_SPLITS)[a.split]
+        split_hash = splits_sha256(DEFAULT_SPLITS)
     now = datetime.now(UTC)
     run_id = f"{a.label}-{now.strftime('%Y%m%dT%H%M%SZ')}"
     run_dir = a.root / run_id
@@ -185,10 +192,11 @@ def run_start(a) -> int:
         "started_at": now.isoformat(),
         "git_head": _git_head(),
         "dataset_sha256": (
-            hashlib.sha256(DATASET.read_bytes()).hexdigest()
-            if DATASET.is_file()
+            hashlib.sha256(DEFAULT_DATASET.read_bytes()).hexdigest()
+            if DEFAULT_DATASET.is_file()
             else None
         ),
+        "splits_sha256": split_hash,
         "web": a.web,
         "split": a.split,
         "cases": selected_cases,

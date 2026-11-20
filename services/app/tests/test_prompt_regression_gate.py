@@ -1,8 +1,9 @@
-"""#179: offline deterministic CI prompt-regression gate (zero paid model calls).
+"""#179: fast offline prompt-contract lint (zero paid model calls).
 
 Validates the actual repo prompt renderer (`taxi_proposal_prompt` / `PLANNER_SINGLE_TURN`)
-against behavioral and safety invariants, and proves that intentional prompt regressions
-fail the gate deterministically without calling Bedrock or LiteLLM.
+against required instruction clauses and proves mutations to those clauses fail fast.
+Behavioral tool/answer regression gating over recorded fixtures lives in
+`tooling/evals/tests/test_prompt_regression_gate.py`.
 """
 
 from __future__ import annotations

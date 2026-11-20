@@ -453,7 +453,7 @@ eval-smoke: ## One real golden case (det-001) into <run>/smoke; needs EVAL_CONFI
 	$(EVAL_GUARD)
 	@$(EVAL_LOG) eval-smoke -- $(EVAL) run-live $(EVAL_RUN_ARG) --smoke --web $(EVAL_WEB) det-001
 
-eval-run: ## Full golden run (37 cases / 43 turns, or EVAL_SPLIT=dev|holdout); needs EVAL_CONFIRM=1
+eval-run: ## Full golden run (37 cases / 43 turns; pass EVAL_SPLIT=dev|holdout matching eval-start to run that split); needs EVAL_CONFIRM=1
 	$(EVAL_GUARD)
 	@$(EVAL_LOG) eval-run -- $(EVAL) run-live $(EVAL_RUN_ARG) $(if $(EVAL_SPLIT),,--all) --web $(EVAL_WEB)
 

@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from pathlib import Path
 
 from evals.schema import GoldenCase
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_DATASET = PACKAGE_ROOT / "datasets/golden/v1/cases.jsonl"
+DEFAULT_SPLITS = PACKAGE_ROOT / "datasets/golden/v1/splits.json"
 REQUIRED_CATEGORIES = ("deterministic", "react", "multi_turn", "unsupported", "failure")
 REQUIRED_SPLITS = ("dev", "holdout")
 
@@ -19,6 +21,45 @@ class DatasetError(ValueError):
 
 def dataset_sha256(path: Path = DEFAULT_DATASET) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def splits_sha256(path: Path = DEFAULT_SPLITS) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def load_splits(
+    path: Path = DEFAULT_SPLITS, cases: list[GoldenCase] | None = None
+) -> dict[str, list[str]]:
+    """Load and validate the disjoint dev/holdout split sidecar for the golden dataset."""
+    raw = json.loads(path.read_text())
+    splits = {s: list(raw.get(s, [])) for s in REQUIRED_SPLITS}
+    validate_splits(splits, cases if cases is not None else load_cases())
+    return splits
+
+
+def validate_splits(splits: dict[str, list[str]], cases: list[GoldenCase]) -> None:
+    by_id = {c.id: c for c in cases}
+    seen: set[str] = set()
+    for split in REQUIRED_SPLITS:
+        ids = splits.get(split)
+        if not ids:
+            raise DatasetError(f"missing or empty split: {split!r}")
+        if len(ids) != len(set(ids)):
+            raise DatasetError(f"duplicate case ids in split {split!r}")
+        unknown = [cid for cid in ids if cid not in by_id]
+        if unknown:
+            raise DatasetError(f"unknown case ids in split {split!r}: {unknown}")
+        overlap = seen & set(ids)
+        if overlap:
+            raise DatasetError(f"splits overlap on cases: {sorted(overlap)}")
+        seen.update(ids)
+        present_cats = {by_id[cid].category for cid in ids}
+        missing_cats = [c for c in REQUIRED_CATEGORIES if c not in present_cats]
+        if missing_cats:
+            raise DatasetError(f"split {split!r} missing categories: {missing_cats}")
+    unassigned = sorted(set(by_id) - seen)
+    if unassigned:
+        raise DatasetError(f"cases missing from splits: {unassigned}")
 
 
 def load_cases(path: Path = DEFAULT_DATASET) -> list[GoldenCase]:
@@ -39,17 +80,6 @@ def validate_cases(cases: list[GoldenCase]) -> None:
     missing = [c for c in REQUIRED_CATEGORIES if c not in present]
     if missing:
         raise DatasetError(f"missing categories: {missing}")
-    present_splits = {c.split for c in cases}
-    missing_splits = [s for s in REQUIRED_SPLITS if s not in present_splits]
-    if missing_splits:
-        raise DatasetError(f"missing splits: {missing_splits}")
-    for split in REQUIRED_SPLITS:
-        split_cats = {c.category for c in cases if c.split == split}
-        missing_in_split = [c for c in REQUIRED_CATEGORIES if c not in split_cats]
-        if missing_in_split:
-            raise DatasetError(
-                f"split {split!r} missing categories: {missing_in_split}"
-            )
     for case in cases:
         if case.category == "multi_turn" and len(case.turns) < 2:
             raise DatasetError(f"{case.id}: multi_turn needs >= 2 turns")

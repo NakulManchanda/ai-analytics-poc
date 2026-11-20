@@ -141,29 +141,9 @@ def test_golden_values_unchanged_vs_main_only_tags_and_notes_differ():
                     ot[key], sort_keys=True
                 ), (cur["id"], key)
             assert ct == ot, cur["id"]
-        strip = lambda c: {
-            k: v for k, v in c.items() if k not in ("tags", "notes", "split")
-        }
+        strip = lambda c: {k: v for k, v in c.items() if k not in ("tags", "notes")}
         assert strip(cur) == strip(old), cur["id"]
         assert set(old["tags"]) <= set(cur["tags"]), cur["id"]
-
-
-def test_disjoint_dev_and_holdout_splits_cover_all_categories():
-    cases = load_cases()
-    dev = [c for c in cases if c.split == "dev"]
-    holdout = [c for c in cases if c.split == "holdout"]
-    assert dev and holdout
-    assert {c.id for c in dev}.isdisjoint({c.id for c in holdout})
-    assert len(dev) + len(holdout) == len(cases)
-    required = {"deterministic", "react", "multi_turn", "unsupported", "failure"}
-    assert {c.category for c in dev} == required
-    assert {c.category for c in holdout} == required
-
-
-def test_missing_split_rejected():
-    cases = [c for c in load_cases() if c.split == "dev"]
-    with pytest.raises(DatasetError, match="holdout"):
-        validate_cases(cases)
 
 
 def test_new_tag_vocabulary_and_one_basis_per_basis_dependent_case():
@@ -176,3 +156,27 @@ def test_new_tag_vocabulary_and_one_basis_per_basis_dependent_case():
             assert len(basis) == 1, case.id
         else:
             assert not basis, case.id
+
+
+def test_sidecar_splits_partition_cases_and_cover_all_categories():
+    from evals.dataset import load_splits, splits_sha256, validate_splits
+
+    cases = load_cases()
+    splits = load_splits(cases=cases)
+    assert len(splits_sha256()) == 64
+    dev, holdout = splits["dev"], splits["holdout"]
+    assert dev and holdout
+    assert set(dev).isdisjoint(set(holdout))
+    assert len(dev) + len(holdout) == len(cases)
+    by_id = {c.id: c for c in cases}
+    required = {"deterministic", "react", "multi_turn", "unsupported", "failure"}
+    assert {by_id[cid].category for cid in dev} == required
+    assert {by_id[cid].category for cid in holdout} == required
+
+    # Unassigned, overlapping, and unknown cases are rejected (no silent default).
+    with pytest.raises(DatasetError, match="missing from splits"):
+        validate_splits({"dev": dev[:-1], "holdout": holdout}, cases)
+    with pytest.raises(DatasetError, match="overlap"):
+        validate_splits({"dev": dev, "holdout": holdout + [dev[0]]}, cases)
+    with pytest.raises(DatasetError, match="unknown"):
+        validate_splits({"dev": dev + ["fake-999"], "holdout": holdout}, cases)
