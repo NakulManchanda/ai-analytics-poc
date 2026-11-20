@@ -2,6 +2,7 @@ import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { MapDemo } from "./map/MapDemo";
 import { MapPanel } from "./map/MapPanel";
 import { launchFromToolRequest, type MapLaunch } from "./map/fromTool";
+import { WorkbenchDemo } from "./workbench/WorkbenchDemo";
 import { ContextInspector } from "./ContextInspector";
 import { TimelineInspector } from "./TimelineInspector";
 import { useVoiceInput } from "./useVoiceInput";
@@ -46,7 +47,9 @@ function mcpLabel(status: Status): string {
 }
 
 export default function App() {
-  if (new URLSearchParams(window.location.search).get("demo") === "map") return <MapDemo />;
+  const demo = new URLSearchParams(window.location.search).get("demo");
+  if (demo === "map") return <MapDemo />;
+  if (demo === "workbench") return <WorkbenchDemo />;
   return <LiveApp />;
 }
 
