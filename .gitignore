@@ -54,6 +54,7 @@ work/
 data/
 artifacts/
 !services/app/app/artifacts/
+!web/src/artifacts/
 metrics/*.jsonl
 metrics/inference/
 metrics/evidence/
