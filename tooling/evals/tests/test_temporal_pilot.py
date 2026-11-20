@@ -1095,3 +1095,96 @@ def test_finalize_recovers_missing_or_truncated_snapshot_sha256(
     graded_turns, _ = load_run_reports(run_dir)
     assert set(graded_turns) == {("det-001", 0)}
     assert (run_dir / "review.html").is_file()
+
+
+def test_starter_rerun_after_completion_attaches_without_reexecuting(
+    tmp_path: Path, temporal_target: str, capsys: pytest.CaptureFixture[str]
+):
+    """P2: Re-running the starter after workflow completion attaches via REJECT_DUPLICATE without starting a second execution."""
+    from temporalio.client import Client
+
+    from evals.temporal_pilot import workflow_id_for_run
+
+    root = tmp_path / "evals"
+    capture_dir = tmp_path / "_capture"
+    server = _FixtureEvalServer(capture_dir, lookup_enabled=False)
+    run_id, run_dir = _init_run(root, "attach-closed", server.url, ["det-001"])
+    _, wanted, expected, cases_path = resolve_batch_plan(run_dir, server.url, [], False)
+
+    tq = f"pilot-attach-closed-{int(time.time() * 1000)}"
+    w1 = _spawn_worker(temporal_target, tq)
+    try:
+        first = asyncio.run(
+            asyncio.wait_for(
+                run_temporal_eval(
+                    str(run_dir),
+                    run_id,
+                    server.url,
+                    wanted,
+                    expected,
+                    cases_path=str(cases_path),
+                    timeout_s=15,
+                    heartbeat_timeout_s=2.0,
+                    finalize=True,
+                    capture_dir=str(capture_dir),
+                    address=temporal_target,
+                    task_queue=tq,
+                ),
+                timeout=25,
+            )
+        )
+        assert first.status == "complete"
+        assert first.finalization.finalized is True
+
+        state_after_first = json.loads((run_dir / "state.json").read_text())
+        review_mtime_after_first = (run_dir / "review.html").stat().st_mtime_ns
+
+        async def _list_exec_ids() -> list[str]:
+            client = await Client.connect(temporal_target)
+            wf_id = workflow_id_for_run(run_id)
+            return [
+                wf.run_id
+                async for wf in client.list_workflows(f'WorkflowId = "{wf_id}"')
+            ]
+
+        exec_ids_after_first = asyncio.run(_list_exec_ids())
+        assert len(exec_ids_after_first) == 1
+
+        # Re-run the starter AFTER the workflow has already completed.
+        # Even without any worker running, attaching to the closed workflow must return the original result.
+        _stop_worker(w1)
+        w1 = None
+        second = asyncio.run(
+            asyncio.wait_for(
+                run_temporal_eval(
+                    str(run_dir),
+                    run_id,
+                    server.url,
+                    wanted,
+                    expected,
+                    cases_path=str(cases_path),
+                    timeout_s=15,
+                    heartbeat_timeout_s=2.0,
+                    finalize=True,
+                    capture_dir=str(capture_dir),
+                    address=temporal_target,
+                    task_queue=tq,
+                ),
+                timeout=15,
+            )
+        )
+        exec_ids_after_second = asyncio.run(_list_exec_ids())
+    finally:
+        if w1 is not None:
+            _stop_worker(w1)
+        server.close()
+
+    assert second == first
+    assert exec_ids_after_second == exec_ids_after_first
+    assert (
+        f"attached to existing Temporal workflow {workflow_id_for_run(run_id)}"
+        in capsys.readouterr().out
+    )
+    assert json.loads((run_dir / "state.json").read_text()) == state_after_first
+    assert (run_dir / "review.html").stat().st_mtime_ns == review_mtime_after_first
+    assert server.total_posts == 1

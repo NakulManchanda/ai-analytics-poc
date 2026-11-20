@@ -379,6 +379,7 @@ async def run_temporal_eval(
     from pathlib import Path
 
     from temporalio.client import Client
+    from temporalio.common import WorkflowIDReusePolicy
     from temporalio.exceptions import WorkflowAlreadyStartedError
 
     turn_counts: dict[str, int] = {}
@@ -406,8 +407,9 @@ async def run_temporal_eval(
             batch_input,
             id=wf_id,
             task_queue=task_queue,
+            id_reuse_policy=WorkflowIDReusePolicy.REJECT_DUPLICATE,
         )
     except WorkflowAlreadyStartedError:
         print(f"attached to existing Temporal workflow {wf_id}", flush=True)
-        handle = client.get_workflow_handle(wf_id)
+        handle = client.get_workflow_handle(wf_id, result_type=EvalBatchResult)
     return await handle.result()
