@@ -1,0 +1,55 @@
+{
+  "name": "evals",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "projectType": "library",
+  "sourceRoot": "tooling/evals/src/evals",
+  "tags": ["scope:evals", "type:tooling"],
+  "targets": {
+    "test": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "inputs": ["default", "pythonTooling", "captureContract", "mcpToolSchemas"],
+      "options": {
+        "command": "uv run --project tooling/evals pytest tooling/evals/tests"
+      }
+    },
+    "lint": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "inputs": ["default", "pythonTooling"],
+      "options": {
+        "command": "uv run --project tooling/evals ruff check tooling/evals"
+      }
+    },
+    "format-check": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "inputs": ["default", "pythonTooling"],
+      "options": {
+        "command": "uv run --project tooling/evals black --check tooling/evals"
+      }
+    },
+    "fixture-report": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "inputs": ["default", "pythonTooling", "captureContract"],
+      "options": {
+        "command": "uv run --project tooling/evals evals report --baseline tooling/evals/fixtures/baseline --candidate tooling/evals/fixtures/candidate"
+      }
+    },
+    "run-live": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "uv run --project tooling/evals evals run-live"
+      }
+    },
+    "review-serve": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "uv run --project tooling/evals evals run-review-serve"
+      }
+    }
+  }
+}

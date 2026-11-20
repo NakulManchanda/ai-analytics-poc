@@ -1,0 +1,62 @@
+{
+  "$schema": "./node_modules/nx/schemas/nx-schema.json",
+  "defaultBase": "main",
+  "analytics": false,
+  "useInferencePlugins": false,
+  "namedInputs": {
+    "default": ["{projectRoot}/**/*", "sharedGlobals"],
+    "production": [
+      "default",
+      "!{projectRoot}/tests/**/*",
+      "!{projectRoot}/**/*.test.*",
+      "!{projectRoot}/**/*.spec.*",
+      "!{projectRoot}/**/*.md"
+    ],
+    "sharedGlobals": ["{workspaceRoot}/nx.json"],
+    "pythonTooling": ["{workspaceRoot}/pyproject.toml"],
+    "datasetConfig": ["{workspaceRoot}/config/datasets/**/*"],
+    "captureContract": ["{workspaceRoot}/services/app/app/capture/**/*"],
+    "mapContract": [
+      "{workspaceRoot}/config/datasets/nyc_yellow_taxi_2024_01.toml",
+      "{workspaceRoot}/web/src/map/taxi-zones.v1.json",
+      "{workspaceRoot}/services/app/app/artifacts/taxi_zones_v1.json"
+    ],
+    "datasetSpike": ["{workspaceRoot}/services/dataset_spike/**/*"],
+    "mcpToolSchemas": ["{workspaceRoot}/services/mcp/mcp_server/**/*"]
+  },
+  "targetDefaults": {
+    "test": {
+      "cache": true
+    },
+    "lint": {
+      "cache": true
+    },
+    "format-check": {
+      "cache": true
+    },
+    "compile": {
+      "cache": true
+    },
+    "build": {
+      "cache": true
+    },
+    "fixture-report": {
+      "cache": true
+    },
+    "dev": {
+      "cache": false
+    },
+    "worker": {
+      "cache": false
+    },
+    "deploy": {
+      "cache": false
+    },
+    "run-live": {
+      "cache": false
+    },
+    "review-serve": {
+      "cache": false
+    }
+  }
+}

@@ -89,3 +89,80 @@ jobs:
           uv run --project services/mcp python -m compileall -q services/mcp/mcp_server
           uv run --project services/dataset_spike python -m compileall -q services/dataset_spike/dataset_spike
           uv run --project services/app python -m compileall -q services/gateway
+
+  nx-affected:
+    name: Nx affected checks
+    runs-on: ubuntu-latest
+    env:
+      NX_DAEMON: "false"
+      NX_TUI: "false"
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            web/package-lock.json
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.9.26"
+          enable-cache: true
+          cache-dependency-glob: |
+            services/*/uv.lock
+            tooling/*/uv.lock
+
+      - name: Install root Nx runner
+        run: npm ci
+
+      - name: Install frontend dependencies
+        run: npm ci --prefix web
+
+      - name: Install Python project dependencies
+        run: |
+          uv sync --frozen --project services/app --dev
+          uv sync --frozen --project services/mcp --dev
+          uv sync --frozen --project tooling/evals --dev
+
+      - name: Run Nx affected targets
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          TARGETS="test,lint,format-check,compile,build,fixture-report"
+          BASE_SHA=""
+          if [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
+            BASE_SHA="${PR_BASE_SHA}"
+          else
+            BASE_SHA="${PUSH_BEFORE_SHA}"
+          fi
+
+          if [ -z "${BASE_SHA}" ] || [ "${BASE_SHA}" = "0000000000000000000000000000000000000000" ] || ! git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
+            if git rev-parse --verify HEAD~1 >/dev/null 2>&1; then
+              BASE_SHA="$(git rev-parse HEAD~1)"
+              echo "Falling back to HEAD~1 (${BASE_SHA}) as Nx affected base"
+            else
+              echo "No valid base SHA available; running all Nx project targets"
+              npx nx run-many -t "${TARGETS}"
+              exit 0
+            fi
+          fi
+
+          echo "Nx affected base: ${BASE_SHA}..HEAD"
+          echo "Affected projects:"
+          npx nx show projects --affected --base="${BASE_SHA}" --head=HEAD || true
+          npx nx affected -t "${TARGETS}" --base="${BASE_SHA}" --head=HEAD

@@ -150,3 +150,7 @@ export.
 ## Spatial map artifact and zone renderer (#234)
 
 Issue #234 (draft PR #250) adds the validated `map_artifact` v1 contract (`services/app/app/artifacts/map_artifact.py` and `web/src/map/artifact.ts`), deterministic TLC taxi-zone geometry (`web/src/map/taxi-zones.v1.json`, 263 features), an app-only MCP tool `map_taxi_zones`, `POST /api/map/zones` with a 64-entry LRU cache, and the interactive `MapPanel` + `ZoneMap` SVG renderer with table fallback and chat integration (`/?demo=map` for the fixture demo). Details are in [the map artifact documentation](map-artifact.md) and work history 0136.
+
+## Deployable-unit inventory, minimal Nx adoption, and affected CI (#252, parent #251)
+
+Issue #252 inventories package, executable, container image, and environment deployment boundaries (including an `app.worker` Compose-vs-ECS audit and separate inventory for deferred packages and supporting runtimes) in [deployment-and-nx-boundaries.md](architecture/deployment-and-nx-boundaries.md), pins `nx@24.0.6` at repo root without npm workspaces (`web/package.json`, `web/package-lock.json`, and `web/Dockerfile` untouched), defines the initial 5 Nx projects (`web`, `app`, `mcp`, `evals`, `gateway`) with explicit cross-project inputs and `cache: false` on live/stateful targets, and adds an additive `nx-affected` CI job alongside `python-services`. Verified 18/18 local cache hits (`73.64s` cold -> `0.99s` warm), `5.94s` cold `web`-only affected run, and exact affected fan-out across 7 contract/lockfile probes. Details are in work history 0137.

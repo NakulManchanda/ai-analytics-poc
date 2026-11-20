@@ -1,0 +1,48 @@
+{
+  "name": "mcp",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "projectType": "application",
+  "sourceRoot": "services/mcp/mcp_server",
+  "tags": ["scope:mcp", "type:service"],
+  "targets": {
+    "test": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "inputs": ["default", "pythonTooling", "datasetConfig", "datasetSpike"],
+      "options": {
+        "command": "uv run --project services/mcp pytest services/mcp/tests"
+      }
+    },
+    "lint": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "inputs": ["default", "pythonTooling"],
+      "options": {
+        "command": "uv run --project services/mcp ruff check services/mcp/mcp_server services/mcp/tests"
+      }
+    },
+    "format-check": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "inputs": ["default", "pythonTooling"],
+      "options": {
+        "command": "uv run --project services/mcp black --check services/mcp/mcp_server services/mcp/tests"
+      }
+    },
+    "compile": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "inputs": ["default", "pythonTooling"],
+      "options": {
+        "command": "uv run --project services/mcp python -m compileall -q services/mcp/mcp_server"
+      }
+    },
+    "dev": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "uv run --project services/mcp fastmcp run services/mcp/mcp_server/server.py --transport http --host 0.0.0.0 --port 8001"
+      }
+    }
+  }
+}

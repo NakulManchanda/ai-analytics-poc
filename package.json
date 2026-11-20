@@ -1,0 +1,12 @@
+{
+  "name": "ai-analytics-poc-workspace",
+  "private": true,
+  "scripts": {
+    "nx:graph": "nx graph",
+    "nx:test": "nx run-many -t test,lint,format-check,compile,build,fixture-report",
+    "nx:affected": "nx affected -t test,lint,format-check,compile,build,fixture-report"
+  },
+  "devDependencies": {
+    "nx": "24.0.6"
+  }
+}

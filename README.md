@@ -52,6 +52,7 @@ Each document describes **current behavior, code ownership, limitations, and evi
 | **Inference gateway & GPU serving** | [Inference architecture](docs/inference.md) · [Gateway implementation](services/gateway/README.md) · [Inference experiments and measured evidence](docs/inference-experiments/inference-evidence-index.md) |
 | **Telemetry and operations** | [Observability setup](docs/observability-stack.md) · [Local operation](docs/local-uat-guide.md) |
 | **Visualizations & artifacts** | [Map artifact v1 and zone map renderer](docs/map-artifact.md) |
+| **Monorepo & deployment boundaries** | [Deployable units, Nx task graph, and affected CI](docs/architecture/deployment-and-nx-boundaries.md) |
 
 
 

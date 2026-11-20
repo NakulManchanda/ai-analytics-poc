@@ -21,10 +21,12 @@ dist/
 build/
 *.egg-info/
 
-# JavaScript
+# JavaScript & Nx
+/node_modules/
 node_modules
 node_modules/
 **/node_modules
+.nx/
 frontend/dist/
 web/dist/
 *.tsbuildinfo
