@@ -48,4 +48,4 @@ The [review tool](../tooling/evals/src/evals/review_server.py) opens frozen runs
 
 All **37 golden cases await human approval**. Committed benchmark fixtures are **synthetic or scripted**, so their scores must not be presented as verified live model performance. Some cases use different SQL filtering bases and remain diagnostic until reconciled.
 
-**Details:** [Experiment procedures and model comparisons](evaluation/running-evaluations.md) · [Capture format](capture.md) · [Golden dataset](../tooling/evals/datasets/golden/v1/cases.jsonl).
+**Details:** [Experiment procedures and model comparisons](evaluation/running-evaluations.md) · [Opt-in Temporal eval workflow pilot](evaluation/temporal-eval-pilot.md) · [Capture format](capture.md) · [Golden dataset](../tooling/evals/datasets/golden/v1/cases.jsonl).
