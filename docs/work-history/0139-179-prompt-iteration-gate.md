@@ -42,7 +42,7 @@ Complete Issue #179 (Epic #167) by:
 - **Motivating failure cluster (from Experiment 1 baseline):** `det-009#0`, `react-008#0`, `det-010#0`, and `det-014#0` all had `tool=correct` but `answer=incorrect` due to comparative superlative inversion, row/metric label-pairing mismatches, or ungrounded derived figures on the Nova Micro answer call (`answer@1.0.0`).
 - **Single variable changed (`answer` & `answer-with-schema` `1.0.0 → 1.1.0`, `planner-single-turn@1.2.0` unchanged):** appended `_ANSWER_GROUNDING_RULE` to the global instruction region:
   > `When comparing groups, verify which row has the highest or lowest value directly from the query result before naming it, pair every number with its exact row and metric label, and cite only numbers present in the query result.`
-- **Dataset:** Fresh, unseen 10-case / 11-turn `holdout` split (`tooling/evals/datasets/holdout/v1/cases.jsonl`, SHA-256 `35a29020307c427ba0b174d42c347e525018ee778e7ea18c5bc954e11460c97b`, `hold-001`..`hold-010`, `pending_human_review`), executed via `make eval-start EVAL_SPLIT=holdout` + `make eval-run EVAL_CONFIRM=1` (no `EVAL_SPLIT` repeated) on isolated `eval_179_ho` / `eval_179_ho2` stacks (`AGENT_STRATEGY=manual`, Nova Pro planner + Nova Micro answer).
+- **Dataset:** Fresh, unseen 10-case / 11-turn `holdout` split (`tooling/evals/datasets/holdout/v1/cases.jsonl`, pre-signoff run SHA-256 `35a29020307c427ba0b174d42c347e525018ee778e7ea18c5bc954e11460c97b`; post-signoff SHA-256 `23b7eac35064922e691171d73547c064cf32db0f48b58bd9e1d0fa8800b54bb2` with identical questions/SQL/facts and `review.status=reviewed`, `reviewer=NakulManchanda`), executed via `make eval-start EVAL_SPLIT=holdout` + `make eval-run EVAL_CONFIRM=1` (no `EVAL_SPLIT` repeated) on isolated `eval_179_ho` / `eval_179_ho2` stacks (`AGENT_STRATEGY=manual`, Nova Pro planner + Nova Micro answer).
 
 | Metric (10 fresh holdout cases / 11 turns) | T1 Base `1.0.0` | T1 Cand `1.1.0` | T2 Base `1.0.0` | T2 Cand `1.1.0` |
 |---|---|---|---|---|
@@ -58,12 +58,11 @@ Complete Issue #179 (Epic #167) by:
 
 **Paired-answer audit (`hold-006#0`):** Inspecting the actual captured answers across both trials revealed that **both `1.0.0` and `1.1.0` were factually correct** (`rate code 4`, `$108.95`, `6,145 trips`). `1.0.0` tripped a deterministic grader comma-clause false alarm (`code` sat in `"is **4**"` while `$108.95` sat in `", with an average fare of **$108.95**"`), whereas `1.1.0` satisfied the grader only by echoing the raw query row `[[4, 108.95, 6145]]`. Rather than broadening the shared clause splitter in `graders.py`, `hold-006#0` is resolved via human adjudication (both arms factually equivalent across both trials; Trial 2's remaining `+1` on `hold-002#0` was planner tool-limit variance rather than the answer prompt).
 
-**Decision:** **NOT PROMOTED — keep `answer@1.0.0` active and archive `answer@1.1.0`**. Without evidence of a genuine factual improvement over `1.0.0`, there is no reason to ship `1.1.0`. Human sign-off on `hold-001`..`hold-010` at SHA-256 `35a29020307c427ba0b174d42c347e525018ee778e7ea18c5bc954e11460c97b` remains pending before closing #179.
+**Decision:** **NOT PROMOTED — keep `answer@1.0.0` active and archive `answer@1.1.0`**. Without evidence of a genuine factual improvement over `1.0.0`, there is no reason to ship `1.1.0`. Human sign-off by `NakulManchanda` recorded on 2026-11-20 against `holdout/v1/cases.jsonl` (run SHA-256 `35a29020307c427ba0b174d42c347e525018ee778e7ea18c5bc954e11460c97b`, committed reviewed SHA-256 `23b7eac35064922e691171d73547c064cf32db0f48b58bd9e1d0fa8800b54bb2`, zero question or reference-fact changes).
 
 ## Known limitations
 
-- All 10 fresh holdout cases (`hold-001`..`hold-010`) have DuckDB-verified reference SQL and are `pending_human_review` until human sign-off; the ship decision remains provisional until then.
-- Two trials per arm (`n=2`) on 10 cases confirm repeatability of `hold-006#0` (`2/2`) but are not a statistically powered sample.
+- Two trials per arm (`n=2`) on 10 reviewed holdout cases confirm repeatability (`hold-006#0` factually correct `2/2` in both arms) but are not a statistically powered sample.
 
 ## Verification
 
