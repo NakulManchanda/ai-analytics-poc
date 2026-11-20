@@ -240,6 +240,8 @@ def test_cache_kept_after_generic_not_found_error() -> None:
 
 
 _LEGACY_MCP_TOOLS = {"get_dataset_profile", "query_taxi_data", "average_trip_metrics"}
+# App-only tool served through POST /api/map/zones, never offered to the model.
+_NON_PLANNER_MCP_TOOLS = {"map_taxi_zones"}
 
 
 def test_allowlist_matches_mcp_published_tools() -> None:
@@ -260,7 +262,7 @@ def test_allowlist_matches_mcp_published_tools() -> None:
         )
     }
     assert set(MCP_TOOL_NAMES) <= published
-    assert published - _LEGACY_MCP_TOOLS == set(MCP_TOOL_NAMES)
+    assert published - _LEGACY_MCP_TOOLS - _NON_PLANNER_MCP_TOOLS == set(MCP_TOOL_NAMES)
 
 
 def test_invalid_args_return_tool_error_not_exception() -> None:

@@ -254,6 +254,16 @@ def validate_measure(value: object) -> MeasureName:
     raise AssertionError("unreachable")
 
 
+ZONE_ROLES = ("pickup", "dropoff")
+MAX_ZONE_ROWS = 265
+
+
+def validate_zone_role(value: object) -> str:
+    if not isinstance(value, str) or value not in ZONE_ROLES:
+        _fail("invalid_zone_role", "zone_role must be 'pickup' or 'dropoff'")
+    return value  # type: ignore[return-value]
+
+
 def validate_dimensions(values: object) -> list[DimensionName]:
     # An empty list is valid: no grouping, one overall total row.
     if not isinstance(values, list):

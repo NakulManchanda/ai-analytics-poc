@@ -14,6 +14,7 @@ from dataset_spike.analytics import (
     compare_taxi_segments,
     describe_taxi_dataset,
     list_taxi_dimension_values,
+    map_taxi_zones,
     query_average_trip_metrics,
     query_dataset,
 )
@@ -27,11 +28,13 @@ from mcp_server.schemas import (
     DimensionSchema,
     DimensionsSchema,
     FiltersSchema,
+    MeasureSchema,
     MeasuresSchema,
     OptionalComparisonModeSchema,
     OptionalDimensionSchema,
     OptionalFiltersSchema,
     OptionalOrderBySchema,
+    ZoneRoleSchema,
 )
 from mcp_server.telemetry import (
     SCHEMA_RESOURCE_URI,
@@ -245,6 +248,30 @@ def run_pinned_aggregate_taxi_data(
     )
 
 
+def run_pinned_map_taxi_zones(
+    *,
+    zone_role: object,
+    measure: object,
+    filters: object = None,
+    tracer: trace.Tracer | None = None,
+) -> dict[str, object]:
+    """Run the one-measure-per-zone query through the killable runner."""
+    project_root = Path(__file__).resolve().parents[3]
+    cache_dir = project_root / DATASET_CACHE_DIR
+    return _run_governed_analytics_tool(
+        tracer=tracer,
+        tool_name="map_taxi_zones",
+        runner=lambda: map_taxi_zones(
+            cache_dir / PARQUET_FILENAME,
+            cache_dir / ZONE_FILENAME,
+            zone_role=zone_role,
+            measure=measure,
+            filters=filters,
+            timeout_seconds=30.0,
+        ),
+    )
+
+
 def run_pinned_compare_taxi_segments(
     *,
     segment_dimension: object = None,
@@ -311,6 +338,7 @@ def build_mcp(
     compare_segments_runner: Callable[..., dict[str, object]] = (
         run_pinned_compare_taxi_segments
     ),
+    map_zones_runner: Callable[..., dict[str, object]] = run_pinned_map_taxi_zones,
     tracer: trace.Tracer | None = None,
 ) -> FastMCP:
     """Build the bounded MCP surface without accepting SQL or dataset paths."""
@@ -491,6 +519,28 @@ def build_mcp(
                 comparison_filters=comparison_filters,
                 limit=limit,
                 **mode_kwargs,
+            ),
+        )
+
+    @server.tool()
+    def map_taxi_zones(
+        zone_role: ZoneRoleSchema,
+        measure: MeasureSchema,
+        filters: OptionalFiltersSchema = None,
+    ) -> dict[str, object]:
+        """One governed measure per taxi zone id (pickup or dropoff), for map rendering."""
+        if map_zones_runner is run_pinned_map_taxi_zones:
+            return run_pinned_map_taxi_zones(
+                zone_role=zone_role,
+                measure=measure,
+                filters=filters,
+                tracer=active_tracer,
+            )
+        return _run_governed_analytics_tool(
+            tracer=active_tracer,
+            tool_name="map_taxi_zones",
+            runner=lambda: map_zones_runner(
+                zone_role=zone_role, measure=measure, filters=filters
             ),
         )
 

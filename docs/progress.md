@@ -146,3 +146,7 @@ export.
   HAMi workers, bounded hop metrics, and a retained four-case proof runner that can sweep the E5
   prefix sizes and writes `crossover.json`. Static verification passes. No current Lambda GPU instance is available, so the issue remains open until the runner
   captures positive Mooncake bytes/tokens and post-forward destination consumption on Worker B.
+
+## Spatial map artifact and zone renderer (#234)
+
+Issue #234 (draft PR #250) adds the validated `map_artifact` v1 contract (`services/app/app/artifacts/map_artifact.py` and `web/src/map/artifact.ts`), deterministic TLC taxi-zone geometry (`web/src/map/taxi-zones.v1.json`, 263 features), an app-only MCP tool `map_taxi_zones`, `POST /api/map/zones` with a 64-entry LRU cache, and the interactive `MapPanel` + `ZoneMap` SVG renderer with table fallback and chat integration (`/?demo=map` for the fixture demo). Details are in [the map artifact documentation](map-artifact.md) and work history 0136.

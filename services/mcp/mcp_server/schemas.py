@@ -14,6 +14,7 @@ from dataset_spike.query_spec import (
     PAYMENT_TYPE_CODES,
     RATE_CODE_CODES,
     VENDOR_CODES,
+    ZONE_ROLES,
     DimensionName,
     MeasureName,
 )
@@ -112,6 +113,10 @@ OptionalFiltersSchema = Annotated[
 OptionalOrderBySchema = Annotated[
     dict[str, object] | None, WithJsonSchema(_nullable(_inline(OrderBy)))
 ]
+ZoneRoleSchema = Annotated[
+    str, WithJsonSchema({"type": "string", "enum": list(ZONE_ROLES)})
+]
+MeasureSchema = Annotated[str, WithJsonSchema(_MEASURE)]
 DimensionsSchema = Annotated[
     list[str], WithJsonSchema({"type": "array", "items": _DIMENSION})
 ]

@@ -20,6 +20,9 @@ MAX_QUERY_RESULT_BYTES = 8_192
 # Same ceiling the planner schema and validator advertise, so a result the app
 # asked for is never rejected after the tool already succeeded.
 MAX_QUERY_RESULT_ROWS = MAX_ROWS
+# The map endpoint (not the planner) needs one row per taxi zone id.
+MAX_MAP_RESULT_ROWS = 265
+MAX_MAP_RESULT_BYTES = 65_536
 ALLOWED_ANALYSES = {
     "top_pickup_zones",
     "trip_volume_by_hour",
@@ -99,6 +102,14 @@ class DatasetProfileMCPClient(Protocol):
         comparison_filters: dict[str, object],
         comparison_mode: str | None = None,
         limit: int = 20,
+    ) -> dict[str, object]: ...
+
+    def map_taxi_zones(
+        self,
+        *,
+        zone_role: str,
+        measure: str,
+        filters: dict[str, object] | None = None,
     ) -> dict[str, object]: ...
 
 
@@ -257,6 +268,41 @@ class FastMCPDatasetProfileClient:
             raise MCPToolError(
                 retryable=True, message=str(error), reason="transport_error"
             ) from error
+
+    def map_taxi_zones(
+        self,
+        *,
+        zone_role: str,
+        measure: str,
+        filters: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        try:
+            return asyncio.run(
+                self._map_taxi_zones(
+                    zone_role=zone_role, measure=measure, filters=filters
+                )
+            )
+        except (ClientError, HTTPError, McpError, OSError, RuntimeError) as error:
+            raise MCPToolError(
+                retryable=True, message=str(error), reason="transport_error"
+            ) from error
+
+    async def _map_taxi_zones(
+        self, *, zone_role: str, measure: str, filters: dict[str, object] | None
+    ) -> dict[str, object]:
+        arguments: dict[str, object] = {"zone_role": zone_role, "measure": measure}
+        if filters is not None:
+            arguments["filters"] = filters
+        async with self._client() as client:
+            result = await client.call_tool("map_taxi_zones", arguments)
+        if not isinstance(result.data, dict):
+            raise MCPToolError(retryable=False, reason="invalid_result_shape")
+        _raise_for_error_envelope(result.data)
+        return sanitize_governed_query_result(
+            result.data,
+            max_rows=MAX_MAP_RESULT_ROWS,
+            max_bytes=MAX_MAP_RESULT_BYTES,
+        )
 
     async def _describe_taxi_dataset(
         self, *, include_column_stats: bool
@@ -441,7 +487,12 @@ _GOVERNED_RESULT_STRING_EXTRAS = frozenset(
 _GOVERNED_RESULT_LIST_EXTRAS = frozenset({"dimensions", "measures", "no_data_sides"})
 
 
-def sanitize_governed_query_result(payload: Mapping[str, Any]) -> dict[str, object]:
+def sanitize_governed_query_result(
+    payload: Mapping[str, Any],
+    *,
+    max_rows: int = MAX_QUERY_RESULT_ROWS,
+    max_bytes: int = MAX_QUERY_RESULT_BYTES,
+) -> dict[str, object]:
     """Sanitize list_taxi_dimension_values / aggregate_taxi_data / compare_taxi_segments."""
     allowed_keys = (
         _GOVERNED_RESULT_BASE_FIELDS
@@ -451,7 +502,9 @@ def sanitize_governed_query_result(payload: Mapping[str, Any]) -> dict[str, obje
     if not _GOVERNED_RESULT_BASE_FIELDS <= set(payload) or set(payload) - allowed_keys:
         raise MCPToolError(retryable=False, reason="invalid_result_shape")
     base_payload = {key: payload[key] for key in _GOVERNED_RESULT_BASE_FIELDS}
-    sanitized = sanitize_query_result(base_payload)
+    sanitized = sanitize_query_result(
+        base_payload, max_rows=max_rows, max_bytes=max_bytes
+    )
     for key in _GOVERNED_RESULT_STRING_EXTRAS:
         if key not in payload:
             continue
@@ -477,7 +530,7 @@ def sanitize_governed_query_result(payload: Mapping[str, Any]) -> dict[str, obje
         encoded = json.dumps(sanitized, separators=(",", ":"), allow_nan=False).encode()
     except (TypeError, ValueError) as error:
         raise MCPToolError(retryable=False, reason="invalid_result_shape") from error
-    if len(encoded) > MAX_QUERY_RESULT_BYTES:
+    if len(encoded) > max_bytes:
         raise MCPToolError(retryable=False, reason="byte_limit_exceeded")
     return sanitized
 
@@ -624,7 +677,12 @@ def sanitize_describe_result(payload: Mapping[str, Any]) -> dict[str, object]:
     return result
 
 
-def sanitize_query_result(payload: Mapping[str, Any]) -> dict[str, object]:
+def sanitize_query_result(
+    payload: Mapping[str, Any],
+    *,
+    max_rows: int = MAX_QUERY_RESULT_ROWS,
+    max_bytes: int = MAX_QUERY_RESULT_BYTES,
+) -> dict[str, object]:
     required_fields = {
         "columns",
         "rows",
@@ -641,7 +699,7 @@ def sanitize_query_result(payload: Mapping[str, Any]) -> dict[str, object]:
     duration = payload.get("execution_duration_ms")
     query_id = payload.get("query_id")
     truncated = payload.get("truncated")
-    if isinstance(rows, list) and len(rows) > MAX_QUERY_RESULT_ROWS:
+    if isinstance(rows, list) and len(rows) > max_rows:
         raise MCPToolError(retryable=False, reason="row_limit_exceeded")
     if (
         not isinstance(columns, list)
@@ -692,7 +750,7 @@ def sanitize_query_result(payload: Mapping[str, Any]) -> dict[str, object]:
         encoded = json.dumps(result, separators=(",", ":"), allow_nan=False).encode()
     except (TypeError, ValueError) as error:
         raise MCPToolError(retryable=False, reason="invalid_result_shape") from error
-    if len(encoded) > MAX_QUERY_RESULT_BYTES:
+    if len(encoded) > max_bytes:
         raise MCPToolError(retryable=False, reason="byte_limit_exceeded")
     return result
 

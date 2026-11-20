@@ -1,4 +1,7 @@
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import { MapDemo } from "./map/MapDemo";
+import { MapPanel } from "./map/MapPanel";
+import { launchFromToolRequest, type MapLaunch } from "./map/fromTool";
 import { ContextInspector } from "./ContextInspector";
 import { TimelineInspector } from "./TimelineInspector";
 import { useVoiceInput } from "./useVoiceInput";
@@ -43,6 +46,11 @@ function mcpLabel(status: Status): string {
 }
 
 export default function App() {
+  if (new URLSearchParams(window.location.search).get("demo") === "map") return <MapDemo />;
+  return <LiveApp />;
+}
+
+function LiveApp() {
   const [status, setStatus] = useState<Status>(initialStatus);
   const [prompt, setPrompt] = useState("");
   const [answer, setAnswer] = useState<AskResponse | null>(null);
@@ -59,6 +67,13 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<"timeline" | "context">("timeline");
   const [streamingAnswer, setStreamingAnswer] = useState<string>("");
   const hydrationVersion = useRef(0);
+
+  // Map panel: opened by the Map button or by "Show on map" under an answer.
+  const [mapOpen, setMapOpen] = useState(false);
+  const [mapLaunch, setMapLaunch] = useState<MapLaunch | undefined>(undefined);
+  const [mapKey, setMapKey] = useState(0);
+  const [mapLaunchByRun, setMapLaunchByRun] = useState<Record<string, MapLaunch>>({});
+  const promptRef = useRef<HTMLTextAreaElement | null>(null);
   const activeAbortController = useRef<AbortController | null>(null);
 
   // Voice Input State & Audio Streaming
@@ -243,6 +258,8 @@ export default function App() {
       await new Promise<void>((resolve) => {
         const eventSource = new EventSource(runAccepted.events_url);
 
+        let unstartedMapLaunch: MapLaunch | null = null;
+        const pendingMapLaunches = new Map<string, MapLaunch | null>();
         const handleRawEvent = (sseEvent: Event) => {
           try {
             const dataStr = (sseEvent as MessageEvent).data;
@@ -253,10 +270,39 @@ export default function App() {
             };
             const eventType = event.event_type || sseEvent.type;
             const p = event.payload || {};
+            const toolCallId = typeof p.tool_call_id === "string" && p.tool_call_id ? p.tool_call_id : null;
 
             if (eventType === "answer.delta" && typeof p.delta === "string") {
               accumulatedAnswer += p.delta;
               setStreamingAnswer(accumulatedAnswer);
+            } else if (eventType === "tool.requested") {
+              const launch = launchFromToolRequest(p);
+              if (toolCallId) {
+                pendingMapLaunches.set(toolCallId, launch);
+              } else {
+                unstartedMapLaunch = launch;
+              }
+            } else if (eventType === "tool.started") {
+              if (toolCallId && !pendingMapLaunches.has(toolCallId)) {
+                pendingMapLaunches.set(toolCallId, unstartedMapLaunch);
+                unstartedMapLaunch = null;
+              }
+            } else if (eventType === "tool.completed") {
+              let launch: MapLaunch | null = null;
+              if (toolCallId) {
+                launch = pendingMapLaunches.get(toolCallId) ?? null;
+                pendingMapLaunches.delete(toolCallId);
+              } else if (pendingMapLaunches.size === 0) {
+                launch = unstartedMapLaunch;
+                unstartedMapLaunch = null;
+              }
+              if (launch) setMapLaunchByRun((prev) => (prev[runId] ? prev : { ...prev, [runId]: launch }));
+            } else if (eventType === "tool.failed") {
+              if (toolCallId) {
+                pendingMapLaunches.delete(toolCallId);
+              } else if (pendingMapLaunches.size === 0) {
+                unstartedMapLaunch = null;
+              }
             } else if (eventType === "answer.audio" && typeof p.data === "string") {
               // Handle audio event: decode base64 MP3 and play
               handleAudioEvent(p.data);
@@ -303,6 +349,10 @@ export default function App() {
           "message",
           "answer.delta",
           "answer.audio",
+          "tool.requested",
+          "tool.started",
+          "tool.completed",
+          "tool.failed",
           "run.received",
           "run.completed",
           "run.failed",
@@ -368,6 +418,17 @@ export default function App() {
     }
     // Stop audio playback if running
     stopAudio();
+  };
+
+  const openMap = (launch?: MapLaunch) => {
+    setMapLaunch(launch);
+    setMapKey((k) => k + 1);
+    setMapOpen(true);
+  };
+
+  const askAboutZone = (text: string) => {
+    setPrompt(text);
+    promptRef.current?.focus();
   };
 
   const handleInspectRun = (runId: string) => {
@@ -451,6 +512,15 @@ export default function App() {
                             Inspect Run
                           </button>
                         )}
+                        {turn.role === "assistant" && turn.runId && mapLaunchByRun[turn.runId] && (
+                          <button
+                            type="button"
+                            className="inspect-link-btn"
+                            onClick={() => openMap(mapLaunchByRun[turn.runId as string])}
+                          >
+                            Show on map
+                          </button>
+                        )}
                       </div>
                     )}
                   </article>
@@ -464,6 +534,7 @@ export default function App() {
             <label htmlFor="prompt">Ask about NYC taxi activity</label>
             <textarea
               id="prompt"
+              ref={promptRef}
               value={prompt}
               onChange={(event) => setPrompt(event.target.value)}
               disabled={isRunning}
@@ -483,6 +554,14 @@ export default function App() {
                 title={isListening ? "Stop listening" : "Speak your question using microphone"}
               >
                 {isListening ? "⏹ Stop Listening" : isVoiceProcessing ? "⏳ Transcribing…" : "🎤 Voice"}
+              </button>
+              <button
+                type="button"
+                className="btn-text"
+                aria-expanded={mapOpen}
+                onClick={() => (mapOpen ? setMapOpen(false) : openMap(mapLaunch))}
+              >
+                Map
               </button>
               {isRunning && (
                 <button
@@ -755,6 +834,15 @@ export default function App() {
               )}
             </div>
           </form>
+
+          {mapOpen && (
+            <MapPanel
+              key={mapKey}
+              launch={mapLaunch}
+              onAskAboutZone={askAboutZone}
+              onClose={() => setMapOpen(false)}
+            />
+          )}
         </section>
 
         {/* Right Column: Telemetry Timeline & Working Context Inspector */}

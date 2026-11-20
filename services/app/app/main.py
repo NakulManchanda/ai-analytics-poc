@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+import threading
+from collections.abc import AsyncIterator, Callable
+from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import FastAPI
@@ -17,6 +19,7 @@ from app.routers.conversations import create_conversations_router
 from app.routers.events import create_events_router
 from app.routers.health import router as health_router
 from app.routers.jobs import create_jobs_router
+from app.routers.maps import _ResponseCache, create_maps_router, warm_curated_zones
 from app.routers.runs import RunDispatcher, create_runs_router
 from app.routers.status import router as status_router
 from app.state import DynamoDBStateRepository, InMemoryStateRepository, StateRepository
@@ -37,6 +40,7 @@ def create_app(
     run_dispatcher: RunDispatcher | None = None,
     event_publisher: EventPublisher | None = None,
     tracer: Tracer | None = None,
+    warm_map_cache: bool = True,
 ) -> FastAPI:
     resolved_settings = settings or Settings.from_environment()
     shared_state_repo = state_repository or (
@@ -47,7 +51,22 @@ def create_app(
         if resolved_settings.dynamodb_table_name
         else InMemoryStateRepository()
     )
-    application = FastAPI(title="AI Analytics POC")
+    map_cache = _ResponseCache()
+
+    def map_mcp_factory() -> DatasetProfileMCPClient:
+        return mcp_client or FastMCPDatasetProfileClient()
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+        if warm_map_cache:
+            threading.Thread(
+                target=warm_curated_zones,
+                args=(map_cache, map_mcp_factory),
+                daemon=True,
+            ).start()
+        yield
+
+    application = FastAPI(title="AI Analytics POC", lifespan=lifespan)
     application.state.state_repository = shared_state_repo
     resolved_publisher: EventPublisher = event_publisher or RedisEventPublisher(
         redis_client=redis_client
@@ -95,6 +114,7 @@ def create_app(
             redis_client=redis_client,
         )
     )
+    application.include_router(create_maps_router(map_mcp_factory, cache=map_cache))
     application.include_router(status_router)
     application.include_router(voice_router)
     return application

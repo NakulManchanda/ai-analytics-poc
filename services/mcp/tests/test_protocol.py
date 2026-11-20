@@ -140,6 +140,7 @@ def test_dataset_contract_exposes_fixed_schema_and_profile_over_mcp():
         "list_taxi_dimension_values",
         "aggregate_taxi_data",
         "compare_taxi_segments",
+        "map_taxi_zones",
     ]
     average_tool = next(tool for tool in tools if tool.name == "average_trip_metrics")
     assert average_tool.inputSchema["type"] == "object"

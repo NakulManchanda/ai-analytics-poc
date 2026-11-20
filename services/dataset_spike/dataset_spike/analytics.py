@@ -20,9 +20,11 @@ from dataset_spike.query_compiler import (
     compile_compare_segments_query,
     compile_compare_whole_segments_query,
     compile_dimension_values_query,
+    compile_zone_measure_query,
 )
 from dataset_spike.query_spec import (
     MAX_COLUMNS,
+    MAX_ZONE_ROWS,
     PAYMENT_TYPE_CODES,
     RATE_CODE_CODES,
     VENDOR_CODES,
@@ -34,8 +36,10 @@ from dataset_spike.query_spec import (
     validate_dimension,
     validate_filters,
     validate_limit,
+    validate_measure,
     validate_measures,
     validate_search,
+    validate_zone_role,
 )
 
 MAX_QUERY_ROWS = 20
@@ -587,6 +591,45 @@ def aggregate_taxi_data(
         spec.filters is not None and spec.filters.airport_trip is not None
     ):
         extra["airport_trip_rule"] = AIRPORT_TRIP_RULE
+    return _augment_envelope(result, max_result_bytes, **extra)
+
+
+MAP_ZONE_MAX_RESULT_BYTES = 65_536
+
+
+def map_taxi_zones(
+    parquet_path: Path,
+    zone_csv_path: Path,
+    *,
+    zone_role: object,
+    measure: object,
+    filters: object = None,
+    max_result_bytes: int = MAP_ZONE_MAX_RESULT_BYTES,
+    timeout_seconds: float = DEFAULT_QUERY_TIMEOUT_SECONDS,
+    query_id_factory: Callable[[], str] | None = None,
+) -> dict[str, object]:
+    """One governed measure per taxi zone id, bounded to the 265 lookup zones."""
+    role = validate_zone_role(zone_role)
+    validated_measure = validate_measure(measure)
+    validated_filters = validate_filters(filters)
+    compiled = compile_zone_measure_query(role, validated_measure, validated_filters)
+    result = _run_governed_query(
+        parquet_path,
+        zone_csv_path,
+        query=compiled.sql,
+        query_parameters=compiled.parameters,
+        result_limit=MAX_ZONE_ROWS,
+        max_result_bytes=max_result_bytes,
+        timeout_seconds=timeout_seconds,
+        query_id_factory=query_id_factory,
+    )
+    extra: dict[str, object] = {
+        "query_class": "zone_map",
+        "dimensions": [f"{role}_zone"],
+        "measures": [validated_measure.value],
+    }
+    if validated_measure in _TIP_MEASURES:
+        extra["tip_rate_semantics"] = TIP_RATE_SEMANTICS
     return _augment_envelope(result, max_result_bytes, **extra)
 
 
