@@ -788,3 +788,19 @@ def test_single_entity_comma_phrase_accepts_both_factually_equivalent_answers():
     for ans in (ans_v100, ans_v110):
         bad, unsure = check_entity_value_association(facts, ans)
         assert not bad and not unsure, (ans, bad, unsure)
+
+    # Negative test: a contrastive clause (", while ...") for a different entity must still fail.
+    manhattan_fact = [
+        Fact(
+            label="manhattan_avg_fare",
+            kind="number",
+            row=0,
+            col="avg_fare",
+            rel_tol=0.01,
+            value=30.50,
+        )
+    ]
+    bad, _unsure = check_entity_value_association(
+        manhattan_fact, "Manhattan averaged $20, while Queens averaged $30.50."
+    )
+    assert any("manhattan" in r and "30.5" in r for r in bad), bad

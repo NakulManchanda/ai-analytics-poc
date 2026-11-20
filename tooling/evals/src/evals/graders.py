@@ -305,7 +305,8 @@ _SUPER_MAX = r"longest|highest|most|largest|biggest|greatest|busiest|maximum"
 _SUPER_MIN = r"shortest|lowest|least|smallest|fewest|minimum|cheapest"
 _SUPER = re.compile(rf"\b({_SUPER_MAX}|{_SUPER_MIN})\b", re.IGNORECASE)
 _CLAUSE_SPLIT = re.compile(
-    r"[;\n]|\.\s|,\s|\s(?:while|whereas|but)\s|\sand\s(?=the\s)", re.IGNORECASE
+    r"[;\n]|\.\s|,\s(?!with\b|at\b|averaging\b|which\b)|\s(?:while|whereas|but)\s|\sand\s(?=the\s)",
+    re.IGNORECASE,
 )
 _RANKING_Q = re.compile(
     r"\b(top|most|least|highest|lowest|busiest|longest|shortest|best|worst|largest|"
@@ -474,12 +475,6 @@ def check_entity_value_association(
         tuple(sorted(_entity_tokens(f))) for f in facts if _entity_tokens(f)
     }
     multi_entity_metric = len(distinct_measures) > 1 and len(distinct_entities) > 1
-    if len(distinct_entities) <= 1:
-        # Single-entity answers often attach metrics in a trailing ", with ..." phrase;
-        # include sentence-level scopes so comma clauses do not split one entity from its value.
-        segs = segs + [
-            s.strip() for s in re.split(r"[;\n]|\.\s+", answer) if s and s.strip()
-        ]
 
     for fact in facts:
         if fact.kind != "number" or fact.value is None:
