@@ -111,6 +111,29 @@ def test_live_writes_results_and_state(tmp_path, stub, cases):
     assert inc == []
     rows = rows_of(run / "results.jsonl")
     assert [r["turn_index"] for r in rows] == [0, 1]
+
+
+def test_split_pinned_manifest_rejects_all_and_out_of_split_before_requests(
+    tmp_path, stub, cases
+):
+    run = tmp_path / "holdout-20200101T000000Z"
+    run.mkdir()
+    (run / "manifest.json").write_text(
+        json.dumps({"split": "holdout", "cases": ["c-2"]})
+    )
+    # --all must be rejected before any HTTP request is made.
+    with pytest.raises(RunError, match="pinned to split 'holdout'"):
+        run_live(run, run.name, stub, [], True, False, 5, cases)
+    assert SEEN == []
+    # Out-of-split explicit case_ids must be rejected before any HTTP request.
+    with pytest.raises(RunError, match="out-of-split cases rejected"):
+        run_live(run, run.name, stub, ["c-1"], False, False, 5, cases)
+    assert SEEN == []
+    # Without --all or out-of-split cases, only the manifest split runs.
+    _out, inc = run_live(run, run.name, stub, [], False, False, 5, cases)
+    assert inc == []
+    rows = rows_of(run / "results.jsonl")
+    assert {r["case_id"] for r in rows} == {"c-2"}
     assert set(rows[0]) == {
         "case_id",
         "turn_index",

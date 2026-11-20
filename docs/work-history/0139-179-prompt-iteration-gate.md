@@ -1,8 +1,8 @@
-# Work 0139 — Eval-driven prompt iteration, disjoint splits, and offline CI gate (#179, Epic #167)
+# Work 0139 — Disjoint splits, offline CI gate, and development prompt A/B (partial #179, Epic #167)
 
 ## Goal
 
-Complete Issue #179 and close Epic #167 by adding a versioned, disjoint `dev`/`holdout` split sidecar for the golden dataset, adding a zero-cost offline recorded-fixture CI regression gate + programmatic holdout-leakage check, and running one matched live ReAct prompt A/B on pinned model/dataset/tool schemas with reconciled LiteLLM spend and Phoenix trace continuity.
+Advance Issue #179 (Epic #167) by adding a versioned, disjoint `dev`/`holdout` split sidecar with authoritative runner enforcement, adding a zero-cost offline recorded-fixture CI regression gate + programmatic holdout-leakage check, and running one matched live ReAct development A/B (`planner-single-turn@1.2.0` vs candidate `1.3.0`) on pinned model/dataset/tool schemas with reconciled LiteLLM spend and Phoenix trace continuity. The sealed-holdout promotion criterion in #179 stays open until a candidate passes development evaluation.
 
 ## Starting point
 
@@ -14,10 +14,10 @@ Complete Issue #179 and close Epic #167 by adding a versioned, disjoint `dev`/`h
 - **Zero-cost offline CI gates (pytest, no Promptfoo dependency):**
   - Behavioral recorded-fixture gate (`tooling/evals/tests/test_prompt_regression_gate.py`): runs `evals.report.compare()` over `fixtures/baseline` vs `fixtures/candidate` (pass) and `fixtures/regressed` (fail) with zero paid model calls, plus a programmatic disjointness check that loads every `holdout` turn question from `load_cases()` + `load_splits()` and verifies none appear in `services/app/app/prompts/bundles.py`.
   - Fast prompt-contract lint (`services/app/tests/test_prompt_regression_gate.py`): checks the real `taxi_proposal_prompt` renderer for required clauses and proves mutations fail fast.
-- **Matched live ReAct A/B (`planner-single-turn@1.2.0` vs candidate `1.3.0`):**
+- **Matched live ReAct development A/B (`planner-single-turn@1.2.0` vs candidate `1.3.0`):**
   - Runtime: bespoke ReAct (`AGENT_STRATEGY=manual`), isolated Compose project `eval_179` (`WEB_PORT=13000`, `LITELLM_PORT=14001`, `PHOENIX_PORT=16007`; existing `ai_app_poc` stack untouched).
-  - Pinned inputs: `taxi-planner` = Bedrock Nova Pro, `taxi-answer` = Bedrock Nova Micro, Jan-2024 parquet, same 6 governed MCP tools, same 18-case / 21-turn evaluation slice (`det-008..014`, `react-005..008`, `multi-003`, `multi-005`, `uns-002`, `uns-003`, `uns-005`, `fail-002`, `fail-004`).
-  - Method note: this A/B slice included three of the motivating cases (`uns-002`, `uns-003`, `multi-005`) before they were moved into `dev` in `splits.json`. Because `1.3.0` failed to improve even on those motivating cases and introduced a regression, it was rejected without promoting to the sealed `holdout` split.
+  - Pinned inputs: `taxi-planner` = Bedrock Nova Pro, `taxi-answer` = Bedrock Nova Micro, Jan-2024 parquet, same 6 governed MCP tools, same 18-case / 21-turn development slice (`det-008..014`, `react-005..008`, `multi-003`, `multi-005`, `uns-002`, `uns-003`, `uns-005`, `fail-002`, `fail-004`).
+  - Method note: this development A/B slice included three of the motivating cases (`uns-002`, `uns-003`, `multi-005`) that now live in `dev` in `splits.json` (`20 dev / 17 holdout`). Because `1.3.0` failed to improve even on those motivating cases and introduced a regression, it was rejected early without running on the sealed `holdout` split. The sealed-holdout acceptance criterion in #179 remains open for a future candidate.
 
 ### Archived rejected candidate text (`planner-single-turn@1.3.0`)
 

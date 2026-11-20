@@ -1188,3 +1188,35 @@ def test_starter_rerun_after_completion_attaches_without_reexecuting(
     assert json.loads((run_dir / "state.json").read_text()) == state_after_first
     assert (run_dir / "review.html").stat().st_mtime_ns == review_mtime_after_first
     assert server.total_posts == 1
+
+
+def test_temporal_resolve_batch_plan_enforces_manifest_split(tmp_path: Path) -> None:
+    """Split-pinned manifests reject --all and out-of-split case_ids before any workflow starts."""
+    from evals.runs import RunError
+
+    cases_path = tmp_path / "cases.jsonl"
+    cases_path.write_text(
+        "".join(
+            json.dumps({"id": cid, "turns": [{"question": "q1"}]}) + "\n"
+            for cid in ("det-001", "det-008")
+        )
+    )
+    run_dir = tmp_path / "holdout-20260101T000000Z"
+    run_dir.mkdir()
+    (run_dir / "manifest.json").write_text(
+        json.dumps(
+            {"split": "holdout", "cases": ["det-008"], "web": "http://localhost:3000"}
+        )
+    )
+
+    with pytest.raises(RunError, match="pinned to split 'holdout'"):
+        resolve_batch_plan(run_dir, None, [], True, cases_path=cases_path)
+    with pytest.raises(RunError, match="out-of-split cases rejected"):
+        resolve_batch_plan(run_dir, None, ["det-001"], False, cases_path=cases_path)
+
+    web, wanted, expected, _ = resolve_batch_plan(
+        run_dir, None, [], False, cases_path=cases_path
+    )
+    assert web == "http://localhost:3000"
+    assert wanted == ["det-008"]
+    assert expected == [("det-008", 0)]

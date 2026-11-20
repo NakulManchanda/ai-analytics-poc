@@ -474,12 +474,12 @@ eval-temporal-down: ## Stop only the opt-in local Temporal dev server project
 eval-temporal-worker: ## Run the opt-in local Temporal eval worker process (foreground; Ctrl-C to stop)
 	$(EVAL_TEMPORAL) temporal-worker --address $(TEMPORAL_ADDRESS) --task-queue $(TEMPORAL_TASK_QUEUE)
 
-eval-temporal-run: ## Run golden cases through the opt-in Temporal workflow (usage: make eval-temporal-run EVAL_CONFIRM=1 [EVAL_CASES="det-001 multi-001"] [EVAL_FINALIZE=1])
+eval-temporal-run: ## Run golden cases through the opt-in Temporal workflow (usage: make eval-temporal-run EVAL_CONFIRM=1 [EVAL_SPLIT=dev|holdout] [EVAL_CASES="det-001 multi-001"] [EVAL_FINALIZE=1])
 	$(EVAL_GUARD)
 	@$(EVAL_LOG) eval-temporal-run -- $(EVAL_TEMPORAL) run-temporal $(EVAL_RUN_ARG) --web $(EVAL_WEB) \
 		--address $(TEMPORAL_ADDRESS) --task-queue $(TEMPORAL_TASK_QUEUE) \
 		$(if $(filter 1,$(EVAL_FINALIZE)),--finalize) \
-		$(if $(EVAL_CASES),$(EVAL_CASES),--all)
+		$(if $(EVAL_CASES),$(EVAL_CASES),$(if $(EVAL_SPLIT),,--all))
 
 eval-freeze: ## Snapshot this run's capture lines (exact eval_run_id) + sha256
 	@$(EVAL_LOG) eval-freeze -- $(EVAL) run-freeze $(EVAL_RUN_ARG)

@@ -167,13 +167,33 @@ def run_live(
     web = web or manifest.get("web") or "http://localhost:3100"
     cases = [json.loads(x) for x in cases_path.read_text().splitlines() if x.strip()]
     by_id = {c["id"]: c for c in cases}
-    wanted = (
-        [c["id"] for c in cases]
-        if all_cases
-        else case_ids
-        or manifest.get("cases")
-        or ([c["id"] for c in cases] if resume and not smoke else [])
-    )
+    manifest_split = manifest.get("split")
+    manifest_cases = list(manifest.get("cases") or [])
+    if manifest_split and not smoke:
+        if not manifest_cases:
+            raise RunError(
+                f"run {run_id!r} is pinned to split {manifest_split!r} but manifest has no cases"
+            )
+        if all_cases:
+            raise RunError(
+                f"run {run_id!r} is pinned to split {manifest_split!r}; "
+                "cannot override with --all"
+            )
+        out_of_split = [c for c in case_ids if c not in manifest_cases]
+        if out_of_split:
+            raise RunError(
+                f"run {run_id!r} is pinned to split {manifest_split!r}; "
+                f"out-of-split cases rejected: {out_of_split}"
+            )
+        wanted = list(case_ids) if case_ids else manifest_cases
+    else:
+        wanted = (
+            [c["id"] for c in cases]
+            if all_cases
+            else case_ids
+            or manifest_cases
+            or ([c["id"] for c in cases] if resume and not smoke else [])
+        )
     unknown = [c for c in wanted if c not in by_id]
     if unknown or not wanted:
         raise RunError(f"unknown or empty case list: {unknown}")

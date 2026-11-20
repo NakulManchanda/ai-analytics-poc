@@ -183,18 +183,38 @@ def resolve_batch_plan(
     cases = load_cases_raw(resolved_path)
     by_id = {c["id"]: c for c in cases}
     resolved_web = web or manifest.get("web") or "http://localhost:3100"
-    wanted = (
-        [c["id"] for c in cases]
-        if all_cases
-        else (case_ids or manifest.get("cases") or [])
-    )
+    manifest_split = manifest.get("split")
+    manifest_cases = list(manifest.get("cases") or [])
+    if manifest_split:
+        if not manifest_cases:
+            raise RunError(
+                f"run is pinned to split {manifest_split!r} but manifest has no cases"
+            )
+        if all_cases:
+            raise RunError(
+                f"run is pinned to split {manifest_split!r}; cannot override with --all"
+            )
+        out_of_split = [c for c in case_ids if c not in manifest_cases]
+        if out_of_split:
+            raise RunError(
+                f"run is pinned to split {manifest_split!r}; "
+                f"out-of-split cases rejected: {out_of_split}"
+            )
+        wanted = list(case_ids) if case_ids else manifest_cases
+    else:
+        wanted = (
+            [c["id"] for c in cases]
+            if all_cases
+            else (case_ids or manifest_cases or [])
+        )
     unknown = [c for c in wanted if c not in by_id]
     if unknown or not wanted:
         raise RunError(f"unknown or empty case list: {unknown}")
-    scope = manifest.get("cases") or list(wanted)
-    for cid in wanted:
-        if cid not in scope:
-            scope = [*scope, cid]
+    scope = list(manifest_cases) if manifest_cases else list(wanted)
+    if not manifest_split:
+        for cid in wanted:
+            if cid not in scope:
+                scope = [*scope, cid]
     expected = [(c, i) for c in scope for i in range(len(by_id[c]["turns"]))]
     return resolved_web, list(wanted), expected, resolved_path
 
