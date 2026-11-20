@@ -37,31 +37,31 @@ Complete Issue #179 (Epic #167) by:
 
 ---
 
-## Experiment 2 (Fresh Unseen Holdout A/B — SHIPPED): `answer@1.0.0` vs `answer@1.1.0`
+## Experiment 2 (Fresh Unseen Holdout A/B — PROVISIONAL SHIP, n=2 trials/arm): `answer@1.0.0` vs `answer@1.1.0`
 
 - **Motivating failure cluster (from Experiment 1 baseline):** `det-009#0`, `react-008#0`, `det-010#0`, and `det-014#0` all had `tool=correct` but `answer=incorrect` due to comparative superlative inversion, row/metric label-pairing mismatches, or ungrounded derived figures on the Nova Micro answer call (`answer@1.0.0`).
 - **Single variable changed (`answer` & `answer-with-schema` `1.0.0 → 1.1.0`, `planner-single-turn@1.2.0` unchanged):** appended `_ANSWER_GROUNDING_RULE` to the global instruction region:
   > `When comparing groups, verify which row has the highest or lowest value directly from the query result before naming it, pair every number with its exact row and metric label, and cite only numbers present in the query result.`
-- **Dataset:** Fresh, unseen 10-case / 11-turn `holdout` split (`tooling/evals/datasets/holdout/v1/cases.jsonl`, `hold-001`..`hold-010`), executed via `make eval-start EVAL_SPLIT=holdout` + `make eval-run EVAL_CONFIRM=1` (no `EVAL_SPLIT` repeated) on isolated `eval_179_ho` stack (`AGENT_STRATEGY=manual`, Nova Pro planner + Nova Micro answer).
+- **Dataset:** Fresh, unseen 10-case / 11-turn `holdout` split (`tooling/evals/datasets/holdout/v1/cases.jsonl`, `hold-001`..`hold-010`, `pending_human_review`), executed via `make eval-start EVAL_SPLIT=holdout` + `make eval-run EVAL_CONFIRM=1` (no `EVAL_SPLIT` repeated) on isolated `eval_179_ho` / `eval_179_ho2` stacks (`AGENT_STRATEGY=manual`, Nova Pro planner + Nova Micro answer).
 
-| Metric (10 fresh holdout cases / 11 turns, n=1) | Baseline `answer@1.0.0` (`179-holdout-base-a100`) | Candidate `answer@1.1.0` (`179-holdout-cand-a110`) | Delta |
-|---|---|---|---|
-| Prompts observed in capture | `planner-single-turn@1.2.0` (11), `answer@1.0.0` (8) | `planner-single-turn@1.2.0` (11), `answer@1.1.0` (8) | Single variable |
-| Execution (`correct / n/a`) | `10 / 1` (0 failures) | `10 / 1` (0 failures) | `0` |
-| Tool (`correct / incorrect / n/a`) | `8 / 2 / 1` | `8 / 2 / 1` | `0` |
-| Answer (`correct / needs_review / incorrect / n/a`) | `2 / 2 / 6 / 1` | `3 / 2 / 5 / 1` | `+1` (`hold-006#0` fixed, `0` regressions) |
-| Model calls / tokens (`in / out`) | `19` (`46,077 / 2,001`) | `19` (`46,416 / 2,035`) | `+339` in (`+0.7%`), `+34` out |
-| Wall time (`median / p95`) | `5.38s / 8.74s` | `5.77s / 7.29s` | `+0.39s` median, `-1.45s` p95 |
-| Streaming TTFT (`median / max`, `n=8`) | `295ms / 434ms` | `322ms / 387ms` | `+27ms` median, `-47ms` max |
-| Reconciled LiteLLM spend | `$0.039245` (`ok=True`, 19 rows, 0 orphans) | `$0.039232` (`ok=True`, 19 rows, 0 orphans) | `-$0.000013` (`-0.03%`) |
-| Phoenix trace continuity | `11/11` runs, `0` problems | `11/11` runs, `0` problems | `0` |
+| Metric (10 fresh holdout cases / 11 turns) | T1 Base `1.0.0` | T1 Cand `1.1.0` | T2 Base `1.0.0` | T2 Cand `1.1.0` |
+|---|---|---|---|---|
+| Execution (`correct / n/a`) | `10 / 1` | `10 / 1` | `10 / 1` | `10 / 1` |
+| Tool (`correct / incorrect / n/a`) | `8 / 2 / 1` | `8 / 2 / 1` | `7 / 3 / 1` | `9 / 1 / 1` |
+| Answer (`correct / needs_review / incorrect / n/a`) | `2 / 2 / 6 / 1` | `3 / 2 / 5 / 1` | `2 / 2 / 6 / 1` | `4 / 2 / 4 / 1` |
+| `hold-006#0` (identical tool call in all 4 runs) | `incorrect` | **`correct`** | `incorrect` | **`correct`** |
+| Tokens (`in / out`) | `46,077 / 2,001` | `46,416 / 2,035` | `46,071 / 1,943` | `46,413 / 2,066` |
+| Wall time (`median / p95`) | `5.38s / 8.74s` | `5.77s / 7.29s` | `5.38s / 9.21s` | `5.54s / 7.31s` |
+| Streaming TTFT (`median / max`, `n=8`) | `295ms / 434ms` | `322ms / 387ms` | `300ms / 459ms` | `318ms / 426ms` |
+| Reconciled LiteLLM spend (`0` orphans, `ok=True`) | `$0.039245` | `$0.039232` | `$0.039081` | `$0.039144` |
+| Phoenix trace continuity (`0` problems) | `11/11` | `11/11` | `11/11` | `11/11` |
 
-**Decision:** **SHIP `answer@1.1.0` / `answer-with-schema@1.1.0`**. Fixed the exact label-to-number association failure on `hold-006#0` with zero regressions and virtually identical cost (`-$0.000013`).
+**Decision:** **PROVISIONAL SHIP `answer@1.1.0` / `answer-with-schema@1.1.0`** (pending human review sign-off on `hold-001`..`hold-010`). Across both repeated trials (`n=2` per arm), `hold-006#0` improved `0/2 → 2/2` with identical planner tool calls and zero regressions across all 22 turns per arm, at effectively identical cost (mean `$0.039188` vs `$0.039163`, `+$0.000025`). (Trial 2's extra `+1` on `hold-002#0` came from planner tool-limit stochasticity rather than the answer prompt.)
 
 ## Known limitations
 
-- Single live trial per arm (`n=1`) on 10 fresh holdout cases; directional win with zero regressions, not a statistically powered sample.
-- Fresh holdout cases (`hold-001`..`hold-010`) have DuckDB-verified reference SQL and are queued for final human review sign-off (`pending_human_review`).
+- All 10 fresh holdout cases (`hold-001`..`hold-010`) have DuckDB-verified reference SQL and are `pending_human_review` until human sign-off; the ship decision remains provisional until then.
+- Two trials per arm (`n=2`) on 10 cases confirm repeatability of `hold-006#0` (`2/2`) but are not a statistically powered sample.
 
 ## Verification
 

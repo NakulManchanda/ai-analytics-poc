@@ -180,11 +180,27 @@ def resolve_batch_plan(
         raise RunError(f"{manifest_p} missing; run `evals run-start` first")
     manifest = json.loads(manifest_p.read_text())
     if cases_path is None:
-        from evals.dataset import resolve_manifest_dataset
+        from evals.dataset import DatasetError, resolve_manifest_dataset
 
-        resolved_path = resolve_manifest_dataset(manifest)
+        try:
+            resolved_path = resolve_manifest_dataset(manifest)
+        except DatasetError as err:
+            raise RunError(str(err)) from err
     else:
         resolved_path = cases_path
+        if (
+            manifest.get("split")
+            and manifest.get("dataset_sha256")
+            and resolved_path.is_file()
+        ):
+            from evals.dataset import dataset_sha256
+
+            actual_sha = dataset_sha256(resolved_path)
+            if actual_sha != manifest["dataset_sha256"]:
+                raise RunError(
+                    f"dataset sha256 mismatch for {resolved_path}: "
+                    f"manifest={manifest['dataset_sha256'][:12]} actual={actual_sha[:12]}"
+                )
     cases = load_cases_raw(resolved_path)
     by_id = {c["id"]: c for c in cases}
     resolved_web = web or manifest.get("web") or "http://localhost:3100"

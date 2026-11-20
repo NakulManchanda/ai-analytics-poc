@@ -166,9 +166,25 @@ def run_live(
         )
     web = web or manifest.get("web") or "http://localhost:3100"
     if cases_path == CASES and manifest.get("split"):
-        from evals.dataset import resolve_manifest_dataset
+        from evals.dataset import DatasetError, resolve_manifest_dataset
 
-        cases_path = resolve_manifest_dataset(manifest)
+        try:
+            cases_path = resolve_manifest_dataset(manifest)
+        except DatasetError as err:
+            raise RunError(str(err)) from err
+    elif (
+        manifest.get("split")
+        and manifest.get("dataset_sha256")
+        and cases_path.is_file()
+    ):
+        from evals.dataset import dataset_sha256
+
+        actual_sha = dataset_sha256(cases_path)
+        if actual_sha != manifest["dataset_sha256"]:
+            raise RunError(
+                f"dataset sha256 mismatch for {cases_path}: "
+                f"manifest={manifest['dataset_sha256'][:12]} actual={actual_sha[:12]}"
+            )
     cases = [json.loads(x) for x in cases_path.read_text().splitlines() if x.strip()]
     by_id = {c["id"]: c for c in cases}
     manifest_split = manifest.get("split")

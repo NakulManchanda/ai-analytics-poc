@@ -280,7 +280,7 @@ def run_freeze(a) -> int:
 
 
 def run_grade(a) -> int:
-    from evals.dataset import load_cases, resolve_manifest_dataset
+    from evals.dataset import DatasetError, load_cases, resolve_manifest_dataset
     from evals.session import SessionError, render_session_report
 
     _, run_dir = _checked(a)
@@ -297,7 +297,10 @@ def run_grade(a) -> int:
             if c
         }
     )
-    cases = load_cases(resolve_manifest_dataset(manifest))
+    try:
+        cases = load_cases(resolve_manifest_dataset(manifest))
+    except DatasetError as err:
+        raise RunError(str(err)) from err
     (run_dir / "report").mkdir(exist_ok=True)
     for conv in convs:
         rows: list[dict] = []

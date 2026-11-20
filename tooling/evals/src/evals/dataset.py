@@ -36,13 +36,25 @@ def resolve_dataset_for_split(split: str | None) -> Path:
     return DEFAULT_HOLDOUT_DATASET if split == "holdout" else DEFAULT_DATASET
 
 
-def resolve_manifest_dataset(manifest: dict) -> Path:
+def resolve_manifest_dataset(manifest: dict, *, verify_hash: bool = True) -> Path:
     rel = manifest.get("dataset")
     if isinstance(rel, str) and rel:
-        p = PACKAGE_ROOT / rel
-        if p.is_file():
-            return p
-    return resolve_dataset_for_split(manifest.get("split"))
+        p = Path(rel) if Path(rel).is_absolute() else PACKAGE_ROOT / rel
+        if not p.is_file():
+            raise DatasetError(f"manifest dataset file missing: {p}")
+    else:
+        p = resolve_dataset_for_split(manifest.get("split"))
+        if not p.is_file():
+            raise DatasetError(f"dataset file missing: {p}")
+    expected_sha = manifest.get("dataset_sha256")
+    if verify_hash and expected_sha:
+        actual_sha = dataset_sha256(p)
+        if actual_sha != expected_sha:
+            raise DatasetError(
+                f"dataset sha256 mismatch for {p}: "
+                f"manifest={expected_sha[:12]} actual={actual_sha[:12]}"
+            )
+    return p
 
 
 def load_splits(
