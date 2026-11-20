@@ -59,7 +59,7 @@ def main(argv: list[str] | None = None) -> int:
 
     add_parsers(sub)
     args = ap.parse_args(argv)
-    if args.cmd.startswith("run-"):
+    if args.cmd.startswith(("run-", "temporal-")):
         return dispatch(args)
 
     if args.cmd == "validate":

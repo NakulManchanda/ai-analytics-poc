@@ -38,7 +38,7 @@ def add_parsers(sub) -> None:
         p.add_argument("--root", type=Path, default=DEFAULT_ROOT)
         if run:
             p.add_argument("--run", help="run_id (default: <root>/.current)")
-            if p.prog.split()[-1] != "run-live":
+            if p.prog.split()[-1] not in ("run-live", "run-temporal"):
                 p.add_argument(
                     "--allow-incomplete",
                     action="store_true",
@@ -112,6 +112,33 @@ def add_parsers(sub) -> None:
     p = common(sub.add_parser("run-review", help="write static review.html"))
     p.add_argument("--baseline-results", type=Path)
     phoenix_args(p)
+    p = sub.add_parser(
+        "temporal-worker",
+        help="run the opt-in local Temporal eval worker process (#253)",
+    )
+    p.add_argument("--address", default="localhost:7233")
+    p.add_argument("--namespace", default="default")
+    p.add_argument("--task-queue", default="eval-pilot")
+    p = common(
+        sub.add_parser(
+            "run-temporal",
+            help="drive golden cases via the opt-in local Temporal eval workflow (#253)",
+        )
+    )
+    p.add_argument("--all", action="store_true")
+    p.add_argument("--web")
+    p.add_argument("--timeout", type=int, default=120)
+    p.add_argument("--address", default="localhost:7233")
+    p.add_argument("--namespace", default="default")
+    p.add_argument("--task-queue", default="eval-pilot")
+    p.add_argument(
+        "--finalize",
+        action="store_true",
+        help="freeze captures, grade reports, and render review.html on completion",
+    )
+    p.add_argument("--capture-dir", type=Path)
+    p.add_argument("--heartbeat-timeout", type=float, default=15.0)
+    p.add_argument("case_ids", nargs="*")
 
 
 def _git_head() -> str | None:
@@ -418,9 +445,84 @@ def run_review_export(a) -> int:
     return 0
 
 
+def _import_temporal_pilot():
+    try:
+        import temporalio  # noqa: F401
+
+        from evals import temporal_pilot
+    except ModuleNotFoundError as err:
+        if err.name == "temporalio" or (err.name or "").startswith("temporalio."):
+            raise RunError(
+                "temporalio is not installed; install the optional extra with "
+                "`uv run --project tooling/evals --extra temporal evals ...`"
+            ) from err
+        raise
+    return temporal_pilot
+
+
+def temporal_worker_cmd(a) -> int:
+    import asyncio
+
+    tp = _import_temporal_pilot()
+    print(
+        f"temporal eval worker listening on {a.address} "
+        f"(namespace={a.namespace}, task_queue={a.task_queue})",
+        flush=True,
+    )
+    try:
+        asyncio.run(
+            tp.run_temporal_worker(
+                address=a.address,
+                namespace=a.namespace,
+                task_queue=a.task_queue,
+            )
+        )
+    except KeyboardInterrupt:
+        pass
+    return 0
+
+
+def run_temporal_cmd(a) -> int:
+    import asyncio
+
+    from evals.temporal_store import resolve_batch_plan
+
+    tp = _import_temporal_pilot()
+    run_id, run_dir = resolve_run(a.root, a.run)
+    web, wanted, expected, cases_path = resolve_batch_plan(
+        run_dir, a.web, a.case_ids, a.all
+    )
+    result = asyncio.run(
+        tp.run_temporal_eval(
+            str(run_dir),
+            run_id,
+            web,
+            wanted,
+            expected,
+            cases_path=str(cases_path),
+            timeout_s=a.timeout,
+            heartbeat_timeout_s=a.heartbeat_timeout,
+            finalize=a.finalize,
+            capture_dir=str(a.capture_dir) if a.capture_dir else None,
+            address=a.address,
+            namespace=a.namespace,
+            task_queue=a.task_queue,
+        )
+    )
+    fin = result.finalization
+    print(
+        f"temporal summary: status={result.status}; expected {fin.turns_total} turns, "
+        f"recorded {fin.turns_recorded}, incomplete {fin.incomplete_count}, "
+        f"missing {fin.missing_count}, finalized={fin.finalized}"
+    )
+    return 0 if result.status == "complete" else 3
+
+
 HANDLERS = {
     "run-start": run_start,
     "run-live": run_live_cmd,
+    "run-temporal": run_temporal_cmd,
+    "temporal-worker": temporal_worker_cmd,
     "run-freeze": run_freeze,
     "run-grade": run_grade,
     "run-reconcile": run_reconcile,

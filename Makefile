@@ -15,7 +15,7 @@ KV_BUNDLE_OUT = $(or $(OUT),work/kv-hop.yaml)
 # JAEGER=1 adds the optional Jaeger overlay.
 OBS_COMPOSE = -f docker-compose.yml -f docker-compose.phoenix.yml -f docker-compose.observability.yml $(if $(filter 1,$(JAEGER)),-f docker-compose.jaeger.yml)
 
-.PHONY: help eval-stack-up eval-start eval-health eval-smoke eval-run eval-freeze eval-grade eval-compare eval-cost eval-reconcile eval-trace-check eval-review eval-review-serve eval-review-report next-5-commands eval-open eval-all check-bootstrap dev app-serve-dev mcp-dev mcp-smoke dataset-test dataset-smoke smoke test nx-test nx-affected nx-graph bench-test evals-test evals-report gateway-test mcp-test infra-test web-test zone-geometry compose-smoke observability-up observability-down observability-smoke observability-jaeger-smoke observability-dev-up observability-dev-info observability-dev-ask observability-dev-burst observability-dev-metrics observability-dev-logs observability-dev-down local-aws-litellm-compose local-aws-compose local-litellm-compose local-bedrock-direct-compose litellm-traffic litellm-env litellm-smoke litellm-calls litellm-spend litellm-errors litellm-ready litellm-ui litellm-traffic local-aws-refresh phoenix-up phoenix-down phoenix-ui phoenix-purge local-serve-compose local-serve-refresh local-bedrock-compose bedrock-smoke m5-bedrock-smoke m6-bedrock-smoke dashboard tf-dispatch tf-resume tf-park inference-validate inference-sync inference-config inference-secret inference-bootstrap inference-deploy inference-up inference-tunnel inference-connect inference-smoke inference-warmup inference-capacity inference-restart inference-gateway-restart inference-controls-on inference-controls-off inference-verify-workers inference-e1 inference-fresh-up inference-tmux-start inference-tmux-end inference-serve-smoke inference-run inference-pull-evidence inference-pull-range inference-kv-image inference-kv-render inference-kv-smoke evidence-analyze evidence-notebook evidence-notebook-open inference-teardown replay-fanout replay-multi-turn replay-compare-strategies replay-strategy-manual replay-strategy-crewai replay-e3-least-loaded replay-e3-prefix-then-load replay-e4-admission-on replay-e4-admission-off replay-e3-large-prefix-least-loaded replay-e3-large-prefix-prefix-then-load replay-e5 replay-arrival-rate trace-request
+.PHONY: help eval-stack-up eval-start eval-health eval-smoke eval-run eval-temporal-up eval-temporal-down eval-temporal-worker eval-temporal-run eval-freeze eval-grade eval-compare eval-cost eval-reconcile eval-trace-check eval-review eval-review-serve eval-review-report next-5-commands eval-open eval-all check-bootstrap dev app-serve-dev mcp-dev mcp-smoke dataset-test dataset-smoke smoke test nx-test nx-affected nx-graph bench-test evals-test evals-report gateway-test mcp-test infra-test web-test zone-geometry compose-smoke observability-up observability-down observability-smoke observability-jaeger-smoke observability-dev-up observability-dev-info observability-dev-ask observability-dev-burst observability-dev-metrics observability-dev-logs observability-dev-down local-aws-litellm-compose local-aws-compose local-litellm-compose local-bedrock-direct-compose litellm-traffic litellm-env litellm-smoke litellm-calls litellm-spend litellm-errors litellm-ready litellm-ui litellm-traffic local-aws-refresh phoenix-up phoenix-down phoenix-ui phoenix-purge local-serve-compose local-serve-refresh local-bedrock-compose bedrock-smoke m5-bedrock-smoke m6-bedrock-smoke dashboard tf-dispatch tf-resume tf-park inference-validate inference-sync inference-config inference-secret inference-bootstrap inference-deploy inference-up inference-tunnel inference-connect inference-smoke inference-warmup inference-capacity inference-restart inference-gateway-restart inference-controls-on inference-controls-off inference-verify-workers inference-e1 inference-fresh-up inference-tmux-start inference-tmux-end inference-serve-smoke inference-run inference-pull-evidence inference-pull-range inference-kv-image inference-kv-render inference-kv-smoke evidence-analyze evidence-notebook evidence-notebook-open inference-teardown replay-fanout replay-multi-turn replay-compare-strategies replay-strategy-manual replay-strategy-crewai replay-e3-least-loaded replay-e3-prefix-then-load replay-e4-admission-on replay-e4-admission-off replay-e3-large-prefix-least-loaded replay-e3-large-prefix-prefix-then-load replay-e5 replay-arrival-rate trace-request
 
 
 help: ## Show available commands
@@ -456,6 +456,30 @@ eval-smoke: ## One real golden case (det-001) into <run>/smoke; needs EVAL_CONFI
 eval-run: ## Full golden run (37 cases / 43 turns, no retries); needs EVAL_CONFIRM=1
 	$(EVAL_GUARD)
 	@$(EVAL_LOG) eval-run -- $(EVAL) run-live $(EVAL_RUN_ARG) --all --web $(EVAL_WEB)
+
+# Opt-in local Temporal eval workflow pilot (#253): separate Compose project, never part of base stack.
+TEMPORAL_PROJECT ?= ai-analytics-temporal
+TEMPORAL_ADDRESS ?= localhost:$(or $(TEMPORAL_PORT),7233)
+TEMPORAL_TASK_QUEUE ?= eval-pilot
+EVAL_TEMPORAL := uv run --project tooling/evals --extra temporal evals
+
+eval-temporal-up: ## Start the opt-in standalone local Temporal dev server (localhost:7233, UI :8233)
+	TEMPORAL_PORT=$(or $(TEMPORAL_PORT),7233) TEMPORAL_UI_PORT=$(or $(TEMPORAL_UI_PORT),8233) \
+		docker compose -p $(TEMPORAL_PROJECT) -f docker-compose.temporal.yml up -d
+	@echo "Temporal gRPC: $(TEMPORAL_ADDRESS)  UI: http://127.0.0.1:$(or $(TEMPORAL_UI_PORT),8233)"
+
+eval-temporal-down: ## Stop only the opt-in local Temporal dev server project
+	docker compose -p $(TEMPORAL_PROJECT) -f docker-compose.temporal.yml down --remove-orphans
+
+eval-temporal-worker: ## Run the opt-in local Temporal eval worker process (foreground; Ctrl-C to stop)
+	$(EVAL_TEMPORAL) temporal-worker --address $(TEMPORAL_ADDRESS) --task-queue $(TEMPORAL_TASK_QUEUE)
+
+eval-temporal-run: ## Run golden cases through the opt-in Temporal workflow (usage: make eval-temporal-run EVAL_CONFIRM=1 [EVAL_CASES="det-001 multi-001"] [EVAL_FINALIZE=1])
+	$(EVAL_GUARD)
+	@$(EVAL_LOG) eval-temporal-run -- $(EVAL_TEMPORAL) run-temporal $(EVAL_RUN_ARG) --web $(EVAL_WEB) \
+		--address $(TEMPORAL_ADDRESS) --task-queue $(TEMPORAL_TASK_QUEUE) \
+		$(if $(filter 1,$(EVAL_FINALIZE)),--finalize) \
+		$(if $(EVAL_CASES),$(EVAL_CASES),--all)
 
 eval-freeze: ## Snapshot this run's capture lines (exact eval_run_id) + sha256
 	@$(EVAL_LOG) eval-freeze -- $(EVAL) run-freeze $(EVAL_RUN_ARG)

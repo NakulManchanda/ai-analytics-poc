@@ -12,6 +12,8 @@ dependencies = [
 reference = ["duckdb>=1.1,<2"]
 # Opt-in LLM-judge metrics. Normal CI never imports this.
 judge = ["deepeval>=3.0,<4"]
+# Opt-in local Temporal eval orchestration pilot (#253).
+temporal = ["temporalio>=1.20,<2"]
 
 [project.scripts]
 evals = "evals.cli:main"
@@ -22,6 +24,7 @@ dev = [
     "duckdb>=1.1,<2",
     "pytest>=8.4,<9",
     "ruff>=0.12,<1",
+    "temporalio>=1.20,<2",
 ]
 
 [build-system]

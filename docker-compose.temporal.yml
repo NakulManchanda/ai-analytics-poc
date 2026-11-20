@@ -1,0 +1,27 @@
+# Opt-in standalone local Temporal dev server for the #253 offline eval pilot.
+# Never part of base docker-compose.yml and never deployed to AWS.
+# Start: make eval-temporal-up   Stop: make eval-temporal-down
+# gRPC:  127.0.0.1:${TEMPORAL_PORT:-7233}
+# WebUI: http://127.0.0.1:${TEMPORAL_UI_PORT:-8233}
+services:
+  temporal:
+    image: ${TEMPORAL_IMAGE:-temporalio/temporal:1.10.1}
+    command:
+      - server
+      - start-dev
+      - --ip
+      - 0.0.0.0
+      - --port
+      - "7233"
+      - --ui-port
+      - "8233"
+      - --db-filename
+      - /data/temporal-dev.db
+    ports:
+      - "127.0.0.1:${TEMPORAL_PORT:-7233}:7233"
+      - "127.0.0.1:${TEMPORAL_UI_PORT:-8233}:8233"
+    volumes:
+      - temporal_dev_data:/data
+
+volumes:
+  temporal_dev_data:
