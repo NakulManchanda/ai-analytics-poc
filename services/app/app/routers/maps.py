@@ -84,7 +84,7 @@ FILTER_KEYS = frozenset(
     }
 )
 FilterScalar = (
-    Annotated[str, Field(max_length=128)] | StrictBool | StrictInt | StrictFloat
+    Annotated[str, Field(max_length=80)] | StrictBool | StrictInt | StrictFloat
 )
 
 _SAFE = {
@@ -100,7 +100,7 @@ class MapZonesRequest(BaseModel):
 
     zone_role: Literal["pickup", "dropoff"]
     measure: MapMeasure
-    filters: dict[str, FilterScalar] | None = Field(default=None, max_length=23)
+    filters: dict[str, FilterScalar] | None = Field(default=None, max_length=16)
 
 
 def _fail(status: int, code: str) -> HTTPException:

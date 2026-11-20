@@ -259,3 +259,25 @@ def test_warm_curated_zones_fails_open_when_mcp_unavailable() -> None:
     cache = maps._ResponseCache()
     assert maps.warm_curated_zones(cache, lambda: client) == 0
     assert len(client.calls) == 1
+
+
+def test_request_rejects_over_16_filters_or_80_char_value_with_422() -> None:
+    client = FakeMapClient()
+    http = _client(client)
+    too_many = {k: "x" for k in sorted(maps.FILTER_KEYS)[:17]}
+    r1 = http.post(
+        "/api/map/zones",
+        json={"zone_role": "pickup", "measure": "trip_count", "filters": too_many},
+    )
+    assert r1.status_code == 422
+
+    r2 = http.post(
+        "/api/map/zones",
+        json={
+            "zone_role": "pickup",
+            "measure": "trip_count",
+            "filters": {"pickup_borough": "x" * 81},
+        },
+    )
+    assert r2.status_code == 422
+    assert len(client.calls) == 0

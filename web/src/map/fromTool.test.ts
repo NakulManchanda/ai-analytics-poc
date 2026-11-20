@@ -8,7 +8,7 @@ describe("launchFromToolRequest", () => {
       launchFromToolRequest({
         tool_name: "aggregate_taxi_data",
         dimensions: ["pickup_zone"],
-        measures: ["average_fare", "trip_count"],
+        measures: ["average_fare"],
         filters: { pickup_week_part: "weekend", pickup_hour_min: 6, payment_type: 1 },
         limit: 10,
       }),
@@ -19,6 +19,19 @@ describe("launchFromToolRequest", () => {
         filters: { pickup_week_part: "weekend", pickup_hour_min: 6, payment_type: 1 },
       },
       dropped: false,
+    });
+  });
+
+  it("flags extra measures as dropped", () => {
+    expect(
+      launchFromToolRequest({
+        tool_name: "aggregate_taxi_data",
+        dimensions: ["pickup_zone"],
+        measures: ["average_fare", "trip_count"],
+      }),
+    ).toEqual({
+      request: { zone_role: "pickup", measure: "average_fare" },
+      dropped: true,
     });
   });
 

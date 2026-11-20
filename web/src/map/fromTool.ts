@@ -22,7 +22,9 @@ export function launchFromToolRequest(payload: Record<string, unknown>): MapLaun
   if (dim !== "pickup_zone" && dim !== "dropoff_zone") return null;
   const pickup = dim === "pickup_zone";
   let dropped = false;
-  const first = Array.isArray(payload.measures) ? payload.measures[0] : undefined;
+  const measuresList = Array.isArray(payload.measures) ? payload.measures : [];
+  if (measuresList.length > 1) dropped = true;
+  const first = measuresList[0];
   const known = typeof first === "string" && (MEASURES as readonly string[]).includes(first);
   if (!known) dropped = true;
   const filters: Record<string, FilterValue> = {};
