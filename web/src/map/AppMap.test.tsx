@@ -30,11 +30,11 @@ class FakeEventSource {
 const ev = (id: number, type: string, payload: object, run = "run_map_1") =>
   ({ event_id: `e${id}`, event_type: type, run_id: run, conversation_id: "conv_map", sequence: id, timestamp: "2026-11-16T00:00:00Z", payload });
 
-function stubBackend(toolPayload: object | null) {
+function stubBackend(toolPayload: object | null, toolOutcome: "tool.completed" | "tool.failed" = "tool.completed") {
   const events = [
-    ...(toolPayload ? [ev(1, "tool.requested", toolPayload)] : []),
-    ev(2, "answer.delta", { delta: "Answer text." }),
-    ev(3, "run.completed", { input_tokens: 1, output_tokens: 1, total_tokens: 2, end_to_end_latency_ms: 5 }),
+    ...(toolPayload ? [ev(1, "tool.requested", toolPayload), ev(2, toolOutcome, {})] : []),
+    ev(3, "answer.delta", { delta: "Answer text." }),
+    ev(4, "run.completed", { input_tokens: 1, output_tokens: 1, total_tokens: 2, end_to_end_latency_ms: 5 }),
   ];
   registry.set("/api/runs/run_map_1/events", events.map((e) => `data: ${JSON.stringify(e)}\n\n`).join(""));
   const fetchMock = vi.fn().mockImplementation(async (input: string) => {
@@ -120,9 +120,20 @@ describe("App map integration", () => {
   it.each([
     ["no tool call", null],
     ["a non-zone aggregation", { tool_name: "aggregate_taxi_data", dimensions: ["pickup_borough"], measures: ["trip_count"] }],
+    ["a multi-dimension aggregation", { tool_name: "aggregate_taxi_data", dimensions: ["pickup_zone", "pickup_hour"], measures: ["trip_count"] }],
     ["another tool", { tool_name: "compare_taxi_segments", dimensions: ["pickup_zone"] }],
   ])("does not show Show on map for %s", async (_name, payload) => {
     stubBackend(payload);
+    render(<App />);
+    await runPrompt();
+    expect(screen.queryByRole("button", { name: "Show on map" })).toBeNull();
+  });
+
+  it("does not show Show on map when the zone aggregation fails", async () => {
+    stubBackend(
+      { tool_name: "aggregate_taxi_data", dimensions: ["pickup_zone"], measures: ["trip_count"] },
+      "tool.failed",
+    );
     render(<App />);
     await runPrompt();
     expect(screen.queryByRole("button", { name: "Show on map" })).toBeNull();

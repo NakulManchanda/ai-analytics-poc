@@ -92,7 +92,7 @@ const ZoneTable = memo(function ZoneTable({ regions, unmapped, measure, unit, se
         {regions.map((r) =>
           onSelect ? (
             <tr
-              key={r.label}
+              key={r.location_ids.join(",")}
               aria-selected={selectedId !== null && r.location_ids.includes(selectedId)}
               className={selectedId !== null && r.location_ids.includes(selectedId) ? "zm-row-selected" : undefined}
             >
@@ -105,7 +105,7 @@ const ZoneTable = memo(function ZoneTable({ regions, unmapped, measure, unit, se
               <td>Yes</td>
             </tr>
           ) : (
-            <tr key={r.label}>
+            <tr key={r.location_ids.join(",")}>
               <th scope="row">{r.label}</th>
               <td>{fmt(r.value)}</td>
               <td>Yes</td>
@@ -208,8 +208,13 @@ function LoadedMap({ artifact: a, projected, interactive, onAskAboutZone }: Load
       };
     });
     const sorted = [...choropleth.regions].sort((x, y) => y.value - x.value);
-    const rank = new Map<string, number>();
-    sorted.forEach((r, i) => rank.set(r.label, i > 0 && r.value === sorted[i - 1].value ? rank.get(sorted[i - 1].label)! : i + 1));
+    const rank = new Map<number, number>();
+    let prevRank = 1;
+    sorted.forEach((r, i) => {
+      const rRank = i > 0 && r.value === sorted[i - 1].value ? prevRank : i + 1;
+      prevRank = rRank;
+      for (const id of r.location_ids) rank.set(id, rRank);
+    });
     return { regionOf, paths, rank, initialView: fitView(a, projected) };
   }, [a, projected, choropleth, highlight, palette, min, max, unit]);
 
@@ -333,10 +338,10 @@ function LoadedMap({ artifact: a, projected, interactive, onAskAboutZone }: Load
                     <dt>{choropleth.measure}</dt>
                     <dd>{selectedRegion ? `${fmt(selectedRegion.value)} ${unit}` : "No data for this zone"}</dd>
                   </div>
-                  {selectedRegion && (
+                  {selectedRegion && selectedId !== null && (
                     <div>
                       <dt>Rank</dt>
-                      <dd>{`${model.rank.get(selectedRegion.label)} of ${choropleth.regions.length}`}</dd>
+                      <dd>{`${model.rank.get(selectedId)} of ${choropleth.regions.length}`}</dd>
                     </div>
                   )}
                 </dl>

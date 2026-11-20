@@ -124,4 +124,24 @@ describe("ZoneMap interactions", () => {
     expect(prov).toHaveTextContent("query query_fixture0001");
     expect(prov.textContent).not.toMatch(/null|run |tool call/);
   });
+
+  it("assigns distinct ranks and React keys to same-named zones with different values", async () => {
+    const splitCorona = {
+      ...valid,
+      layers: [
+        {
+          ...valid.layers[0],
+          regions: [
+            { label: "Corona", location_ids: [56], value: 264 },
+            { label: "Corona", location_ids: [57], value: 10 },
+          ],
+        },
+      ],
+    };
+    const { container } = await renderMap(undefined, splitCorona);
+    fireEvent.click(path(container, 56));
+    expect(screen.getByLabelText("Selected zone")).toHaveTextContent("1 of 2");
+    fireEvent.click(path(container, 57));
+    expect(screen.getByLabelText("Selected zone")).toHaveTextContent("2 of 2");
+  });
 });

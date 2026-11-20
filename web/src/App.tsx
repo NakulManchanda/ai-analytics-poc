@@ -258,6 +258,7 @@ function LiveApp() {
       await new Promise<void>((resolve) => {
         const eventSource = new EventSource(runAccepted.events_url);
 
+        let pendingMapLaunch: MapLaunch | null = null;
         const handleRawEvent = (sseEvent: Event) => {
           try {
             const dataStr = (sseEvent as MessageEvent).data;
@@ -273,8 +274,13 @@ function LiveApp() {
               accumulatedAnswer += p.delta;
               setStreamingAnswer(accumulatedAnswer);
             } else if (eventType === "tool.requested") {
-              const launch = launchFromToolRequest(p);
+              pendingMapLaunch = launchFromToolRequest(p);
+            } else if (eventType === "tool.completed") {
+              const launch = pendingMapLaunch;
+              pendingMapLaunch = null;
               if (launch) setMapLaunchByRun((prev) => (prev[runId] ? prev : { ...prev, [runId]: launch }));
+            } else if (eventType === "tool.failed") {
+              pendingMapLaunch = null;
             } else if (eventType === "answer.audio" && typeof p.data === "string") {
               // Handle audio event: decode base64 MP3 and play
               handleAudioEvent(p.data);
@@ -322,6 +328,8 @@ function LiveApp() {
           "answer.delta",
           "answer.audio",
           "tool.requested",
+          "tool.completed",
+          "tool.failed",
           "run.received",
           "run.completed",
           "run.failed",

@@ -103,7 +103,7 @@ describe("MapPanel", () => {
     expect(onAsk).toHaveBeenCalledExactlyOnceWith("Tell me more about taxi activity in the JFK Airport zone.");
   });
 
-  it("prefills from a chat launch and retries without extra filters after a 422", async () => {
+  it("keeps the original filter scope on 422 and drops chat filters only when asked", async () => {
     fetchMock.mockResolvedValueOnce({
       ok: false,
       status: 422,
@@ -119,6 +119,12 @@ describe("MapPanel", () => {
         dropped: false,
       },
     });
+    expect(await screen.findByRole("alert")).toHaveTextContent("The map request was rejected by the data tool.");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(screen.getByText(/Also applying from the chat run: vendor = CMT/)).toBeInTheDocument();
+    expect(screen.queryByText("Some filters not applied.")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Drop chat filters and retry" }));
     expect(await screen.findByRole("img")).toBeInTheDocument();
     expect(screen.getByLabelText("Measure")).toHaveValue("median_fare");
     expect(screen.getByRole("button", { name: "Dropoff zones" })).toHaveAttribute("aria-pressed", "true");
@@ -127,6 +133,7 @@ describe("MapPanel", () => {
     const sent = bodies(fetchMock);
     expect(sent[0].filters).toEqual({ vendor: "CMT", pickup_week_part: "weekday", pickup_hour_min: 7 });
     expect(sent[1].filters).toEqual({ pickup_week_part: "weekday", pickup_hour_min: 7 });
+    expect(screen.queryByText(/Also applying from the chat run/)).toBeNull();
     expect(screen.getByText("Some filters not applied.")).toBeInTheDocument();
   });
 

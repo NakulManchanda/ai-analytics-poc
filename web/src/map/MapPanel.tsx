@@ -49,8 +49,8 @@ function hourOf(v: FilterValue | undefined): string {
 export function MapPanel({ launch, onAskAboutZone, onClose }: Props) {
   const initial = launch?.request;
   const initialFilters = initial?.filters ?? {};
-  // Filters the controls do not offer are carried along unchanged.
-  const [extraFilters] = useState(() =>
+  // Filters the controls do not offer are carried along unchanged unless the user explicitly drops them.
+  const [extraFilters, setExtraFilters] = useState(() =>
     Object.fromEntries(Object.entries(initialFilters).filter(([k]) => !PANEL_FILTERS.includes(k))),
   );
   const [role, setRole] = useState<ZoneRole>(initial?.zone_role ?? "pickup");
@@ -88,17 +88,7 @@ export function MapPanel({ launch, onAskAboutZone, onClose }: Props) {
     const ctl = new AbortController();
     const timer = window.setTimeout(async () => {
       try {
-        let artifact: unknown;
-        try {
-          artifact = await fetchZoneMap(request, ctl.signal);
-        } catch (error) {
-          // The server rejects keys it does not support; retry once with the panel's own filters.
-          const extras = Object.keys(extraFilters);
-          if (!(error instanceof MapRequestError) || error.status !== 422 || extras.length === 0) throw error;
-          const kept = Object.fromEntries(Object.entries(request.filters ?? {}).filter(([k]) => PANEL_FILTERS.includes(k)));
-          artifact = await fetchZoneMap({ ...request, filters: kept }, ctl.signal);
-          setDropped(true);
-        }
+        const artifact = await fetchZoneMap(request, ctl.signal);
         if (!ctl.signal.aborted) setLoad({ status: "ready", artifact });
       } catch (error) {
         if (ctl.signal.aborted) return;
@@ -113,7 +103,7 @@ export function MapPanel({ launch, onAskAboutZone, onClose }: Props) {
       window.clearTimeout(timer);
       ctl.abort();
     };
-  }, [request, hoursInvalid, attempt, extraFilters]);
+  }, [request, hoursInvalid, attempt]);
 
   const extraList = Object.entries(extraFilters);
 
@@ -176,6 +166,21 @@ export function MapPanel({ launch, onAskAboutZone, onClose }: Props) {
           <button type="button" className="btn-text" onClick={() => setAttempt((n) => n + 1)}>
             Retry
           </button>
+          {extraList.length > 0 && (
+            <>
+              {" "}
+              <button
+                type="button"
+                className="btn-text"
+                onClick={() => {
+                  setExtraFilters({});
+                  setDropped(true);
+                }}
+              >
+                Drop chat filters and retry
+              </button>
+            </>
+          )}
         </p>
       )}
       {load.artifact !== null && load.status !== "error" && (

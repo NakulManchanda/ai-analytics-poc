@@ -41,6 +41,7 @@ describe("launchFromToolRequest", () => {
     ["non-zone dimension", { tool_name: "aggregate_taxi_data", dimensions: ["pickup_borough"], measures: ["trip_count"] }],
     ["no dimensions", { tool_name: "aggregate_taxi_data", measures: ["trip_count"] }],
     ["both zone dimensions", { tool_name: "aggregate_taxi_data", dimensions: ["pickup_zone", "dropoff_zone"] }],
+    ["multiple dimensions with a zone", { tool_name: "aggregate_taxi_data", dimensions: ["pickup_zone", "pickup_hour"], measures: ["trip_count"] }],
   ])("returns null for %s", (_name, payload) => {
     expect(launchFromToolRequest(payload)).toBeNull();
   });
