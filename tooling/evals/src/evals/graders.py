@@ -305,10 +305,7 @@ _SUPER_MAX = r"longest|highest|most|largest|biggest|greatest|busiest|maximum"
 _SUPER_MIN = r"shortest|lowest|least|smallest|fewest|minimum|cheapest"
 _SUPER = re.compile(rf"\b({_SUPER_MAX}|{_SUPER_MIN})\b", re.IGNORECASE)
 _CLAUSE_SPLIT = re.compile(
-    r"[;\n]|\.\s|"
-    r",\s(?!with\s+(?:[*_]*\s*)?(?:an?\b|the\b|average\b|avg\b|median\b|total\b|p95\b|fare\b|tip\b|trip\b|distance\b|duration\b|\$|\d))|"
-    r"\s(?:while|whereas|but)\s|\sand\s(?=the\s)",
-    re.IGNORECASE,
+    r"[;\n]|\.\s|,\s|\s(?:while|whereas|but)\s|\sand\s(?=the\s)", re.IGNORECASE
 )
 _RANKING_Q = re.compile(
     r"\b(top|most|least|highest|lowest|busiest|longest|shortest|best|worst|largest|"
