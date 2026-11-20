@@ -258,7 +258,8 @@ function LiveApp() {
       await new Promise<void>((resolve) => {
         const eventSource = new EventSource(runAccepted.events_url);
 
-        let pendingMapLaunch: MapLaunch | null = null;
+        let unstartedMapLaunch: MapLaunch | null = null;
+        const pendingMapLaunches = new Map<string, MapLaunch | null>();
         const handleRawEvent = (sseEvent: Event) => {
           try {
             const dataStr = (sseEvent as MessageEvent).data;
@@ -269,18 +270,39 @@ function LiveApp() {
             };
             const eventType = event.event_type || sseEvent.type;
             const p = event.payload || {};
+            const toolCallId = typeof p.tool_call_id === "string" && p.tool_call_id ? p.tool_call_id : null;
 
             if (eventType === "answer.delta" && typeof p.delta === "string") {
               accumulatedAnswer += p.delta;
               setStreamingAnswer(accumulatedAnswer);
             } else if (eventType === "tool.requested") {
-              pendingMapLaunch = launchFromToolRequest(p);
+              const launch = launchFromToolRequest(p);
+              if (toolCallId) {
+                pendingMapLaunches.set(toolCallId, launch);
+              } else {
+                unstartedMapLaunch = launch;
+              }
+            } else if (eventType === "tool.started") {
+              if (toolCallId && !pendingMapLaunches.has(toolCallId)) {
+                pendingMapLaunches.set(toolCallId, unstartedMapLaunch);
+                unstartedMapLaunch = null;
+              }
             } else if (eventType === "tool.completed") {
-              const launch = pendingMapLaunch;
-              pendingMapLaunch = null;
+              let launch: MapLaunch | null = null;
+              if (toolCallId) {
+                launch = pendingMapLaunches.get(toolCallId) ?? null;
+                pendingMapLaunches.delete(toolCallId);
+              } else if (pendingMapLaunches.size === 0) {
+                launch = unstartedMapLaunch;
+                unstartedMapLaunch = null;
+              }
               if (launch) setMapLaunchByRun((prev) => (prev[runId] ? prev : { ...prev, [runId]: launch }));
             } else if (eventType === "tool.failed") {
-              pendingMapLaunch = null;
+              if (toolCallId) {
+                pendingMapLaunches.delete(toolCallId);
+              } else if (pendingMapLaunches.size === 0) {
+                unstartedMapLaunch = null;
+              }
             } else if (eventType === "answer.audio" && typeof p.data === "string") {
               // Handle audio event: decode base64 MP3 and play
               handleAudioEvent(p.data);
@@ -328,6 +350,7 @@ function LiveApp() {
           "answer.delta",
           "answer.audio",
           "tool.requested",
+          "tool.started",
           "tool.completed",
           "tool.failed",
           "run.received",

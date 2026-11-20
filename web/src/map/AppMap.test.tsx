@@ -138,4 +138,41 @@ describe("App map integration", () => {
     await runPrompt();
     expect(screen.queryByRole("button", { name: "Show on map" })).toBeNull();
   });
+
+  it("tracks pending launches by tool_call_id across interleaved tool events", async () => {
+    // Interleaved: zone aggregation fails while metadata tool completes, then reverse.
+    const events1 = [
+      ev(1, "tool.requested", { tool_name: "aggregate_taxi_data", dimensions: ["pickup_zone"], measures: ["trip_count"] }),
+      ev(2, "tool.started", { tool_call_id: "call_zone", tool_name: "aggregate_taxi_data" }),
+      ev(3, "tool.requested", { tool_name: "query_taxi_data", analysis: "top_pickup_zones" }),
+      ev(4, "tool.started", { tool_call_id: "call_meta", tool_name: "query_taxi_data" }),
+      ev(5, "tool.completed", { tool_call_id: "call_meta", query_id: "q_meta" }),
+      ev(6, "tool.failed", { tool_call_id: "call_zone", tool_name: "aggregate_taxi_data", error: "boom" }),
+      ev(7, "answer.delta", { delta: "Answer text." }),
+      ev(8, "run.completed", { input_tokens: 1, output_tokens: 1, total_tokens: 2, end_to_end_latency_ms: 5 }),
+    ];
+    stubBackend(null);
+    registry.set("/api/runs/run_map_1/events", events1.map((e) => `data: ${JSON.stringify(e)}\n\n`).join(""));
+    render(<App />);
+    await runPrompt();
+    expect(screen.queryByRole("button", { name: "Show on map" })).toBeNull();
+  });
+
+  it("shows Show on map when a zone aggregation succeeds after another tool fails", async () => {
+    const events2 = [
+      ev(1, "tool.requested", { tool_name: "aggregate_taxi_data", dimensions: ["pickup_zone"], measures: ["trip_count"] }),
+      ev(2, "tool.started", { tool_call_id: "call_zone", tool_name: "aggregate_taxi_data" }),
+      ev(3, "tool.requested", { tool_name: "query_taxi_data", analysis: "top_pickup_zones" }),
+      ev(4, "tool.started", { tool_call_id: "call_meta", tool_name: "query_taxi_data" }),
+      ev(5, "tool.failed", { tool_call_id: "call_meta", tool_name: "query_taxi_data", error: "boom" }),
+      ev(6, "tool.completed", { tool_call_id: "call_zone", query_id: "q_zone" }),
+      ev(7, "answer.delta", { delta: "Answer text." }),
+      ev(8, "run.completed", { input_tokens: 1, output_tokens: 1, total_tokens: 2, end_to_end_latency_ms: 5 }),
+    ];
+    stubBackend(null);
+    registry.set("/api/runs/run_map_1/events", events2.map((e) => `data: ${JSON.stringify(e)}\n\n`).join(""));
+    render(<App />);
+    await runPrompt();
+    expect(await screen.findByRole("button", { name: "Show on map" })).toBeInTheDocument();
+  });
 });
