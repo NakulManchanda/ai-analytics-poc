@@ -40,6 +40,7 @@ class CaseActivityInput:
     case_id: str
     expected_turns: list[list]
     cases_path: str | None = None
+    expected_dataset_sha256: str | None = None
     timeout_s: int = 120
     heartbeat_interval_s: float = 1.0
 
@@ -84,6 +85,7 @@ class EvalBatchInput:
     expected_turns: list[list]
     case_turn_counts: dict[str, int] = field(default_factory=dict)
     cases_path: str | None = None
+    expected_dataset_sha256: str | None = None
     timeout_s: int = 120
     heartbeat_timeout_s: float = 15.0
     finalize: bool = False
@@ -118,11 +120,32 @@ async def init_eval_activity(inp: InitRunInput) -> None:
 @activity.defn
 async def execute_case_activity(inp: CaseActivityInput) -> CaseActivityResult:
     """Run or reconcile one whole multi-turn golden case with periodic activity heartbeats."""
+    import hashlib
+    import json
     from pathlib import Path
 
-    from evals.temporal_store import execute_case_reconcilable, load_cases_raw
+    from evals.dataset import DEFAULT_DATASET
+    from evals.temporal_store import execute_case_reconcilable
 
-    cases = load_cases_raw(Path(inp.cases_path) if inp.cases_path else None)
+    path = Path(inp.cases_path) if inp.cases_path else DEFAULT_DATASET
+    if not path.is_file():
+        raise ValueError(f"dataset file missing: {path}")
+    raw_bytes = path.read_bytes()
+    expected_sha = inp.expected_dataset_sha256
+    if not expected_sha:
+        manifest_p = Path(inp.run_dir) / "manifest.json"
+        if manifest_p.is_file():
+            manifest = json.loads(manifest_p.read_text())
+            if manifest.get("split") and manifest.get("dataset_sha256"):
+                expected_sha = manifest["dataset_sha256"]
+    if expected_sha:
+        actual_sha = hashlib.sha256(raw_bytes).hexdigest()
+        if actual_sha != expected_sha:
+            raise ValueError(
+                f"dataset sha256 mismatch for {path}: "
+                f"expected={expected_sha[:12]} actual={actual_sha[:12]}"
+            )
+    cases = [json.loads(x) for x in raw_bytes.decode().splitlines() if x.strip()]
     by_id = {c["id"]: c for c in cases}
     if inp.case_id not in by_id:
         raise ValueError(f"unknown case_id {inp.case_id!r}")
@@ -292,6 +315,7 @@ class EvalBatchWorkflow:
                         case_id=cid,
                         expected_turns=inp.expected_turns,
                         cases_path=inp.cases_path,
+                        expected_dataset_sha256=inp.expected_dataset_sha256,
                         timeout_s=inp.timeout_s,
                         heartbeat_interval_s=hb_interval,
                     ),
@@ -367,6 +391,7 @@ async def run_temporal_eval(
     expected_turns: list[tuple[str, int]],
     *,
     cases_path: str | None = None,
+    expected_dataset_sha256: str | None = None,
     timeout_s: int = 120,
     heartbeat_timeout_s: float = 15.0,
     finalize: bool = False,
@@ -376,6 +401,7 @@ async def run_temporal_eval(
     task_queue: str = DEFAULT_TASK_QUEUE,
 ) -> EvalBatchResult:
     """Start (or attach to) the deterministic ``EvalBatchWorkflow`` for ``eval_run_id`` and await its result."""
+    import json
     from pathlib import Path
 
     from temporalio.client import Client
@@ -385,6 +411,14 @@ async def run_temporal_eval(
     turn_counts: dict[str, int] = {}
     for cid, _ in expected_turns:
         turn_counts[cid] = turn_counts.get(cid, 0) + 1
+
+    resolved_sha = expected_dataset_sha256
+    if not resolved_sha:
+        manifest_p = Path(run_dir) / "manifest.json"
+        if manifest_p.is_file():
+            manifest = json.loads(manifest_p.read_text())
+            if manifest.get("split") and manifest.get("dataset_sha256"):
+                resolved_sha = manifest["dataset_sha256"]
 
     client = await Client.connect(address, namespace=namespace)
     wf_id = workflow_id_for_run(eval_run_id)
@@ -396,6 +430,7 @@ async def run_temporal_eval(
         expected_turns=[[c, i] for c, i in expected_turns],
         case_turn_counts=turn_counts,
         cases_path=str(Path(cases_path).resolve()) if cases_path else None,
+        expected_dataset_sha256=resolved_sha,
         timeout_s=timeout_s,
         heartbeat_timeout_s=heartbeat_timeout_s,
         finalize=finalize,

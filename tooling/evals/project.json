@@ -8,7 +8,14 @@
     "test": {
       "executor": "nx:run-commands",
       "cache": true,
-      "inputs": ["default", "pythonTooling", "captureContract", "mcpToolSchemas"],
+      "inputs": [
+        "default",
+        "pythonTooling",
+        "captureContract",
+        "mcpToolSchemas",
+        "promptBundles",
+        "rootMakefile"
+      ],
       "options": {
         "command": "uv run --project tooling/evals pytest tooling/evals/tests"
       }

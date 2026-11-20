@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from pathlib import Path
 
 from evals.schema import GoldenCase
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_DATASET = PACKAGE_ROOT / "datasets/golden/v1/cases.jsonl"
+DEFAULT_HOLDOUT_DATASET = PACKAGE_ROOT / "datasets/holdout/v1/cases.jsonl"
+DEFAULT_SPLITS = PACKAGE_ROOT / "datasets/golden/v1/splits.json"
 REQUIRED_CATEGORIES = ("deterministic", "react", "multi_turn", "unsupported", "failure")
+REQUIRED_SPLITS = ("dev", "regression", "holdout")
 
 
 class DatasetError(ValueError):
@@ -18,6 +22,94 @@ class DatasetError(ValueError):
 
 def dataset_sha256(path: Path = DEFAULT_DATASET) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def splits_sha256(path: Path = DEFAULT_SPLITS) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def load_holdout_cases(path: Path = DEFAULT_HOLDOUT_DATASET) -> list[GoldenCase]:
+    return load_cases(path)
+
+
+def resolve_dataset_for_split(split: str | None) -> Path:
+    return DEFAULT_HOLDOUT_DATASET if split == "holdout" else DEFAULT_DATASET
+
+
+def resolve_manifest_dataset(manifest: dict, *, verify_hash: bool = True) -> Path:
+    rel = manifest.get("dataset")
+    if isinstance(rel, str) and rel:
+        p = Path(rel) if Path(rel).is_absolute() else PACKAGE_ROOT / rel
+        if not p.is_file():
+            raise DatasetError(f"manifest dataset file missing: {p}")
+    else:
+        p = resolve_dataset_for_split(manifest.get("split"))
+        if not p.is_file():
+            raise DatasetError(f"dataset file missing: {p}")
+    expected_sha = manifest.get("dataset_sha256")
+    if verify_hash and expected_sha:
+        actual_sha = dataset_sha256(p)
+        if actual_sha != expected_sha:
+            raise DatasetError(
+                f"dataset sha256 mismatch for {p}: "
+                f"manifest={expected_sha[:12]} actual={actual_sha[:12]}"
+            )
+    return p
+
+
+def load_splits(
+    path: Path = DEFAULT_SPLITS,
+    cases: list[GoldenCase] | None = None,
+    holdout_cases: list[GoldenCase] | None = None,
+) -> dict[str, list[str]]:
+    """Load and validate the disjoint dev/regression/holdout split sidecar."""
+    raw = json.loads(path.read_text())
+    splits = {s: list(raw.get(s, [])) for s in REQUIRED_SPLITS}
+    v1_cases = cases if cases is not None else load_cases()
+    ho_cases = (
+        holdout_cases
+        if holdout_cases is not None
+        else load_holdout_cases(DEFAULT_HOLDOUT_DATASET)
+    )
+    validate_splits(splits, v1_cases, ho_cases)
+    return splits
+
+
+def validate_splits(
+    splits: dict[str, list[str]],
+    cases: list[GoldenCase],
+    holdout_cases: list[GoldenCase] | None = None,
+) -> None:
+    v1_by_id = {c.id: c for c in cases}
+    ho_by_id = {c.id: c for c in (holdout_cases or [])}
+    id_overlap = set(v1_by_id) & set(ho_by_id)
+    if id_overlap:
+        raise DatasetError(
+            f"holdout dataset overlaps golden/v1 case ids: {sorted(id_overlap)}"
+        )
+    all_by_id = {**v1_by_id, **ho_by_id}
+    seen: set[str] = set()
+    for split in REQUIRED_SPLITS:
+        ids = splits.get(split)
+        if not ids:
+            raise DatasetError(f"missing or empty split: {split!r}")
+        if len(ids) != len(set(ids)):
+            raise DatasetError(f"duplicate case ids in split {split!r}")
+        expected_pool = ho_by_id if (split == "holdout" and ho_by_id) else all_by_id
+        unknown = [cid for cid in ids if cid not in expected_pool]
+        if unknown:
+            raise DatasetError(f"unknown case ids in split {split!r}: {unknown}")
+        overlap = seen & set(ids)
+        if overlap:
+            raise DatasetError(f"splits overlap on cases: {sorted(overlap)}")
+        seen.update(ids)
+        present_cats = {all_by_id[cid].category for cid in ids}
+        missing_cats = [c for c in REQUIRED_CATEGORIES if c not in present_cats]
+        if missing_cats:
+            raise DatasetError(f"split {split!r} missing categories: {missing_cats}")
+    unassigned = sorted(set(all_by_id) - seen)
+    if unassigned:
+        raise DatasetError(f"cases missing from splits: {unassigned}")
 
 
 def load_cases(path: Path = DEFAULT_DATASET) -> list[GoldenCase]:

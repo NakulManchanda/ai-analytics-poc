@@ -16,6 +16,8 @@
     "pythonTooling": ["{workspaceRoot}/pyproject.toml"],
     "datasetConfig": ["{workspaceRoot}/config/datasets/**/*"],
     "captureContract": ["{workspaceRoot}/services/app/app/capture/**/*"],
+    "promptBundles": ["{workspaceRoot}/services/app/app/prompts/bundles.py"],
+    "rootMakefile": ["{workspaceRoot}/Makefile"],
     "mapContract": [
       "{workspaceRoot}/config/datasets/nyc_yellow_taxi_2024_01.toml",
       "{workspaceRoot}/web/src/map/taxi-zones.v1.json",

@@ -165,15 +165,55 @@ def run_live(
             "to re-run incomplete cases (no overwrite)"
         )
     web = web or manifest.get("web") or "http://localhost:3100"
+    if cases_path == CASES and manifest.get("split"):
+        from evals.dataset import DatasetError, resolve_manifest_dataset
+
+        try:
+            cases_path = resolve_manifest_dataset(manifest)
+        except DatasetError as err:
+            raise RunError(str(err)) from err
+    elif (
+        manifest.get("split")
+        and manifest.get("dataset_sha256")
+        and cases_path.is_file()
+    ):
+        from evals.dataset import dataset_sha256
+
+        actual_sha = dataset_sha256(cases_path)
+        if actual_sha != manifest["dataset_sha256"]:
+            raise RunError(
+                f"dataset sha256 mismatch for {cases_path}: "
+                f"manifest={manifest['dataset_sha256'][:12]} actual={actual_sha[:12]}"
+            )
     cases = [json.loads(x) for x in cases_path.read_text().splitlines() if x.strip()]
     by_id = {c["id"]: c for c in cases}
-    wanted = (
-        [c["id"] for c in cases]
-        if all_cases
-        else case_ids
-        or manifest.get("cases")
-        or ([c["id"] for c in cases] if resume and not smoke else [])
-    )
+    manifest_split = manifest.get("split")
+    manifest_cases = list(manifest.get("cases") or [])
+    if manifest_split and not smoke:
+        if not manifest_cases:
+            raise RunError(
+                f"run {run_id!r} is pinned to split {manifest_split!r} but manifest has no cases"
+            )
+        if all_cases:
+            raise RunError(
+                f"run {run_id!r} is pinned to split {manifest_split!r}; "
+                "cannot override with --all"
+            )
+        out_of_split = [c for c in case_ids if c not in manifest_cases]
+        if out_of_split:
+            raise RunError(
+                f"run {run_id!r} is pinned to split {manifest_split!r}; "
+                f"out-of-split cases rejected: {out_of_split}"
+            )
+        wanted = list(case_ids) if case_ids else manifest_cases
+    else:
+        wanted = (
+            [c["id"] for c in cases]
+            if all_cases
+            else case_ids
+            or manifest_cases
+            or ([c["id"] for c in cases] if resume and not smoke else [])
+        )
     unknown = [c for c in wanted if c not in by_id]
     if unknown or not wanted:
         raise RunError(f"unknown or empty case list: {unknown}")

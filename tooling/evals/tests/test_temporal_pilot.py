@@ -1188,3 +1188,93 @@ def test_starter_rerun_after_completion_attaches_without_reexecuting(
     assert json.loads((run_dir / "state.json").read_text()) == state_after_first
     assert (run_dir / "review.html").stat().st_mtime_ns == review_mtime_after_first
     assert server.total_posts == 1
+
+
+def test_temporal_resolve_batch_plan_enforces_manifest_split(tmp_path: Path) -> None:
+    """Split-pinned manifests reject --all and out-of-split case_ids before any workflow starts."""
+    from evals.runs import RunError
+
+    cases_path = tmp_path / "cases.jsonl"
+    cases_path.write_text(
+        "".join(
+            json.dumps({"id": cid, "turns": [{"question": "q1"}]}) + "\n"
+            for cid in ("det-001", "det-008")
+        )
+    )
+    run_dir = tmp_path / "holdout-20260101T000000Z"
+    run_dir.mkdir()
+    (run_dir / "manifest.json").write_text(
+        json.dumps(
+            {"split": "holdout", "cases": ["det-008"], "web": "http://localhost:3000"}
+        )
+    )
+
+    with pytest.raises(RunError, match="pinned to split 'holdout'"):
+        resolve_batch_plan(run_dir, None, [], True, cases_path=cases_path)
+    with pytest.raises(RunError, match="out-of-split cases rejected"):
+        resolve_batch_plan(run_dir, None, ["det-001"], False, cases_path=cases_path)
+
+    web, wanted, expected, _ = resolve_batch_plan(
+        run_dir, None, [], False, cases_path=cases_path
+    )
+    assert web == "http://localhost:3000"
+    assert wanted == ["det-008"]
+    assert expected == [("det-008", 0)]
+
+
+def test_temporal_activity_rejects_dataset_edit_after_planning_with_zero_requests(
+    tmp_path: Path,
+) -> None:
+    """Mutating the dataset file after workflow planning must fail in the worker before any app POST."""
+    from evals.dataset import dataset_sha256
+    from evals.temporal_pilot import CaseActivityInput, execute_case_activity
+
+    cases_path = tmp_path / "cases.jsonl"
+    cases_path.write_text(
+        json.dumps({"id": "hold-001", "turns": [{"question": "original question"}]})
+        + "\n"
+    )
+    original_sha = dataset_sha256(cases_path)
+    run_dir = tmp_path / "holdout-20260101T000000Z"
+    run_dir.mkdir()
+    capture_dir = tmp_path / "_capture"
+    server = _FixtureEvalServer(capture_dir)
+    try:
+        (run_dir / "manifest.json").write_text(
+            json.dumps(
+                {
+                    "split": "holdout",
+                    "cases": ["hold-001"],
+                    "dataset": str(cases_path),
+                    "dataset_sha256": original_sha,
+                    "web": server.url,
+                }
+            )
+        )
+        # Planning succeeds while dataset matches the manifest hash.
+        web, wanted, expected, resolved_path = resolve_batch_plan(
+            run_dir, None, [], False, cases_path=cases_path
+        )
+        assert wanted == ["hold-001"]
+
+        # Mutate the dataset file on disk AFTER workflow planning, before worker execution.
+        cases_path.write_text(
+            json.dumps({"id": "hold-001", "turns": [{"question": "mutated question"}]})
+            + "\n"
+        )
+
+        inp = CaseActivityInput(
+            run_dir=str(run_dir),
+            eval_run_id=run_dir.name,
+            web=web,
+            case_id="hold-001",
+            expected_turns=[[c, i] for c, i in expected],
+            cases_path=str(resolved_path),
+            expected_dataset_sha256=original_sha,
+            timeout_s=10,
+        )
+        with pytest.raises(ValueError, match="dataset sha256 mismatch"):
+            asyncio.run(execute_case_activity(inp))
+        assert server.total_posts == 0
+    finally:
+        server.close()
