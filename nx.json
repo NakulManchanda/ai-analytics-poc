@@ -19,10 +19,18 @@
     "mapContract": [
       "{workspaceRoot}/config/datasets/nyc_yellow_taxi_2024_01.toml",
       "{workspaceRoot}/web/src/map/taxi-zones.v1.json",
+      "{workspaceRoot}/web/src/map/fixtures/**/*",
       "{workspaceRoot}/services/app/app/artifacts/taxi_zones_v1.json"
     ],
     "datasetSpike": ["{workspaceRoot}/services/dataset_spike/**/*"],
-    "mcpToolSchemas": ["{workspaceRoot}/services/mcp/mcp_server/**/*"]
+    "mcpToolSchemas": ["{workspaceRoot}/services/mcp/mcp_server/**/*"],
+    "litellmConfig": ["{workspaceRoot}/infra/litellm/config.yaml"],
+    "terraformConfig": ["{workspaceRoot}/infra/terraform/*.tf"],
+    "inferenceBundle": [
+      "{workspaceRoot}/infra/inference/**/*",
+      "{workspaceRoot}/infra/observability/inference/**/*",
+      "{workspaceRoot}/Makefile"
+    ]
   },
   "targetDefaults": {
     "test": {

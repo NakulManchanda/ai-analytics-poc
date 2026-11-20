@@ -13,8 +13,7 @@
         "pythonTooling",
         "{workspaceRoot}/services/app/pyproject.toml",
         "{workspaceRoot}/services/app/uv.lock",
-        "{workspaceRoot}/infra/inference/tests/**/*",
-        "{workspaceRoot}/infra/inference/k8s/gateway/**/*"
+        "inferenceBundle"
       ],
       "options": {
         "command": "uv run --project services/app pytest infra/inference/tests"

@@ -152,14 +152,9 @@ jobs:
           fi
 
           if [ -z "${BASE_SHA}" ] || [ "${BASE_SHA}" = "0000000000000000000000000000000000000000" ] || ! git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
-            if git rev-parse --verify HEAD~1 >/dev/null 2>&1; then
-              BASE_SHA="$(git rev-parse HEAD~1)"
-              echo "Falling back to HEAD~1 (${BASE_SHA}) as Nx affected base"
-            else
-              echo "No valid base SHA available; running all Nx project targets"
-              npx nx run-many -t "${TARGETS}"
-              exit 0
-            fi
+            echo "No valid base SHA available (e.g. brand-new branch push or rewritten history); running all Nx project targets"
+            npx nx run-many -t "${TARGETS}"
+            exit 0
           fi
 
           echo "Nx affected base: ${BASE_SHA}..HEAD"

@@ -8,7 +8,16 @@
     "test": {
       "executor": "nx:run-commands",
       "cache": true,
-      "inputs": ["default", "pythonTooling", "mapContract", "captureContract", "mcpToolSchemas"],
+      "inputs": [
+        "default",
+        "pythonTooling",
+        "mapContract",
+        "captureContract",
+        "mcpToolSchemas",
+        "datasetSpike",
+        "litellmConfig",
+        "terraformConfig"
+      ],
       "options": {
         "command": "uv run --project services/app pytest services/app/tests"
       }

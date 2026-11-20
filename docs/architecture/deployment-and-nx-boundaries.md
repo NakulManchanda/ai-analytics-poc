@@ -72,13 +72,16 @@ These runtimes are infrastructure or external services, not Nx projects:
 | Named / explicit input | Files covered | Consuming Nx projects | Why |
 | --- | --- | --- | --- |
 | `sharedGlobals` | `nx.json` | All 5 (`web`, `app`, `mcp`, `evals`, `gateway`) | Changes to Nx cache/input rules invalidate all projects. |
+| Root `package-lock.json` (Nx lockfile tracking) | `package-lock.json` | All 5 (`web`, `app`, `mcp`, `evals`, `gateway`) | Bumping the pinned Nx runner version intentionally invalidates all projects. |
 | `pythonTooling` | `pyproject.toml` | `app`, `mcp`, `evals`, `gateway` (excludes `web`) | Root pytest and ruff settings apply to Python services only. |
 | `datasetConfig` | `config/datasets/**/*` | `mcp` | MCP reads dataset metadata/pin config at runtime and builds it into its image. |
-| `mapContract` | `config/datasets/nyc_yellow_taxi_2024_01.toml`, `web/src/map/taxi-zones.v1.json`, `services/app/app/artifacts/taxi_zones_v1.json` | `app`, `web` | Shared `map_artifact` v1 geometry/zone contract without coupling unrelated `web/src/**` edits to `app`. |
+| `mapContract` | `config/datasets/nyc_yellow_taxi_2024_01.toml`, `web/src/map/taxi-zones.v1.json`, `web/src/map/fixtures/**/*`, `services/app/app/artifacts/taxi_zones_v1.json` | `app`, `web` | Shared `map_artifact` v1 geometry, allowlist, and golden fixtures (`services/app/tests/test_map_artifact.py`) without coupling unrelated `web/src/**` edits to `app`. |
 | `captureContract` | `services/app/app/capture/**/*` | `app`, `evals` | `evals` parses and grades capture records produced by `app`. |
-| `datasetSpike` | `services/dataset_spike/**/*` | `mcp` | `services/mcp` installs `services/dataset_spike` as a direct local dependency. |
+| `datasetSpike` | `services/dataset_spike/**/*` | `app`, `mcp` | `services/mcp` installs `services/dataset_spike` directly; `services/app/tests/test_query_catalogue.py` imports `dataset_spike.query_spec` and `test_map_router.py` inspects `query_spec.py`. |
 | `mcpToolSchemas` | `services/mcp/mcp_server/**/*` | `mcp`, `app`, `evals` | `evals` verifies tool contracts and `services/app/tests/test_deep_agents_strategy.py` inspects `services/mcp/mcp_server/server.py`. |
-| Gateway app-env & infra inputs | `services/app/pyproject.toml`, `services/app/uv.lock`, `infra/inference/tests/**/*`, `infra/inference/k8s/gateway/**/*` | `gateway` | `gateway` has no standalone `pyproject.toml`; it runs under `services/app`'s lockfile and tests against `infra/inference/tests` + k8s manifests. Using file inputs (instead of `implicitDependencies: ["app"]`) ensures unrelated `services/app/app/*` edits do not trigger `gateway`. |
+| `litellmConfig` | `infra/litellm/config.yaml` | `app` | `services/app/tests/test_litellm_config_pricing.py` validates LiteLLM proxy pricing/model config. |
+| `terraformConfig` | `infra/terraform/*.tf` | `app` | `services/app/tests/test_agent_strategy.py` and `test_litellm_config_pricing.py` assert invariants against `variables.tf` and `ecs.tf`. |
+| `inferenceBundle` + `app` lockfile | `services/app/pyproject.toml`, `services/app/uv.lock`, `infra/inference/**/*`, `infra/observability/inference/**/*`, `Makefile` | `gateway` | `gateway` has no standalone `pyproject.toml` (runs under `services/app` venv), and `infra/inference/tests` validates `mooncake/`, `kv_transfer/`, `scripts/`, `k8s/`, `experiments/`, `infra/observability/inference/`, and `Makefile` targets. Using file inputs (instead of `implicitDependencies: ["app"]`) keeps unrelated `services/app/app/*` edits isolated from `gateway`. |
 
 ### Target caching policy
 
@@ -100,21 +103,28 @@ These runtimes are infrastructure or external services, not Nx projects:
 
 ## 5. Affected-CI validation, measured timings, and keep-vs-fallback decision
 
-`.github/workflows/ci.yml` now runs an additive `nx-affected` job in parallel with the existing `python-services` job (`fetch-depth: 0`, `NX_DAEMON=false`, `NX_TUI=false`). `python-services` is untouched and remains the authoritative full-repo gate while `nx-affected` is validated on real PRs and `main` pushes.
+`.github/workflows/ci.yml` now runs an additive `nx-affected` job in parallel with the existing `python-services` job (`fetch-depth: 0`, `NX_DAEMON=false`, `NX_TUI=false`). On `pull_request`, it diffs against `github.event.pull_request.base.sha`; on `push`, it diffs against `github.event.before`, and whenever the base SHA is empty, zeroed (`0000...`, e.g., a brand-new branch push), or unreachable, it falls back directly to `npx nx run-many` rather than `HEAD~1` so multi-commit pushes cannot silently skip earlier commits. `python-services` is untouched and remains the authoritative full-repo gate while `nx-affected` is validated on real PRs and `main` pushes.
 
 ### Empirical affected-scope proofs
 
-Verified locally with `NX_DAEMON=false npx nx show projects --affected --files=<path>` (and confirmed with a temporary uncommitted git diff against `HEAD`):
+Verified locally with `NX_DAEMON=false npx nx show projects --affected --files=<path>` (and confirmed with a temporary uncommitted git diff on `web/src/App.tsx` against `--base=HEAD`):
 
 | Simulated edit | Affected projects reported by Nx | Expected? |
 | --- | --- | --- |
 | `web/src/App.tsx` | `web` | Yes — frontend-only change does not run Python tests/lints. |
+| `web/src/map/fixtures/pickup-count-choropleth.v1.json` | `app`, `web` | Yes — shared map artifact fixture is tested by both `web` and `services/app/tests/test_map_artifact.py`. |
 | `pyproject.toml` | `app`, `evals`, `gateway`, `mcp` | Yes — shared Python tooling fans out to all Python projects, skips `web`. |
 | `config/datasets/nyc_yellow_taxi_2024_01.toml` | `app`, `mcp`, `web` | Yes — dataset/map config triggers all three consumers. |
 | `services/app/app/capture/schema.py` | `app`, `evals` | Yes — capture contract fans out to `evals` without pulling in `gateway`. |
 | `services/app/uv.lock` | `app`, `gateway` | Yes — shared `services/app` lockfile invalidates `gateway`. |
-| `services/dataset_spike/dataset_spike/analytics.py` | `mcp` | Yes — direct local dependency invalidates `mcp`. |
-| `services/mcp/mcp_server/server.py` | `mcp`, `app`, `evals` | Yes — MCP tool surface invalidates `mcp`, `app`, and `evals`. |
+| `services/dataset_spike/dataset_spike/query_spec.py` | `app`, `mcp` | Yes — direct local dep of `mcp` and imported/read by `services/app/tests/test_query_catalogue.py` & `test_map_router.py`. |
+| `services/mcp/mcp_server/server.py` | `app`, `evals`, `mcp` | Yes — MCP tool surface invalidates `mcp`, `app`, and `evals`. |
+| `infra/litellm/config.yaml` | `app` | Yes — validated by `services/app/tests/test_litellm_config_pricing.py`. |
+| `infra/terraform/ecs.tf` | `app` | Yes — validated by `services/app/tests/test_agent_strategy.py`. |
+| `infra/inference/scripts/deploy.sh` | `gateway` | Yes — inference bundle scripts are covered by `infra/inference/tests`. |
+| `infra/observability/inference/grafana/dashboards.py` | `gateway` | Yes — inference Grafana/Prometheus contracts are covered by `infra/inference/tests`. |
+| `Makefile` | `gateway` | Yes — `test_scripts_contract.py` and `test_remote_dir_contract.py` assert inference Make targets. |
+| `package-lock.json` | `app`, `evals`, `gateway`, `mcp`, `web` | Yes — bumping root Nx runner dependencies intentionally marks all 5 projects affected. |
 
 ### Measured local wall times
 
@@ -139,6 +149,8 @@ Measured on Apple Silicon (`node v24.10.0`, `uv 0.9.26`, `nx 24.0.6`):
 Because `nx-affected` currently installs all three Python virtualenvs (`services/app`, `services/mcp`, `tooling/evals`) and `web` dependencies up front on cold runners before filtering tasks, its CI speedup is concentrated in **task execution time** (e.g., ~5.9s vs ~73.6s on a `web`-only change, a >12x task reduction) rather than runner bootstrap time.
 
 ### Keep-vs-fallback decision rule (Nx vs `Makefile` + GitHub Actions path filtering)
+
+Note on scope: `services/dataset_spike` standalone tests, `tooling/benchmarks`, and root `tests/` intentionally remain outside the initial 5 Nx projects (covered by `python-services` CI and `make test`). Any future decision to replace `python-services` with Nx requires either bringing those suites into Nx or keeping dedicated CI jobs for them.
 
 Keep Nx as the repo's task runner if, after 2–4 weeks of real PRs:
 - `nx-affected` stays green with zero false-negative skips on cross-project contract edits,

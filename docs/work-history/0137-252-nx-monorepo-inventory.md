@@ -9,20 +9,27 @@ Document the repository's real package, executable, Docker image, and environmen
 ## Decisions
 - **Minimal root Nx pin without package-manager migration:** Added root `package.json` + `package-lock.json` pinning `"nx": "24.0.6"` in `devDependencies` with no `workspaces` field. Left `web/package.json`, `web/package-lock.json`, and `web/Dockerfile` completely untouched.
 - **Explicit targets only, zero inference plugins:** Configured `nx.json` with `"useInferencePlugins": false` and `"analytics": false`, plus `.nxignore` excluding `.venv/`, `vev/`, `.worktrees/`, `.vscode/`, `metrics/`, `data/`, `**/__pycache__/`, `**/.venv/`, `web/dist/`, and `infra/terraform/.terraform/`. Updated `.gitignore` for `.nx/` and `/node_modules/`.
-- **Truthful cross-project inputs & strict cache boundaries:** Defined `project.json` for `web`, `app`, `mcp`, `evals`, and `gateway` wrapping existing `npm --prefix web` and `uv run --project ...` commands via `nx:run-commands`. Used targeted `namedInputs` (`pythonTooling`, `datasetConfig`, `captureContract`, `mapContract`, `datasetSpike`, `mcpToolSchemas`) and file-level `services/app/uv.lock` inputs on `gateway` (instead of broad `implicitDependencies: ["app"]`) so `web`-only edits affect only `web` and `services/app/app/capture/schema.py` affects `app` + `evals` without falsely triggering `gateway`. Marked all live, stateful, dev, and deploy targets (`web:dev`, `web:deploy`, `app:dev`, `app:worker`, `mcp:dev`, `evals:run-live`, `evals:review-serve`) with `"cache": false`.
-- **Additive CI + Make ergonomics:** Added a parallel `nx-affected` job to `.github/workflows/ci.yml` (`fetch-depth: 0`, `NX_DAEMON=false`, `NX_TUI=false`, robust `pull_request` and `push` base-SHA handling with fallback) without removing or weakening `python-services`. Added `make nx-test`, `make nx-affected`, and `make nx-graph` while keeping all existing Make targets intact.
+- **Truthful cross-project inputs & strict cache boundaries:** Defined `project.json` for `web`, `app`, `mcp`, `evals`, and `gateway` wrapping existing `npm --prefix web` and `uv run --project ...` commands via `nx:run-commands`. Audited all cross-folder imports and file reads across all 5 test suites and encoded them via `namedInputs` (`pythonTooling`, `datasetConfig`, `captureContract`, `mapContract` including `web/src/map/fixtures/**/*`, `datasetSpike`, `mcpToolSchemas`, `litellmConfig`, `terraformConfig`, and `inferenceBundle` covering `infra/inference/**/*`, `infra/observability/inference/**/*`, and `Makefile`) plus file-level `services/app/uv.lock` inputs on `gateway` (instead of broad `implicitDependencies: ["app"]`). This ensures `web/src/App.tsx` edits affect only `web` while every real cross-boundary test dependency invalidates its actual consumer. Marked all live, stateful, dev, and deploy targets (`web:dev`, `web:deploy`, `app:dev`, `app:worker`, `mcp:dev`, `evals:run-live`, `evals:review-serve`) with `"cache": false`.
+- **Additive CI + Make ergonomics:** Added a parallel `nx-affected` job to `.github/workflows/ci.yml` (`fetch-depth: 0`, `NX_DAEMON=false`, `NX_TUI=false`) without removing or weakening `python-services`. When `github.event.before` is missing, zeroed (`0000...`), or unreachable (e.g. brand-new branch push), it falls back directly to `npx nx run-many` rather than `HEAD~1` so multi-commit pushes cannot miss earlier commits. Added `make nx-test`, `make nx-affected`, and `make nx-graph` while keeping all existing Make targets intact.
 - **Grounded boundary inventory:** Authored `docs/architecture/deployment-and-nx-boundaries.md` linked from `README.md`, including an explicit `app.worker` Compose-vs-ECS audit, separate inventory of deferred packages (`tooling/benchmarks`, `services/dataset_spike`, `tooling/experiments`, root `tests/`) and supporting runtimes, measured timings, coverage gaps, and a clear keep-vs-fallback rule vs `Makefile` + Actions path filtering.
 
 ## Verification
 - `NX_DAEMON=false npx nx show projects`: exact 5 projects (`gateway`, `evals`, `app`, `mcp`, `web`).
 - Affected-scope proofs (`nx show projects --affected --files=...` + temporary real git-diff check against `HEAD`):
   - `web/src/App.tsx` -> `web`
+  - `web/src/map/fixtures/pickup-count-choropleth.v1.json` -> `app`, `web`
   - `pyproject.toml` -> `app`, `evals`, `gateway`, `mcp`
   - `config/datasets/nyc_yellow_taxi_2024_01.toml` -> `app`, `mcp`, `web`
   - `services/app/app/capture/schema.py` -> `app`, `evals`
   - `services/app/uv.lock` -> `app`, `gateway`
-  - `services/dataset_spike/dataset_spike/analytics.py` -> `mcp`
-  - `services/mcp/mcp_server/server.py` -> `mcp`, `app`, `evals`
+  - `services/dataset_spike/dataset_spike/query_spec.py` -> `app`, `mcp`
+  - `services/mcp/mcp_server/server.py` -> `app`, `evals`, `mcp`
+  - `infra/litellm/config.yaml` -> `app`
+  - `infra/terraform/ecs.tf` -> `app`
+  - `infra/inference/scripts/deploy.sh` -> `gateway`
+  - `infra/observability/inference/grafana/dashboards.py` -> `gateway`
+  - `Makefile` -> `gateway`
+  - `package-lock.json` -> `app`, `evals`, `gateway`, `mcp`, `web`
 - Local caching & wall times:
   - Cold `nx run-many -t test,lint,format-check,compile,build,fixture-report`: 18/18 tasks passed in `73.64s`.
   - Warm `make nx-test`: 18/18 tasks hit local cache (`100%`, `11ms` Nx runner, `0.99s` wall time).
