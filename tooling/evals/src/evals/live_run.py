@@ -165,6 +165,10 @@ def run_live(
             "to re-run incomplete cases (no overwrite)"
         )
     web = web or manifest.get("web") or "http://localhost:3100"
+    if cases_path == CASES and manifest.get("split"):
+        from evals.dataset import resolve_manifest_dataset
+
+        cases_path = resolve_manifest_dataset(manifest)
     cases = [json.loads(x) for x in cases_path.read_text().splitlines() if x.strip()]
     by_id = {c["id"]: c for c in cases}
     manifest_split = manifest.get("split")

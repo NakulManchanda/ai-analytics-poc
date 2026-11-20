@@ -442,7 +442,9 @@ eval-stack-up: litellm-env ## Rebuild/start the local LiteLLM stack with live ev
 	LITELLM_STORE_PROMPTS=false LITELLM_LOG=INFO WEB_PORT=$(or $(WEB_PORT),3000) VOICE_ENABLED=$(or $(VOICE_ENABLED),false) \
 	docker compose $(EVAL_COMPOSE) up --build -d
 
-eval-start: ## Start a run (usage: make eval-start LABEL=<name> [EVAL_SPLIT=dev|holdout]); refuses a label that was ever used
+EVAL_DEFAULT_ALL = $(shell python3 -c 'import json,pathlib,sys; root,run=sys.argv[1],sys.argv[2]; cur=pathlib.Path(root,".current"); r=run or (cur.read_text().strip() if cur.is_file() else ""); mp=pathlib.Path(root,r,"manifest.json") if r else None; m=json.loads(mp.read_text()) if (mp and mp.is_file()) else {}; print("" if (m.get("split") or m.get("cases")) else "--all")' "$(EVAL_ROOT)" "$(EVAL_RUN)")
+
+eval-start: ## Start a run (usage: make eval-start LABEL=<name> [EVAL_SPLIT=dev|regression|holdout]); refuses a label that was ever used
 	@[ -n "$(EVAL_LABEL)" ] || { echo "LABEL=<name> is required"; exit 2; }
 	@EVAL_LOG_NEW_RUN=1 $(EVAL_LOG) eval-start -- $(EVAL) run-start --root $(EVAL_ROOT) --label $(EVAL_LABEL) --web $(EVAL_WEB) $(if $(EVAL_SPLIT),--split $(EVAL_SPLIT))
 
@@ -453,9 +455,9 @@ eval-smoke: ## One real golden case (det-001) into <run>/smoke; needs EVAL_CONFI
 	$(EVAL_GUARD)
 	@$(EVAL_LOG) eval-smoke -- $(EVAL) run-live $(EVAL_RUN_ARG) --smoke --web $(EVAL_WEB) det-001
 
-eval-run: ## Full golden run (37 cases / 43 turns; pass EVAL_SPLIT=dev|holdout matching eval-start to run that split); needs EVAL_CONFIRM=1
+eval-run: ## Run the active run's saved manifest split/cases, or all 37 golden cases if unpinned; needs EVAL_CONFIRM=1
 	$(EVAL_GUARD)
-	@$(EVAL_LOG) eval-run -- $(EVAL) run-live $(EVAL_RUN_ARG) $(if $(EVAL_SPLIT),,--all) --web $(EVAL_WEB)
+	@$(EVAL_LOG) eval-run -- $(EVAL) run-live $(EVAL_RUN_ARG) $(EVAL_DEFAULT_ALL) --web $(EVAL_WEB)
 
 # Opt-in local Temporal eval workflow pilot (#253): separate Compose project, never part of base stack.
 TEMPORAL_PROJECT ?= ai-analytics-temporal
@@ -474,12 +476,12 @@ eval-temporal-down: ## Stop only the opt-in local Temporal dev server project
 eval-temporal-worker: ## Run the opt-in local Temporal eval worker process (foreground; Ctrl-C to stop)
 	$(EVAL_TEMPORAL) temporal-worker --address $(TEMPORAL_ADDRESS) --task-queue $(TEMPORAL_TASK_QUEUE)
 
-eval-temporal-run: ## Run golden cases through the opt-in Temporal workflow (usage: make eval-temporal-run EVAL_CONFIRM=1 [EVAL_SPLIT=dev|holdout] [EVAL_CASES="det-001 multi-001"] [EVAL_FINALIZE=1])
+eval-temporal-run: ## Run golden cases through the opt-in Temporal workflow using the saved manifest split/cases or --all if unpinned (usage: make eval-temporal-run EVAL_CONFIRM=1 [EVAL_CASES="det-001 multi-001"] [EVAL_FINALIZE=1])
 	$(EVAL_GUARD)
 	@$(EVAL_LOG) eval-temporal-run -- $(EVAL_TEMPORAL) run-temporal $(EVAL_RUN_ARG) --web $(EVAL_WEB) \
 		--address $(TEMPORAL_ADDRESS) --task-queue $(TEMPORAL_TASK_QUEUE) \
 		$(if $(filter 1,$(EVAL_FINALIZE)),--finalize) \
-		$(if $(EVAL_CASES),$(EVAL_CASES),$(if $(EVAL_SPLIT),,--all))
+		$(if $(EVAL_CASES),$(EVAL_CASES),$(EVAL_DEFAULT_ALL))
 
 eval-freeze: ## Snapshot this run's capture lines (exact eval_run_id) + sha256
 	@$(EVAL_LOG) eval-freeze -- $(EVAL) run-freeze $(EVAL_RUN_ARG)

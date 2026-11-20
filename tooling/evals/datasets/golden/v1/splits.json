@@ -1,6 +1,7 @@
 {
-  "version": "v1",
-  "rationale": "Disjoint dev (20) and holdout (17) partition of golden/v1/cases.jsonl. Every category is represented in both splits and multi-turn scenarios stay whole. Motivating unsupported/causal failure-cluster cases inspected from frozen Nova Pro runs (uns-001, uns-002, uns-003, multi-005) are placed in dev so prompt iteration happens on dev and holdout remains sealed for promotion checks.",
+  "version": "v2",
+  "holdout_dataset": "datasets/holdout/v1/cases.jsonl",
+  "rationale": "Disjoint 3-way partition: dev (20 v1 cases, including motivating unsupported/causal cluster uns-001..003 and multi-005), regression (17 previously exercised v1 cases preserved as a regression suite), and holdout (10 fresh unseen cases in datasets/holdout/v1/cases.jsonl with independent DuckDB SQL reference facts and zero overlap with dev, regression, or prompt bundles). Every split covers all 5 categories and keeps multi-turn scenarios whole.",
   "dev": [
     "det-001",
     "det-002",
@@ -23,7 +24,7 @@
     "fail-001",
     "fail-003"
   ],
-  "holdout": [
+  "regression": [
     "det-008",
     "det-009",
     "det-010",
@@ -41,5 +42,17 @@
     "uns-006",
     "fail-002",
     "fail-004"
+  ],
+  "holdout": [
+    "hold-001",
+    "hold-002",
+    "hold-003",
+    "hold-004",
+    "hold-005",
+    "hold-006",
+    "hold-007",
+    "hold-008",
+    "hold-009",
+    "hold-010"
   ]
 }

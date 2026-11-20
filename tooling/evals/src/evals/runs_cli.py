@@ -49,7 +49,7 @@ def add_parsers(sub) -> None:
     p = common(sub.add_parser("run-start", help="create a labelled run folder"), False)
     p.add_argument("--label", required=True)
     p.add_argument("--web")
-    p.add_argument("--split", choices=("dev", "holdout"))
+    p.add_argument("--split", choices=("dev", "regression", "holdout"))
     p.add_argument("--cases", nargs="*", default=[])
     p = common(sub.add_parser("run-live", help="drive golden cases through the app"))
     p.add_argument("--all", action="store_true")
@@ -171,12 +171,14 @@ def run_start(a) -> int:
     if a.split and a.cases:
         raise RunError("pass either --split or --cases, not both")
     from evals.dataset import (
-        DEFAULT_DATASET,
         DEFAULT_SPLITS,
+        PACKAGE_ROOT,
         load_splits,
+        resolve_dataset_for_split,
         splits_sha256,
     )
 
+    ds_path = resolve_dataset_for_split(a.split)
     selected_cases = list(a.cases)
     split_hash: str | None = None
     if a.split:
@@ -191,9 +193,10 @@ def run_start(a) -> int:
         "run_id": run_id,
         "started_at": now.isoformat(),
         "git_head": _git_head(),
+        "dataset": str(ds_path.relative_to(PACKAGE_ROOT)),
         "dataset_sha256": (
-            hashlib.sha256(DEFAULT_DATASET.read_bytes()).hexdigest()
-            if DEFAULT_DATASET.is_file()
+            hashlib.sha256(ds_path.read_bytes()).hexdigest()
+            if ds_path.is_file()
             else None
         ),
         "splits_sha256": split_hash,
@@ -277,13 +280,14 @@ def run_freeze(a) -> int:
 
 
 def run_grade(a) -> int:
-    from evals.dataset import load_cases
+    from evals.dataset import load_cases, resolve_manifest_dataset
     from evals.session import SessionError, render_session_report
 
     _, run_dir = _checked(a)
     snap = run_dir / "captures.snapshot.jsonl"
     if not snap.is_file():
         raise RunError(f"{snap} missing; run `evals run-freeze` first")
+    manifest = json.loads((run_dir / "manifest.json").read_text())
     convs = sorted(
         {
             c
@@ -293,7 +297,7 @@ def run_grade(a) -> int:
             if c
         }
     )
-    cases = load_cases()
+    cases = load_cases(resolve_manifest_dataset(manifest))
     (run_dir / "report").mkdir(exist_ok=True)
     for conv in convs:
         rows: list[dict] = []

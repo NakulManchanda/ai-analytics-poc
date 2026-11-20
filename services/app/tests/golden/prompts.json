@@ -37,7 +37,7 @@
         "b"
       ]
     },
-    "question": "Top \"zones\" {{injected}} {x} café ☃?",
+    "question": "Top \"zones\" {{injected}} {x} caf\u00e9 \u2603?",
     "prior_turns": [
       {
         "question": "first?",
@@ -65,52 +65,52 @@
   "planner": {
     "global_shared": "You are the NYC Taxi Analytics AI Assistant. You have access to governed read-only analytics tools over the NYC yellow taxi dataset. Always base answers strictly on governed query observations and dataset profiles.\nDataset constraints: All queries run against the pinned NYC Taxi trip dataset. Analyses are pre-governed: 'top_pickup_zones', 'trip_volume_by_hour', 'average_distance_by_weekday', and 'average_trip_metrics'.\nAvailable Dataset Schema: {\"columns\":[\"PULocationID\",\"fare_amount\"],\"dataset\":\"nyc-taxi\",\"month\":\"2024-01\",\"z\":{\"a\":[1,2],\"b\":1}}\nChoose exactly ONE governed analysis that answers the question. Do not make multiple tool calls. To compare all boroughs across NYC, call average_trip_metrics with region_name omitted.",
     "conversation_shared": "",
-    "unique_suffix": "Question: Top \"zones\" {{injected}} {x} café ☃?",
+    "unique_suffix": "Question: Top \"zones\" {{injected}} {x} caf\u00e9 \u2603?",
     "prefix_id": "b868aae64bcf500a"
   },
   "planner_prior": {
     "global_shared": "You are the NYC Taxi Analytics AI Assistant. You have access to governed read-only analytics tools over the NYC yellow taxi dataset. Always base answers strictly on governed query observations and dataset profiles.\nDataset constraints: All queries run against the pinned NYC Taxi trip dataset. Analyses are pre-governed: 'top_pickup_zones', 'trip_volume_by_hour', 'average_distance_by_weekday', and 'average_trip_metrics'.\nAvailable Dataset Schema: {\"columns\":[\"PULocationID\",\"fare_amount\"],\"dataset\":\"nyc-taxi\",\"month\":\"2024-01\",\"z\":{\"a\":[1,2],\"b\":1}}\nChoose exactly ONE governed analysis that answers the question. Do not make multiple tool calls. To compare all boroughs across NYC, call average_trip_metrics with region_name omitted.",
     "conversation_shared": "PAST_TURN: {\"answer\": \"A\", \"question\": \"first?\", \"tool\": \"query_taxi_data\"}\nPAST_TURN: {\"n\": 2, \"question\": \"second\"}",
-    "unique_suffix": "Question: Top \"zones\" {{injected}} {x} café ☃?",
+    "unique_suffix": "Question: Top \"zones\" {{injected}} {x} caf\u00e9 \u2603?",
     "prefix_id": "e88e0c1316d20753"
   },
   "planner_custom_system": {
     "global_shared": "CUSTOM SYS\nDataset constraints: All queries run against the pinned NYC Taxi trip dataset. Analyses are pre-governed: 'top_pickup_zones', 'trip_volume_by_hour', 'average_distance_by_weekday', and 'average_trip_metrics'.\nAvailable Dataset Schema: {\"columns\":[\"PULocationID\",\"fare_amount\"],\"dataset\":\"nyc-taxi\",\"month\":\"2024-01\",\"z\":{\"a\":[1,2],\"b\":1}}\nChoose exactly ONE governed analysis that answers the question. Do not make multiple tool calls. To compare all boroughs across NYC, call average_trip_metrics with region_name omitted.",
     "conversation_shared": "",
-    "unique_suffix": "Question: Top \"zones\" {{injected}} {x} café ☃?",
+    "unique_suffix": "Question: Top \"zones\" {{injected}} {x} caf\u00e9 \u2603?",
     "prefix_id": "40a5ac88934f4ebd"
   },
   "answer": {
-    "global_shared": "You are the NYC Taxi Analytics AI Assistant. You have access to governed read-only analytics tools over the NYC yellow taxi dataset. Always base answers strictly on governed query observations and dataset profiles.\nDataset constraints: All queries run against the pinned NYC Taxi trip dataset. Analyses are pre-governed: 'top_pickup_zones', 'trip_volume_by_hour', 'average_distance_by_weekday', and 'average_trip_metrics'.",
+    "global_shared": "You are the NYC Taxi Analytics AI Assistant. You have access to governed read-only analytics tools over the NYC yellow taxi dataset. Always base answers strictly on governed query observations and dataset profiles.\nDataset constraints: All queries run against the pinned NYC Taxi trip dataset. Analyses are pre-governed: 'top_pickup_zones', 'trip_volume_by_hour', 'average_distance_by_weekday', and 'average_trip_metrics'.\nWhen comparing groups, verify which row has the highest or lowest value directly from the query result before naming it, pair every number with its exact row and metric label, and cite only numbers present in the query result.",
     "conversation_shared": "Observation (query_result): {\"columns\":[\"pickup_zone\",\"trip_count\"],\"query_id\":\"q1\",\"row_count\":1,\"rows\":[[\"JFK Airport\",145240]],\"truncated\":false}",
-    "unique_suffix": "Answer the user's question using only this governed query result.\nQuestion: Top \"zones\" {{injected}} {x} café ☃?",
-    "prefix_id": "d5edf79d054b04e5"
+    "unique_suffix": "Answer the user's question using only this governed query result.\nQuestion: Top \"zones\" {{injected}} {x} caf\u00e9 \u2603?",
+    "prefix_id": "4f564808c2fc75b0"
   },
   "answer_schema_prior": {
-    "global_shared": "You are the NYC Taxi Analytics AI Assistant. You have access to governed read-only analytics tools over the NYC yellow taxi dataset. Always base answers strictly on governed query observations and dataset profiles.\nDataset constraints: All queries run against the pinned NYC Taxi trip dataset. Analyses are pre-governed: 'top_pickup_zones', 'trip_volume_by_hour', 'average_distance_by_weekday', and 'average_trip_metrics'.\nSchema: {\"columns\": [\"PULocationID\", \"fare_amount\"], \"dataset\": \"nyc-taxi\", \"month\": \"2024-01\", \"z\": {\"a\": [1, 2], \"b\": 1}}",
+    "global_shared": "You are the NYC Taxi Analytics AI Assistant. You have access to governed read-only analytics tools over the NYC yellow taxi dataset. Always base answers strictly on governed query observations and dataset profiles.\nDataset constraints: All queries run against the pinned NYC Taxi trip dataset. Analyses are pre-governed: 'top_pickup_zones', 'trip_volume_by_hour', 'average_distance_by_weekday', and 'average_trip_metrics'.\nSchema: {\"columns\": [\"PULocationID\", \"fare_amount\"], \"dataset\": \"nyc-taxi\", \"month\": \"2024-01\", \"z\": {\"a\": [1, 2], \"b\": 1}}\nWhen comparing groups, verify which row has the highest or lowest value directly from the query result before naming it, pair every number with its exact row and metric label, and cite only numbers present in the query result.",
     "conversation_shared": "PAST_TURN: {\"answer\": \"A\", \"question\": \"first?\", \"tool\": \"query_taxi_data\"}\nPAST_TURN: {\"n\": 2, \"question\": \"second\"}\nObservation (query_result): {\"columns\":[\"pickup_zone\",\"trip_count\"],\"query_id\":\"q1\",\"row_count\":1,\"rows\":[[\"JFK Airport\",145240]],\"truncated\":false}",
-    "unique_suffix": "Answer the user's question using only this governed query result.\nQuestion: Top \"zones\" {{injected}} {x} café ☃?",
-    "prefix_id": "c7ce504186914d1f"
+    "unique_suffix": "Answer the user's question using only this governed query result.\nQuestion: Top \"zones\" {{injected}} {x} caf\u00e9 \u2603?",
+    "prefix_id": "c3bcc37043d3810a"
   },
   "dataset_profile": {
     "global_shared": "You are the NYC Taxi Analytics AI Assistant. You have access to governed read-only analytics tools over the NYC yellow taxi dataset. Always base answers strictly on governed query observations and dataset profiles.",
     "conversation_shared": "Dataset Profile: {\"columns\":[\"a\",\"b\"],\"row_count\":2964621}",
-    "unique_suffix": "Answer the user's question using only this governed dataset profile.\nQuestion: Top \"zones\" {{injected}} {x} café ☃?",
+    "unique_suffix": "Answer the user's question using only this governed dataset profile.\nQuestion: Top \"zones\" {{injected}} {x} caf\u00e9 \u2603?",
     "prefix_id": "f9d7e912649ede6f"
   },
   "ask": {
     "global_shared": "You are the NYC Taxi Analytics AI Assistant. You have access to governed read-only analytics tools over the NYC yellow taxi dataset. Always base answers strictly on governed query observations and dataset profiles.",
     "conversation_shared": "USER: hi\nASSISTANT: hello",
-    "unique_suffix": "USER: Top \"zones\" {{injected}} {x} café ☃?",
+    "unique_suffix": "USER: Top \"zones\" {{injected}} {x} caf\u00e9 \u2603?",
     "prefix_id": "f4c64e843f431798"
   },
   "ask_no_prior": {
     "global_shared": "You are the NYC Taxi Analytics AI Assistant. You have access to governed read-only analytics tools over the NYC yellow taxi dataset. Always base answers strictly on governed query observations and dataset profiles.",
     "conversation_shared": "",
-    "unique_suffix": "USER: Top \"zones\" {{injected}} {x} café ☃?",
+    "unique_suffix": "USER: Top \"zones\" {{injected}} {x} caf\u00e9 \u2603?",
     "prefix_id": "bb66f3be13404adb"
   },
-  "planner_single_turn": "Choose exactly ONE governed analysis that answers the question. Do not make multiple tool calls. Put every metric the question asks for in that one call's measures list. To compare groups (for example weekday and weekend, or two boroughs), still make one call: group by that field with aggregate_taxi_data, or call compare_taxi_segments once; never one call per group. To compare all boroughs across NYC, call average_trip_metrics with region_name omitted. Dataset schema: {\"dataset\":\"nyc-taxi\",\"month\":\"2024-01\",\"columns\":[\"PULocationID\",\"fare_amount\"],\"z\":{\"b\":1,\"a\":[1,2]}}\nQuestion: Top \"zones\" {{injected}} {x} café ☃?\nThese tools are read-only analytics over the NYC taxi dataset. For a request to modify, delete, insert or update data, answer in one plain sentence that this assistant only reads data and cannot change it, and do not use a tool. For a question about causes that depend on data outside the dataset (such as weather, events, traffic or news), answer in one plain sentence that the dataset does not contain that information, and do not use a tool. A question about trip counts, fares, distances, tips, zones, boroughs, payment types or times in the dataset must use a tool.",
-  "answer_single_turn": "Answer the user's question using only this governed query result. Question: Top \"zones\" {{injected}} {x} café ☃?\nQuery result: {\"columns\":[\"pickup_zone\",\"trip_count\"],\"rows\":[[\"JFK Airport\",145240]],\"row_count\":1,\"query_id\":\"q1\",\"truncated\":false}",
-  "profile_single_turn": "Answer the user's question using only this governed dataset profile. Question: Top \"zones\" {{injected}} {x} café ☃?\nDataset profile: {\"row_count\":2964621,\"columns\":[\"a\",\"b\"]}"
+  "planner_single_turn": "Choose exactly ONE governed analysis that answers the question. Do not make multiple tool calls. Put every metric the question asks for in that one call's measures list. To compare groups (for example weekday and weekend, or two boroughs), still make one call: group by that field with aggregate_taxi_data, or call compare_taxi_segments once; never one call per group. To compare all boroughs across NYC, call average_trip_metrics with region_name omitted. Dataset schema: {\"dataset\":\"nyc-taxi\",\"month\":\"2024-01\",\"columns\":[\"PULocationID\",\"fare_amount\"],\"z\":{\"b\":1,\"a\":[1,2]}}\nQuestion: Top \"zones\" {{injected}} {x} caf\u00e9 \u2603?\nThese tools are read-only analytics over the NYC taxi dataset. For a request to modify, delete, insert or update data, answer in one plain sentence that this assistant only reads data and cannot change it, and do not use a tool. For a question about causes that depend on data outside the dataset (such as weather, events, traffic or news), answer in one plain sentence that the dataset does not contain that information, and do not use a tool. A question about trip counts, fares, distances, tips, zones, boroughs, payment types or times in the dataset must use a tool.",
+  "answer_single_turn": "Answer the user's question using only this governed query result. Question: Top \"zones\" {{injected}} {x} caf\u00e9 \u2603?\nQuery result: {\"columns\":[\"pickup_zone\",\"trip_count\"],\"rows\":[[\"JFK Airport\",145240]],\"row_count\":1,\"query_id\":\"q1\",\"truncated\":false}",
+  "profile_single_turn": "Answer the user's question using only this governed dataset profile. Question: Top \"zones\" {{injected}} {x} caf\u00e9 \u2603?\nDataset profile: {\"row_count\":2964621,\"columns\":[\"a\",\"b\"]}"
 }

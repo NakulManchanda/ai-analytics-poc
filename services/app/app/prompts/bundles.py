@@ -74,11 +74,20 @@ PLANNER = PromptBundle(
     description="Planner tool proposal on the partitioned (serve/LiteLLM-history) path.",
 )
 
+_ANSWER_GROUNDING_RULE = (
+    "When comparing groups, verify which row has the highest or lowest value "
+    "directly from the query result before naming it, pair every number with "
+    "its exact row and metric label, and cite only numbers present in the "
+    "query result."
+)
+
 ANSWER = PromptBundle(
     "answer",
-    "1.0.0",
+    "1.1.0",
     {
-        "global": PromptTemplate("{{system_prompt}}\n{{taxi_rules}}", SYSTEM),
+        "global": PromptTemplate(
+            "{{system_prompt}}\n{{taxi_rules}}\n" + _ANSWER_GROUNDING_RULE, SYSTEM
+        ),
         "past_turn": _PAST_TURN,
         "observation": _QUERY_OBSERVATION,
         "user": _ANSWER_USER,
@@ -90,10 +99,12 @@ ANSWER = PromptBundle(
 
 ANSWER_WITH_SCHEMA = PromptBundle(
     "answer-with-schema",
-    "1.0.0",
+    "1.1.0",
     {
         "global": PromptTemplate(
-            "{{system_prompt}}\n{{taxi_rules}}\nSchema: {{schema_json}}", SYSTEM
+            "{{system_prompt}}\n{{taxi_rules}}\nSchema: {{schema_json}}\n"
+            + _ANSWER_GROUNDING_RULE,
+            SYSTEM,
         ),
         "past_turn": _PAST_TURN,
         "observation": _QUERY_OBSERVATION,

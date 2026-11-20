@@ -31,7 +31,7 @@ not this layer's.
 | Catalogue / deterministic (`query_catalogue.lookup`) | No: planner step is skipped, no model-call record | none |
 | Planner, serve/vLLM (`ServeLLMClient.propose_taxi_query`) | Yes | `planner@1.0.0` |
 | Planner, LiteLLM proxy and direct Bedrock | Yes | `planner-single-turn@1.2.0` |
-| Answer, serve/vLLM and LiteLLM (streaming or not) | Yes | `answer@1.0.0` (`answer-with-schema` when a schema is passed) |
+| Answer, serve/vLLM and LiteLLM (streaming or not) | Yes | `answer@1.1.0` (`answer-with-schema@1.1.0` when a schema is passed) |
 | Answer, direct Bedrock (streaming or not) | Yes | `answer-single-turn@1.0.0` |
 | Dataset profile answer, serve | Yes | `dataset-profile@1.0.0` |
 | Dataset profile answer, direct Bedrock | Yes | `dataset-profile-single-turn@1.0.0` |
@@ -92,3 +92,4 @@ the bad version already produced captures; versions are never reused). Captures 
 | planner-single-turn | 1.1.0 | Appended read-only decline, outside-the-dataset decline and positive tool-use anchor (#179); live eval-all pending | pending |
 | planner-single-turn | 1.2.0 | One call for several metrics or groups: put all metrics in `measures`, compare groups with one `aggregate_taxi_data` (group by the field) or one `compare_taxi_segments`, never one call per group (#207 option 1; aggregate/compare tool descriptions say the same) | `179-baseline-v120` (18-case / 21-turn dev A/B: 19/19 exec, 12/19 tool, 6/19 answer, $0.051022 reconciled) |
 | planner-single-turn | 1.3.0 (rejected) | Tested expanding unsupported-scope decline clause (causal "why", forecasts, missing schema fields) against `1.2.0` on 18-case / 21-turn dev A/B containing the motivating cluster (#179); **rejected** early (no sealed-holdout run) — 0 genuine decline gains (`uns-003` still queried `vendor`), 1 execution regression (`multi-005#1` hit `multiple_tool_calls`, 18/19 exec), $0.051294 reconciled; kept `1.2.0` (verbatim candidate text archived in work history 0139) | `179-candidate-v130` vs `179-baseline-v120` (work history 0139) |
+| answer, answer-with-schema | 1.1.0 | Added comparative-verification and exact row/metric label-pairing grounding rule (`_ANSWER_GROUNDING_RULE`) targeting answer-layer label/comparative errors (#179); **shipped** — fresh 10-case unseen holdout A/B improved answer correctness `+1` (`2/10 → 3/10`, fixed `hold-006#0` label-to-number pairing) with `0` regressions and `$0.039232` vs `$0.039245` reconciled spend | `179-holdout-cand-a110` vs `179-holdout-base-a100` (work history 0139) |

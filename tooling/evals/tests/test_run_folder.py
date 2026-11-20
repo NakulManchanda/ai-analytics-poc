@@ -50,6 +50,21 @@ def test_start_split_selects_disjoint_cases(tmp_path, capsys):
                 "--root",
                 str(tmp_path),
                 "--label",
+                "reg-r",
+                "--split",
+                "regression",
+            ]
+        )
+        == 0
+    )
+    reg_id = capsys.readouterr().out.strip()
+    assert (
+        main(
+            [
+                "run-start",
+                "--root",
+                str(tmp_path),
+                "--label",
                 "hold-r",
                 "--split",
                 "holdout",
@@ -59,11 +74,17 @@ def test_start_split_selects_disjoint_cases(tmp_path, capsys):
     )
     hold_id = capsys.readouterr().out.strip()
     dev_m = json.loads((tmp_path / dev_id / "manifest.json").read_text())
+    reg_m = json.loads((tmp_path / reg_id / "manifest.json").read_text())
     hold_m = json.loads((tmp_path / hold_id / "manifest.json").read_text())
-    assert dev_m["split"] == "dev" and hold_m["split"] == "holdout"
-    assert dev_m["cases"] and hold_m["cases"]
+    assert dev_m["split"] == "dev" and reg_m["split"] == "regression"
+    assert hold_m["split"] == "holdout"
+    assert hold_m["dataset"] == "datasets/holdout/v1/cases.jsonl"
+    assert dev_m["cases"] and reg_m["cases"] and hold_m["cases"]
+    assert set(dev_m["cases"]).isdisjoint(set(reg_m["cases"]))
     assert set(dev_m["cases"]).isdisjoint(set(hold_m["cases"]))
-    assert len(dev_m["cases"]) + len(hold_m["cases"]) == 37
+    assert set(reg_m["cases"]).isdisjoint(set(hold_m["cases"]))
+    assert len(dev_m["cases"]) + len(reg_m["cases"]) == 37
+    assert len(hold_m["cases"]) == 10
     # Passing both --split and --cases is rejected.
     assert (
         main(

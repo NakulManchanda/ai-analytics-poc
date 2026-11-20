@@ -179,7 +179,12 @@ def resolve_batch_plan(
     if not manifest_p.is_file():
         raise RunError(f"{manifest_p} missing; run `evals run-start` first")
     manifest = json.loads(manifest_p.read_text())
-    resolved_path = cases_path or DEFAULT_DATASET
+    if cases_path is None:
+        from evals.dataset import resolve_manifest_dataset
+
+        resolved_path = resolve_manifest_dataset(manifest)
+    else:
+        resolved_path = cases_path
     cases = load_cases_raw(resolved_path)
     by_id = {c["id"]: c for c in cases}
     resolved_web = web or manifest.get("web") or "http://localhost:3100"

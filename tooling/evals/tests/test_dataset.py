@@ -159,24 +159,46 @@ def test_new_tag_vocabulary_and_one_basis_per_basis_dependent_case():
 
 
 def test_sidecar_splits_partition_cases_and_cover_all_categories():
-    from evals.dataset import load_splits, splits_sha256, validate_splits
+    from evals.dataset import (
+        load_holdout_cases,
+        load_splits,
+        splits_sha256,
+        validate_splits,
+    )
 
     cases = load_cases()
-    splits = load_splits(cases=cases)
+    holdout_cases = load_holdout_cases()
+    splits = load_splits(cases=cases, holdout_cases=holdout_cases)
     assert len(splits_sha256()) == 64
-    dev, holdout = splits["dev"], splits["holdout"]
-    assert dev and holdout
+    dev, reg, holdout = splits["dev"], splits["regression"], splits["holdout"]
+    assert dev and reg and holdout
+    assert set(dev).isdisjoint(set(reg))
     assert set(dev).isdisjoint(set(holdout))
-    assert len(dev) + len(holdout) == len(cases)
-    by_id = {c.id: c for c in cases}
+    assert set(reg).isdisjoint(set(holdout))
+    assert len(dev) + len(reg) == len(cases)
+    assert len(holdout) == len(holdout_cases)
+    by_id = {c.id: c for c in cases + holdout_cases}
     required = {"deterministic", "react", "multi_turn", "unsupported", "failure"}
     assert {by_id[cid].category for cid in dev} == required
+    assert {by_id[cid].category for cid in reg} == required
     assert {by_id[cid].category for cid in holdout} == required
 
     # Unassigned, overlapping, and unknown cases are rejected (no silent default).
     with pytest.raises(DatasetError, match="missing from splits"):
-        validate_splits({"dev": dev[:-1], "holdout": holdout}, cases)
+        validate_splits(
+            {"dev": dev[:-1], "regression": reg, "holdout": holdout},
+            cases,
+            holdout_cases,
+        )
     with pytest.raises(DatasetError, match="overlap"):
-        validate_splits({"dev": dev, "holdout": holdout + [dev[0]]}, cases)
+        validate_splits(
+            {"dev": dev, "regression": reg + [dev[0]], "holdout": holdout},
+            cases,
+            holdout_cases,
+        )
     with pytest.raises(DatasetError, match="unknown"):
-        validate_splits({"dev": dev + ["fake-999"], "holdout": holdout}, cases)
+        validate_splits(
+            {"dev": dev + ["fake-999"], "regression": reg, "holdout": holdout},
+            cases,
+            holdout_cases,
+        )
