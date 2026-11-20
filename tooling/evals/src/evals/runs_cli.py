@@ -247,9 +247,10 @@ def run_freeze(a) -> int:
     tmp = snap.with_name(snap.name + ".tmp")
     tmp.write_bytes(data)
     os.replace(tmp, snap)
-    (run_dir / "captures.snapshot.sha256").write_text(
-        f"{hashlib.sha256(data).hexdigest()}  {snap.name}\n"
-    )
+    sha_path = run_dir / "captures.snapshot.sha256"
+    sha_tmp = sha_path.with_name(sha_path.name + ".tmp")
+    sha_tmp.write_text(f"{hashlib.sha256(data).hexdigest()}  {snap.name}\n")
+    os.replace(sha_tmp, sha_path)
     print(
         f"froze: kept {len(kept)}, dropped {dropped} (not in results.jsonl: superseded or "
         f"unrecorded), malformed {bad} -> {snap}"

@@ -25,7 +25,12 @@ from temporalio.testing import WorkflowEnvironment
 
 from evals.cli import main
 from evals.runs import load_run_reports
-from evals.temporal_pilot import EvalBatchWorkflow, run_temporal_eval
+from evals.temporal_pilot import (
+    EvalBatchWorkflow,
+    FinalizeInput,
+    finalize_eval_activity,
+    run_temporal_eval,
+)
 from evals.temporal_store import (
     AMBIGUOUS_TERMINAL,
     SUBMISSION_KEY_HEADER,
@@ -36,6 +41,7 @@ from evals.temporal_store import (
     load_cases_raw,
     load_submission_journal,
     read_jsonl_tolerant,
+    repair_jsonl_tail,
     resolve_batch_plan,
     submission_key,
 )
@@ -950,3 +956,142 @@ def test_workflow_finalizes_even_when_case_activity_fails_non_retryably(
     state = json.loads((run_dir / "state.json").read_text())
     assert state["status"] == "incomplete"
     assert state["finished_at"] is not None
+
+
+def test_torn_jsonl_tail_repaired_on_disk_end_to_end_through_finalize(
+    tmp_path: Path, temporal_target: str
+):
+    """P1: Torn partial JSONL tails (no trailing newline) are repaired on disk before append and finalize."""
+    root = tmp_path / "evals"
+    capture_dir = tmp_path / "_capture"
+    server = _FixtureEvalServer(capture_dir, lookup_enabled=False)
+    cases = ["det-001", "det-004"]
+    run_id, run_dir = _init_run(root, "torn-tail-e2e", server.url, cases)
+    _, wanted, expected, cases_path = resolve_batch_plan(run_dir, server.url, [], False)
+
+    # Run det-001 first so we have valid persisted artifacts + capture rows on disk.
+    det001 = next(c for c in load_cases_raw() if c["id"] == "det-001")
+    res0 = execute_case_reconcilable(
+        run_dir, run_id, server.url, det001, expected, timeout_s=15
+    )
+    assert res0["status"] == "complete"
+
+    # Plant torn partial JSON lines with NO trailing newline on both results.jsonl and submissions.jsonl.
+    with (run_dir / "results.jsonl").open("ab") as fh:
+        fh.write(b'{"case_id": "det-004", "turn_index": 0, "partial')
+    with (run_dir / "submissions.jsonl").open("ab") as fh:
+        fh.write(b'{"submission_key": "torn", "stat')
+
+    tq = f"pilot-torn-tail-{int(time.time() * 1000)}"
+    w1 = _spawn_worker(temporal_target, tq)
+    try:
+        result = asyncio.run(
+            asyncio.wait_for(
+                run_temporal_eval(
+                    str(run_dir),
+                    run_id,
+                    server.url,
+                    wanted,
+                    expected,
+                    cases_path=str(cases_path),
+                    timeout_s=15,
+                    heartbeat_timeout_s=2.0,
+                    finalize=True,
+                    capture_dir=str(capture_dir),
+                    address=temporal_target,
+                    task_queue=tq,
+                ),
+                timeout=25,
+            )
+        )
+    finally:
+        _stop_worker(w1)
+        server.close()
+
+    assert result.status == "complete"
+    assert result.finalization.finalized is True
+
+    # Every single line on disk in results.jsonl and submissions.jsonl must parse cleanly as valid JSON.
+    for fname in ("results.jsonl", "submissions.jsonl", "submitted.jsonl"):
+        raw = (run_dir / fname).read_text()
+        assert raw.endswith("\n")
+        parsed = [json.loads(line) for line in raw.splitlines() if line.strip()]
+        assert parsed
+
+    results_rows = [
+        json.loads(line)
+        for line in (run_dir / "results.jsonl").read_text().splitlines()
+        if line.strip()
+    ]
+    assert sorted((r["case_id"], r["turn_index"]) for r in results_rows) == [
+        ("det-001", 0),
+        ("det-004", 0),
+    ]
+    matches = json.loads((run_dir / "matches.json").read_text())["matches"]
+    assert sorted((m["case_id"], m["turn_index"]) for m in matches) == [
+        ("det-001", 0),
+        ("det-004", 0),
+    ]
+    assert (run_dir / "captures.snapshot.jsonl").is_file()
+    assert (run_dir / "captures.snapshot.sha256").is_file()
+    graded_turns, _ = load_run_reports(run_dir)
+    assert set(graded_turns) == {("det-001", 0), ("det-004", 0)}
+    review_html = (run_dir / "review.html").read_text()
+    assert "det-001#0" in review_html and "det-004#0" in review_html
+    assert json.loads((run_dir / "state.json").read_text())["status"] == "complete"
+    # repair_jsonl_tail still raises on mid-file corruption.
+    corrupt = tmp_path / "mid-corrupt.jsonl"
+    corrupt.write_text('{"bad\n' + json.dumps({"ok": True}) + "\n")
+    with pytest.raises(json.JSONDecodeError):
+        repair_jsonl_tail(corrupt)
+
+
+@pytest.mark.parametrize("corrupt_mode", ["missing", "truncated"])
+def test_finalize_recovers_missing_or_truncated_snapshot_sha256(
+    tmp_path: Path, corrupt_mode: str
+):
+    """P2: finalize_eval_activity regenerates a missing or truncated captures.snapshot.sha256 sidecar."""
+    import hashlib
+
+    root = tmp_path / "evals"
+    capture_dir = tmp_path / "_capture"
+    server = _FixtureEvalServer(capture_dir, lookup_enabled=False)
+    run_id, run_dir = _init_run(root, f"sha-{corrupt_mode}", server.url, ["det-001"])
+    expected = [("det-001", 0)]
+    case = next(c for c in load_cases_raw() if c["id"] == "det-001")
+    try:
+        res = execute_case_reconcilable(
+            run_dir, run_id, server.url, case, expected, timeout_s=15
+        )
+        assert res["status"] == "complete"
+    finally:
+        server.close()
+
+    fin_inp = FinalizeInput(
+        run_dir=str(run_dir),
+        eval_run_id=run_id,
+        expected_turns=[["det-001", 0]],
+        finalize=True,
+        capture_dir=str(capture_dir),
+    )
+    first = asyncio.run(finalize_eval_activity(fin_inp))
+    assert first.finalized is True
+
+    snap = run_dir / "captures.snapshot.jsonl"
+    sha_path = run_dir / "captures.snapshot.sha256"
+    expected_sha = f"{hashlib.sha256(snap.read_bytes()).hexdigest()}  {snap.name}\n"
+    assert sha_path.read_text() == expected_sha
+
+    # Simulate crash right between captures.snapshot.jsonl and captures.snapshot.sha256.
+    if corrupt_mode == "missing":
+        sha_path.unlink()
+    else:
+        sha_path.write_text(expected_sha[:12])
+
+    second = asyncio.run(finalize_eval_activity(fin_inp))
+    assert second.finalized is True
+    assert sha_path.read_text() == expected_sha
+    assert "captures.snapshot.sha256" in second.report_files
+    graded_turns, _ = load_run_reports(run_dir)
+    assert set(graded_turns) == {("det-001", 0)}
+    assert (run_dir / "review.html").is_file()

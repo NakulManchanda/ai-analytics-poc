@@ -159,6 +159,24 @@ async def execute_case_activity(inp: CaseActivityInput) -> CaseActivityResult:
     )
 
 
+def _ensure_snapshot_checksum(run_dir) -> None:
+    """Ensure ``captures.snapshot.sha256`` exists and matches ``captures.snapshot.jsonl``."""
+    import hashlib
+    import os
+
+    snap = run_dir / "captures.snapshot.jsonl"
+    sha_path = run_dir / "captures.snapshot.sha256"
+    expected = f"{hashlib.sha256(snap.read_bytes()).hexdigest()}  {snap.name}\n"
+    try:
+        current = sha_path.read_text() if sha_path.is_file() else None
+    except OSError:
+        current = None
+    if current != expected:
+        tmp = sha_path.with_name(f"{sha_path.name}.{os.getpid()}.tmp")
+        tmp.write_text(expected)
+        os.replace(tmp, sha_path)
+
+
 @activity.defn
 async def finalize_eval_activity(inp: FinalizeInput) -> FinalizeResult:
     """Write final ``state.json`` and, when requested and complete, freeze/grade/render review."""
@@ -186,6 +204,7 @@ async def finalize_eval_activity(inp: FinalizeInput) -> FinalizeResult:
                     capture_dir=Path(inp.capture_dir) if inp.capture_dir else None,
                 )
             )
+        _ensure_snapshot_checksum(run_dir)
         run_grade(
             argparse.Namespace(
                 root=root,
@@ -206,6 +225,8 @@ async def finalize_eval_activity(inp: FinalizeInput) -> FinalizeResult:
         finalized = True
         if snap.is_file():
             report_files.append("captures.snapshot.jsonl")
+        if (run_dir / "captures.snapshot.sha256").is_file():
+            report_files.append("captures.snapshot.sha256")
         report_dir = run_dir / "report"
         if report_dir.is_dir():
             report_files.extend(

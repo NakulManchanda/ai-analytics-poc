@@ -87,6 +87,55 @@ def case_execution_lock(run_dir: Path, case_id: str) -> Iterator[None]:
             fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
 
 
+def repair_jsonl_tail(path: Path) -> bool:
+    """Repair a torn or non-newline-terminated final JSONL line on disk (caller must hold lock).
+
+    Returns ``True`` if the file was rewritten cleanly, ``False`` if it was already clean.
+    Mid-file JSON corruption still raises ``json.JSONDecodeError`` so genuine corruption is never hidden.
+    """
+    if not path.is_file():
+        return False
+    raw_bytes = path.read_bytes()
+    if not raw_bytes:
+        return False
+    text = raw_bytes.decode("utf-8", errors="replace")
+    raw_lines = [line for line in text.splitlines() if line.strip()]
+    valid_lines: list[str] = []
+    repaired = False
+    last_idx = len(raw_lines) - 1
+    for idx, line in enumerate(raw_lines):
+        try:
+            json.loads(line)
+        except json.JSONDecodeError:
+            if idx == last_idx:
+                _LOG.warning(
+                    "repairing truncated final JSONL line in %s (line %d)",
+                    path,
+                    idx + 1,
+                )
+                repaired = True
+                break
+            raise
+        valid_lines.append(line)
+    needs_newline = not raw_bytes.endswith(b"\n")
+    if repaired or needs_newline or not raw_lines:
+        clean_text = "".join(f"{line}\n" for line in valid_lines)
+        tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+        with tmp.open("wb") as fh:
+            fh.write(clean_text.encode("utf-8"))
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, path)
+        return True
+    return False
+
+
+def _append_jsonl_locked(path: Path, row: dict) -> None:
+    """Repair any torn tail and fsync-append one JSONL row (caller must hold ``run_dir_lock``)."""
+    repair_jsonl_tail(path)
+    _append_row(path, row)
+
+
 def read_jsonl_tolerant(path: Path) -> list[dict]:
     """Read a JSONL file, gracefully ignoring a single truncated/unparseable final line.
 
@@ -231,6 +280,7 @@ def update_run_state(
 ) -> dict:
     """Synchronize ``matches.json`` and ``state.json`` with ``results.jsonl`` under lock."""
     with run_dir_lock(run_dir):
+        repair_jsonl_tail(run_dir / "results.jsonl")
         rows = read_jsonl_tolerant(run_dir / "results.jsonl")
         old_state = read_state(run_dir)
         started = (old_state or {}).get("started_at") or _now()
@@ -276,10 +326,11 @@ def _record_submitted_once(
     conversation_id: str,
 ) -> None:
     submitted_p = run_dir / "submitted.jsonl"
+    repair_jsonl_tail(submitted_p)
     existing = {r.get("run_id") for r in read_jsonl_tolerant(submitted_p)}
     if run_ref in existing:
         return
-    _append_row(
+    _append_jsonl_locked(
         submitted_p,
         {
             "run_id": run_ref,
@@ -298,11 +349,12 @@ def _record_result_row(
 ) -> None:
     results_p = run_dir / "results.jsonl"
     with run_dir_lock(run_dir):
+        repair_jsonl_tail(results_p)
         existing = {
             (r["case_id"], r["turn_index"]) for r in read_jsonl_tolerant(results_p)
         }
         if (row["case_id"], row["turn_index"]) not in existing:
-            _append_row(results_p, row)
+            _append_jsonl_locked(results_p, row)
     update_run_state(run_dir, expected_turns, status="running")
 
 
@@ -338,7 +390,7 @@ def _record_ambiguous(
     if reason:
         entry["reason"] = reason
     with run_dir_lock(run_dir):
-        _append_row(run_dir / "submissions.jsonl", entry)
+        _append_jsonl_locked(run_dir / "submissions.jsonl", entry)
     row.update(run_id=None, terminal=AMBIGUOUS_TERMINAL, evidence="incomplete")
     if prev_failed:
         row["after_failed_turn"] = True
@@ -382,6 +434,9 @@ def execute_case_reconcilable(
 
     with case_execution_lock(run_dir, case_id):
         with run_dir_lock(run_dir):
+            repair_jsonl_tail(run_dir / "results.jsonl")
+            repair_jsonl_tail(run_dir / "submissions.jsonl")
+            repair_jsonl_tail(run_dir / "submitted.jsonl")
             existing_rows = {
                 r["turn_index"]: r
                 for r in read_jsonl_tolerant(run_dir / "results.jsonl")
@@ -490,7 +545,7 @@ def execute_case_reconcilable(
                     run_ref, conv = resolved
                     reconciled_turns += 1
                     with run_dir_lock(run_dir):
-                        _append_row(
+                        _append_jsonl_locked(
                             run_dir / "submissions.jsonl",
                             {
                                 "submission_key": sub_key,
@@ -529,7 +584,7 @@ def execute_case_reconcilable(
             else:
                 # Fresh submission: fsync pre-submit intent BEFORE network POST.
                 with run_dir_lock(run_dir):
-                    _append_row(
+                    _append_jsonl_locked(
                         run_dir / "submissions.jsonl",
                         {
                             "submission_key": sub_key,
@@ -555,7 +610,7 @@ def execute_case_reconcilable(
                     if 400 <= exc.code < 500:
                         # Definite client/request rejection before a run was created.
                         with run_dir_lock(run_dir):
-                            _append_row(
+                            _append_jsonl_locked(
                                 run_dir / "submissions.jsonl",
                                 {
                                     "submission_key": sub_key,
@@ -614,7 +669,7 @@ def execute_case_reconcilable(
                     run_ref, conv = resolved
                     reconciled_turns += 1
                     with run_dir_lock(run_dir):
-                        _append_row(
+                        _append_jsonl_locked(
                             run_dir / "submissions.jsonl",
                             {
                                 "submission_key": sub_key,
@@ -658,7 +713,7 @@ def execute_case_reconcilable(
                     run_ref, conv = resolved
                     reconciled_turns += 1
                     with run_dir_lock(run_dir):
-                        _append_row(
+                        _append_jsonl_locked(
                             run_dir / "submissions.jsonl",
                             {
                                 "submission_key": sub_key,
@@ -674,7 +729,7 @@ def execute_case_reconcilable(
                         _record_submitted_once(run_dir, run_ref, case_id, idx, conv)
                 else:
                     with run_dir_lock(run_dir):
-                        _append_row(
+                        _append_jsonl_locked(
                             run_dir / "submissions.jsonl",
                             {
                                 "submission_key": sub_key,
