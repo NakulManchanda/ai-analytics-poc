@@ -141,9 +141,29 @@ def test_golden_values_unchanged_vs_main_only_tags_and_notes_differ():
                     ot[key], sort_keys=True
                 ), (cur["id"], key)
             assert ct == ot, cur["id"]
-        strip = lambda c: {k: v for k, v in c.items() if k not in ("tags", "notes")}
+        strip = lambda c: {
+            k: v for k, v in c.items() if k not in ("tags", "notes", "split")
+        }
         assert strip(cur) == strip(old), cur["id"]
         assert set(old["tags"]) <= set(cur["tags"]), cur["id"]
+
+
+def test_disjoint_dev_and_holdout_splits_cover_all_categories():
+    cases = load_cases()
+    dev = [c for c in cases if c.split == "dev"]
+    holdout = [c for c in cases if c.split == "holdout"]
+    assert dev and holdout
+    assert {c.id for c in dev}.isdisjoint({c.id for c in holdout})
+    assert len(dev) + len(holdout) == len(cases)
+    required = {"deterministic", "react", "multi_turn", "unsupported", "failure"}
+    assert {c.category for c in dev} == required
+    assert {c.category for c in holdout} == required
+
+
+def test_missing_split_rejected():
+    cases = [c for c in load_cases() if c.split == "dev"]
+    with pytest.raises(DatasetError, match="holdout"):
+        validate_cases(cases)
 
 
 def test_new_tag_vocabulary_and_one_basis_per_basis_dependent_case():

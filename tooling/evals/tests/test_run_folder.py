@@ -35,6 +35,54 @@ def test_prefix_label_not_blocked(tmp_path):
     assert start(tmp_path, "foo-bar") == 2
 
 
+def test_start_split_selects_disjoint_cases(tmp_path, capsys):
+    assert (
+        main(
+            ["run-start", "--root", str(tmp_path), "--label", "dev-r", "--split", "dev"]
+        )
+        == 0
+    )
+    dev_id = capsys.readouterr().out.strip()
+    assert (
+        main(
+            [
+                "run-start",
+                "--root",
+                str(tmp_path),
+                "--label",
+                "hold-r",
+                "--split",
+                "holdout",
+            ]
+        )
+        == 0
+    )
+    hold_id = capsys.readouterr().out.strip()
+    dev_m = json.loads((tmp_path / dev_id / "manifest.json").read_text())
+    hold_m = json.loads((tmp_path / hold_id / "manifest.json").read_text())
+    assert dev_m["split"] == "dev" and hold_m["split"] == "holdout"
+    assert dev_m["cases"] and hold_m["cases"]
+    assert set(dev_m["cases"]).isdisjoint(set(hold_m["cases"]))
+    assert len(dev_m["cases"]) + len(hold_m["cases"]) == 37
+    # Passing both --split and --cases is rejected.
+    assert (
+        main(
+            [
+                "run-start",
+                "--root",
+                str(tmp_path),
+                "--label",
+                "both-r",
+                "--split",
+                "dev",
+                "--cases",
+                "det-001",
+            ]
+        )
+        == 2
+    )
+
+
 def make_run(tmp_path, status="complete"):
     start(tmp_path, "r")
     rid = (tmp_path / ".current").read_text()

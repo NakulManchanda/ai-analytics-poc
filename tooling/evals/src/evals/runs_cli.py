@@ -49,6 +49,7 @@ def add_parsers(sub) -> None:
     p = common(sub.add_parser("run-start", help="create a labelled run folder"), False)
     p.add_argument("--label", required=True)
     p.add_argument("--web")
+    p.add_argument("--split", choices=("dev", "holdout"))
     p.add_argument("--cases", nargs="*", default=[])
     p = common(sub.add_parser("run-live", help="drive golden cases through the app"))
     p.add_argument("--all", action="store_true")
@@ -167,6 +168,13 @@ def run_start(a) -> int:
             raise RunError(
                 f"label {a.label!r} already used by {clash[0]}; pick a new label"
             )
+    if a.split and a.cases:
+        raise RunError("pass either --split or --cases, not both")
+    selected_cases = list(a.cases)
+    if a.split:
+        from evals.dataset import load_cases
+
+        selected_cases = [c.id for c in load_cases(DATASET) if c.split == a.split]
     now = datetime.now(UTC)
     run_id = f"{a.label}-{now.strftime('%Y%m%dT%H%M%SZ')}"
     run_dir = a.root / run_id
@@ -182,7 +190,8 @@ def run_start(a) -> int:
             else None
         ),
         "web": a.web,
-        "cases": a.cases,
+        "split": a.split,
+        "cases": selected_cases,
     }
     (run_dir / "manifest.json").write_text(json.dumps(manifest, indent=1))
     (a.root / ".current").write_text(run_id)

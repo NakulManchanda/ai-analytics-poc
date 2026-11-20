@@ -15,6 +15,7 @@ CAPTURE_SCHEMA_VERSION = "capture.v1"
 
 Category = Literal["deterministic", "react", "multi_turn", "unsupported", "failure"]
 Behavior = Literal["answer", "unsupported", "failure"]
+Split = Literal["dev", "holdout"]
 
 
 class Fact(BaseModel):
@@ -74,6 +75,7 @@ class GoldenCase(BaseModel):
     id: str
     version: str
     category: Category
+    split: Split = "dev"
     source: Literal["golden"] = "golden"
     tags: list[str] = Field(default_factory=list)
     notes: str = ""

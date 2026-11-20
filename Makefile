@@ -442,9 +442,9 @@ eval-stack-up: litellm-env ## Rebuild/start the local LiteLLM stack with live ev
 	LITELLM_STORE_PROMPTS=false LITELLM_LOG=INFO WEB_PORT=$(or $(WEB_PORT),3000) VOICE_ENABLED=$(or $(VOICE_ENABLED),false) \
 	docker compose $(EVAL_COMPOSE) up --build -d
 
-eval-start: ## Start a run (usage: make eval-start LABEL=<name>); refuses a label that was ever used
+eval-start: ## Start a run (usage: make eval-start LABEL=<name> [EVAL_SPLIT=dev|holdout]); refuses a label that was ever used
 	@[ -n "$(EVAL_LABEL)" ] || { echo "LABEL=<name> is required"; exit 2; }
-	@EVAL_LOG_NEW_RUN=1 $(EVAL_LOG) eval-start -- $(EVAL) run-start --root $(EVAL_ROOT) --label $(EVAL_LABEL) --web $(EVAL_WEB)
+	@EVAL_LOG_NEW_RUN=1 $(EVAL_LOG) eval-start -- $(EVAL) run-start --root $(EVAL_ROOT) --label $(EVAL_LABEL) --web $(EVAL_WEB) $(if $(EVAL_SPLIT),--split $(EVAL_SPLIT))
 
 eval-health: ## Check the web app and LiteLLM proxy before a run (no spend)
 	@$(EVAL_LOG) eval-health -- sh -c 'curl -sf $(EVAL_WEB)/ -o /dev/null && echo web-ok && $(MAKE) --no-print-directory litellm-ready'
@@ -453,9 +453,9 @@ eval-smoke: ## One real golden case (det-001) into <run>/smoke; needs EVAL_CONFI
 	$(EVAL_GUARD)
 	@$(EVAL_LOG) eval-smoke -- $(EVAL) run-live $(EVAL_RUN_ARG) --smoke --web $(EVAL_WEB) det-001
 
-eval-run: ## Full golden run (37 cases / 43 turns, no retries); needs EVAL_CONFIRM=1
+eval-run: ## Full golden run (37 cases / 43 turns, or EVAL_SPLIT=dev|holdout); needs EVAL_CONFIRM=1
 	$(EVAL_GUARD)
-	@$(EVAL_LOG) eval-run -- $(EVAL) run-live $(EVAL_RUN_ARG) --all --web $(EVAL_WEB)
+	@$(EVAL_LOG) eval-run -- $(EVAL) run-live $(EVAL_RUN_ARG) $(if $(EVAL_SPLIT),,--all) --web $(EVAL_WEB)
 
 # Opt-in local Temporal eval workflow pilot (#253): separate Compose project, never part of base stack.
 TEMPORAL_PROJECT ?= ai-analytics-temporal

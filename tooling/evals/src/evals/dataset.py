@@ -10,6 +10,7 @@ from evals.schema import GoldenCase
 PACKAGE_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_DATASET = PACKAGE_ROOT / "datasets/golden/v1/cases.jsonl"
 REQUIRED_CATEGORIES = ("deterministic", "react", "multi_turn", "unsupported", "failure")
+REQUIRED_SPLITS = ("dev", "holdout")
 
 
 class DatasetError(ValueError):
@@ -38,6 +39,17 @@ def validate_cases(cases: list[GoldenCase]) -> None:
     missing = [c for c in REQUIRED_CATEGORIES if c not in present]
     if missing:
         raise DatasetError(f"missing categories: {missing}")
+    present_splits = {c.split for c in cases}
+    missing_splits = [s for s in REQUIRED_SPLITS if s not in present_splits]
+    if missing_splits:
+        raise DatasetError(f"missing splits: {missing_splits}")
+    for split in REQUIRED_SPLITS:
+        split_cats = {c.category for c in cases if c.split == split}
+        missing_in_split = [c for c in REQUIRED_CATEGORIES if c not in split_cats]
+        if missing_in_split:
+            raise DatasetError(
+                f"split {split!r} missing categories: {missing_in_split}"
+            )
     for case in cases:
         if case.category == "multi_turn" and len(case.turns) < 2:
             raise DatasetError(f"{case.id}: multi_turn needs >= 2 turns")
