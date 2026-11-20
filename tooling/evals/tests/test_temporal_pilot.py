@@ -29,9 +29,13 @@ from evals.temporal_pilot import EvalBatchWorkflow, run_temporal_eval
 from evals.temporal_store import (
     AMBIGUOUS_TERMINAL,
     SUBMISSION_KEY_HEADER,
+    SUBMIT_ERROR_STATUS,
+    CaseInFlightError,
+    case_execution_lock,
     execute_case_reconcilable,
     load_cases_raw,
     load_submission_journal,
+    read_jsonl_tolerant,
     resolve_batch_plan,
     submission_key,
 )
@@ -96,11 +100,13 @@ class _FixtureEvalServer:
         lookup_enabled: bool = False,
         hold_post_for_key: str | None = None,
         hold_events_for_key: str | None = None,
+        reject_4xx_for_key: str | None = None,
     ) -> None:
         self.capture_dir = capture_dir
         self.lookup_enabled = lookup_enabled
         self.hold_post_for_key = hold_post_for_key
         self.hold_events_for_key = hold_events_for_key
+        self.reject_4xx_for_key = reject_4xx_for_key
 
         self.lock = threading.Lock()
         self.seq = 0
@@ -134,6 +140,22 @@ class _FixtureEvalServer:
                 length = int(self.headers.get("content-length", "0"))
                 body = json.loads(self.rfile.read(length))
                 sub_key = self.headers.get(SUBMISSION_KEY_HEADER) or ""
+                if (
+                    server_ref.reject_4xx_for_key
+                    and sub_key == server_ref.reject_4xx_for_key
+                ):
+                    with server_ref.lock:
+                        server_ref.total_posts += 1
+                        server_ref.posts_by_key[sub_key] = (
+                            server_ref.posts_by_key.get(sub_key, 0) + 1
+                        )
+                    err_body = b'{"detail":"invalid prompt"}'
+                    self.send_response(422)
+                    self.send_header("content-type", "application/json")
+                    self.send_header("content-length", str(len(err_body)))
+                    self.end_headers()
+                    self.wfile.write(err_body)
+                    return
                 should_hold = False
                 with server_ref.lock:
                     server_ref.seq += 1
@@ -778,3 +800,153 @@ def test_workflow_contains_no_direct_network_or_filesystem_calls():
         "write_text",
     ):
         assert forbidden not in src
+
+
+def test_post_timeout_without_lookup_records_ambiguous_not_submit_error(tmp_path: Path):
+    """POST timeout after server receipt with lookup=404 records ambiguous_submission, never retries."""
+    capture_dir = tmp_path / "_capture"
+    run_dir = tmp_path / "run-timeout"
+    run_dir.mkdir()
+    case = next(c for c in load_cases_raw() if c["id"] == "det-001")
+    target_key = submission_key("run-timeout", "det-001", 0)
+    server = _FixtureEvalServer(
+        capture_dir,
+        lookup_enabled=False,
+        hold_post_for_key=target_key,
+    )
+    try:
+        res = execute_case_reconcilable(
+            run_dir,
+            "run-timeout",
+            server.url,
+            case,
+            [("det-001", 0)],
+            timeout_s=5,
+            post_timeout_s=1,
+        )
+    finally:
+        server.close()
+
+    assert res["status"] == "incomplete"
+    assert res["ambiguous_turns"] == 1
+    assert server.posts_by_key[target_key] == 1
+    assert target_key in server.lookup_requests
+
+    rows = _rows_of(run_dir / "results.jsonl")
+    assert len(rows) == 1
+    assert rows[0]["terminal"] == AMBIGUOUS_TERMINAL
+    assert rows[0]["evidence"] == "incomplete"
+    assert rows[0]["run_id"] is None
+
+    journal = load_submission_journal(run_dir)
+    assert journal[target_key]["status"] == AMBIGUOUS_TERMINAL
+
+
+def test_post_4xx_records_submit_error_in_journal_and_results(tmp_path: Path):
+    """Definite HTTP 4xx rejection records submit_error (not ambiguous_submission)."""
+    capture_dir = tmp_path / "_capture"
+    run_dir = tmp_path / "run-422"
+    run_dir.mkdir()
+    case = next(c for c in load_cases_raw() if c["id"] == "det-001")
+    target_key = submission_key("run-422", "det-001", 0)
+    server = _FixtureEvalServer(
+        capture_dir,
+        lookup_enabled=False,
+        reject_4xx_for_key=target_key,
+    )
+    try:
+        res = execute_case_reconcilable(
+            run_dir,
+            "run-422",
+            server.url,
+            case,
+            [("det-001", 0)],
+            timeout_s=5,
+            post_timeout_s=2,
+        )
+    finally:
+        server.close()
+
+    assert res["status"] == "incomplete"
+    assert res["ambiguous_turns"] == 0
+    assert server.posts_by_key[target_key] == 1
+    rows = _rows_of(run_dir / "results.jsonl")
+    assert rows[0]["terminal"].startswith("submit_error:")
+    assert load_submission_journal(run_dir)[target_key]["status"] == SUBMIT_ERROR_STATUS
+
+
+def test_case_execution_lock_prevents_overlapping_attempts(tmp_path: Path):
+    """Holding the per-case lock causes overlapping attempts to fail fast without HTTP calls."""
+    run_dir = tmp_path / "run-lock"
+    run_dir.mkdir()
+    case = next(c for c in load_cases_raw() if c["id"] == "det-001")
+    with case_execution_lock(run_dir, "det-001"), pytest.raises(CaseInFlightError):
+        execute_case_reconcilable(
+            run_dir,
+            "run-lock",
+            "http://127.0.0.1:1",
+            case,
+            [("det-001", 0)],
+            timeout_s=2,
+        )
+
+
+def test_truncated_final_jsonl_line_ignored_during_recovery(tmp_path: Path):
+    """A partial final JSONL line from mid-write SIGKILL is ignored; mid-file corruption still raises."""
+    p = tmp_path / "submissions.jsonl"
+    p.write_text(
+        json.dumps({"submission_key": "k1", "status": "submitting"})
+        + "\n"
+        + '{"submission_key": "k2", "stat'
+    )
+    rows = read_jsonl_tolerant(p)
+    assert rows == [{"submission_key": "k1", "status": "submitting"}]
+
+    corrupt_mid = tmp_path / "corrupt.jsonl"
+    corrupt_mid.write_text('{"bad\n' + json.dumps({"ok": True}) + "\n")
+    with pytest.raises(json.JSONDecodeError):
+        read_jsonl_tolerant(corrupt_mid)
+
+
+def test_workflow_finalizes_even_when_case_activity_fails_non_retryably(
+    tmp_path: Path, temporal_target: str
+):
+    """Non-retryable ActivityError (e.g. unknown case_id ValueError) still runs finalize_eval_activity."""
+    root = tmp_path / "evals"
+    capture_dir = tmp_path / "_capture"
+    server = _FixtureEvalServer(capture_dir, lookup_enabled=False)
+    run_id, run_dir = _init_run(root, "non-retryable-case", server.url, ["det-001"])
+
+    tq = f"pilot-nonretry-{int(time.time() * 1000)}"
+    w1 = _spawn_worker(temporal_target, tq)
+    try:
+        result = asyncio.run(
+            asyncio.wait_for(
+                run_temporal_eval(
+                    str(run_dir),
+                    run_id,
+                    server.url,
+                    ["missing-case-999", "det-001"],
+                    [("missing-case-999", 0), ("det-001", 0)],
+                    timeout_s=15,
+                    heartbeat_timeout_s=2.0,
+                    finalize=True,
+                    capture_dir=str(capture_dir),
+                    address=temporal_target,
+                    task_queue=tq,
+                ),
+                timeout=20,
+            )
+        )
+    finally:
+        _stop_worker(w1)
+        server.close()
+
+    by_case = {c.case_id: c for c in result.cases}
+    assert by_case["missing-case-999"].status == "activity_failed"
+    assert by_case["det-001"].status == "complete"
+    assert result.status == "incomplete"
+    assert result.finalization.finalized is False
+    state = json.loads((run_dir / "state.json").read_text())
+    assert state["status"] == "incomplete"
+    assert state["finished_at"] is not None

@@ -1,9 +1,9 @@
 """Opt-in local Temporal workflow, activities, worker, and starter for offline eval runs (#253).
 
 Owns Temporal orchestration only:
-- ``EvalBatchWorkflow`` schedules one ``execute_case_activity`` per whole multi-turn golden case,
-  then invokes ``finalize_eval_activity`` to write final ``state.json`` and optionally run
-  ``run-freeze``, ``run-grade``, and ``run-review``.
+- ``EvalBatchWorkflow`` initializes run state, schedules one ``execute_case_activity`` per whole
+  multi-turn golden case, and always invokes ``finalize_eval_activity`` to write final ``state.json``
+  and optionally run ``run-freeze``, ``run-grade``, and ``run-review``.
 - Workflow code is strictly deterministic: zero network calls, zero filesystem I/O, and zero
   per-tool retries.
 - Online request execution (``FastAPI -> MCP``) and Redis ``app.worker`` live elsewhere and are
@@ -18,10 +18,18 @@ from datetime import timedelta
 
 from temporalio import activity, workflow
 from temporalio.common import RetryPolicy
+from temporalio.exceptions import ActivityError
 
 DEFAULT_ADDRESS = "localhost:7233"
 DEFAULT_NAMESPACE = "default"
 DEFAULT_TASK_QUEUE = "eval-pilot"
+NON_RETRYABLE_ERRORS = ["ValueError", "RunError"]
+
+
+@dataclass
+class InitRunInput:
+    run_dir: str
+    expected_turns: list[list]
 
 
 @dataclass
@@ -44,6 +52,7 @@ class CaseActivityResult:
     reconciled_turns: int = 0
     ambiguous_turns: int = 0
     turns_completed: int = 0
+    error: str | None = None
 
 
 @dataclass
@@ -73,6 +82,7 @@ class EvalBatchInput:
     web: str
     case_ids: list[str]
     expected_turns: list[list]
+    case_turn_counts: dict[str, int] = field(default_factory=dict)
     cases_path: str | None = None
     timeout_s: int = 120
     heartbeat_timeout_s: float = 15.0
@@ -92,6 +102,17 @@ async def _heartbeat_loop(interval_s: float, state: dict[str, str]) -> None:
     while True:
         activity.heartbeat(state["phase"])
         await asyncio.sleep(interval_s)
+
+
+@activity.defn
+async def init_eval_activity(inp: InitRunInput) -> None:
+    """Write initial ``running`` state once when the workflow begins (never on client attach)."""
+    from pathlib import Path
+
+    from evals.temporal_store import update_run_state
+
+    expected = [(str(c), int(i)) for c, i in inp.expected_turns]
+    update_run_state(Path(inp.run_dir), expected, status="running")
 
 
 @activity.defn
@@ -216,33 +237,53 @@ class EvalBatchWorkflow:
     async def run(self, inp: EvalBatchInput) -> EvalBatchResult:
         hb_timeout = timedelta(seconds=max(1.0, inp.heartbeat_timeout_s))
         hb_interval = max(0.2, min(inp.heartbeat_timeout_s / 3.0, 5.0))
-        # Per-case activity timeout accommodates multi-turn cases (up to 4 turns * timeout_s + buffer).
-        case_timeout = timedelta(seconds=max(30, inp.timeout_s * 4 + 30))
         retry_policy = RetryPolicy(
             initial_interval=timedelta(milliseconds=300),
             backoff_coefficient=1.5,
             maximum_interval=timedelta(seconds=5),
             maximum_attempts=5,
+            non_retryable_error_types=NON_RETRYABLE_ERRORS,
+        )
+
+        await workflow.execute_activity(
+            init_eval_activity,
+            InitRunInput(run_dir=inp.run_dir, expected_turns=inp.expected_turns),
+            start_to_close_timeout=timedelta(seconds=30),
+            retry_policy=RetryPolicy(
+                initial_interval=timedelta(milliseconds=300),
+                maximum_interval=timedelta(seconds=3),
+                maximum_attempts=3,
+                non_retryable_error_types=NON_RETRYABLE_ERRORS,
+            ),
         )
 
         case_results: list[CaseActivityResult] = []
         for cid in inp.case_ids:
-            res = await workflow.execute_activity(
-                execute_case_activity,
-                CaseActivityInput(
-                    run_dir=inp.run_dir,
-                    eval_run_id=inp.eval_run_id,
-                    web=inp.web,
+            n_turns = max(inp.case_turn_counts.get(cid, 1), 1)
+            case_timeout = timedelta(seconds=(inp.timeout_s + 60) * n_turns + 60)
+            try:
+                res = await workflow.execute_activity(
+                    execute_case_activity,
+                    CaseActivityInput(
+                        run_dir=inp.run_dir,
+                        eval_run_id=inp.eval_run_id,
+                        web=inp.web,
+                        case_id=cid,
+                        expected_turns=inp.expected_turns,
+                        cases_path=inp.cases_path,
+                        timeout_s=inp.timeout_s,
+                        heartbeat_interval_s=hb_interval,
+                    ),
+                    start_to_close_timeout=case_timeout,
+                    heartbeat_timeout=hb_timeout,
+                    retry_policy=retry_policy,
+                )
+            except ActivityError as exc:
+                res = CaseActivityResult(
                     case_id=cid,
-                    expected_turns=inp.expected_turns,
-                    cases_path=inp.cases_path,
-                    timeout_s=inp.timeout_s,
-                    heartbeat_interval_s=hb_interval,
-                ),
-                start_to_close_timeout=case_timeout,
-                heartbeat_timeout=hb_timeout,
-                retry_policy=retry_policy,
-            )
+                    status="activity_failed",
+                    error=str(exc.cause or exc),
+                )
             case_results.append(res)
 
         finalization = await workflow.execute_activity(
@@ -259,6 +300,7 @@ class EvalBatchWorkflow:
                 initial_interval=timedelta(milliseconds=300),
                 maximum_interval=timedelta(seconds=3),
                 maximum_attempts=3,
+                non_retryable_error_types=NON_RETRYABLE_ERRORS,
             ),
         )
         return EvalBatchResult(
@@ -287,7 +329,11 @@ async def run_temporal_worker(
         client,
         task_queue=task_queue,
         workflows=[EvalBatchWorkflow],
-        activities=[execute_case_activity, finalize_eval_activity],
+        activities=[
+            init_eval_activity,
+            execute_case_activity,
+            finalize_eval_activity,
+        ],
     )
     await worker.run()
 
@@ -314,10 +360,9 @@ async def run_temporal_eval(
     from temporalio.client import Client
     from temporalio.exceptions import WorkflowAlreadyStartedError
 
-    from evals.temporal_store import update_run_state
-
-    # Record initial "running" state before handing off to Temporal, matching run-live semantics.
-    update_run_state(Path(run_dir), expected_turns, status="running")
+    turn_counts: dict[str, int] = {}
+    for cid, _ in expected_turns:
+        turn_counts[cid] = turn_counts.get(cid, 0) + 1
 
     client = await Client.connect(address, namespace=namespace)
     wf_id = workflow_id_for_run(eval_run_id)
@@ -327,6 +372,7 @@ async def run_temporal_eval(
         web=web,
         case_ids=list(case_ids),
         expected_turns=[[c, i] for c, i in expected_turns],
+        case_turn_counts=turn_counts,
         cases_path=str(Path(cases_path).resolve()) if cases_path else None,
         timeout_s=timeout_s,
         heartbeat_timeout_s=heartbeat_timeout_s,
@@ -341,5 +387,6 @@ async def run_temporal_eval(
             task_queue=task_queue,
         )
     except WorkflowAlreadyStartedError:
+        print(f"attached to existing Temporal workflow {wf_id}", flush=True)
         handle = client.get_workflow_handle(wf_id)
     return await handle.result()

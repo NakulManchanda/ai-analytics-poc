@@ -25,6 +25,10 @@ flowchart LR
   2. **`accepted` in `submissions.jsonl` (post-accept crash before Activity ack):** skips `POST /api/runs`, reconciles via `GET /api/runs/{run_id}/events` (SSE replay), and continues later turns in the same `conversation_id`.
   3. **`submitting` with no `accepted` (blind-window crash between HTTP POST and receiving `202`):** queries optional `GET /api/runs/by-submission/{submission_key}`. If the server returns `200 {run_id, conversation_id}`, reconciles via SSE; if the server returns `404`/`405`/`501` (current unmodified `services/app`), records `terminal="ambiguous_submission"`, `evidence="incomplete"`, and stops the case **without retrying `POST /api/runs`**.
 - **Artifact compatibility:** Writes the exact run-folder schema (`submitted.jsonl`, `results.jsonl`, `matches.json`, `events/<run_id>.txt`, `state.json`) consumed by `evals run-freeze`, `run-grade`, `run-reconcile`, `run-trace-check`, and `run-review`.
+- **Known pilot boundaries:**
+  - Spend reconciliation (`make eval-reconcile`) and Phoenix trace checking (`make eval-trace-check`) remain manual post-run steps rather than part of `--finalize`, because `/spend/logs` requires `LITELLM_MASTER_KEY` against the live proxy.
+  - A completed SSE call that ends in `timeout` or `stream_error` is recorded in `results.jsonl` as `evidence="incomplete"` and leaves that case incomplete rather than auto-replaying SSE on resume.
+  - Overlapping worker attempts for the same case are prevented by an exclusive non-blocking per-case lock (`<run_dir>/.locks/<case_id>.lock`).
 - **Optional dependency isolation:** `temporalio>=1.20,<2` is isolated under `[project.optional-dependencies] temporal` (and `[dependency-groups] dev` so CI executes the crash-recovery proof). Default `evals` commands never import `temporalio`.
 
 ## Real OS-Process `SIGKILL` Crash-Recovery Proof

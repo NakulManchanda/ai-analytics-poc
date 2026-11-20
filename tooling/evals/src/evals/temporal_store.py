@@ -17,6 +17,7 @@ from __future__ import annotations
 import contextlib
 import fcntl
 import json
+import logging
 import os
 import time
 import urllib.error
@@ -32,7 +33,6 @@ from evals.live_run import (
     _append_row,
     _evidence,
     _now,
-    _read_rows,
     _write_matches,
     read_events,
 )
@@ -40,6 +40,13 @@ from evals.runs import RunError, read_state, write_json_atomic
 
 SUBMISSION_KEY_HEADER = "x-eval-submission-key"
 AMBIGUOUS_TERMINAL = "ambiguous_submission"
+SUBMIT_ERROR_STATUS = "submit_error"
+
+_LOG = logging.getLogger(__name__)
+
+
+class CaseInFlightError(RuntimeError):
+    """Raised when another attempt already holds the exclusive per-case execution lock."""
 
 
 def submission_key(eval_run_id: str, case_id: str, turn_index: int) -> str:
@@ -58,6 +65,52 @@ def run_dir_lock(run_dir: Path) -> Iterator[None]:
             yield
         finally:
             fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+
+
+@contextlib.contextmanager
+def case_execution_lock(run_dir: Path, case_id: str) -> Iterator[None]:
+    """Non-blocking exclusive per-case lock preventing overlapping attempts for the same case."""
+    locks_dir = run_dir / ".locks"
+    locks_dir.mkdir(parents=True, exist_ok=True)
+    safe_id = case_id.replace("/", "_").replace("..", "_")
+    lock_path = locks_dir / f"{safe_id}.lock"
+    with lock_path.open("a+") as fh:
+        try:
+            fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise CaseInFlightError(
+                f"case {case_id!r} is already executing in another worker attempt"
+            ) from exc
+        try:
+            yield
+        finally:
+            fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+
+
+def read_jsonl_tolerant(path: Path) -> list[dict]:
+    """Read a JSONL file, gracefully ignoring a single truncated/unparseable final line.
+
+    A ``SIGKILL`` mid-append can leave a partial trailing line; skipping only the final line keeps
+    crash recovery operational while still surfacing mid-file corruption.
+    """
+    if not path.is_file():
+        return []
+    raw_lines = [line for line in path.read_text().splitlines() if line.strip()]
+    rows: list[dict] = []
+    last_idx = len(raw_lines) - 1
+    for idx, line in enumerate(raw_lines):
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            if idx == last_idx:
+                _LOG.warning(
+                    "ignoring truncated final JSONL line in %s (line %d)", path, idx + 1
+                )
+                break
+            raise
+        if isinstance(obj, dict):
+            rows.append(obj)
+    return rows
 
 
 def load_cases_raw(cases_path: Path | None = None) -> list[dict]:
@@ -100,10 +153,11 @@ def resolve_batch_plan(
 def load_submission_journal(run_dir: Path) -> dict[str, dict]:
     """Return effective submission state per ``submission_key`` from ``submissions.jsonl``.
 
-    Precedence per key: ``accepted`` (has a concrete ``run_id``) > ``ambiguous_submission`` > ``submitting``.
+    Precedence per key: ``accepted`` (concrete ``run_id``) > terminal failure
+    (``ambiguous_submission`` / ``submit_error``) > ``submitting``.
     """
     state: dict[str, dict] = {}
-    for row in _read_rows(run_dir / "submissions.jsonl"):
+    for row in read_jsonl_tolerant(run_dir / "submissions.jsonl"):
         key = row.get("submission_key")
         if not key:
             continue
@@ -111,7 +165,7 @@ def load_submission_journal(run_dir: Path) -> dict[str, dict]:
         status = row.get("status")
         if status == "accepted" and row.get("run_id"):
             state[key] = row
-        elif status == "ambiguous_submission":
+        elif status in (AMBIGUOUS_TERMINAL, SUBMIT_ERROR_STATUS):
             if cur is None or cur.get("status") != "accepted":
                 state[key] = row
         elif status == "submitting" and cur is None:
@@ -152,7 +206,7 @@ def lookup_submission(
 
     Returns ``(run_id, conversation_id)`` on HTTP 200 JSON, and ``None`` cleanly on 404/405/501
     (the expected behavior for an unmodified ``services/app``). Raises on transient transport errors
-    so recovery can retry lookup without ever blindly retrying ``POST /api/runs``.
+    so callers can decide whether to retry lookup or record an ambiguous submission.
     """
     url = f"{web}/api/runs/by-submission/{quote(sub_key, safe='')}"
     req = urllib.request.Request(url, method="GET")
@@ -177,7 +231,7 @@ def update_run_state(
 ) -> dict:
     """Synchronize ``matches.json`` and ``state.json`` with ``results.jsonl`` under lock."""
     with run_dir_lock(run_dir):
-        rows = _read_rows(run_dir / "results.jsonl")
+        rows = read_jsonl_tolerant(run_dir / "results.jsonl")
         old_state = read_state(run_dir)
         started = (old_state or {}).get("started_at") or _now()
         recorded = {(r["case_id"], r["turn_index"]): r for r in rows}
@@ -222,7 +276,7 @@ def _record_submitted_once(
     conversation_id: str,
 ) -> None:
     submitted_p = run_dir / "submitted.jsonl"
-    existing = {r.get("run_id") for r in _read_rows(submitted_p)}
+    existing = {r.get("run_id") for r in read_jsonl_tolerant(submitted_p)}
     if run_ref in existing:
         return
     _append_row(
@@ -244,7 +298,9 @@ def _record_result_row(
 ) -> None:
     results_p = run_dir / "results.jsonl"
     with run_dir_lock(run_dir):
-        existing = {(r["case_id"], r["turn_index"]) for r in _read_rows(results_p)}
+        existing = {
+            (r["case_id"], r["turn_index"]) for r in read_jsonl_tolerant(results_p)
+        }
         if (row["case_id"], row["turn_index"]) not in existing:
             _append_row(results_p, row)
     update_run_state(run_dir, expected_turns, status="running")
@@ -259,6 +315,37 @@ def _write_events_atomic(run_dir: Path, run_ref: str, raw: str) -> None:
     os.replace(tmp, target)
 
 
+def _record_ambiguous(
+    run_dir: Path,
+    sub_key: str,
+    case_id: str,
+    idx: int,
+    conv: str | None,
+    row: dict,
+    prev_failed: bool,
+    t0: float,
+    expected_turns: list[tuple[str, int]],
+    reason: str | None = None,
+) -> None:
+    entry: dict = {
+        "submission_key": sub_key,
+        "case_id": case_id,
+        "turn_index": idx,
+        "conversation_id": conv,
+        "status": AMBIGUOUS_TERMINAL,
+        "ts": _now(),
+    }
+    if reason:
+        entry["reason"] = reason
+    with run_dir_lock(run_dir):
+        _append_row(run_dir / "submissions.jsonl", entry)
+    row.update(run_id=None, terminal=AMBIGUOUS_TERMINAL, evidence="incomplete")
+    if prev_failed:
+        row["after_failed_turn"] = True
+    row["wall_s"] = round(time.monotonic() - t0, 2)
+    _record_result_row(run_dir, row, expected_turns)
+
+
 def execute_case_reconcilable(
     run_dir: Path,
     eval_run_id: str,
@@ -267,8 +354,13 @@ def execute_case_reconcilable(
     expected_turns: list[tuple[str, int]],
     timeout_s: int = 120,
     heartbeat: Callable[[str], None] | None = None,
+    post_timeout_s: int = 30,
 ) -> dict:
     """Execute or reconcile one whole multi-turn case without rerunning completed turns.
+
+    Acquires an exclusive non-blocking per-case lock (``<run_dir>/.locks/<case_id>.lock``) for
+    the full duration of the attempt so overlapping worker retries never submit the same case
+    concurrently.
 
     Recovery rules per turn:
     1. Already recorded in ``results.jsonl`` with complete evidence -> reuse ``conversation_id`` and skip.
@@ -277,229 +369,363 @@ def execute_case_reconcilable(
     4. ``submitting`` in ``submissions.jsonl`` (blind-window crash) -> try ``lookup_submission``:
        - resolved -> record ``accepted`` + ``submitted.jsonl`` and reconcile via SSE;
        - unresolved (404/405/501) -> record ``ambiguous_submission`` (never blindly retry POST) and stop case.
-    5. No journal record -> fsync ``submitting`` -> ``POST /api/runs`` -> fsync ``accepted`` + ``submitted.jsonl``
-       -> stream SSE -> persist ``events/<run_id>.txt`` + ``results.jsonl`` + ``matches.json`` + ``state.json``.
+    5. No journal record -> fsync ``submitting`` -> ``POST /api/runs``:
+       - HTTP 4xx -> journal ``submit_error`` + record ``submit_error`` (definite server rejection).
+       - Timeout / reset / 5xx / malformed response -> attempt ``lookup_submission``; reconcile if found,
+         else journal and record ``ambiguous_submission`` (never blindly retry POST).
+       - HTTP 200/202 -> fsync ``accepted`` + ``submitted.jsonl`` -> stream SSE -> persist
+         ``events/<run_id>.txt`` + ``results.jsonl`` + ``matches.json`` + ``state.json``.
     """
     case_id = case["id"]
     turns = case["turns"]
     (run_dir / "events").mkdir(parents=True, exist_ok=True)
 
-    with run_dir_lock(run_dir):
-        existing_rows = {
-            r["turn_index"]: r
-            for r in _read_rows(run_dir / "results.jsonl")
-            if r.get("case_id") == case_id
-        }
-        journal = load_submission_journal(run_dir)
+    with case_execution_lock(run_dir, case_id):
+        with run_dir_lock(run_dir):
+            existing_rows = {
+                r["turn_index"]: r
+                for r in read_jsonl_tolerant(run_dir / "results.jsonl")
+                if r.get("case_id") == case_id
+            }
+            journal = load_submission_journal(run_dir)
 
-    # Fast path: whole case already completed on an earlier attempt.
-    if len(existing_rows) == len(turns) and all(
-        _evidence(existing_rows[i]) == "complete" for i in range(len(turns))
-    ):
+        # Fast path: whole case already completed on an earlier attempt.
+        if len(existing_rows) == len(turns) and all(
+            _evidence(existing_rows[i]) == "complete" for i in range(len(turns))
+        ):
+            return {
+                "case_id": case_id,
+                "status": "complete",
+                "skipped_already_complete": True,
+                "reconciled_turns": 0,
+                "ambiguous_turns": 0,
+                "turns_completed": len(turns),
+            }
+
+        conv: str | None = None
+        prev_failed = False
+        reconciled_turns = 0
+        ambiguous_turns = 0
+        turns_completed = 0
+
+        for idx, turn in enumerate(turns):
+            if heartbeat:
+                heartbeat(f"{case_id}:t{idx}:start")
+
+            if idx in existing_rows:
+                prev_row = existing_rows[idx]
+                if _evidence(prev_row) == "complete":
+                    conv = prev_row.get("conversation_id")
+                    prev_failed = prev_row.get("terminal") in FAILED_TERMINALS
+                    turns_completed += 1
+                    continue
+                if prev_row.get("terminal") == AMBIGUOUS_TERMINAL:
+                    ambiguous_turns += 1
+                return {
+                    "case_id": case_id,
+                    "status": "incomplete",
+                    "skipped_already_complete": False,
+                    "reconciled_turns": reconciled_turns,
+                    "ambiguous_turns": ambiguous_turns,
+                    "turns_completed": turns_completed,
+                }
+
+            t0 = time.monotonic()
+            sub_key = submission_key(eval_run_id, case_id, idx)
+            entry = journal.get(sub_key)
+            row: dict = {
+                "case_id": case_id,
+                "turn_index": idx,
+                "question": turn["question"],
+                "conversation_id": conv,
+            }
+            run_ref: str | None = None
+            terminal: str | None = None
+
+            if entry is not None and entry.get("status") == "accepted":
+                # Post-accept recovery: never call POST /api/runs again; replay SSE for existing run_id.
+                run_ref = str(entry["run_id"])
+                conv = str(entry.get("conversation_id") or conv or "")
+                reconciled_turns += 1
+                with run_dir_lock(run_dir):
+                    _record_submitted_once(run_dir, run_ref, case_id, idx, conv)
+            elif entry is not None and entry.get("status") == AMBIGUOUS_TERMINAL:
+                row.update(
+                    run_id=None, terminal=AMBIGUOUS_TERMINAL, evidence="incomplete"
+                )
+                row["wall_s"] = round(time.monotonic() - t0, 2)
+                _record_result_row(run_dir, row, expected_turns)
+                ambiguous_turns += 1
+                return {
+                    "case_id": case_id,
+                    "status": "incomplete",
+                    "skipped_already_complete": False,
+                    "reconciled_turns": reconciled_turns,
+                    "ambiguous_turns": ambiguous_turns,
+                    "turns_completed": turns_completed,
+                }
+            elif entry is not None and entry.get("status") == SUBMIT_ERROR_STATUS:
+                err_msg = entry.get("error") or SUBMIT_ERROR_STATUS
+                row.update(
+                    run_id=None,
+                    terminal=f"submit_error: {err_msg}",
+                    evidence="incomplete",
+                )
+                row["wall_s"] = round(time.monotonic() - t0, 2)
+                _record_result_row(run_dir, row, expected_turns)
+                return {
+                    "case_id": case_id,
+                    "status": "incomplete",
+                    "skipped_already_complete": False,
+                    "reconciled_turns": reconciled_turns,
+                    "ambiguous_turns": ambiguous_turns,
+                    "turns_completed": turns_completed,
+                }
+            elif entry is not None and entry.get("status") == "submitting":
+                # Blind-window recovery: check optional server lookup; refuse blind POST retry if absent.
+                resolved = lookup_submission(
+                    web, sub_key, timeout_s=min(post_timeout_s, 15)
+                )
+                if resolved is not None:
+                    run_ref, conv = resolved
+                    reconciled_turns += 1
+                    with run_dir_lock(run_dir):
+                        _append_row(
+                            run_dir / "submissions.jsonl",
+                            {
+                                "submission_key": sub_key,
+                                "case_id": case_id,
+                                "turn_index": idx,
+                                "run_id": run_ref,
+                                "conversation_id": conv,
+                                "status": "accepted",
+                                "source": "lookup",
+                                "ts": _now(),
+                            },
+                        )
+                        _record_submitted_once(run_dir, run_ref, case_id, idx, conv)
+                else:
+                    _record_ambiguous(
+                        run_dir,
+                        sub_key,
+                        case_id,
+                        idx,
+                        conv,
+                        row,
+                        prev_failed,
+                        t0,
+                        expected_turns,
+                        reason="prior_submitting_unresolved",
+                    )
+                    ambiguous_turns += 1
+                    return {
+                        "case_id": case_id,
+                        "status": "incomplete",
+                        "skipped_already_complete": False,
+                        "reconciled_turns": reconciled_turns,
+                        "ambiguous_turns": ambiguous_turns,
+                        "turns_completed": turns_completed,
+                    }
+            else:
+                # Fresh submission: fsync pre-submit intent BEFORE network POST.
+                with run_dir_lock(run_dir):
+                    _append_row(
+                        run_dir / "submissions.jsonl",
+                        {
+                            "submission_key": sub_key,
+                            "case_id": case_id,
+                            "turn_index": idx,
+                            "conversation_id": conv,
+                            "status": "submitting",
+                            "ts": _now(),
+                        },
+                    )
+                try:
+                    acc = post_run_with_key(
+                        web,
+                        turn["question"],
+                        conv,
+                        eval_run_id,
+                        sub_key,
+                        timeout_s=post_timeout_s,
+                    )
+                    conv = str(acc["conversation_id"])
+                    run_ref = str(acc["run_id"])
+                except urllib.error.HTTPError as exc:
+                    if 400 <= exc.code < 500:
+                        # Definite client/request rejection before a run was created.
+                        with run_dir_lock(run_dir):
+                            _append_row(
+                                run_dir / "submissions.jsonl",
+                                {
+                                    "submission_key": sub_key,
+                                    "case_id": case_id,
+                                    "turn_index": idx,
+                                    "conversation_id": conv,
+                                    "status": SUBMIT_ERROR_STATUS,
+                                    "http_status": exc.code,
+                                    "error": repr(exc),
+                                    "ts": _now(),
+                                },
+                            )
+                        row.update(
+                            run_id=None,
+                            terminal=f"submit_error: {exc!r}",
+                            evidence="incomplete",
+                        )
+                        if prev_failed:
+                            row["after_failed_turn"] = True
+                        row["wall_s"] = round(time.monotonic() - t0, 2)
+                        _record_result_row(run_dir, row, expected_turns)
+                        return {
+                            "case_id": case_id,
+                            "status": "incomplete",
+                            "skipped_already_complete": False,
+                            "reconciled_turns": reconciled_turns,
+                            "ambiguous_turns": ambiguous_turns,
+                            "turns_completed": turns_completed,
+                        }
+                    # HTTP 5xx may have created a run before failing; reconcile via lookup or mark ambiguous.
+                    resolved = _try_lookup_after_ambiguous_post(
+                        web, sub_key, timeout_s=min(post_timeout_s, 15)
+                    )
+                    if resolved is None:
+                        _record_ambiguous(
+                            run_dir,
+                            sub_key,
+                            case_id,
+                            idx,
+                            conv,
+                            row,
+                            prev_failed,
+                            t0,
+                            expected_turns,
+                            reason=repr(exc),
+                        )
+                        ambiguous_turns += 1
+                        return {
+                            "case_id": case_id,
+                            "status": "incomplete",
+                            "skipped_already_complete": False,
+                            "reconciled_turns": reconciled_turns,
+                            "ambiguous_turns": ambiguous_turns,
+                            "turns_completed": turns_completed,
+                        }
+                    run_ref, conv = resolved
+                    reconciled_turns += 1
+                    with run_dir_lock(run_dir):
+                        _append_row(
+                            run_dir / "submissions.jsonl",
+                            {
+                                "submission_key": sub_key,
+                                "case_id": case_id,
+                                "turn_index": idx,
+                                "run_id": run_ref,
+                                "conversation_id": conv,
+                                "status": "accepted",
+                                "source": "lookup",
+                                "ts": _now(),
+                            },
+                        )
+                        _record_submitted_once(run_dir, run_ref, case_id, idx, conv)
+                except (OSError, ValueError, KeyError) as exc:
+                    # Socket timeout, connection reset, or truncated response: server may have accepted it.
+                    resolved = _try_lookup_after_ambiguous_post(
+                        web, sub_key, timeout_s=min(post_timeout_s, 15)
+                    )
+                    if resolved is None:
+                        _record_ambiguous(
+                            run_dir,
+                            sub_key,
+                            case_id,
+                            idx,
+                            conv,
+                            row,
+                            prev_failed,
+                            t0,
+                            expected_turns,
+                            reason=repr(exc),
+                        )
+                        ambiguous_turns += 1
+                        return {
+                            "case_id": case_id,
+                            "status": "incomplete",
+                            "skipped_already_complete": False,
+                            "reconciled_turns": reconciled_turns,
+                            "ambiguous_turns": ambiguous_turns,
+                            "turns_completed": turns_completed,
+                        }
+                    run_ref, conv = resolved
+                    reconciled_turns += 1
+                    with run_dir_lock(run_dir):
+                        _append_row(
+                            run_dir / "submissions.jsonl",
+                            {
+                                "submission_key": sub_key,
+                                "case_id": case_id,
+                                "turn_index": idx,
+                                "run_id": run_ref,
+                                "conversation_id": conv,
+                                "status": "accepted",
+                                "source": "lookup",
+                                "ts": _now(),
+                            },
+                        )
+                        _record_submitted_once(run_dir, run_ref, case_id, idx, conv)
+                else:
+                    with run_dir_lock(run_dir):
+                        _append_row(
+                            run_dir / "submissions.jsonl",
+                            {
+                                "submission_key": sub_key,
+                                "case_id": case_id,
+                                "turn_index": idx,
+                                "run_id": run_ref,
+                                "conversation_id": conv,
+                                "status": "accepted",
+                                "source": "post",
+                                "ts": _now(),
+                            },
+                        )
+                        _record_submitted_once(run_dir, run_ref, case_id, idx, conv)
+
+            if heartbeat:
+                heartbeat(f"{case_id}:t{idx}:events:{run_ref}")
+            raw, terminal = read_events(web, run_ref, timeout_s)
+            _write_events_atomic(run_dir, run_ref, raw)
+            row.update(conversation_id=conv, run_id=run_ref, terminal=terminal)
+            row["evidence"] = "complete" if terminal in TERMINAL else "incomplete"
+            if prev_failed:
+                row["after_failed_turn"] = True
+            prev_failed = terminal in FAILED_TERMINALS
+            row["wall_s"] = round(time.monotonic() - t0, 2)
+            _record_result_row(run_dir, row, expected_turns)
+
+            if row["evidence"] != "complete":
+                return {
+                    "case_id": case_id,
+                    "status": "incomplete",
+                    "skipped_already_complete": False,
+                    "reconciled_turns": reconciled_turns,
+                    "ambiguous_turns": ambiguous_turns,
+                    "turns_completed": turns_completed,
+                }
+            turns_completed += 1
+
         return {
             "case_id": case_id,
             "status": "complete",
-            "skipped_already_complete": True,
-            "reconciled_turns": 0,
-            "ambiguous_turns": 0,
-            "turns_completed": len(turns),
+            "skipped_already_complete": False,
+            "reconciled_turns": reconciled_turns,
+            "ambiguous_turns": ambiguous_turns,
+            "turns_completed": turns_completed,
         }
 
-    conv: str | None = None
-    prev_failed = False
-    reconciled_turns = 0
-    ambiguous_turns = 0
-    turns_completed = 0
 
-    for idx, turn in enumerate(turns):
-        if heartbeat:
-            heartbeat(f"{case_id}:t{idx}:start")
-
-        if idx in existing_rows:
-            prev_row = existing_rows[idx]
-            if _evidence(prev_row) == "complete":
-                conv = prev_row.get("conversation_id")
-                prev_failed = prev_row.get("terminal") in FAILED_TERMINALS
-                turns_completed += 1
-                continue
-            if prev_row.get("terminal") == AMBIGUOUS_TERMINAL:
-                ambiguous_turns += 1
-            return {
-                "case_id": case_id,
-                "status": "incomplete",
-                "skipped_already_complete": False,
-                "reconciled_turns": reconciled_turns,
-                "ambiguous_turns": ambiguous_turns,
-                "turns_completed": turns_completed,
-            }
-
-        t0 = time.monotonic()
-        sub_key = submission_key(eval_run_id, case_id, idx)
-        entry = journal.get(sub_key)
-        row: dict = {
-            "case_id": case_id,
-            "turn_index": idx,
-            "question": turn["question"],
-            "conversation_id": conv,
-        }
-        run_ref: str | None = None
-        terminal: str | None = None
-
-        if entry is not None and entry.get("status") == "accepted":
-            # Post-accept recovery: never call POST /api/runs again; replay SSE for existing run_id.
-            run_ref = str(entry["run_id"])
-            conv = str(entry.get("conversation_id") or conv or "")
-            reconciled_turns += 1
-            with run_dir_lock(run_dir):
-                _record_submitted_once(run_dir, run_ref, case_id, idx, conv)
-        elif entry is not None and entry.get("status") == AMBIGUOUS_TERMINAL:
-            row.update(run_id=None, terminal=AMBIGUOUS_TERMINAL, evidence="incomplete")
-            row["wall_s"] = round(time.monotonic() - t0, 2)
-            _record_result_row(run_dir, row, expected_turns)
-            ambiguous_turns += 1
-            return {
-                "case_id": case_id,
-                "status": "incomplete",
-                "skipped_already_complete": False,
-                "reconciled_turns": reconciled_turns,
-                "ambiguous_turns": ambiguous_turns,
-                "turns_completed": turns_completed,
-            }
-        elif entry is not None and entry.get("status") == "submitting":
-            # Blind-window recovery: check optional server lookup; refuse blind POST retry if absent.
-            resolved = lookup_submission(web, sub_key)
-            if resolved is not None:
-                run_ref, conv = resolved
-                reconciled_turns += 1
-                with run_dir_lock(run_dir):
-                    _append_row(
-                        run_dir / "submissions.jsonl",
-                        {
-                            "submission_key": sub_key,
-                            "case_id": case_id,
-                            "turn_index": idx,
-                            "run_id": run_ref,
-                            "conversation_id": conv,
-                            "status": "accepted",
-                            "source": "lookup",
-                            "ts": _now(),
-                        },
-                    )
-                    _record_submitted_once(run_dir, run_ref, case_id, idx, conv)
-            else:
-                with run_dir_lock(run_dir):
-                    _append_row(
-                        run_dir / "submissions.jsonl",
-                        {
-                            "submission_key": sub_key,
-                            "case_id": case_id,
-                            "turn_index": idx,
-                            "conversation_id": conv,
-                            "status": AMBIGUOUS_TERMINAL,
-                            "ts": _now(),
-                        },
-                    )
-                row.update(
-                    run_id=None,
-                    terminal=AMBIGUOUS_TERMINAL,
-                    evidence="incomplete",
-                )
-                if prev_failed:
-                    row["after_failed_turn"] = True
-                row["wall_s"] = round(time.monotonic() - t0, 2)
-                _record_result_row(run_dir, row, expected_turns)
-                ambiguous_turns += 1
-                return {
-                    "case_id": case_id,
-                    "status": "incomplete",
-                    "skipped_already_complete": False,
-                    "reconciled_turns": reconciled_turns,
-                    "ambiguous_turns": ambiguous_turns,
-                    "turns_completed": turns_completed,
-                }
-        else:
-            # Fresh submission: fsync pre-submit intent BEFORE network POST.
-            with run_dir_lock(run_dir):
-                _append_row(
-                    run_dir / "submissions.jsonl",
-                    {
-                        "submission_key": sub_key,
-                        "case_id": case_id,
-                        "turn_index": idx,
-                        "conversation_id": conv,
-                        "status": "submitting",
-                        "ts": _now(),
-                    },
-                )
-            try:
-                acc = post_run_with_key(
-                    web, turn["question"], conv, eval_run_id, sub_key
-                )
-                conv = str(acc["conversation_id"])
-                run_ref = str(acc["run_id"])
-            except (OSError, ValueError, KeyError) as exc:
-                row.update(
-                    run_id=None,
-                    terminal=f"submit_error: {exc!r}",
-                    evidence="incomplete",
-                )
-                if prev_failed:
-                    row["after_failed_turn"] = True
-                row["wall_s"] = round(time.monotonic() - t0, 2)
-                _record_result_row(run_dir, row, expected_turns)
-                return {
-                    "case_id": case_id,
-                    "status": "incomplete",
-                    "skipped_already_complete": False,
-                    "reconciled_turns": reconciled_turns,
-                    "ambiguous_turns": ambiguous_turns,
-                    "turns_completed": turns_completed,
-                }
-            else:
-                with run_dir_lock(run_dir):
-                    _append_row(
-                        run_dir / "submissions.jsonl",
-                        {
-                            "submission_key": sub_key,
-                            "case_id": case_id,
-                            "turn_index": idx,
-                            "run_id": run_ref,
-                            "conversation_id": conv,
-                            "status": "accepted",
-                            "source": "post",
-                            "ts": _now(),
-                        },
-                    )
-                    _record_submitted_once(run_dir, run_ref, case_id, idx, conv)
-
-        if heartbeat:
-            heartbeat(f"{case_id}:t{idx}:events:{run_ref}")
-        raw, terminal = read_events(web, run_ref, timeout_s)
-        _write_events_atomic(run_dir, run_ref, raw)
-        row.update(conversation_id=conv, run_id=run_ref, terminal=terminal)
-        row["evidence"] = "complete" if terminal in TERMINAL else "incomplete"
-        if prev_failed:
-            row["after_failed_turn"] = True
-        prev_failed = terminal in FAILED_TERMINALS
-        row["wall_s"] = round(time.monotonic() - t0, 2)
-        _record_result_row(run_dir, row, expected_turns)
-
-        if row["evidence"] != "complete":
-            return {
-                "case_id": case_id,
-                "status": "incomplete",
-                "skipped_already_complete": False,
-                "reconciled_turns": reconciled_turns,
-                "ambiguous_turns": ambiguous_turns,
-                "turns_completed": turns_completed,
-            }
-        turns_completed += 1
-
-    return {
-        "case_id": case_id,
-        "status": "complete",
-        "skipped_already_complete": False,
-        "reconciled_turns": reconciled_turns,
-        "ambiguous_turns": ambiguous_turns,
-        "turns_completed": turns_completed,
-    }
+def _try_lookup_after_ambiguous_post(
+    web: str, sub_key: str, *, timeout_s: int = 15
+) -> tuple[str, str] | None:
+    try:
+        return lookup_submission(web, sub_key, timeout_s=timeout_s)
+    except OSError:
+        return None
