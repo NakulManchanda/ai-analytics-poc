@@ -1,0 +1,186 @@
+name: Protected Bedrock eval smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      eval_split:
+        description: "Dataset split to use for bounded smoke"
+        required: true
+        default: "dev"
+        type: choice
+        options:
+          - dev
+          - regression
+          - holdout
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: bedrock-eval-smoke
+  cancel-in-progress: false
+
+jobs:
+  bedrock-smoke:
+    name: Protected Bedrock smoke + artifacts
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: bedrock-eval-protected
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      DYNAMODB_TABLE_NAME: ${{ vars.DYNAMODB_TABLE_NAME }}
+      GLOBAL_BEDROCK_MONTHLY_LIMIT_USD: ${{ vars.GLOBAL_BEDROCK_MONTHLY_LIMIT_USD }}
+      AWS_ROLE_DURATION_SECONDS: "1800"
+      EVAL_ROOT: metrics/evals
+      EVAL_CONFIRM: "1"
+      WEB_PORT: "3000"
+      MAIN_REF: "refs/heads/main"
+    steps:
+      - name: Validate trusted dispatch context
+        env:
+          DISPATCH_EVAL_SPLIT: ${{ inputs.eval_split }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${GITHUB_REPOSITORY}" = "NakulManchanda/ai-analytics-poc"
+          test "${GITHUB_REF}" = "${MAIN_REF}"
+          case "${DISPATCH_EVAL_SPLIT}" in
+            dev|regression|holdout) ;;
+            *)
+              echo "eval_split must be one of: dev, regression, holdout" >&2
+              exit 2
+              ;;
+          esac
+
+      - name: Check out protected main
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: refs/heads/main
+          fetch-depth: 0
+
+      - name: Verify checked-out main provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${GITHUB_REF}" = "${MAIN_REF}"
+          test "$(git rev-parse origin/main)" = "$(git rev-parse HEAD)"
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "24"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff # v6
+        with:
+          version: "0.9.26"
+
+      - name: Run offline preflight checks
+        run: |
+          make preflight
+          make evals-test
+
+      - name: Configure AWS credentials (OIDC, short-lived)
+        uses: aws-actions/configure-aws-credentials@cabfdba3510de1431bac9dba27511d97497fc100 # v5
+        with:
+          aws-region: ${{ vars.AWS_REGION }}
+          role-to-assume: ${{ vars.BEDROCK_EVAL_ROLE_ARN }}
+          role-session-name: bedrock-eval-smoke
+          role-duration-seconds: ${{ env.AWS_ROLE_DURATION_SECONDS }}
+          mask-aws-account-id: true
+
+      - name: Verify caller identity
+        run: aws sts get-caller-identity >/dev/null
+
+      - name: Start bounded real-AWS stack
+        run: |
+          make local-aws-litellm-compose
+          make preflight-runtime-aws
+          make litellm-ready
+
+      - name: Run bounded eval smoke
+        env:
+          DISPATCH_EVAL_SPLIT: ${{ inputs.eval_split }}
+        run: |
+          make eval-start LABEL=gha-${{ github.run_id }} EVAL_SPLIT="${DISPATCH_EVAL_SPLIT}"
+          make eval-health
+          make eval-smoke EVAL_CONFIRM=1
+          make eval-freeze
+          make eval-grade
+          make eval-review
+
+      - name: Build sanitized eval summary artifact
+        if: always()
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          root = Path("metrics/evals")
+          out_dir = Path("artifacts/bedrock-eval-smoke")
+          out_dir.mkdir(parents=True, exist_ok=True)
+          summary = {
+              "github_run_id": "${{ github.run_id }}",
+              "status": "no-run-folder",
+              "run_id": None,
+              "manifest": None,
+              "result_counts": {},
+          }
+          current = root / ".current"
+          if current.exists():
+              run_id = current.read_text(encoding="utf-8").strip()
+              run_dir = root / run_id
+              summary["run_id"] = run_id
+              if run_dir.exists():
+                  summary["status"] = "run-folder-present"
+                  manifest_path = run_dir / "manifest.json"
+                  if manifest_path.exists():
+                      manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                      summary["manifest"] = {
+                          "label": manifest.get("label"),
+                          "run_id": manifest.get("run_id"),
+                          "split": manifest.get("split"),
+                          "dataset_version": manifest.get("dataset_version"),
+                          "dataset_sha256": manifest.get("dataset_sha256"),
+                          "case_count": len(manifest.get("cases", []) or []),
+                          "git_head": manifest.get("git_head"),
+                      }
+                  results_path = run_dir / "results.jsonl"
+                  if results_path.exists():
+                      counts = {"total": 0, "completed": 0, "failed": 0, "cancelled": 0, "other": 0}
+                      for line in results_path.read_text(encoding="utf-8").splitlines():
+                          if not line.strip():
+                              continue
+                          counts["total"] += 1
+                          row = json.loads(line)
+                          terminal = str(row.get("terminal_event", ""))
+                          if terminal == "run.completed":
+                              counts["completed"] += 1
+                          elif terminal == "run.failed":
+                              counts["failed"] += 1
+                          elif terminal == "run.cancelled":
+                              counts["cancelled"] += 1
+                          else:
+                              counts["other"] += 1
+                      summary["result_counts"] = counts
+          (out_dir / "summary.json").write_text(json.dumps(summary, indent=2) + "\\n", encoding="utf-8")
+          PY
+
+      - name: Upload sanitized eval summary
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: bedrock-eval-smoke-sanitized-${{ github.run_id }}
+          path: |
+            artifacts/bedrock-eval-smoke/summary.json
+          if-no-files-found: error
+
+      - name: Teardown stack
+        if: always()
+        run: docker compose -f docker-compose.yml -f docker-compose.aws.yml -f docker-compose.litellm.yml -f docker-compose.phoenix.yml -f docker-compose.phoenix-litellm.yml down --remove-orphans

@@ -124,3 +124,4 @@ Monotonically numbered log of every post-bootstrap task. Each entry records the 
 - [0132 — Deep Agents Phoenix parity](0132-226-deep-agents-phoenix-parity.md) — `agent.strategy`/`agent.framework`/`agent.step_count` on `ai.run` for every strategy, `ai.plan.updated`/`ai.context.compacted` events, `trace` metadata; trace-context tests (#226)
 - [0133 — Eval billing reconciliation](0133-226-billing-reconciliation.md) — `evals run-reconcile` / `make eval-reconcile` join frozen capture to tagged LiteLLM spend rows; orphan spend counted in reconciled cost (#226)
 - [0134 — Phoenix trace-continuity check](0134-226-phoenix-trace-check.md) — `evals run-trace-check` / `make eval-trace-check`: one `ai.run` root, unbroken parentage, LiteLLM and MCP spans per run; unreachable Phoenix fails (#226)
+- [0140 — #265 Codespaces readiness, unified preflight, and protected keyless Bedrock eval smoke](0140-265-codespaces-readiness-preflight-keyless-bedrock.md)
