@@ -15,11 +15,29 @@ KV_BUNDLE_OUT = $(or $(OUT),work/kv-hop.yaml)
 # JAEGER=1 adds the optional Jaeger overlay.
 OBS_COMPOSE = -f docker-compose.yml -f docker-compose.phoenix.yml -f docker-compose.observability.yml $(if $(filter 1,$(JAEGER)),-f docker-compose.jaeger.yml)
 
-.PHONY: help eval-stack-up eval-start eval-health eval-smoke eval-run eval-temporal-up eval-temporal-down eval-temporal-worker eval-temporal-run eval-freeze eval-grade eval-compare eval-cost eval-reconcile eval-trace-check eval-review eval-review-serve eval-review-report next-5-commands eval-open eval-all check-bootstrap dev app-serve-dev mcp-dev mcp-smoke dataset-test dataset-smoke smoke test nx-test nx-affected nx-graph bench-test evals-test evals-report gateway-test mcp-test infra-test web-test zone-geometry compose-smoke observability-up observability-down observability-smoke observability-jaeger-smoke observability-dev-up observability-dev-info observability-dev-ask observability-dev-burst observability-dev-metrics observability-dev-logs observability-dev-down local-aws-litellm-compose local-aws-compose local-litellm-compose local-bedrock-direct-compose litellm-traffic litellm-env litellm-smoke litellm-calls litellm-spend litellm-errors litellm-ready litellm-ui litellm-traffic local-aws-refresh phoenix-up phoenix-down phoenix-ui phoenix-purge local-serve-compose local-serve-refresh local-bedrock-compose bedrock-smoke m5-bedrock-smoke m6-bedrock-smoke dashboard tf-dispatch tf-resume tf-park inference-validate inference-sync inference-config inference-secret inference-bootstrap inference-deploy inference-up inference-tunnel inference-connect inference-smoke inference-warmup inference-capacity inference-restart inference-gateway-restart inference-controls-on inference-controls-off inference-verify-workers inference-e1 inference-fresh-up inference-tmux-start inference-tmux-end inference-serve-smoke inference-run inference-pull-evidence inference-pull-range inference-kv-image inference-kv-render inference-kv-smoke evidence-analyze evidence-notebook evidence-notebook-open inference-teardown replay-fanout replay-multi-turn replay-compare-strategies replay-strategy-manual replay-strategy-crewai replay-e3-least-loaded replay-e3-prefix-then-load replay-e4-admission-on replay-e4-admission-off replay-e3-large-prefix-least-loaded replay-e3-large-prefix-prefix-then-load replay-e5 replay-arrival-rate trace-request
+.PHONY: help preflight preflight-env preflight-services preflight-eval preflight-paid-smoke eval-stack-up eval-start eval-health eval-smoke eval-run eval-temporal-up eval-temporal-down eval-temporal-worker eval-temporal-run eval-freeze eval-grade eval-compare eval-cost eval-reconcile eval-trace-check eval-review eval-review-serve eval-review-report next-5-commands eval-open eval-all check-bootstrap dev app-serve-dev mcp-dev mcp-smoke dataset-test dataset-smoke smoke test nx-test nx-affected nx-graph bench-test evals-test evals-report gateway-test mcp-test infra-test web-test zone-geometry compose-smoke observability-up observability-down observability-smoke observability-jaeger-smoke observability-dev-up observability-dev-info observability-dev-ask observability-dev-burst observability-dev-metrics observability-dev-logs observability-dev-down local-aws-litellm-compose local-aws-compose local-litellm-compose local-bedrock-direct-compose litellm-traffic litellm-env litellm-smoke litellm-calls litellm-spend litellm-errors litellm-ready litellm-ui litellm-traffic local-aws-refresh phoenix-up phoenix-down phoenix-ui phoenix-purge local-serve-compose local-serve-refresh local-bedrock-compose bedrock-smoke m5-bedrock-smoke m6-bedrock-smoke dashboard tf-dispatch tf-resume tf-park inference-validate inference-sync inference-config inference-secret inference-bootstrap inference-deploy inference-up inference-tunnel inference-connect inference-smoke inference-warmup inference-capacity inference-restart inference-gateway-restart inference-controls-on inference-controls-off inference-verify-workers inference-e1 inference-fresh-up inference-tmux-start inference-tmux-end inference-serve-smoke inference-run inference-pull-evidence inference-pull-range inference-kv-image inference-kv-render inference-kv-smoke evidence-analyze evidence-notebook evidence-notebook-open inference-teardown replay-fanout replay-multi-turn replay-compare-strategies replay-strategy-manual replay-strategy-crewai replay-e3-least-loaded replay-e3-prefix-then-load replay-e4-admission-on replay-e4-admission-off replay-e3-large-prefix-least-loaded replay-e3-large-prefix-prefix-then-load replay-e5 replay-arrival-rate trace-request
 
 
 help: ## Show available commands
 	@awk 'BEGIN {FS = ":.*## "; print "Targets:"} /^[a-zA-Z_-]+:.*## / {printf "  %-18s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+
+preflight-env: ## Validate local/Codespaces toolchain, dataset split, LiteLLM aliases, and budget env shape
+	python3 scripts/preflight/readiness.py env
+
+preflight-services: ## Validate service topology markers (MCP/DuckDB, Redis/SSE, telemetry overlays)
+	python3 scripts/preflight/readiness.py services
+
+preflight-eval: ## Validate eval artifacts (baseline/holdout), split docs, and offline guardrails
+	python3 scripts/preflight/readiness.py eval
+
+preflight: preflight-env preflight-services preflight-eval ## Unified preflight for environment, services, and eval readiness
+
+preflight-paid-smoke: ## Explicit paid check (requires a running real-AWS stack): one bounded Bedrock smoke call
+	@if [ "$(EVAL_CONFIRM)" != "1" ]; then \
+		echo "Refusing paid smoke without explicit EVAL_CONFIRM=1"; \
+		exit 2; \
+	fi
+	@$(MAKE) --no-print-directory bedrock-smoke
 
 dashboard: ## Run local Streamlit metrics & model comparison dashboard
 	uv run --with streamlit --with duckdb streamlit run scripts/dashboard.py
@@ -650,4 +668,3 @@ replay-arrival-rate: ## Replay scenario with open-loop Poisson/rate scheduling (
 
 trace-request: ## Explain one request end to end (usage: make trace-request RUN_DIR=metrics/evidence/<run> REQUEST_ID=<id> [GATEWAY_LOG=gateway.log])
 	uv run --project tooling/benchmarks python -m benchmarks.trace_cli --run-dir $(RUN_DIR) --request-id $(REQUEST_ID) $(if $(GATEWAY_LOG),--gateway-log $(GATEWAY_LOG))
-
