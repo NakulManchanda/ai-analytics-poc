@@ -19,17 +19,20 @@ Implement issue #265 by adding:
   - `make preflight-env`
   - `make preflight-services`
   - `make preflight-eval`
+  - `make preflight-runtime-local`
+  - `make preflight-runtime-aws`
   - `make preflight`
   - `make preflight-paid-smoke` (explicit `EVAL_CONFIRM=1` gate)
-  Checks cover required tooling, no static AWS env keys, dataset split/holdout contract, LiteLLM alias and Bedrock config markers, budget parsing, MCP/Redis/SSE and observability topology markers, and eval baseline/holdout assets.
+  Checks cover required tooling, temporary-credential validation (allow STS/OIDC session sets, reject permanent/incomplete env keys), dataset split/holdout contract, LiteLLM alias and Bedrock config markers, budget parsing, MCP/Redis/SSE and observability topology markers, eval baseline/holdout assets, and runtime stack readiness using existing smoke/health commands.
 - **Protected keyless CI path:** Added `.github/workflows/bedrock-eval-smoke.yml` with:
   - `workflow_dispatch` only,
   - protected environment `bedrock-eval-protected`,
   - minimal permissions (`contents: read`, `id-token: write`),
   - SHA-pinned third-party actions,
   - short credential lifetime (`1800s`),
-  - trusted ref guard (`main` or `v*`),
-  - bounded smoke flow (`eval-start` + `eval-smoke` + artifact upload + teardown).
+  - trusted ref guard (**dispatch context `refs/heads/main` + checkout pinned to `refs/heads/main` + post-checkout provenance check against `origin/main` before OIDC credential exchange**),
+  - bounded smoke flow (`eval-start` + `eval-smoke` + artifact upload + teardown),
+  - sanitized artifact upload only (`artifacts/bedrock-eval-smoke/summary.json`; no raw eval captures/logs).
 - **Runbook:** Added `docs/codespaces-preflight-bedrock.md` for Codespaces sizing/idle/budget guidance, SSO/device login, protected OIDC setup, trust policy template, least-privilege intent, cost controls, and teardown.
 - **Discoverability:** Added README link under “Developer platform readiness”.
 
@@ -38,6 +41,8 @@ Implement issue #265 by adding:
 - `make preflight-env` -> `preflight env: ok`
 - `make preflight-services` -> `preflight services: ok`
 - `make preflight-eval` -> `preflight eval: ok`
+- `make preflight-runtime-local` -> **NOT RUN** (requires active local stack)
+- `make preflight-runtime-aws` -> **NOT RUN** (requires active real-AWS stack + approved credentials)
 
 ## Limitations / blockers
 - Live GitHub Bedrock smoke execution requires owner/admin setup that cannot be completed from repository code:

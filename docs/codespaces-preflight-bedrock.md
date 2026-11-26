@@ -36,6 +36,17 @@ What they validate:
 - **Services**: MCP/Redis/SSE topology markers, observability overlay presence, required smoke scripts.
 - **Eval readiness**: baseline/holdout artifacts, split/test assets, docs markers for `EVAL_CONFIRM`, baseline, holdout.
 
+Runtime readiness is separate from static checks:
+
+```bash
+# Requires running local stack; no paid inference
+make preflight-runtime-local
+
+# Requires running local real-AWS stack; no paid inference
+# Verifies temporary credential propagation + STS + DynamoDB permission from the app container
+make preflight-runtime-aws
+```
+
 Paid inference remains explicit:
 
 ```bash
@@ -69,8 +80,9 @@ Security shape:
 - least permissions: `contents: read`, `id-token: write`
 - short-lived credentials (`role-duration-seconds: 1800`)
 - third-party actions pinned to reviewed commit SHAs
-- trusted refs only (`main` or signed `v*` tag pattern)
+- trusted refs only (`refs/heads/main` dispatch context + checkout locked to `refs/heads/main`)
 - bounded single smoke flow: preflight -> stack up -> `eval-smoke` -> artifact capture -> teardown
+- uploads only a sanitized allowlisted summary artifact (no raw captures/logs)
 
 ### Manual owner-only setup required before enabling live runs
 
@@ -80,11 +92,11 @@ These steps require AWS/GitHub admin access and are not executable from reposito
 2. **Attach least-privilege policy** allowing only required Bedrock models/inference profile and minimal S3 artifact paths.
 3. **Create protected GitHub environment** `bedrock-eval-protected`:
    - required reviewers
-   - deployment-branch restrictions (for example `main` and approved `v*` tags)
+   - deployment-branch restrictions (**main only** for initial live evaluation)
    - environment variables: `AWS_REGION`, `DYNAMODB_TABLE_NAME`, `GLOBAL_BEDROCK_MONTHLY_LIMIT_USD`, `BEDROCK_EVAL_ROLE_ARN`
 4. **Do not add static AWS credentials** to repository or org secrets.
 
-### Example trust-policy constraints
+### Example trust-policy constraints (environment + repository scoped)
 
 Use as a template and adapt account IDs/role names:
 
@@ -101,14 +113,15 @@ Use as a template and adapt account IDs/role names:
       "Condition": {
         "StringEquals": {
           "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
-          "token.actions.githubusercontent.com:sub": "repo:NakulManchanda/ai-analytics-poc:environment:bedrock-eval-protected",
-          "token.actions.githubusercontent.com:job_workflow_ref": "NakulManchanda/ai-analytics-poc/.github/workflows/bedrock-eval-smoke.yml@refs/heads/main"
+          "token.actions.githubusercontent.com:sub": "repo:NakulManchanda/ai-analytics-poc:environment:bedrock-eval-protected"
         }
       }
     }
   ]
 }
 ```
+
+`job_workflow_ref` can be used as an extra defense only after verifying that claim is present in your account's issued token and accepted by your IAM condition-key policy in practice. Do not rely on unsupported/unverified claim keys.
 
 ## 5) Cost controls and quotas
 
@@ -125,7 +138,7 @@ After manual/local runs:
 docker compose -f docker-compose.yml -f docker-compose.aws.yml -f docker-compose.litellm.yml -f docker-compose.phoenix.yml -f docker-compose.phoenix-litellm.yml down --remove-orphans
 ```
 
-For workflow runs, artifacts are captured from `metrics/evals/<run_id>/...` and uploaded as CI artifacts.
+For workflow runs, CI uploads only `artifacts/bedrock-eval-smoke/summary.json` (sanitized summary). Raw `metrics/evals/**` captures/logs stay in-runner and are not uploaded by default.
 
 ## 7) Verified blocker list
 
